@@ -94,6 +94,8 @@ class Conversation {
   private _lastEvent: ProviderEvent | null;
   // Track if we've started a CLI session (for --resume vs --session-id)
   private _hasStartedSession: boolean;
+  // Buffer for incomplete JSON lines from stdout
+  private _stdoutBuffer: string;
 
   constructor(id: string, workingDirectory: string | null = null, provider: ProviderName = 'claude') {
     this.id = id;
@@ -111,6 +113,7 @@ class Conversation {
     this._pendingTaskTools = new Map();
     this._lastEvent = null;
     this._hasStartedSession = false;
+    this._stdoutBuffer = '';
   }
 
   /**
@@ -128,6 +131,9 @@ class Conversation {
     console.log(`[${this.id}] Spawning ${this.provider} (claude-session=${this.claudeSessionId.substring(0, 8)}..., resume=${shouldResume})`);
     console.log(`[${this.id}] Message: "${content.substring(0, 50)}"`);
 
+    // Reset stdout buffer for new process
+    this._stdoutBuffer = '';
+
     // Use claudeSessionId (not conversation id) for CLI session tracking
     const spawnConfig = this.providerConfig!.getSpawnConfig(this.claudeSessionId, this.workingDirectory, shouldResume);
     this.process = spawn(spawnConfig.command, spawnConfig.args, spawnConfig.options);
@@ -137,29 +143,39 @@ class Conversation {
 
     this.process.stdout?.on('data', (data: Buffer) => {
       const rawOutput = data.toString();
-      console.log(`[${this.id}] stdout (${rawOutput.length} bytes):`, rawOutput.substring(0, 200));
 
-      const lines = rawOutput
-        .split('\n')
-        .filter((line) => line.trim());
+      // Append to buffer - JSON may be split across multiple data events
+      this._stdoutBuffer += rawOutput;
 
-      lines.forEach((line) => {
+      // Split by newlines and process complete lines
+      const lines = this._stdoutBuffer.split('\n');
+
+      // Keep the last element in the buffer if it's incomplete (doesn't end with newline)
+      // If buffer ends with newline, last element is empty string
+      this._stdoutBuffer = lines.pop() || '';
+
+      // Process complete lines
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
         try {
-          const json = JSON.parse(line) as unknown;
+          const json = JSON.parse(trimmed) as unknown;
           const jsonType = (json as { type?: string }).type;
           const eventType = (json as { event?: { type?: string } }).event?.type;
           console.log(`[${this.id}] RAW: type=${jsonType}${eventType ? `, event.type=${eventType}` : ''}`);
           this.handleOutput(json);
         } catch (e) {
           if (e instanceof SyntaxError) {
-            console.error(`[${this.provider}] Failed to parse JSON:`, line.substring(0, 100));
+            // This shouldn't happen now since we're buffering properly
+            console.error(`[${this.provider}] Failed to parse JSON:`, trimmed.substring(0, 100));
           } else if (e instanceof ProviderParseError) {
             console.error(`[${this.provider}] Parse error:`, e.message);
           } else if (e instanceof Error) {
             console.error(`[${this.provider}] Error:`, e.message);
           }
         }
-      });
+      }
     });
 
     this.process.stderr?.on('data', (data: Buffer) => {
