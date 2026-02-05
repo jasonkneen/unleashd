@@ -9,6 +9,7 @@ import { RobotLoader } from './components/RobotLoader';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useConversationStore } from './stores/conversationStore';
 import { useUIStore } from './stores/uiStore';
+import { initSettings } from './stores/settingsStore';
 import './App.css';
 
 /**
@@ -54,6 +55,11 @@ function GalleryWithRestore() {
 
 function AppLayout() {
   useWebSocketBridge();
+
+  // Initialize settings on mount — loads from server and applies saved palette
+  useEffect(() => {
+    initSettings().catch(console.error);
+  }, []);
 
   return (
     <div className="app">

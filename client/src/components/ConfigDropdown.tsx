@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { ColorPalettePicker } from './ColorPalettePicker';
-import { useSettings } from '../hooks/useSettings';
+import { useSettingsStore } from '../stores/settingsStore';
 import './ConfigDropdown.css';
 
 export function ConfigDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const [showPalettePicker, setShowPalettePicker] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { settings } = useSettings();
+  const settings = useSettingsStore((s) => s.settings);
 
   // Close dropdown when clicking outside
   useEffect(() => {

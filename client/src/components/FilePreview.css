@@ -1,5 +1,9 @@
 /* =============================================================================
-   FilePreview.css — Inline file path preview with CSS-only hover popup
+   FilePreview.css — Inline file path preview with portal-based hover popup
+
+   The popup renders via React Portal to document.body, so it escapes parent
+   overflow containers (.messages-container has overflow-y: auto). Positioning
+   is done via inline styles (position: fixed) calculated from getBoundingClientRect.
    ============================================================================= */
 
 .file-preview {
@@ -25,27 +29,21 @@
   color: var(--cyan-bright);
 }
 
-/* Popup — always in DOM, toggled via CSS :hover */
+/* Popup — rendered via Portal to document.body, positioned with inline fixed styles */
 .file-preview-popup {
-  display: none;
+  position: fixed;
+  transform: translateX(-50%);
+  display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
   background: var(--bg-panel);
   border: 1px solid var(--border-emphasis);
   border-radius: 8px;
   padding: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  z-index: 200;
+  z-index: 2100;
   pointer-events: none;
-}
-
-.file-preview:hover .file-preview-popup {
-  display: flex;
 }
 
 .file-preview-image,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSettings, PALETTES, applyPalette, type Palette16 } from '../hooks/useSettings';
+import { useSettingsStore, PALETTES, applyPalette, type Palette16 } from '../stores/settingsStore';
 import './ColorPalettePicker.css';
 
 interface Props {
@@ -77,7 +77,16 @@ function ChatPreview({ palette }: { palette: Palette16 }) {
 }
 
 export function ColorPalettePicker({ onClose }: Props) {
-  const { settings, setColorPalette, previewPalette, restorePalette, addCustomPalette, allPalettes } = useSettings();
+  const settings = useSettingsStore((s) => s.settings);
+  // Select customPalettes as state, merge with PALETTES in component to avoid
+  // creating new object in selector (which causes infinite re-renders)
+  const customPalettes = useSettingsStore((s) => s.customPalettes);
+  const allPalettes = { ...PALETTES, ...customPalettes };
+  const setColorPalette = useSettingsStore((s) => s.setColorPalette);
+  const previewPalette = useSettingsStore((s) => s.previewPalette);
+  const restorePalette = useSettingsStore((s) => s.restorePalette);
+  const addCustomPalette = useSettingsStore((s) => s.addCustomPalette);
+
   const [selectedPalette, setSelectedPalette] = useState(settings.colorPalette);
   const [aiMode, setAiMode] = useState(false);
   const [aiDescription, setAiDescription] = useState('');

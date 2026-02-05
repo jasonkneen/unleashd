@@ -43,6 +43,9 @@ const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 /** Directory for Codex conversation persistence (our own format) */
 const CODEX_PERSISTENCE_DIR = path.join(os.homedir(), '.claude-web-view', 'codex');
 
+/** Track directories that have already warned about ENOENT (only log once) */
+const warnedDirectories = new Set<string>();
+
 // =============================================================================
 // Directory Scanning
 // =============================================================================
@@ -61,7 +64,11 @@ export async function getProjectDirectories(
   } catch (error: unknown) {
     const code = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
     if (code === 'ENOENT') {
-      console.warn(`Projects directory not found, skipping: ${projectsDir}`);
+      // Only warn once per directory to avoid log spam during polling
+      if (!warnedDirectories.has(projectsDir)) {
+        warnedDirectories.add(projectsDir);
+        console.warn(`Projects directory not found, skipping: ${projectsDir}`);
+      }
     } else {
       console.warn(`Failed to read projects directory: ${projectsDir} (${error instanceof Error ? error.message : error})`);
     }
@@ -391,6 +398,7 @@ export function jsonlSessionToConversation(session: JsonlSession): Conversation 
     loopConfig: null,
     provider: inferProviderFromModel(session.model),
     subAgents: extractSubAgentsFromEntries(session.entries),
+    queue: [],
   };
 }
 
@@ -414,6 +422,145 @@ export interface PollResult {
   mtimes: Map<string, number>;        // full updated mtime index
 }
 
+// =============================================================================
+// Parallel Processing Helper
+// =============================================================================
+
+/**
+ * Process items with bounded concurrency (worker-pool pattern).
+ * No external dependencies — just Promise-based throttling.
+ *
+ * @param items - Array of items to process
+ * @param concurrency - Max concurrent operations
+ * @param fn - Async function to call on each item
+ * @returns Array of results in the same order as input
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await fn(items[index]);
+    }
+  }
+
+  // Start `concurrency` workers
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, worker);
+  await Promise.all(workers);
+
+  return results;
+}
+
+// =============================================================================
+// File Discovery (Phase 1 — fast readdir + stat for mtime sorting)
+// =============================================================================
+
+interface DiscoveredFile {
+  filePath: string;
+  mtimeMs: number;
+  forceProvider?: 'codex';
+}
+
+/**
+ * Discover all JSONL files across both sources, sorted by mtime descending.
+ * Stats each file to get mtime for sorting (most recently modified first).
+ * This enables progressive loading: recent conversations appear first.
+ */
+async function discoverAllJsonlFiles(
+  claudeProjectsDir: string,
+  codexPersistenceDir: string
+): Promise<DiscoveredFile[]> {
+  const files: DiscoveredFile[] = [];
+
+  async function scanSource(projectsDir: string, forceProvider?: 'codex') {
+    const dirs = await getProjectDirectories(projectsDir);
+    for (const projectDir of dirs) {
+      const jsonlPaths = await scanSessionDirectory(projectDir);
+      // Stat each file to get mtime (parallel within directory)
+      const statPromises = jsonlPaths.map(async (filePath) => {
+        try {
+          const stat = await fs.promises.stat(filePath);
+          return { filePath, mtimeMs: stat.mtimeMs, forceProvider };
+        } catch {
+          // File may have been deleted between readdir and stat
+          return null;
+        }
+      });
+      const results = await Promise.all(statPromises);
+      for (const result of results) {
+        if (result) files.push(result);
+      }
+    }
+  }
+
+  await Promise.all([
+    scanSource(claudeProjectsDir),
+    scanSource(codexPersistenceDir, 'codex'),
+  ]);
+
+  // Sort by mtime descending (most recent first)
+  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  return files;
+}
+
+// =============================================================================
+// File Parsing (Phase 2 — parallelized with concurrency limit)
+// =============================================================================
+
+interface ParsedResult {
+  filePath: string;
+  mtimeMs: number;
+  conversation: Conversation | null;
+  parseTimeMs: number;
+}
+
+/**
+ * Parse a single JSONL file and return the conversation.
+ * Returns null if parsing fails or produces empty messages.
+ * Includes timing metrics for performance analysis.
+ */
+async function parseOneFile(file: DiscoveredFile): Promise<ParsedResult> {
+  const startTime = performance.now();
+  try {
+    // mtimeMs already available from discovery phase
+    const session = await parseJsonlFile(file.filePath);
+    const parseTimeMs = performance.now() - startTime;
+
+    if (session.entries.length === 0) {
+      return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation: null, parseTimeMs };
+    }
+
+    const conversation = jsonlSessionToConversation(session);
+    if (conversation.messages.length === 0) {
+      return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation: null, parseTimeMs };
+    }
+
+    // Override provider if needed
+    if (file.forceProvider) {
+      conversation.provider = file.forceProvider;
+    }
+
+    return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation, parseTimeMs };
+  } catch (error: unknown) {
+    const parseTimeMs = performance.now() - startTime;
+    console.warn(`Failed to parse session: ${path.basename(file.filePath)} (${error instanceof Error ? error.message : error})`);
+    return { filePath: file.filePath, mtimeMs: 0, conversation: null, parseTimeMs };
+  }
+}
+
+/**
+ * Callback for progressive loading — invoked with batches of conversations.
+ * Called multiple times during loading so clients receive data incrementally.
+ */
+export type LoadProgressCallback = (batch: Conversation[], progress: { loaded: number; total: number }) => void;
+
 /**
  * Load all conversations from both Claude Code's JSONL files and Codex persistence files.
  *
@@ -421,72 +568,91 @@ export interface PollResult {
  * 1. ~/.claude/projects/* (Claude Code sessions)
  * 2. ~/.claude-web-view/codex/* (Codex sessions we persist)
  *
- * Returns conversations + mtime index for subsequent polling.
+ * Phase 1: Discover all file paths + stat for mtime (sorted by mtime descending)
+ * Phase 2: Parse files in parallel with bounded concurrency, emitting batches progressively
+ *
+ * Files are sorted by mtime descending (most recent first), so the onProgress callback
+ * receives the most recently used conversations first. This enables the server to
+ * broadcast batches to clients incrementally instead of waiting for all files.
+ *
+ * @param claudeProjectsDir - Directory containing Claude Code project folders
+ * @param codexPersistenceDir - Directory containing Codex persistence files
+ * @param onProgress - Optional callback invoked with batches of parsed conversations
+ * @returns conversations + mtime index for subsequent polling
  */
 export async function loadAllConversations(
   claudeProjectsDir: string = CLAUDE_PROJECTS_DIR,
-  codexPersistenceDir: string = CODEX_PERSISTENCE_DIR
+  codexPersistenceDir: string = CODEX_PERSISTENCE_DIR,
+  onProgress?: LoadProgressCallback
 ): Promise<LoadResult> {
+  const CONCURRENCY = 10; // macOS default fd limit is 256; 10 is very safe
+  const BATCH_SIZE = 50;  // Emit progress every N files
+
+  // Phase 1: Discover all files (sorted by mtime descending)
+  const discoverStart = performance.now();
+  console.log('Discovering JSONL files...');
+  const files = await discoverAllJsonlFiles(claudeProjectsDir, codexPersistenceDir);
+  const discoverTimeMs = performance.now() - discoverStart;
+  console.log(`Discovered ${files.length} JSONL files in ${discoverTimeMs.toFixed(0)}ms (sorted by mtime), parsing with concurrency=${CONCURRENCY}...`);
+
+  // Phase 2: Parse files in parallel with batched progress callbacks
   const conversations = new Map<string, Conversation>();
   const mtimes = new Map<string, number>();
+  const parseTimes: number[] = [];
+  let batchBuffer: Conversation[] = [];
+  let filesProcessed = 0;
 
-  // Load Claude conversations
-  console.log('Loading Claude conversations...');
-  const claudeDirs = await getProjectDirectories(claudeProjectsDir);
-  console.log(`Found ${claudeDirs.length} Claude project directories`);
+  // Process files with bounded concurrency, emitting batches as we go
+  const parseStart = performance.now();
 
-  for (const projectDir of claudeDirs) {
-    const jsonlFiles = await scanSessionDirectory(projectDir);
+  await mapWithConcurrency(files, CONCURRENCY, async (file) => {
+    const result = await parseOneFile(file);
 
-    for (const filePath of jsonlFiles) {
-      try {
-        const stat = await fs.promises.stat(filePath);
-        mtimes.set(filePath, stat.mtimeMs);
+    // Track timing
+    parseTimes.push(result.parseTimeMs);
 
-        const session = await parseJsonlFile(filePath);
-        if (session.entries.length === 0) continue;
-
-        const conversation = jsonlSessionToConversation(session);
-        if (conversation.messages.length === 0) continue;
-
-        conversations.set(conversation.id, conversation);
-      } catch (error: unknown) {
-        console.warn(`Failed to parse Claude session: ${path.basename(filePath)} (${error instanceof Error ? error.message : error})`);
-      }
+    // Collect results
+    if (result.mtimeMs > 0) {
+      mtimes.set(result.filePath, result.mtimeMs);
     }
+    if (result.conversation) {
+      conversations.set(result.conversation.id, result.conversation);
+      batchBuffer.push(result.conversation);
+    }
+
+    filesProcessed++;
+
+    // Emit batch when threshold reached
+    if (onProgress && batchBuffer.length >= BATCH_SIZE) {
+      onProgress(batchBuffer, { loaded: filesProcessed, total: files.length });
+      batchBuffer = [];
+    }
+
+    return result;
+  });
+
+  // Emit any remaining conversations in the final batch
+  if (onProgress && batchBuffer.length > 0) {
+    onProgress(batchBuffer, { loaded: filesProcessed, total: files.length });
   }
 
-  // Load Codex conversations (using same JSONL parser)
-  console.log('Loading Codex conversations...');
-  const codexDirs = await getProjectDirectories(codexPersistenceDir);
-  console.log(`Found ${codexDirs.length} Codex project directories`);
+  const parseTimeMs = performance.now() - parseStart;
 
-  for (const projectDir of codexDirs) {
-    const jsonlFiles = await scanSessionDirectory(projectDir);
+  // Log timing summary
+  if (parseTimes.length > 0) {
+    const sorted = [...parseTimes].sort((a, b) => a - b);
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+    const avg = parseTimes.reduce((a, b) => a + b, 0) / parseTimes.length;
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.floor(sorted.length * 0.95)];
 
-    for (const filePath of jsonlFiles) {
-      try {
-        const stat = await fs.promises.stat(filePath);
-        mtimes.set(filePath, stat.mtimeMs);
-
-        const session = await parseJsonlFile(filePath);
-        if (session.entries.length === 0) continue;
-
-        // Convert to conversation and force provider to 'codex'
-        const conversation = jsonlSessionToConversation(session);
-        if (conversation.messages.length === 0) continue;
-
-        // Override provider detection - anything from codex dir is codex
-        conversation.provider = 'codex';
-
-        conversations.set(conversation.id, conversation);
-      } catch (error: unknown) {
-        console.warn(`Failed to parse Codex session: ${path.basename(filePath)} (${error instanceof Error ? error.message : error})`);
-      }
-    }
+    console.log(`Parse timing (${parseTimes.length} files): min=${min.toFixed(1)}ms, avg=${avg.toFixed(1)}ms, median=${median.toFixed(1)}ms, p95=${p95.toFixed(1)}ms, max=${max.toFixed(1)}ms`);
   }
 
-  console.log(`Loaded ${conversations.size} total conversations (Claude + Codex)`);
+  const totalTimeMs = discoverTimeMs + parseTimeMs;
+  console.log(`Loaded ${conversations.size} conversations from ${files.length} files in ${totalTimeMs.toFixed(0)}ms (discover: ${discoverTimeMs.toFixed(0)}ms, parse: ${parseTimeMs.toFixed(0)}ms)`);
+
   return { conversations, mtimes };
 }
 
@@ -570,40 +736,4 @@ export async function pollForChanges(
   await scanSource(codexPersistenceDir, 'codex');
 
   return { updated, mtimes };
-}
-
-/**
- * Load conversations for a specific working directory only
- */
-export async function loadConversationsForDirectory(
-  workingDirectory: string,
-  projectsDir: string = CLAUDE_PROJECTS_DIR
-): Promise<Map<string, Conversation>> {
-  // Encode the path to match Claude Code's directory naming
-  const encodedPath = workingDirectory.replace(/\//g, '-');
-  const projectDir = path.join(projectsDir, encodedPath);
-
-  const conversations = new Map<string, Conversation>();
-
-  if (!fs.existsSync(projectDir)) {
-    return conversations;
-  }
-
-  const jsonlFiles = await scanSessionDirectory(projectDir);
-
-  for (const filePath of jsonlFiles) {
-    try {
-      const session = await parseJsonlFile(filePath);
-      if (session.entries.length === 0) continue;
-
-      const conversation = jsonlSessionToConversation(session);
-      if (conversation.messages.length === 0) continue;
-
-      conversations.set(conversation.id, conversation);
-    } catch (error: unknown) {
-      console.warn(`Failed to parse session: ${path.basename(filePath)} (${error instanceof Error ? error.message : error})`);
-    }
-  }
-
-  return conversations;
 }

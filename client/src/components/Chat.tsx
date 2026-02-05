@@ -1,13 +1,7 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { Components } from 'react-markdown';
-import type { Message } from '@claude-web-view/shared';
-import { FilePreview, getPreviewType } from './FilePreview';
 import { useConversationStore } from '../stores/conversationStore';
 import type { QueuedMessage } from '../stores/conversationStore';
 import { useUIStore, DRAFT_KEY_PREFIX } from '../stores/uiStore';
@@ -16,6 +10,8 @@ import { formatTimeAgo } from '../utils/time';
 import { PromptPalette } from './PromptPalette';
 import { SubAgentPanel } from './SubAgentPanel';
 import { useDropzone } from 'react-dropzone';
+import { VirtualizedMessageList } from './VirtualizedMessageList';
+import type { MessageGroup } from './VirtualizedMessageList';
 import './Chat.css';
 
 // Stable reference for empty queue — avoids new [] on every render triggering re-renders
@@ -34,66 +30,10 @@ interface PendingFile {
 
 const EMPTY_PENDING: PendingFile[] = [];
 
-// Stable reference — module-level so react-markdown doesn't re-mount on every render.
-// Overrides inline `code` to render file path previews for image/HTML paths.
-const markdownComponents: Components = {
-  code({ children, className, ...rest }) {
-    // Code blocks have className from rehype-highlight — pass through
-    if (className) return <code className={className} {...rest}>{children}</code>;
-
-    // Check if inline code content is a previewable file path
-    const text = typeof children === 'string' ? children.trim() : null;
-    if (!text) return <code {...rest}>{children}</code>;
-
-    const previewType = getPreviewType(text);
-    if (!previewType) return <code {...rest}>{children}</code>;
-
-    return <FilePreview path={text} type={previewType} />;
-  },
-};
-
 // =============================================================================
-// Memoized Message Rendering
-//
-// During streaming, each chunk causes Chat to re-render. Without memoization,
-// EVERY message re-parses through react-markdown + rehype-highlight — even
-// completed messages whose content hasn't changed. On a 50-message thread with
-// 100 chunks, that's 5,000 Markdown parse cycles.
-//
-// MemoizedMessage skips re-render when content/role/isLoopMarker are unchanged.
-// Only the actively-streaming message (whose content grows each frame) re-renders.
+// Memoized Message and Markdown components moved to VirtualizedMessageList.tsx
+// See that file for the MemoizedMessage component and markdownComponents.
 // =============================================================================
-
-interface MemoizedMessageProps {
-  msg: Message;
-  className: string;
-  forwardedRef?: React.RefObject<HTMLDivElement | null>;
-}
-
-const MemoizedMessage = memo(function MemoizedMessage({ msg, className, forwardedRef }: MemoizedMessageProps) {
-  return (
-    <div className={className} ref={forwardedRef}>
-      {msg.role !== 'system' && (
-        <div className={`message-role ${msg.role}`}>{msg.role}</div>
-      )}
-      <div className="message-content">
-        <Markdown
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeHighlight]}
-          components={markdownComponents}
-        >
-          {msg.content || '...'}
-        </Markdown>
-      </div>
-    </div>
-  );
-}, (prev, next) => {
-  // Skip re-render if content and role haven't changed
-  return prev.msg.content === next.msg.content
-    && prev.msg.role === next.msg.role
-    && prev.className === next.className
-    && prev.forwardedRef === next.forwardedRef;
-});
 
 /**
  * Returns a live-updating "time ago" string for a Date.
@@ -120,7 +60,11 @@ export function Chat() {
   // not when any other conversation in the Map updates.
   const conversation = useConversationStore((s) => id ? s.conversations.get(id) ?? null : null);
   const conversationCount = useConversationStore((s) => s.conversations.size);
-  const queue = useConversationStore((s) => (id ? s.queues.get(id) : undefined) ?? EMPTY_QUEUE);
+  const queue = useConversationStore((s) => {
+    if (!id) return EMPTY_QUEUE;
+    const conv = s.conversations.get(id);
+    return conv?.queue?.length ? conv.queue : EMPTY_QUEUE;
+  });
 
   // Actions are stable function references — never trigger re-renders
   const setActiveConversationId = useConversationStore((s) => s.setActiveConversationId);
@@ -130,17 +74,14 @@ export function Chat() {
   const interruptAndSend = useConversationStore((s) => s.interruptAndSend);
   const cancelQueuedMessage = useConversationStore((s) => s.cancelQueuedMessage);
   const clearQueue = useConversationStore((s) => s.clearQueue);
+  const stopConversation = useConversationStore((s) => s.stopConversation);
 
   const { savePrompt } = useSavedPrompts();
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // NEW Badge Feature: IntersectionObserver ref to detect when last message is visible.
   // When 50%+ of last message enters viewport, mark all messages as seen.
   // See docs/new_badge_feature.md for design rationale.
   const lastMessageRef = useRef<HTMLDivElement>(null);
-  // Track whether user is near the bottom — only auto-scroll if they haven't scrolled up
-  const isNearBottomRef = useRef(true);
   // Debounce timer for draft saves — cleared on each keystroke, fires after DRAFT_SAVE_DELAY_MS
   const draftTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
@@ -201,6 +142,11 @@ export function Chat() {
   const isLooping = conversation?.loopConfig?.isLooping ?? false;
   const isReady = conversation?.isReady ?? false;
   const isRunning = conversation?.isRunning ?? false;
+
+  // Ref to track running state for cleanup — closures in useEffect capture stale values,
+  // so we need a ref to read current isRunning when the cleanup function executes.
+  const isRunningRef = useRef(isRunning);
+  isRunningRef.current = isRunning;
   // Allow input if ready, even if running (messages will queue)
   const canInput = isReady && !isLooping;
   // Messages will be queued if running
@@ -210,10 +156,9 @@ export function Chat() {
   const hasContent = hasInput || pendingFiles.length > 0;
 
   // Split queue: "sending" message is current (already visible in chat), only "pending" are truly queued.
-  // For loop entries, the "sending" entry IS the loop countdown — show it separately.
-  const loopQueueEntry = queue.find((m) => m.isLoop) ?? null;
-  const currentMessage = queue.find((m) => m.status === 'sending' && !m.isLoop) ?? null;
-  const pendingQueue = queue.filter((m) => m.status === 'pending' && !m.isLoop);
+  // Loop state is read from loopConfig directly — not stored in the queue.
+  const currentMessage = queue.find((m) => m.status === 'sending') ?? null;
+  const pendingQueue = queue.filter((m) => m.status === 'pending');
 
   // Upload files immediately on drop/select — returns absolute paths from server
   const handleFilesUpload = useCallback(async (acceptedFiles: File[]) => {
@@ -272,21 +217,18 @@ export function Chat() {
       setActiveConversationId(id);
       setUIActiveId(id);
     }
-    return () => setActiveConversationId(null);
-  }, [id, setActiveConversationId, setUIActiveId]);
+    // Cleanup when navigating away: stop streaming if running.
+    // Queue is NOT cleared here — it's server-owned state that persists
+    // across navigation. The queue will still be there when the user returns.
+    return () => {
+      setActiveConversationId(null);
+      if (id && isRunningRef.current) {
+        stopConversation(id);
+      }
+    };
+  }, [id, setActiveConversationId, setUIActiveId, stopConversation]);
 
-  // Auto-scroll: during streaming, chunks flush ~60Hz via rAF. Using
-  // 'smooth' scrollIntoView would queue an animated scroll per frame,
-  // fighting the browser's layout engine. Use 'instant' when running
-  // (actively streaming) and 'smooth' only for discrete new messages.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: We want to scroll when messages change
-  useEffect(() => {
-    if (isNearBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({
-        behavior: isRunning ? 'instant' : 'smooth',
-      });
-    }
-  }, [conversation?.messages, isRunning]);
+  // Auto-scroll is now handled by VirtualizedMessageList component
 
   // If conversation doesn't exist and we have conversations, go to gallery
   useEffect(() => {
@@ -307,46 +249,16 @@ export function Chat() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // NEW Badge Feature: IntersectionObserver to detect when last message is visible.
-  // When 50%+ of last message enters viewport → mark all messages as seen → badge disappears.
-  // Uses hardware-accelerated IntersectionObserver (no manual scroll listeners needed).
-  // Dependencies: [id, messages.length, markMessagesSeen] — only recreate observer when
-  // conversation changes or new message arrives.
-  useEffect(() => {
-    if (!id || !conversation || conversation.messages.length === 0) return;
+  // NEW Badge Feature: IntersectionObserver is now handled by VirtualizedMessageList
+  // See VirtualizedMessageList.tsx for implementation details.
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            markMessagesSeen(id, conversation.messages.length - 1);
-          }
-        }
-      },
-      { threshold: 0.5 } // 50% of element must be visible
-    );
+  // Scroll state callback from VirtualizedMessageList
+  const handleScrollStateChange = useCallback((_isNearBottom: boolean, showButton: boolean) => {
+    setShowScrollToBottom(showButton);
+  }, []);
 
-    if (lastMessageRef.current) {
-      observer.observe(lastMessageRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, [id, conversation?.messages.length, markMessagesSeen]);
-
-  // Track scroll position: if user is within 150px of the bottom, auto-scroll.
-  // Otherwise they've scrolled up to read — leave them alone.
-  // Also show/hide the floating scroll-to-bottom arrow at 200px threshold.
-  const handleScroll = () => {
-    const el = messagesContainerRef.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isNearBottomRef.current = distanceFromBottom < 150;
-    setShowScrollToBottom(distanceFromBottom >= 200);
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // Ref for VirtualizedMessageList to call scroll-to-bottom
+  const scrollToBottomRef = useRef<(() => void) | null>(null);
 
   // Read textarea value from DOM — never goes through React state
   const getInputValue = () => textareaRef.current?.value ?? '';
@@ -412,17 +324,10 @@ export function Chat() {
   // Group messages by loop iteration for collapsible display.
   // Non-loop messages are wrapped in { type: 'single' } groups.
   // Loop iterations are wrapped in { type: 'loop-group' } with iteration metadata.
-  const messageGroups = useMemo(() => {
+  const messageGroups = useMemo((): MessageGroup[] => {
     if (!conversation) return [];
-    type MsgGroup = {
-      type: 'single' | 'loop-group';
-      iteration?: number;
-      total?: number;
-      messages: Message[];
-      isRunning?: boolean; // true if this iteration is currently streaming
-    };
-    const groups: MsgGroup[] = [];
-    let currentLoopGroup: MsgGroup | null = null;
+    const groups: MessageGroup[] = [];
+    let currentLoopGroup: MessageGroup | null = null;
 
     for (const msg of conversation.messages) {
       if (msg.isLoopMarker && msg.content.includes('Start')) {
@@ -589,7 +494,16 @@ export function Chat() {
   };
 
   return (
-    <div className="chat-view">
+    <div className={`chat-view${isDragActive ? ' drag-active' : ''}`} {...getRootProps()}>
+      <input {...getInputProps()} />
+      {isDragActive && (
+        <div className="dropzone-overlay">
+          <div className="dropzone-overlay-content">
+            <span className="dropzone-overlay-icon">&#x1F4CE;</span>
+            <span className="dropzone-overlay-text">Drop files here</span>
+          </div>
+        </div>
+      )}
       <div className="chat-header">
         <div className="chat-title">
           <span className="chat-id">{conversation.id.substring(0, 8)}</span>
@@ -640,92 +554,49 @@ export function Chat() {
         <SubAgentPanel subAgents={conversation.subAgents} />
       )}
 
-      <div className="messages-container" ref={messagesContainerRef} onScroll={handleScroll}>
-        {conversation.messages.length === 0 ? (
+      {conversation.messages.length === 0 ? (
+        <div className="messages-container">
           <div className="empty-state">
             {isReady
               ? 'Send a message to start the conversation.'
               : `Waiting for ${conversation.provider || 'claude'} to be ready...`}
           </div>
-        ) : (
-          <>
-            {messageGroups.map((group, gi) => {
-              const isLastGroup = gi === messageGroups.length - 1;
+        </div>
+      ) : (
+        <div className="messages-container-wrapper">
+          <VirtualizedMessageList
+            messageGroups={messageGroups}
+            collapsedIterations={collapsedIterations}
+            toggleIterationCollapse={toggleIterationCollapse}
+            isRunning={isRunning}
+            lastMessageRef={lastMessageRef}
+            onScrollStateChange={handleScrollStateChange}
+            conversationId={id!}
+            markMessagesSeen={markMessagesSeen}
+            totalMessageCount={conversation.messages.length}
+            scrollToBottomRef={scrollToBottomRef}
+          />
+          {conversation.isRunning && (
+            <div className="typing-indicator-overlay">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+            </div>
+          )}
+          {showScrollToBottom && (
+            <button
+              type="button"
+              className="scroll-to-bottom-btn"
+              onClick={() => scrollToBottomRef.current?.()}
+              aria-label="Scroll to bottom"
+            >
+              &#x25BC;
+            </button>
+          )}
+        </div>
+      )}
 
-              if (group.type === 'loop-group' && group.iteration != null) {
-                const isCollapsed = collapsedIterations.has(group.iteration);
-                return (
-                  <div key={`loop-${group.iteration}`} className={`loop-iteration-group ${group.isRunning ? 'running' : ''}`}>
-                    <div
-                      className="loop-iteration-header"
-                      onClick={() => toggleIterationCollapse(group.iteration!)}
-                    >
-                      <span className="loop-iteration-chevron">
-                        {isCollapsed ? '\u25B6' : '\u25BC'}
-                      </span>
-                      <span className="loop-iteration-label">
-                        Loop {group.iteration}/{group.total}
-                      </span>
-                      {group.isRunning && (
-                        <span className="loop-iteration-running">running...</span>
-                      )}
-                      {isCollapsed && (
-                        <span className="loop-iteration-collapsed-hint">
-                          {group.messages.length} message{group.messages.length !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </div>
-                    {!isCollapsed && group.messages.map((msg, mi) => {
-                      const isLastMessage = isLastGroup && mi === group.messages.length - 1;
-                      return (
-                        <MemoizedMessage
-                          key={mi}
-                          msg={msg}
-                          className={`message ${msg.role} ${msg.isLoopMarker ? 'loop-marker' : ''}`}
-                          forwardedRef={isLastMessage ? lastMessageRef : undefined}
-                        />
-                      );
-                    })}
-                  </div>
-                );
-              }
-              // Single (non-loop) messages
-              return group.messages.map((msg, mi) => {
-                const isLastMessage = isLastGroup && mi === group.messages.length - 1;
-                return (
-                  <MemoizedMessage
-                    key={`${gi}-${mi}`}
-                    msg={msg}
-                    className={`message ${msg.role} ${msg.isLoopMarker ? 'loop-marker' : ''}`}
-                    forwardedRef={isLastMessage ? lastMessageRef : undefined}
-                  />
-                );
-              });
-            })}
-            {conversation.isRunning && (
-              <div className="typing-indicator">
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-              </div>
-            )}
-          </>
-        )}
-        <div ref={messagesEndRef} />
-        {showScrollToBottom && (
-          <button
-            type="button"
-            className="scroll-to-bottom-btn"
-            onClick={scrollToBottom}
-            aria-label="Scroll to bottom"
-          >
-            &#x25BC;
-          </button>
-        )}
-      </div>
-
-      <div className={`input-container${isDragActive ? ' drag-active' : ''}`} {...getRootProps()}>
-        <input {...getInputProps()} />
+      <div className="input-container">
         {/* RALPH LOOP STATUS — shows Nx countdown and cancel button during active loop.
             Popup offers 5x/10x/20x counts + clearContext toggle.
             On "Start Loop", sends start_loop to server which orchestrates
@@ -736,10 +607,10 @@ export function Chat() {
             <div className="loop-active-info">
               <img src="/icons/ralph-wiggum.png" alt="" className="loop-active-icon" />
               <span className="loop-active-count">
-                {loopQueueEntry?.loopIterationsRemaining ?? conversation.loopConfig?.loopsRemaining ?? 0}x remaining
+                {conversation.loopConfig?.loopsRemaining ?? 0}x remaining
               </span>
               <span className="loop-active-prompt">
-                {loopQueueEntry?.content.substring(0, 60) ?? conversation.loopConfig?.prompt?.substring(0, 60) ?? ''}
+                {conversation.loopConfig?.prompt?.substring(0, 60) ?? ''}
               </span>
             </div>
             <button type="button" className="cancel-loop-btn" onClick={handleCancelLoop}>

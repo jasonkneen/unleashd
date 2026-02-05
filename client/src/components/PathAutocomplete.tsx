@@ -33,6 +33,15 @@ interface Props {
   autoFocus?: boolean;
 }
 
+/** Check if a path looks like a valid new directory (absolute or ~/..., with a name after the last /). */
+function isCreatablePath(path: string): boolean {
+  const trimmed = path.trim();
+  if (!trimmed.startsWith('/') && !trimmed.startsWith('~')) return false;
+  // Must have a non-empty name after the last separator
+  const parts = trimmed.split('/').filter(Boolean);
+  return parts.length >= 1;
+}
+
 /**
  * PathAutocomplete - A directory path input with autocomplete suggestions.
  *
@@ -200,6 +209,26 @@ export function PathAutocomplete({
     fetchFsSuggestions(newValue);
   };
 
+  const handleCreateFolder = async () => {
+    const trimmed = value.trim();
+    try {
+      const response = await fetch('/api/mkdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: trimmed }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error ?? 'Failed to create directory');
+      }
+      const data = (await response.json()) as { path: string };
+      // Select the newly created directory
+      handleSelectPath(data.path);
+    } catch (err) {
+      console.error('Failed to create folder:', err);
+    }
+  };
+
   /** Resolve the selected index to a path from the combined list (fuzzy first, then fs). */
   const getSelectedPath = (index: number): string | null => {
     if (index < fuzzyMatches.length) return fuzzyMatches[index].path;
@@ -217,6 +246,12 @@ export function PathAutocomplete({
     }
 
     if (!showSuggestions || totalCount === 0) {
+      // When no suggestions but "Create folder" is visible, Enter creates it
+      if (totalCount === 0 && e.key === 'Enter' && showSuggestions && isCreatablePath(value)) {
+        e.preventDefault();
+        handleCreateFolder();
+        return;
+      }
       if (e.key === 'Escape') {
         setShowSuggestions(false);
       }
@@ -337,7 +372,24 @@ export function PathAutocomplete({
 
       {showSuggestions && totalCount === 0 && !isLoading && value && (
         <div className="path-suggestions">
-          <div className="path-no-results">No matching directories</div>
+          {isCreatablePath(value) ? (
+            <div
+              className="path-suggestion-item path-create-item selected"
+              onClick={handleCreateFolder}
+            >
+              <span className="path-create-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  <line x1="12" y1="11" x2="12" y2="17" />
+                  <line x1="9" y1="14" x2="15" y2="14" />
+                </svg>
+              </span>
+              <span className="path-suggestion-name">Create folder</span>
+              <span className="path-suggestion-path">{value.trim()}</span>
+            </div>
+          ) : (
+            <div className="path-no-results">No matching directories</div>
+          )}
         </div>
       )}
     </div>

@@ -188,6 +188,17 @@ export const SubAgentSchema = z.object({
 
 export type SubAgent = z.infer<typeof SubAgentSchema>;
 
+// Queue types (shared between server state and client display).
+// Queue is for real messages only — loop state is read from loopConfig.
+export const QueuedMessageSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  queuedAt: z.coerce.date(),
+  status: z.enum(['pending', 'sending']),
+});
+
+export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
+
 export const ConversationSchema = z.object({
   id: z.string().uuid(),
   messages: z.array(MessageSchema),
@@ -199,6 +210,7 @@ export const ConversationSchema = z.object({
   provider: ProviderSchema.default('claude'),
   model: ModelIdSchema.optional(),  // Provider-specific model identifier (undefined = provider default)
   subAgents: z.array(SubAgentSchema).default([]),  // Active/recent sub-agents
+  queue: z.array(QueuedMessageSchema).default([]),  // Server-owned message queue
 });
 
 export type Conversation = z.infer<typeof ConversationSchema>;
@@ -257,6 +269,38 @@ export const CancelLoopMessageSchema = z.object({
 
 export type CancelLoopMessage = z.infer<typeof CancelLoopMessageSchema>;
 
+export const SetModelMessageSchema = z.object({
+  type: z.literal('set_model'),
+  conversationId: z.string().uuid(),
+  model: ModelIdSchema.optional(),
+});
+
+export type SetModelMessage = z.infer<typeof SetModelMessageSchema>;
+
+// Queue Messages (Client → Server)
+export const QueueMessageSchema = z.object({
+  type: z.literal('queue_message'),
+  conversationId: z.string().uuid(),
+  content: z.string().min(1),
+});
+
+export type QueueMessage = z.infer<typeof QueueMessageSchema>;
+
+export const CancelQueuedMessageSchema = z.object({
+  type: z.literal('cancel_queued_message'),
+  conversationId: z.string().uuid(),
+  messageId: z.string(),
+});
+
+export type CancelQueuedMessage = z.infer<typeof CancelQueuedMessageSchema>;
+
+export const ClearQueueMessageSchema = z.object({
+  type: z.literal('clear_queue'),
+  conversationId: z.string().uuid(),
+});
+
+export type ClearQueueMessage = z.infer<typeof ClearQueueMessageSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   NewConversationMessageSchema,
   SendMessageMessageSchema,
@@ -264,6 +308,10 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   DeleteConversationMessageSchema,
   StartLoopMessageSchema,
   CancelLoopMessageSchema,
+  SetModelMessageSchema,
+  QueueMessageSchema,
+  CancelQueuedMessageSchema,
+  ClearQueueMessageSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
@@ -276,6 +324,8 @@ export const InitMessageSchema = z.object({
   type: z.literal('init'),
   conversations: z.array(ConversationSchema),
   defaultCwd: z.string(),
+  /** True if server is still loading conversations from disk. Client should wait for conversations_updated. */
+  loading: z.boolean().optional(),
 });
 
 export type InitMessage = z.infer<typeof InitMessageSchema>;
@@ -400,6 +450,15 @@ export const SubAgentCompleteMessageSchema = z.object({
 
 export type SubAgentCompleteMessage = z.infer<typeof SubAgentCompleteMessageSchema>;
 
+// Queue update broadcast (Server → Client)
+export const QueueUpdatedMessageSchema = z.object({
+  type: z.literal('queue_updated'),
+  conversationId: z.string().uuid(),
+  queue: z.array(QueuedMessageSchema),
+});
+
+export type QueueUpdatedMessage = z.infer<typeof QueueUpdatedMessageSchema>;
+
 // File polling: server detected external changes to JSONL files
 export const ConversationsUpdatedMessageSchema = z.object({
   type: z.literal('conversations_updated'),
@@ -425,6 +484,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   SubAgentUpdateMessageSchema,
   SubAgentCompleteMessageSchema,
   ConversationsUpdatedMessageSchema,
+  QueueUpdatedMessageSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;

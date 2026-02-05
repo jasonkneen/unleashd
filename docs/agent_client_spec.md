@@ -112,7 +112,7 @@ Codex uses composite model IDs that encode both model name and reasoning effort 
 ```
 1. Conversation created with provider name ('claude' | 'codex') and optional model
 2. constructor() calls getProvider(name) to get Provider instance
-3. User sends message → queueMessage() → _processQueue() → sendMessage()
+3. User sends message → queue_message (WS) → server enqueueMessage() → processQueue() → sendMessage()
 4. sendMessage() calls spawnForMessage(content):
    a. provider.getSpawnConfig(sessionId, workingDir, resume, model)
    b. spawn(config.command, config.args, config.options)

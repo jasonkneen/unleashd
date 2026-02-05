@@ -249,8 +249,9 @@ export function Sidebar() {
           const timeAgo = lastTime ? formatTimeAgo(lastTime) : null;
           const timeColor = lastTime ? timeAgoColor(getMinutesElapsed(lastTime)) : undefined;
           // NEW Badge Feature: Show badge if user hasn't seen the latest messages.
-          // Badge shows when lastSeenIndex < messages.length - 1.
-          // See docs/new_badge_feature.md
+          // Data layer fix is in conversationStore.ts:_handleMessage — new messages for the
+          // active conversation are immediately marked seen. No view-layer masking here;
+          // if badge shows on active conversation, that's a bug to fix at the source.
           const hasUnseen = hasUnseenMessages(conv.id, conv.messages.length);
 
           return (

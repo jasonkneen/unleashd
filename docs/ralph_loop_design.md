@@ -78,7 +78,7 @@ resetProcess(): void {
 
 After `resetProcess()`, `isReady` is `false`. The loop engine then calls `conv.sendMessage()` which calls `spawnForMessage()`. `spawnForMessage()` only checks `this.isRunning` (not `this.isReady`), so the spawn succeeds. But `isReady = false` was already broadcast to the client via `broadcastStatus()` somewhere in the chain.
 
-**Impact:** The client UI thinks the conversation is not ready. The client store's `_processQueue()` guard `!conv.isReady` prevents queue processing. The loop iteration handlers in the store may not update correctly because the conversation appears in a "not ready" state. The loop _may_ work server-side but the client shows incorrect state.
+**Impact:** The client UI thinks the conversation is not ready. The server's `processQueue()` guard `!this.isReady` prevents queue processing. The loop iteration handlers in the store may not update correctly because the conversation appears in a "not ready" state. The loop _may_ work server-side but the client shows incorrect state.
 
 **Root cause:** `isReady` was designed for long-lived CLI processes that need time to initialize. In the spawn-per-message model, the conversation is always conceptually "ready" — we spawn fresh for each message.
 
@@ -719,7 +719,7 @@ The server drives loop execution. The client creates a display-only "loop" queue
 
 ### Queue vs Loop Ordering:
 
-If messages are queued before a loop starts, the loop starts immediately (server-side). Existing queued messages are paused (`conv.loopConfig?.isLooping` guard in `_processQueue`). After the loop completes, the queue resumes normally. This is the simplest correct behavior.
+If messages are queued before a loop starts, the loop starts immediately (server-side). Existing queued messages are paused (`conv.loopConfig?.isLooping` guard in `processQueue()`). After the loop completes, the queue resumes normally. This is the simplest correct behavior.
 
 ---
 
@@ -853,11 +853,10 @@ If the server restarts during a 20x loop:
 
 **`client/src/stores/conversationStore.ts` — `startLoop()`:**
 ```typescript
-// Loop execution is server-driven. The client creates a synthetic "loop"
-// queue entry for display only (the "Nx" counter). The server sends
-// loop_iteration_end events to decrement the counter. The entry is cleared
-// on loop_complete. Normal queue processing is paused during loops
-// (guarded in _processQueue by conv.loopConfig?.isLooping).
+// Loop execution is server-driven. The UI reads loopConfig directly
+// for the "Nx" countdown — no synthetic queue entry needed.
+// Normal queue processing is paused during loops
+// (guarded in server processQueue() by this.loopConfig?.isLooping).
 ```
 
 **`client/src/components/Chat.tsx` — loop popup:**
@@ -901,9 +900,9 @@ If the server restarts during a 20x loop:
 - **Lines 78-79:** `startLoop()`, `cancelLoop()` signatures
 - **Lines 133:** `loopConfig: null` in optimistic conversation stub
 - **Lines 167-173:** `startLoop()`, `cancelLoop()` implementations
-- **Lines 207:** Queue guard: `!conv.loopConfig?.isLooping`
-- **Lines 266-310:** `_processQueue()` with loop guard at line 278
-- **Lines 491-526:** Handlers for `loop_iteration_start/end`, `loop_complete`
+- **Lines 167-173:** `startLoop()`, `cancelLoop()` — thin WS senders (server owns queue + loop)
+- **Queue processing:** Server-side `processQueue()` with `this.loopConfig?.isLooping` guard
+- **Lines 460-475:** Handlers for `loop_iteration_start/end`, `loop_complete`
 
 ### Client UI (`components/Chat.tsx`):
 - **Lines 122-125:** Loop popup state (`showLoopPopup`, `loopCount`, `clearContext`)

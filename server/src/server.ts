@@ -9,6 +9,7 @@ import http from 'node:http';
 import net from 'node:net';
 import readline from 'node:readline';
 import { EventEmitter } from 'node:events';
+import crypto from 'node:crypto';
 import type {
   Provider as ProviderName,
   ModelId,
@@ -17,11 +18,12 @@ import type {
   Conversation as ConversationData,
   ServerMessage,
   SubAgent,
+  QueuedMessage,
 } from '@claude-web-view/shared';
 import { getProvider, ProviderParseError, type Provider, type ProviderEvent } from './providers';
 import { loadAllConversations, pollForChanges } from './adapters/jsonl';
-import { loadCodexSessions, pollCodexSessions } from './adapters/codex-sessions';
 import { writeCodexMessage } from './adapters/codex-persistence';
+
 import multer from 'multer';
 
 const app = express();
@@ -45,6 +47,16 @@ const EXTERNAL_GRACE_MS = 30_000; // 30s grace period before marking idle
 // All sessionIds belonging to known conversations (including rotated ones from resetProcess).
 // Prevents the file poller from importing an orphaned JSONL as a duplicate conversation.
 const knownSessionIds = new Set<string>();
+
+// Track initial load completion state.
+// Resolves when loadExistingConversations() finishes. WebSocket handlers await this
+// before sending `init` to ensure clients get all conversations, not an empty list.
+let initialLoadComplete: Promise<void>;
+let resolveInitialLoad: () => void;
+// Initialize the promise (resolved by startServer after loadExistingConversations)
+initialLoadComplete = new Promise((resolve) => {
+  resolveInitialLoad = resolve;
+});
 
 // =============================================================================
 // Types for WebSocket Messages
@@ -117,6 +129,9 @@ class Conversation extends EventEmitter {
   providerConfig: Provider | null;
   // Sub-agent tracking
   subAgents: SubAgent[];
+  // Server-owned message queue — persists across client navigation/refresh.
+  // Client mirrors this state via queue_updated broadcasts.
+  queue: QueuedMessage[];
   // Track pending tool_use blocks that might be Task tools
   private _pendingTaskTools: Map<string, { id: string; startedAt: Date }>;
   // Track if we've started a CLI session (for --resume vs --session-id)
@@ -153,6 +168,7 @@ class Conversation extends EventEmitter {
     this.model = model;
     this.providerConfig = getProvider(provider);
     this.subAgents = [];
+    this.queue = [];
     this._pendingTaskTools = new Map();
     // Mark session as started if loading existing (use --resume for next message)
     this._hasStartedSession = existingSessionId !== undefined;
@@ -181,7 +197,19 @@ class Conversation extends EventEmitter {
 
     // Use sessionId (not conversation id) for CLI session tracking
     const spawnConfig = this.providerConfig!.getSpawnConfig(this.sessionId, this.workingDirectory, shouldResume, this.model);
-    this.process = spawn(spawnConfig.command, spawnConfig.args, spawnConfig.options);
+    // Detached: child gets own process group, survives server SIGTERM (hot-reload).
+    // unref(): Node won't block exit waiting for this child.
+    // Pipes work while server is alive. When server exits, pipes break:
+    //   - Node.js CLIs (Claude): SIGPIPE is ignored by default → gets EPIPE on
+    //     stdout writes, continues running, completes work, writes to JSONL.
+    //   - Non-Node CLIs: may die from SIGPIPE. Current response would be truncated
+    //     but whatever was written to JSONL is preserved.
+    // In both cases, the file poller re-adopts via JSONL mtime detection on restart.
+    this.process = spawn(spawnConfig.command, spawnConfig.args, {
+      ...spawnConfig.options,
+      detached: true,
+    });
+    this.process.unref();
     this.isRunning = true;
     this._hasStartedSession = true; // Mark session as started for next message
     this.broadcastStatus();
@@ -244,6 +272,19 @@ class Conversation extends EventEmitter {
       this.isRunning = false;
       this.process = null;
       this.broadcastStatus();
+      // Broadcast ready so queued messages (e.g. interrupt-and-send) can process.
+      // This is the ONLY place that should broadcast ready after a process ends —
+      // stop() defers to this handler to avoid racing the actual process exit.
+      this.broadcastReady();
+      // Dequeue the "sending" message (completed or crashed) and process next.
+      // This is the SINGLE code path for dequeue — not split between
+      // message_complete and close. Handles both success and crash.
+      if (this.queue.length > 0 && this.queue[0].status === 'sending') {
+        this.queue.shift();
+        this.broadcastQueue();
+      }
+      // Small delay to let the client process status+ready broadcasts first.
+      setTimeout(() => this.processQueue(), 100);
     });
 
     // Write message and close stdin to trigger processing
@@ -501,17 +542,24 @@ class Conversation extends EventEmitter {
   }
 
   stop(): void {
-    if (this.process) {
-      this.process.kill();
-      this.process = null;
-      this.isRunning = false;
-      // Mark ready so queued messages (e.g. interrupt-and-send) can process.
-      // Same reasoning as resetProcess(): we spawn a fresh process per message,
-      // so a stopped conversation is conceptually "ready" for the next one.
-      this.isReady = true;
-      this.broadcastStatus();
-      this.broadcastReady();
-    }
+    if (!this.process) return;
+
+    const proc = this.process;
+    // CRITICAL: Don't set isRunning/isReady here. The 'close' handler does that.
+    // This ensures atomicity: process exits → state updated → queue dequeued →
+    // processQueue() spawns next. If we set state here, processQueue could fire
+    // while the old process is still alive, and spawnForMessage's isRunning
+    // guard would silently drop the queued message.
+    proc.kill('SIGTERM');
+
+    const killTimer = setTimeout(() => {
+      if (proc.exitCode === null && !proc.killed) {
+        console.warn(`[${this.id}] Process did not exit after SIGTERM, sending SIGKILL`);
+        proc.kill('SIGKILL');
+      }
+    }, 3000);
+
+    proc.once('close', () => clearTimeout(killTimer));
   }
 
   // Reset process for fresh context (used in loop with clearContext).
@@ -558,6 +606,71 @@ class Conversation extends EventEmitter {
     });
   }
 
+  broadcastQueue(): void {
+    broadcastToAll({
+      type: 'queue_updated',
+      conversationId: this.id,
+      queue: this.queue,
+    });
+  }
+
+  /**
+   * Add a message to the queue. If the conversation is ready and idle,
+   * process immediately. Otherwise it sits until the next status/ready change.
+   */
+  enqueueMessage(content: string): void {
+    const msg: QueuedMessage = {
+      id: crypto.randomUUID(),
+      content,
+      queuedAt: new Date(),
+      status: 'pending',
+    };
+    this.queue.push(msg);
+    console.log(`[${this.id}] Queued message: "${content.substring(0, 30)}"`);
+    this.broadcastQueue();
+    this.processQueue();
+  }
+
+  /**
+   * Cancel a pending queued message by ID. Cannot cancel messages already sending.
+   */
+  cancelQueuedMessage(messageId: string): void {
+    const idx = this.queue.findIndex((m) => m.id === messageId && m.status === 'pending');
+    if (idx !== -1) {
+      console.log(`[${this.id}] Cancelled queued message: ${messageId.substring(0, 8)}`);
+      this.queue.splice(idx, 1);
+      this.broadcastQueue();
+    }
+  }
+
+  /**
+   * Clear all pending messages from the queue. Messages currently sending are kept.
+   */
+  clearQueue(): void {
+    const before = this.queue.length;
+    this.queue = this.queue.filter((m) => m.status === 'sending');
+    console.log(`[${this.id}] Cleared queue: removed ${before - this.queue.length} messages`);
+    this.broadcastQueue();
+  }
+
+  /**
+   * Process the next queued message if the conversation is idle and ready.
+   * Called after status/ready changes, message_complete, and enqueueMessage.
+   */
+  processQueue(): void {
+    if (this.isRunning || !this.isReady) return;
+    if (this.loopConfig?.isLooping) return;
+    if (this.queue.length === 0) return;
+
+    const next = this.queue[0];
+    if (next.status === 'sending') return; // already in flight
+
+    next.status = 'sending';
+    this.broadcastQueue();
+    this.sendMessage(next.content);
+  }
+
+
   toJSON(): ConversationData {
     return {
       id: this.id,
@@ -570,6 +683,7 @@ class Conversation extends EventEmitter {
       provider: this.provider,
       model: this.model,
       subAgents: this.subAgents,
+      queue: this.queue,
     };
   }
 }
@@ -813,13 +927,40 @@ interface CancelLoopData {
   conversationId: string;
 }
 
+interface QueueMessageData {
+  type: 'queue_message';
+  conversationId: string;
+  content: string;
+}
+
+interface CancelQueuedMessageData {
+  type: 'cancel_queued_message';
+  conversationId: string;
+  messageId: string;
+}
+
+interface ClearQueueData {
+  type: 'clear_queue';
+  conversationId: string;
+}
+
+interface SetModelData {
+  type: 'set_model';
+  conversationId: string;
+  model?: ModelId;
+}
+
 type ClientMessageData =
   | NewConversationData
   | SendMessageData
   | StopConversationData
   | DeleteConversationData
   | StartLoopData
-  | CancelLoopData;
+  | CancelLoopData
+  | QueueMessageData
+  | CancelQueuedMessageData
+  | ClearQueueData
+  | SetModelData;
 
 // =============================================================================
 // WebSocket Handler
@@ -828,20 +969,32 @@ type ClientMessageData =
 wss.on('connection', (ws: WebSocket) => {
   console.log('New WebSocket connection');
 
-  // Send current state (include external running status for accurate initial render)
-  ws.send(
-    JSON.stringify({
-      type: 'init',
-      conversations: Array.from(conversations.values()).map((c) => {
-        const json = c.toJSON();
-        if (externallyRunning.has(c.id)) {
-          json.isRunning = true;
-        }
-        return json;
-      }),
-      defaultCwd: process.cwd(),
-    })
-  );
+  // Wait for initial load to complete before sending init with conversations.
+  // This prevents race condition where clients get empty conversations array
+  // because JSONL loading (1500+ files, ~5s) hasn't finished yet.
+  // The await is safe because initialLoadComplete is a cached Promise that
+  // resolves immediately once loading is done (subsequent connections don't wait).
+  (async () => {
+    await initialLoadComplete;
+
+    // Guard: client may have disconnected while we were waiting
+    if (ws.readyState !== WebSocket.OPEN) return;
+
+    // Send current state (include external running status for accurate initial render)
+    ws.send(
+      JSON.stringify({
+        type: 'init',
+        conversations: Array.from(conversations.values()).map((c) => {
+          const json = c.toJSON();
+          if (externallyRunning.has(c.id)) {
+            json.isRunning = true;
+          }
+          return json;
+        }),
+        defaultCwd: process.cwd(),
+      })
+    );
+  })();
 
   ws.on('message', (message: Buffer | string) => {
     try {
@@ -955,6 +1108,46 @@ wss.on('connection', (ws: WebSocket) => {
           cancelLoop(data.conversationId);
           break;
         }
+
+        case 'set_model': {
+          const conv = conversations.get(data.conversationId);
+          if (conv) {
+            conv.model = data.model;
+            console.log(`[WS] Model changed for ${data.conversationId}: ${data.model ?? 'default'}`);
+            // Broadcast updated conversation
+            ws.send(
+              JSON.stringify({
+                type: 'conversation_created',
+                conversation: conv.toJSON(),
+              })
+            );
+          }
+          break;
+        }
+
+        case 'queue_message': {
+          const conv = conversations.get(data.conversationId);
+          if (conv) {
+            conv.enqueueMessage(data.content);
+          }
+          break;
+        }
+
+        case 'cancel_queued_message': {
+          const conv = conversations.get(data.conversationId);
+          if (conv) {
+            conv.cancelQueuedMessage(data.messageId);
+          }
+          break;
+        }
+
+        case 'clear_queue': {
+          const conv = conversations.get(data.conversationId);
+          if (conv) {
+            conv.clearQueue();
+          }
+          break;
+        }
       }
     } catch (e) {
       console.error('Error handling WebSocket message:', e);
@@ -1029,31 +1222,63 @@ const DEFAULT_SETTINGS: Settings = {
   colorPalette: 'solarized',
 };
 
-function loadSettings(): Settings {
+// =============================================================================
+// Settings Cache — initialized once at startup, updated on POST
+// =============================================================================
+
+let settingsCache: Settings | null = null;
+
+/**
+ * Initialize settings cache from disk. Called once at startup.
+ * Throws if the file exists but is malformed (fail eagerly).
+ */
+async function initSettingsCache(): Promise<void> {
   try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const data = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
-    }
+    const data = await fs.promises.readFile(SETTINGS_FILE, 'utf-8');
+    settingsCache = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+    console.log('Settings loaded from disk');
   } catch (e) {
-    console.error('Error loading settings:', e);
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      // File doesn't exist — use defaults
+      settingsCache = { ...DEFAULT_SETTINGS };
+      console.log('Settings file not found, using defaults');
+    } else {
+      throw new Error(`Failed to load settings: ${(e as Error).message}`);
+    }
   }
-  return DEFAULT_SETTINGS;
 }
 
-function saveSettings(settings: Settings): void {
-  try {
-    if (!fs.existsSync(SETTINGS_DIR)) {
-      fs.mkdirSync(SETTINGS_DIR, { recursive: true });
-    }
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
-  } catch (e) {
-    console.error('Error saving settings:', e);
+/**
+ * Get settings from cache. Throws if cache not initialized (programming error).
+ */
+function getSettings(): Settings {
+  if (!settingsCache) {
+    throw new Error('Settings cache not initialized — call initSettingsCache() at startup');
   }
+  return settingsCache;
+}
+
+/**
+ * Update settings cache and write to disk asynchronously.
+ * Cache is updated immediately; disk write is fire-and-forget with error logging.
+ */
+function writeSettingsAsync(settings: Settings): void {
+  settingsCache = settings;
+
+  // Fire-and-forget disk write
+  (async () => {
+    try {
+      await fs.promises.mkdir(SETTINGS_DIR, { recursive: true });
+      await fs.promises.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    } catch (e) {
+      console.error('Error saving settings to disk:', e);
+    }
+  })();
 }
 
 app.get('/api/settings', (_req: Request, res: Response) => {
-  res.json(loadSettings());
+  res.json(getSettings());
 });
 
 // Model list API — returns ModelInfo[] for the given provider.
@@ -1066,14 +1291,14 @@ app.get('/api/models', (req: Request, res: Response) => {
 
 // Path autocomplete API - returns directory listings for a given path
 // Used by the PathAutocomplete component in the new conversation dialog
-app.get('/api/paths', (req: Request, res: Response) => {
+app.get('/api/paths', async (req: Request, res: Response) => {
   const inputPath = (req.query.path as string) || '';
 
   // Handle empty path - return home directory contents
   if (!inputPath) {
     try {
       const homeDir = os.homedir();
-      const entries = fs.readdirSync(homeDir, { withFileTypes: true });
+      const entries = await fs.promises.readdir(homeDir, { withFileTypes: true });
       const results = entries
         .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
         .slice(0, 20)
@@ -1100,10 +1325,10 @@ app.get('/api/paths', (req: Request, res: Response) => {
 
   // Check if the path exists and is a directory
   try {
-    const stats = fs.statSync(normalizedPath);
+    const stats = await fs.promises.stat(normalizedPath);
     if (stats.isDirectory()) {
       // Path is a complete directory - list its contents
-      const entries = fs.readdirSync(normalizedPath, { withFileTypes: true });
+      const entries = await fs.promises.readdir(normalizedPath, { withFileTypes: true });
       const results = entries
         .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
         .slice(0, 20)
@@ -1124,9 +1349,9 @@ app.get('/api/paths', (req: Request, res: Response) => {
   const partial = path.basename(normalizedPath).toLowerCase();
 
   try {
-    const stats = fs.statSync(parentDir);
+    const stats = await fs.promises.stat(parentDir);
     if (stats.isDirectory()) {
-      const entries = fs.readdirSync(parentDir, { withFileTypes: true });
+      const entries = await fs.promises.readdir(parentDir, { withFileTypes: true });
       const results = entries
         .filter(
           (entry) =>
@@ -1149,6 +1374,31 @@ app.get('/api/paths', (req: Request, res: Response) => {
 
   // Return empty array for invalid paths
   res.json([]);
+});
+
+// Create a directory (used by PathAutocomplete's "Create folder" option)
+app.post('/api/mkdir', express.json(), async (req: Request, res: Response) => {
+  const dirPath = req.body?.path as string | undefined;
+  if (!dirPath) {
+    res.status(400).json({ error: 'Missing path' });
+    return;
+  }
+
+  // Expand ~ to home directory
+  let expandedPath = dirPath;
+  if (expandedPath.startsWith('~')) {
+    expandedPath = expandedPath.replace(/^~/, os.homedir());
+  }
+
+  const normalizedPath = path.normalize(expandedPath);
+
+  try {
+    await fs.promises.mkdir(normalizedPath, { recursive: true });
+    res.json({ path: normalizedPath });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create directory';
+    res.status(500).json({ error: message });
+  }
 });
 
 // Serve local files over HTTP so the browser can display them
@@ -1174,8 +1424,8 @@ app.get('/api/files', (req: Request, res: Response) => {
 });
 
 app.post('/api/settings', (req: Request, res: Response) => {
-  const settings = { ...loadSettings(), ...req.body };
-  saveSettings(settings);
+  const settings = { ...getSettings(), ...req.body };
+  writeSettingsAsync(settings);
   res.json(settings);
 });
 
@@ -1216,49 +1466,78 @@ interface StoredPalette {
   green: string;
 }
 
-function getNextPaletteNumber(): number {
-  if (!fs.existsSync(PALETTES_DIR)) return 1;
+// =============================================================================
+// Palette Cache — initialized once at startup, updated on generate
+// =============================================================================
 
-  let maxN = 0;
-  for (const file of fs.readdirSync(PALETTES_DIR)) {
-    const match = file.match(/^palette_(\d+)\.json$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxN) maxN = n;
+/** In-memory cache of custom palettes (keyed by "custom_N") */
+let paletteCache: Record<string, Record<string, string>> = {};
+/** Next available palette number (incremented after each generation) */
+let nextPaletteNumber = 1;
+
+/**
+ * Initialize palette cache from disk. Called once at startup.
+ * Reads all palette_N.json files and builds the cache.
+ */
+async function initPaletteCache(): Promise<void> {
+  paletteCache = {};
+  nextPaletteNumber = 1;
+
+  try {
+    const entries = await fs.promises.readdir(PALETTES_DIR, { withFileTypes: true });
+
+    // Parse all palette files in parallel
+    const parsePromises = entries
+      .filter((entry) => entry.isFile() && /^palette_\d+\.json$/.test(entry.name))
+      .map(async (entry) => {
+        const match = entry.name.match(/^palette_(\d+)\.json$/);
+        if (!match) return null;
+
+        const n = parseInt(match[1], 10);
+        const filePath = path.join(PALETTES_DIR, entry.name);
+
+        try {
+          const content = await fs.promises.readFile(filePath, 'utf-8');
+          const stored = JSON.parse(content) as StoredPalette;
+          const palette: Record<string, string> = { name: stored.name };
+          for (const key of PALETTE16_KEYS) {
+            palette[key] = stored[key];
+          }
+          return { key: `custom_${n}`, palette, n };
+        } catch (e) {
+          console.error(`Failed to parse palette file ${entry.name}:`, e);
+          return null;
+        }
+      });
+
+    const results = await Promise.all(parsePromises);
+
+    for (const result of results) {
+      if (result) {
+        paletteCache[result.key] = result.palette;
+        if (result.n >= nextPaletteNumber) {
+          nextPaletteNumber = result.n + 1;
+        }
+      }
+    }
+
+    console.log(`Palette cache initialized: ${Object.keys(paletteCache).length} palettes, next number: ${nextPaletteNumber}`);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      // Directory doesn't exist — no palettes yet
+      console.log('Palettes directory not found, starting with empty cache');
+    } else {
+      throw new Error(`Failed to initialize palette cache: ${(e as Error).message}`);
     }
   }
-  return maxN + 1;
 }
 
 // GET /api/custom-palettes — returns Record<string, Palette16> of saved custom palettes
 // Each entry has { name, base03, base02, ..., green } matching the Palette16 interface.
+// Reads from in-memory cache (zero I/O).
 app.get('/api/custom-palettes', (_req: Request, res: Response) => {
-  const palettes: Record<string, Record<string, string>> = {};
-
-  if (!fs.existsSync(PALETTES_DIR)) {
-    res.json(palettes);
-    return;
-  }
-
-  for (const file of fs.readdirSync(PALETTES_DIR)) {
-    const match = file.match(/^palette_(\d+)\.json$/);
-    if (!match) continue;
-
-    try {
-      const content = fs.readFileSync(path.join(PALETTES_DIR, file), 'utf-8');
-      const stored = JSON.parse(content) as StoredPalette;
-      // Return Palette16 shape: flat keys, no nested 'colors' object
-      const palette: Record<string, string> = { name: stored.name };
-      for (const key of PALETTE16_KEYS) {
-        palette[key] = stored[key];
-      }
-      palettes[`custom_${match[1]}`] = palette;
-    } catch (e) {
-      console.error(`Failed to parse palette file ${file}:`, e);
-    }
-  }
-
-  res.json(palettes);
+  res.json(paletteCache);
 });
 
 // POST /api/generate-palette — spawn an agent in single-shot mode to generate a palette
@@ -1323,7 +1602,9 @@ Requirements:
 - Prefer perceptually uniform accent lightness (all accents roughly equal perceived brightness).
 - base03 should be very dark (suitable for long coding sessions).`;
 
-  const n = getNextPaletteNumber();
+  // Use cached counter instead of scanning filesystem
+  const n = nextPaletteNumber;
+  nextPaletteNumber++;
 
   // Use the provider's single-shot config instead of hardcoding spawn args
   const spawnConfig = provider.getSingleShotConfig(prompt);
@@ -1407,27 +1688,31 @@ Requirements:
       cyan:   parsed.cyan,   green:  parsed.green,
     };
 
-    try {
-      if (!fs.existsSync(PALETTES_DIR)) {
-        fs.mkdirSync(PALETTES_DIR, { recursive: true });
-      }
-      const filePath = path.join(PALETTES_DIR, `palette_${n}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(stored, null, 2));
-      console.log(`[generate-palette] Saved palette to ${filePath}`);
-    } catch (writeErr) {
-      console.error(`[generate-palette] Failed to save palette file:`, writeErr);
-      sendError(500, 'Failed to save palette file');
-      return;
-    }
-
-    // Return Palette16 shape to client (flat keys, no nested 'colors' object)
-    if (responded) return; // timeout already fired
-    responded = true;
+    // Build Palette16 shape for client and cache
     const key = `custom_${n}`;
     const palette: Record<string, string> = { name: parsed.name };
     for (const k of PALETTE16_KEYS) {
       palette[k] = parsed[k];
     }
+
+    // Update cache immediately
+    paletteCache[key] = palette;
+
+    // Fire-and-forget disk write (error logged but doesn't fail the request)
+    (async () => {
+      try {
+        await fs.promises.mkdir(PALETTES_DIR, { recursive: true });
+        const filePath = path.join(PALETTES_DIR, `palette_${n}.json`);
+        await fs.promises.writeFile(filePath, JSON.stringify(stored, null, 2));
+        console.log(`[generate-palette] Saved palette to ${filePath}`);
+      } catch (writeErr) {
+        console.error(`[generate-palette] Failed to save palette file:`, writeErr);
+      }
+    })();
+
+    // Return Palette16 shape to client
+    if (responded) return; // timeout already fired
+    responded = true;
     console.log(`[generate-palette] Success: "${parsed.name}" -> ${key}`);
     res.json({ key, palette });
   });
@@ -1446,10 +1731,29 @@ app.get('*', (_req: Request, res: Response) => {
 // Server Lifecycle
 // =============================================================================
 
-// Cleanup on exit
+// Signal Handlers — split behavior for intentional shutdown vs hot-reload.
+//
+// SIGINT (Ctrl-C): Intentional shutdown. Kill all child processes and clear PID file.
+// SIGTERM (tsx watch, kill, pm2, Docker stop): Hot-reload. Leave detached children
+//   alive — the restarted server re-adopts them via the file poller + PID tracker.
+//
+// Children are spawned with detached:true + unref(), so they survive SIGTERM naturally.
+// We just need to NOT kill them on SIGTERM and let Node exit.
+
 process.on('SIGINT', () => {
-  console.log('Shutting down...');
-  conversations.forEach((conv) => conv.stop());
+  console.log('SIGINT — killing child processes and shutting down...');
+  for (const conv of conversations.values()) {
+    if (conv.process) {
+      conv.process.kill('SIGKILL');
+    }
+  }
+  process.exit();
+});
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM — detaching child processes for hot-reload...');
+  // Don't kill children — they're detached and will keep running.
+  // PID file is left intact so the restarted server can re-adopt them.
   process.exit();
 });
 
@@ -1655,6 +1959,10 @@ function startFilePolling(): void {
 }
 
 async function startServer(): Promise<void> {
+  // Initialize caches before opening the port
+  await initSettingsCache();
+  await initPaletteCache();
+
   const portNumber = typeof PORT === 'string' ? parseInt(PORT, 10) : PORT;
   let isPortAvailable = await checkPort(portNumber);
 
@@ -1687,27 +1995,27 @@ async function startServer(): Promise<void> {
   }
 
   // Start listening FIRST so the Vite proxy can connect immediately.
-  // Conversation loading happens after — clients get an empty init,
-  // then a conversations_updated broadcast once loading finishes.
+  // WebSocket handlers await initialLoadComplete before sending init,
+  // so clients don't receive empty conversations during the loading window.
   server.listen(portNumber, () => {
     console.log(`Server running on http://localhost:${portNumber}`);
-    startFilePolling();
-    console.log('File polling started (5s interval)');
   });
 
-  // Load existing conversations in the background after the port is open.
-  // Any clients connected during loading get an empty conversations list,
-  // then receive a conversations_updated broadcast when loading completes.
+  // Load existing conversations after the port is open.
+  // WebSocket handlers await initialLoadComplete, so clients won't receive
+  // init until this completes — no race condition with empty conversations.
   await loadExistingConversations();
 
-  // Broadcast all loaded conversations to any clients that connected during loading
-  if (conversations.size > 0) {
-    broadcastToAll({
-      type: 'conversations_updated',
-      conversations: Array.from(conversations.values()).map((c) => c.toJSON()),
-    });
-    console.log(`Broadcast ${conversations.size} loaded conversations to connected clients`);
-  }
+  // Signal that initial load is complete. WebSocket handlers waiting on
+  // initialLoadComplete will now proceed to send init with all conversations.
+  resolveInitialLoad();
+  console.log('Initial load complete, WebSocket handlers unblocked');
+
+  // Start file polling AFTER initial load so mtimes are populated.
+  // If poller starts before loadExistingConversations completes, the first poll
+  // would see empty mtimes and re-broadcast all conversations.
+  startFilePolling();
+  console.log('File polling started (5s interval)');
 }
 
 startServer();

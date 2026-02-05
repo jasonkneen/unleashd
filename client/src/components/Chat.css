@@ -72,6 +72,17 @@
   color: var(--cyan);
 }
 
+/* Wrapper for virtualized message list — contains the list + overlays */
+.messages-container-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  min-height: 0; /* Critical for flex child to allow shrinking */
+  overflow: hidden;
+  background: var(--bg-content);
+}
+
 .messages-container {
   flex: 1;
   overflow-y: auto;
@@ -80,16 +91,20 @@
   position: relative; /* anchor for sticky scroll-to-bottom button */
 }
 
+/* Virtualized list inner container — placeholder for total scrollable height */
+.virtual-list-inner {
+  /* Height is set dynamically by useVirtualizer */
+}
+
 /* Floating scroll-to-bottom arrow — appears when scrolled up 200px+ */
 .scroll-to-bottom-btn {
-  position: sticky;
+  position: absolute;
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto;
   width: 38px;
   height: 38px;
   border-radius: 50%;
@@ -597,6 +612,19 @@
   margin-bottom: 20px;
 }
 
+/* Typing indicator overlay — positioned at bottom of virtualized list */
+.typing-indicator-overlay {
+  display: flex;
+  gap: 6px;
+  padding: 12px 16px;
+  position: absolute;
+  bottom: 0;
+  left: 32px;
+  background: linear-gradient(to top, var(--bg-content) 60%, transparent);
+  padding-bottom: 16px;
+  padding-top: 24px;
+}
+
 .typing-dot {
   width: 8px;
   height: 8px;
@@ -1083,10 +1111,40 @@
   font-size: 18px;
 }
 
-/* Drag-and-drop active state — dashed border highlight on input area */
-.input-container.drag-active {
-  border-top: 2px dashed var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-card));
+/* Drag-and-drop active state — full chat-view overlay */
+.chat-view.drag-active {
+  position: relative;
+}
+
+.dropzone-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-primary) 85%, transparent);
+  border: 3px dashed var(--accent-primary);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.dropzone-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.dropzone-overlay-icon {
+  font-size: 48px;
+}
+
+.dropzone-overlay-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  letter-spacing: 0.5px;
 }
 
 /* Pending files preview — horizontal strip above the textarea */

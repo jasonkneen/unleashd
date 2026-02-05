@@ -115,8 +115,8 @@ const claudeProvider: Provider = {
 
   listModels(): ModelInfo[] {
     return [
-      { id: 'sonnet', displayName: 'Claude Sonnet', isDefault: true },
-      { id: 'opus', displayName: 'Claude Opus', isDefault: false },
+      { id: 'sonnet', displayName: 'Claude Sonnet', isDefault: false },
+      { id: 'opus', displayName: 'Claude Opus', isDefault: true },
       { id: 'haiku', displayName: 'Claude Haiku', isDefault: false },
     ];
   },

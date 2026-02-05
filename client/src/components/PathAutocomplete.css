@@ -140,6 +140,19 @@
   max-width: 60%;
 }
 
+/* Create folder icon (folder + plus) */
+.path-create-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  flex-shrink: 0;
+}
+
+.path-create-item .path-suggestion-name {
+  color: var(--green);
+}
+
 /* No results message */
 .path-no-results {
   padding: 12px;

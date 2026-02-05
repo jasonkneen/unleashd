@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { create } from 'zustand';
 
 /**
  * 16-token palette. The only source of truth for a theme.
@@ -112,8 +112,8 @@ export const PALETTES: Record<string, Palette16> = {
   },
 };
 
-export interface Settings {
-  colorPalette: string; // Key into PALETTES
+interface Settings {
+  colorPalette: string; // Key into PALETTES or customPalettes
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -136,90 +136,123 @@ export function applyPalette(palette: Palette16) {
   }
 }
 
-export function useSettings() {
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [loaded, setLoaded] = useState(false);
-  const [customPalettes, setCustomPalettes] = useState<Record<string, Palette16>>({});
+// =============================================================================
+// Settings Store — Single source of truth for server-persisted settings
+// =============================================================================
 
-  // Single merged palette map -- computed once, stable reference until customPalettes changes
-  const allPalettes = useMemo<Record<string, Palette16>>(
-    () => ({ ...PALETTES, ...customPalettes }),
-    [customPalettes]
-  );
+interface SettingsState {
+  // Core state
+  settings: Settings;
+  customPalettes: Record<string, Palette16>;
+  loaded: boolean;
 
-  // Load settings and custom palettes from server on mount
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/settings').then((res) => res.json()),
-      fetch('/api/custom-palettes').then((res) => res.json()),
-    ])
-      .then(([settingsData, palettesData]) => {
-        if (settingsData && settingsData.colorPalette) {
-          setSettings(settingsData);
-        }
-        if (palettesData && typeof palettesData === 'object') {
-          setCustomPalettes(palettesData as Record<string, Palette16>);
-        }
-        setLoaded(true);
-      })
-      .catch(() => {
-        setLoaded(true);
-      });
-  }, []);
+  // Derived — merged palette map (built-in + custom)
+  allPalettes: () => Record<string, Palette16>;
 
-  // Apply palette when settings or palette registry changes
-  useEffect(() => {
-    if (loaded) {
-      const palette = allPalettes[settings.colorPalette] || PALETTES.solarized;
-      applyPalette(palette);
+  // Actions
+  _init: () => Promise<void>;
+  setColorPalette: (paletteKey: string) => void;
+  addCustomPalette: (key: string, palette: Palette16) => void;
+  previewPalette: (paletteKey: string) => void;
+  restorePalette: () => void;
+}
+
+export const useSettingsStore = create<SettingsState>((set, get) => ({
+  // State
+  settings: DEFAULT_SETTINGS,
+  customPalettes: {},
+  loaded: false,
+
+  // Derived selector — returns merged palette map
+  allPalettes: () => ({ ...PALETTES, ...get().customPalettes }),
+
+  // Private init action — called once at app startup
+  _init: async () => {
+    try {
+      const [settingsData, palettesData] = await Promise.all([
+        fetch('/api/settings').then((res) => res.json()),
+        fetch('/api/custom-palettes').then((res) => res.json()),
+      ]);
+
+      // Merge custom palettes first
+      const customPalettes = (palettesData && typeof palettesData === 'object')
+        ? palettesData as Record<string, Palette16>
+        : {};
+
+      const mergedPalettes = { ...PALETTES, ...customPalettes };
+
+      // Apply saved palette or fallback to solarized
+      const savedKey = settingsData?.colorPalette;
+      const savedPalette = savedKey ? mergedPalettes[savedKey] : null;
+
+      if (savedPalette) {
+        // Apply saved palette
+        applyPalette(savedPalette);
+        set({ settings: settingsData, customPalettes, loaded: true });
+      } else {
+        // No valid saved palette — apply solarized and save it as default
+        applyPalette(PALETTES.solarized);
+        set({ customPalettes, loaded: true });
+
+        // Save default to server
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(DEFAULT_SETTINGS),
+        }).catch(console.error);
+      }
+    } catch (err) {
+      // Fetch failed — apply solarized as fallback
+      console.error('Failed to load settings:', err);
+      applyPalette(PALETTES.solarized);
+      set({ loaded: true });
     }
-  }, [settings.colorPalette, loaded, allPalettes]);
+  },
 
-  const updateSettings = useCallback((newSettings: Partial<Settings>) => {
-    setSettings((prev) => {
-      const updated = { ...prev, ...newSettings };
-      fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      }).catch(console.error);
-      return updated;
-    });
-  }, []);
+  // Set active palette and save to server
+  setColorPalette: (paletteKey) => {
+    const newSettings = { colorPalette: paletteKey };
+    set({ settings: newSettings });
 
-  const setColorPalette = useCallback(
-    (paletteKey: string) => {
-      updateSettings({ colorPalette: paletteKey });
-    },
-    [updateSettings]
-  );
+    // Apply palette immediately
+    const palette = get().allPalettes()[paletteKey] || PALETTES.solarized;
+    applyPalette(palette);
 
-  // Optimistically add a newly generated custom palette without re-fetching
-  const addCustomPalette = useCallback((key: string, palette: Palette16) => {
-    setCustomPalettes((prev) => ({ ...prev, [key]: palette }));
-  }, []);
+    // Save to server
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSettings),
+    }).catch(console.error);
+  },
 
-  // Preview a palette without saving -- uses allPalettes via closure
-  const previewPalette = useCallback((paletteKey: string) => {
-    const palette = allPalettes[paletteKey];
+  // Add a newly generated custom palette without re-fetching
+  addCustomPalette: (key, palette) => {
+    set((s) => ({
+      customPalettes: { ...s.customPalettes, [key]: palette },
+    }));
+  },
+
+  // Preview a palette without saving
+  previewPalette: (paletteKey) => {
+    const palette = get().allPalettes()[paletteKey];
     if (palette) {
       applyPalette(palette);
     }
-  }, [allPalettes]);
+  },
 
   // Restore current saved palette (after preview)
-  const restorePalette = useCallback(() => {
-    const palette = allPalettes[settings.colorPalette] || PALETTES.solarized;
+  restorePalette: () => {
+    const { settings, allPalettes } = get();
+    const palette = allPalettes()[settings.colorPalette] || PALETTES.solarized;
     applyPalette(palette);
-  }, [settings.colorPalette, allPalettes]);
+  },
+}));
 
-  return {
-    settings,
-    setColorPalette,
-    previewPalette,
-    restorePalette,
-    addCustomPalette,
-    allPalettes,
-    loaded,
-  };
+// =============================================================================
+// Initialization — call once at app startup to load settings and apply palette
+// =============================================================================
+
+export async function initSettings() {
+  await useSettingsStore.getState()._init();
 }

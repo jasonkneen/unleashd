@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ClientMessage, Conversation, ModelId, Provider, ServerMessage } from '@claude-web-view/shared';
+import type { ClientMessage, Conversation, ModelId, Provider, ServerMessage, QueuedMessage } from '@claude-web-view/shared';
 import { PENDING_CONVERSATIONS_KEY, DRAFT_KEY_PREFIX, useUIStore } from './uiStore';
 
 // =============================================================================
@@ -58,32 +58,8 @@ function scheduleChunkFlush(): void {
   }
 }
 
-// =============================================================================
-// Message Queue Types
-// =============================================================================
-
-/**
- * A message waiting in the queue to be sent.
- * ID is generated client-side for UI tracking and cancel operations.
- *
- * Status:
- * - 'pending': Message is waiting in queue
- * - 'sending': Message is currently being sent to server
- *
- * Loop entries (isLoop=true) are synthetic display-only entries created by
- * startLoop() to show the "Nx" countdown. The server drives actual loop
- * execution; these entries just give the UI visibility into pending iterations.
- * See docs/ralph_loop_design.md §Queue Integration.
- */
-export interface QueuedMessage {
-  id: string;
-  content: string;
-  queuedAt: Date;
-  status: 'pending' | 'sending';
-  isLoop?: boolean;
-  loopIterationsTotal?: number;
-  loopIterationsRemaining?: number;
-}
+// Re-export QueuedMessage from shared types (server-owned, client mirrors)
+export type { QueuedMessage } from '@claude-web-view/shared';
 
 // =============================================================================
 // Pending Conversations Persistence
@@ -132,7 +108,6 @@ interface ConversationStore {
   activeConversationId: string | null;
   wsStatus: 'connecting' | 'connected' | 'disconnected';
   defaultCwd: string;
-  queues: Map<string, QueuedMessage[]>;
 
   // Actions
   setActiveConversationId: (id: string | null) => void;
@@ -143,6 +118,8 @@ interface ConversationStore {
   interruptAndSend: (conversationId: string, content: string) => void;
   startLoop: (conversationId: string, prompt: string, iterations: '5' | '10' | '20', clearContext: boolean) => void;
   cancelLoop: (conversationId: string) => void;
+  // Queue operations — thin wrappers that send WS commands to the server.
+  // Server owns the queue; client mirrors it via queue_updated broadcasts.
   queueMessage: (conversationId: string, content: string) => void;
   cancelQueuedMessage: (conversationId: string, messageId: string) => void;
   clearQueue: (conversationId: string) => void;
@@ -150,7 +127,6 @@ interface ConversationStore {
 
   // Internal — called by WebSocket bridge, not by components directly
   _handleMessage: (data: ServerMessage) => void;
-  _processQueue: (conversationId: string) => void;
   _setSend: (send: (msg: ClientMessage) => void) => void;
   _setWsStatus: (status: 'connecting' | 'connected' | 'disconnected') => void;
 
@@ -174,7 +150,6 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   activeConversationId: null,
   wsStatus: 'connecting',
   defaultCwd: '',
-  queues: new Map(),
   _send: () => {},
 
   // ---------------------------------------------------------------------------
@@ -199,6 +174,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       model,
       loopConfig: null,
       subAgents: [],
+      queue: [],
     };
 
     set((state) => {
@@ -220,7 +196,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   /**
    * Send a chat message to a conversation.
-   * Always routes through the queue for consistent ordering.
+   * Routes through the server-side queue for consistent ordering.
    */
   sendMessage: (conversationId, content) => {
     const conv = get().conversations.get(conversationId);
@@ -228,7 +204,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       console.warn(`[Send] Cannot send message: conversation ${conversationId} not found`);
       return;
     }
-    get().queueMessage(conversationId, content);
+    get()._send({ type: 'queue_message', conversationId, content });
   },
 
   /**
@@ -254,41 +230,24 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     const conv = get().conversations.get(conversationId);
     if (!conv) return;
 
+    const { _send } = get();
+
     // Kill running process
-    get()._send({ type: 'stop_conversation', conversationId });
+    _send({ type: 'stop_conversation', conversationId });
 
     // Clear any pending queue entries — the interrupt supersedes them
-    get().clearQueue(conversationId);
+    _send({ type: 'clear_queue', conversationId });
 
-    // Queue the wrapped interrupt message. It will auto-process once
-    // the server broadcasts ready + not running after the kill completes.
+    // Queue the wrapped interrupt message. Server will auto-process once
+    // the process exits and the conversation becomes ready again.
     const wrappedContent = `We interrupted, please continue from the last input but with the adjustment: "${content}"`;
-    get().queueMessage(conversationId, wrappedContent);
+    _send({ type: 'queue_message', conversationId, content: wrappedContent });
   },
 
-  // Loop execution is server-driven. The client creates a synthetic "loop"
-  // queue entry for display only (the "Nx" counter). The server sends
-  // loop_iteration_end events to decrement the counter. The entry is cleared
-  // on loop_complete. Normal queue processing is paused during loops
-  // (guarded in _processQueue by conv.loopConfig?.isLooping).
+  // Loop execution is server-driven. The server creates a synthetic "loop"
+  // queue entry for display (the "Nx" counter) and broadcasts it via queue_updated.
+  // The server sends loop_iteration_end events to decrement the counter.
   startLoop: (conversationId, prompt, iterations, clearContext) => {
-    const total = Number.parseInt(iterations, 10);
-
-    // Create synthetic loop queue entry for UI display
-    set((state) => {
-      const queues = new Map(state.queues);
-      queues.set(conversationId, [{
-        id: crypto.randomUUID(),
-        content: prompt,
-        queuedAt: new Date(),
-        status: 'sending',
-        isLoop: true,
-        loopIterationsTotal: total,
-        loopIterationsRemaining: total,
-      }]);
-      return { queues };
-    });
-
     get()._send({ type: 'start_loop', conversationId, prompt, iterations, clearContext });
   },
 
@@ -297,82 +256,24 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   },
 
   // ---------------------------------------------------------------------------
-  // Queue Operations
+  // Queue Operations — thin WS senders. Server owns the queue.
+  // Client mirrors queue state via conversation.queue (set by queue_updated).
   // ---------------------------------------------------------------------------
 
-  /**
-   * Queue a new message for a conversation.
-   * If the conversation is ready and not busy, it will be processed immediately.
-   */
   queueMessage: (conversationId, content) => {
-    const conv = get().conversations.get(conversationId);
-    if (!conv) {
-      console.warn(`[Queue] Cannot queue message: conversation ${conversationId} not found`);
-      return;
-    }
-
-    const newMessage: QueuedMessage = {
-      id: crypto.randomUUID(),
-      content,
-      queuedAt: new Date(),
-      status: 'pending',
-    };
-
-    console.log(`[Queue] Queueing message for ${conversationId.substring(0, 8)}: "${content.substring(0, 30)}"`);
-
-    set((state) => {
-      const queues = new Map(state.queues);
-      const queue = [...(queues.get(conversationId) || []), newMessage];
-      queues.set(conversationId, queue);
-      return { queues };
-    });
-
-    // If conversation is ready and not running, process immediately
-    if (conv.isReady && !conv.isRunning && !conv.loopConfig?.isLooping) {
-      setTimeout(() => get()._processQueue(conversationId), 0);
-    }
+    get()._send({ type: 'queue_message', conversationId, content });
   },
 
-  /**
-   * Cancel a queued message by its ID.
-   * Cannot cancel messages that are currently being sent.
-   */
   cancelQueuedMessage: (conversationId, messageId) => {
-    set((state) => {
-      const queues = new Map(state.queues);
-      const queue = (queues.get(conversationId) || []).filter((m) => {
-        if (m.id === messageId && m.status === 'pending') {
-          console.log(`[Queue] Cancelled message ${messageId.substring(0, 8)} for ${conversationId.substring(0, 8)}`);
-          return false;
-        }
-        return true;
-      });
-      queues.set(conversationId, queue);
-      return { queues };
-    });
+    get()._send({ type: 'cancel_queued_message', conversationId, messageId });
   },
 
-  /**
-   * Clear all queued messages for a conversation.
-   * Only clears pending messages; sending messages will complete.
-   */
   clearQueue: (conversationId) => {
-    set((state) => {
-      const queues = new Map(state.queues);
-      const queue = queues.get(conversationId) || [];
-      const sendingMessages = queue.filter((m) => m.status === 'sending');
-      console.log(`[Queue] Clearing queue for ${conversationId.substring(0, 8)}: removed ${queue.length - sendingMessages.length} messages`);
-      queues.set(conversationId, sendingMessages);
-      return { queues };
-    });
+    get()._send({ type: 'clear_queue', conversationId });
   },
 
-  /**
-   * Get the current queue for a conversation.
-   * Returns an empty array if no queue exists.
-   */
   getQueue: (conversationId) => {
-    return get().queues.get(conversationId) || [];
+    return get().conversations.get(conversationId)?.queue ?? [];
   },
 
   // ---------------------------------------------------------------------------
@@ -382,56 +283,6 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   _setSend: (send) => set({ _send: send }),
 
   _setWsStatus: (status) => set({ wsStatus: status }),
-
-  /**
-   * Process the next queued message for a conversation.
-   * Uses get() for fresh state — no stale closures.
-   */
-  _processQueue: (conversationId) => {
-    const { queues, conversations, _send } = get();
-    const queue = queues.get(conversationId) || [];
-    const conv = conversations.get(conversationId);
-
-    // Guard: only process if ready and not running
-    if (!conv || !conv.isReady || conv.isRunning) {
-      console.log(`[Queue] Cannot process queue for ${conversationId.substring(0, 8)}: not ready or running`);
-      return;
-    }
-
-    // Guard: don't process queue during loop mode
-    if (conv.loopConfig?.isLooping) {
-      console.log(`[Queue] Queue paused for ${conversationId.substring(0, 8)}: loop mode active`);
-      return;
-    }
-
-    if (queue.length === 0) {
-      return;
-    }
-
-    const nextMessage = queue[0];
-
-    // Don't re-send if already sending
-    if (nextMessage.status === 'sending') {
-      console.log(`[Queue] Message already sending for ${conversationId.substring(0, 8)}`);
-      return;
-    }
-
-    console.log(`[Queue] Processing next message for ${conversationId.substring(0, 8)}: "${nextMessage.content.substring(0, 30)}"`);
-
-    // Mark as sending in queue
-    set((state) => {
-      const queues = new Map(state.queues);
-      const q = [...(queues.get(conversationId) || [])];
-      if (q.length > 0) {
-        q[0] = { ...q[0], status: 'sending' };
-        queues.set(conversationId, q);
-      }
-      return { queues };
-    });
-
-    // Send via WebSocket
-    _send({ type: 'send_message', conversationId, content: nextMessage.content });
-  },
 
   /**
    * Handle incoming server messages.
@@ -468,6 +319,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
               model: pc.model,
               loopConfig: null,
               subAgents: [],
+              queue: [],
             };
             convMap.set(pc.id, stub);
             // Re-send creation request after state is set (deferred so _send is available)
@@ -478,27 +330,8 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
         }
 
         set({ defaultCwd: data.defaultCwd, conversations: convMap });
-
-        // Recreate synthetic loop queue entries for any conversations that are actively looping.
-        // This handles WebSocket reconnect during an active loop — the server is still running
-        // the loop, but the client lost its synthetic queue entry. Rebuild from loopConfig.
-        for (const conv of convMap.values()) {
-          if (conv.loopConfig?.isLooping) {
-            set((state) => {
-              const queues = new Map(state.queues);
-              queues.set(conv.id, [{
-                id: crypto.randomUUID(),
-                content: conv.loopConfig?.prompt ?? '',
-                queuedAt: new Date(),
-                status: 'sending',
-                isLoop: true,
-                loopIterationsTotal: conv.loopConfig?.totalIterations ?? 0,
-                loopIterationsRemaining: conv.loopConfig?.loopsRemaining ?? 0,
-              }]);
-              return { queues };
-            });
-          }
-        }
+        // Queue state is included in each conversation's `queue` field from the init payload.
+        // No client-side reconstruction needed — the server is the source of truth.
         break;
       }
 
@@ -519,21 +352,19 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
         set((state) => {
           const conversations = new Map(state.conversations);
           conversations.delete(data.conversationId);
-          const queues = new Map(state.queues);
-          queues.delete(data.conversationId);
-          // Use get() for fresh activeConversationId — no ref needed
           const activeConversationId = state.activeConversationId === data.conversationId
             ? null
             : state.activeConversationId;
-          return { conversations, queues, activeConversationId };
+          return { conversations, activeConversationId };
         });
         // Clean up localStorage: pending stub + draft
         removePendingConversation(data.conversationId);
         localStorage.removeItem(`${DRAFT_KEY_PREFIX}${data.conversationId}`);
         break;
 
-      case 'message':
+      case 'message': {
         console.log(`[WS] message event: role=${data.role}, content="${data.content.substring(0, 50)}"`);
+        let newMessageIndex: number | null = null;
         set((state) => {
           const conversations = new Map(state.conversations);
           const conv = conversations.get(data.conversationId);
@@ -544,7 +375,8 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
               console.log('[WS] Skipping duplicate assistant message');
               return state;
             }
-            console.log(`[WS] Adding message #${conv.messages.length + 1} (role=${data.role})`);
+            newMessageIndex = conv.messages.length;
+            console.log(`[WS] Adding message #${newMessageIndex + 1} (role=${data.role})`);
             conversations.set(data.conversationId, {
               ...conv,
               messages: [
@@ -559,7 +391,17 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
           }
           return { conversations };
         });
+
+        // NEW Badge Fix: If this message is for the active conversation, mark it seen immediately.
+        // User is viewing this thread — no badge should appear for messages they're watching stream in.
+        if (newMessageIndex !== null) {
+          const activeId = useUIStore.getState().activeConversationId;
+          if (activeId === data.conversationId) {
+            useUIStore.getState().markMessagesSeen(data.conversationId, newMessageIndex);
+          }
+        }
         break;
+      }
 
       case 'chunk':
         // Buffer chunks and flush once per animation frame (~60Hz).
@@ -580,10 +422,6 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
           }
           return { conversations };
         });
-        // When status changes to not running, try processing queue
-        if (!data.isRunning) {
-          setTimeout(() => get()._processQueue(data.conversationId), 100);
-        }
         break;
 
       case 'error':
@@ -599,34 +437,19 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
           }
           return { conversations };
         });
-        // When ready, try processing any queued messages
-        if (data.isReady) {
-          setTimeout(() => get()._processQueue(data.conversationId), 100);
-        }
         break;
 
       case 'message_complete':
         // Flush any buffered chunks synchronously — message_complete can arrive
         // in the same event loop tick as the last chunk, before rAF fires.
         flushChunkBuffer();
-        // Remove the first message from queue (it was the one that was sending)
-        console.log(`[Queue] message_complete for ${data.conversationId.substring(0, 8)}`);
-        set((state) => {
-          const queues = new Map(state.queues);
-          const queue = queues.get(data.conversationId) || [];
-          if (queue.length > 0 && queue[0].status === 'sending') {
-            queues.set(data.conversationId, queue.slice(1));
-          }
-          return { queues };
-        });
-        // Process next message after a brief delay to ensure state is updated
-        setTimeout(() => get()._processQueue(data.conversationId), 100);
+        // Queue dequeue + next-message processing is handled server-side.
+        // Client will receive queue_updated broadcast.
         break;
 
       case 'loop_iteration_start':
       case 'loop_iteration_end':
         set((state) => {
-          // Update loopConfig on the conversation
           const conversations = new Map(state.conversations);
           const conv = conversations.get(data.conversationId);
           if (conv) {
@@ -646,18 +469,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
               },
             });
           }
-
-          // Decrement the synthetic loop queue counter on iteration_end
-          if ('loopsRemaining' in data) {
-            const queues = new Map(state.queues);
-            const queue = queues.get(data.conversationId) || [];
-            const updatedQueue = queue.map((m) =>
-              m.isLoop ? { ...m, loopIterationsRemaining: data.loopsRemaining } : m
-            );
-            queues.set(data.conversationId, updatedQueue);
-            return { conversations, queues };
-          }
-
+          // Loop queue counter is updated server-side via queue_updated broadcast.
           return { conversations };
         });
         break;
@@ -669,15 +481,9 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
           if (conv) {
             conversations.set(data.conversationId, { ...conv, loopConfig: null });
           }
-
-          // Clear the synthetic loop queue entry
-          const queues = new Map(state.queues);
-          queues.set(data.conversationId, []);
-
-          return { conversations, queues };
+          // Loop queue entry is cleared server-side via queue_updated broadcast.
+          return { conversations };
         });
-        // Resume normal queue processing after loop completes
-        setTimeout(() => get()._processQueue(data.conversationId), 100);
         break;
 
       // File polling: server detected external changes to JSONL files
@@ -706,6 +512,18 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       }
 
       // Sub-agent events
+      // Server-owned queue update — mirror the queue state onto the conversation
+      case 'queue_updated':
+        set((state) => {
+          const conversations = new Map(state.conversations);
+          const conv = conversations.get(data.conversationId);
+          if (conv) {
+            conversations.set(data.conversationId, { ...conv, queue: data.queue });
+          }
+          return { conversations };
+        });
+        break;
+
       case 'subagent_start':
         console.log(`[WS] subagent_start: ${data.subAgent.id.substring(0, 8)} - "${data.subAgent.description.substring(0, 30)}"`);
         set((state) => {
