@@ -38,6 +38,12 @@ import {
   isCodexResponseMessage,
 } from '@claude-web-view/shared';
 
+/** Canonicalize a directory path: resolve `.`/`..` and strip trailing slashes
+ *  so "/foo/bar/" and "/foo/bar" group as the same project. */
+function normalizeDirPath(dir: string): string {
+  return path.normalize(dir).replace(/\/+$/, '');
+}
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -253,7 +259,7 @@ export async function parseJsonlFile(filePath: string): Promise<JsonlSession> {
   return {
     sessionId,
     filePath,
-    workingDirectory,
+    workingDirectory: normalizeDirPath(workingDirectory),
     model,
     createdAt: createdAt ?? new Date(),
     modifiedAt: modifiedAt ?? new Date(),
@@ -380,7 +386,7 @@ async function parseCodexJsonlFile(filePath: string): Promise<CodexSession> {
   return {
     sessionId,
     filePath,
-    workingDirectory,
+    workingDirectory: normalizeDirPath(workingDirectory),
     model,
     parentSessionId,
     createdAt: createdAt ?? new Date(),
@@ -713,7 +719,7 @@ async function parseOpenCodeSessionDirectory(
   return {
     sessionId,
     filePath: sessionDirPath,
-    workingDirectory: workingDirectory || process.cwd(),
+    workingDirectory: normalizeDirPath(workingDirectory || process.cwd()),
     model,
     createdAt: createdAt ?? new Date(),
     modifiedAt: modifiedAt ?? new Date(),
