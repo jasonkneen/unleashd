@@ -16,8 +16,9 @@
  */
 
 import type { ModelInfo } from '@claude-web-view/shared';
+import { buildCommand } from '@nbardy/agent-cli';
 import { ProviderParseError, type Provider, type ProviderEvent, type SpawnConfig } from './index';
-import { isOpenCodeModelId } from './model-validation';
+
 
 type JsonObject = Record<string, unknown>;
 
@@ -116,26 +117,6 @@ function buildToolDisplayName(toolName: string, input: JsonObject): string {
   return toolName;
 }
 
-/**
- * OpenCode session ids currently look like "ses_...".
- * If we don't have one yet, skip --session and let OpenCode create a new session.
- */
-function isOpenCodeSessionId(value: string): boolean {
-  return value.startsWith('ses_');
-}
-
-/**
- * Backward compatibility for older sessions/configs that stored OpenCode models
- * as `openai/<model>`. Current OpenCode installs generally expose these as
- * `opencode/<model>`.
- */
-function normalizeOpenCodeModelId(modelId: string): string {
-  if (modelId.startsWith('openai/')) {
-    return `opencode/${modelId.slice('openai/'.length)}`;
-  }
-  return modelId;
-}
-
 const opencodeProvider: Provider = {
   name: 'opencode',
 
@@ -149,28 +130,22 @@ const opencodeProvider: Provider = {
     ];
   },
 
-  modelToParams(modelId?: string): string[] {
-    if (!modelId) return [];
-    if (!isOpenCodeModelId(modelId)) {
-      throw new Error(
-        `Invalid OpenCode model identifier: ${modelId}. Expected "provider/model" (e.g. opencode/big-pickle).`
-      );
-    }
-    // OpenCode accepts either --model or -m.
-    return ['-m', normalizeOpenCodeModelId(modelId)];
-  },
-
   getSpawnConfig(sessionId: string, workingDir: string, resume = false, modelId?: string): SpawnConfig {
-    const args = ['run', '--format', 'json', ...this.modelToParams(modelId)];
-
-    // Resume only when we have a real OpenCode session id captured from events.
-    if (resume && isOpenCodeSessionId(sessionId)) {
-      args.push('--session', sessionId, '--continue');
-    }
+    // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
+    // Agent-cli handles: run subcommand, model normalization (openai/ → opencode/),
+    // ses_ session guard, resume flags.
+    // Project-specific: --format json (streaming output).
+    // Prompt text is NOT passed here — delivered via stdin (formatInput).
+    const spec = buildCommand('opencode', {
+      model: modelId,
+      sessionId,
+      resume,
+      extraArgs: ['--format', 'json'],
+    });
 
     return {
-      command: 'opencode',
-      args,
+      command: spec.argv[0],
+      args: spec.argv.slice(1),
       options: {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -184,10 +159,6 @@ const opencodeProvider: Provider = {
       args: ['run', prompt],
       options: {},
     };
-  },
-
-  formatInput(content: string): string {
-    return `${content}\n`;
   },
 
   parseOutput(json: unknown): ProviderEvent {

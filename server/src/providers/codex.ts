@@ -37,6 +37,7 @@
  */
 
 import type { ModelInfo } from '@claude-web-view/shared';
+import { buildCommand } from '@nbardy/agent-cli';
 import { ProviderParseError, type Provider, type SpawnConfig, type ProviderEvent } from './index';
 
 // =============================================================================
@@ -247,15 +248,6 @@ function classifyCommand(rawCommand: string): ClassifiedCommand {
 // Provider Implementation
 // =============================================================================
 
-// Known effort levels for composite model ID decomposition.
-// Composite format: "{model}-{effort}" e.g. "gpt-5.3-codex-high"
-// Matched as suffixes to avoid ambiguity with model names containing hyphens.
-const CODEX_EFFORT_LEVELS = ['medium', 'high', 'xhigh'] as const;
-
-// Models that are standalone (no effort decomposition). Pass directly via `-m`.
-// e.g. "gpt-5.3-codex-spark" → `-m gpt-5.3-codex-spark` (no effort config).
-const CODEX_STANDALONE_MODELS = new Set(['gpt-5.3-codex-spark']);
-
 const codexProvider: Provider = {
   name: 'codex',
 
@@ -271,60 +263,30 @@ const codexProvider: Provider = {
     ];
   },
 
-  modelToParams(modelId?: string): string[] {
-    if (!modelId) return [];
-
-    // Standalone models (e.g. spark) — pass directly, no effort decomposition.
-    if (CODEX_STANDALONE_MODELS.has(modelId)) {
-      return ['-m', modelId];
-    }
-
-    // Decompose composite ID: "gpt-5.3-codex-high" → model="gpt-5.3-codex", effort="high"
-    // Split on the LAST segment matching a known effort level.
-    for (const effort of CODEX_EFFORT_LEVELS) {
-      if (modelId.endsWith(`-${effort}`)) {
-        const model = modelId.slice(0, -(effort.length + 1));
-        return ['-m', model, '-c', `reasoning.effort=${effort}`];
-      }
-    }
-
-    throw new Error(`Invalid Codex model identifier: ${modelId}. Expected format: "model-effort" (e.g. gpt-5.3-codex-high)`);
-  },
-
   getSpawnConfig(sessionId: string, workingDir: string, resume = false, modelId?: string): SpawnConfig {
-    // Codex exec reads prompt from stdin when `-` is passed as the prompt argument.
-    // First message: `codex exec --json -C <workingDir> -`
-    // Subsequent: `codex exec resume <sessionId> --json -`
+    // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
+    // Agent-cli handles: exec subcommand, resume <id> restructuring, -C suppression
+    // on resume, model decomposition (composite IDs), bypass flags.
     //
-    // The `-` tells Codex to read the prompt from stdin (matching the server's
-    // pattern of writing to stdin then closing it).
-    const args: string[] = [];
-
-    if (resume) {
-      args.push('exec', 'resume', sessionId, '--json');
-    } else {
-      args.push('exec', '--json', '-C', workingDir);
-    }
-
-    // Model/effort selection — splice in CLI flags for selected model
-    args.push(...this.modelToParams(modelId));
-
-    // MAX PERMISSIONS MODE (enabled by default):
-    // Bypass all approval prompts and sandbox restrictions.
-    // Set CODEX_MAX_PERMISSIONS=false to disable.
-    // WARNING: Only use in trusted/sandboxed environments!
+    // Project-specific: --json (streaming output) and `-` (read prompt from stdin).
+    // Prompt text is NOT passed here — delivered via stdin (formatInput).
     const maxPermissions = process.env.CODEX_MAX_PERMISSIONS !== 'false';
     if (maxPermissions) {
-      args.push('--dangerously-bypass-approvals-and-sandbox');
       console.log('[codex] MAX PERMISSIONS MODE enabled');
     }
 
-    // `-` as positional prompt arg tells Codex to read from stdin
-    args.push('-');
+    const spec = buildCommand('codex', {
+      model: modelId,
+      sessionId,
+      resume,
+      cwd: workingDir,
+      bypassPermissions: maxPermissions,
+      extraArgs: ['--json', '-'],
+    });
 
     return {
-      command: 'codex',
-      args,
+      command: spec.argv[0],
+      args: spec.argv.slice(1),
       options: {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -340,10 +302,6 @@ const codexProvider: Provider = {
       args: ['exec', '--dangerously-bypass-approvals-and-sandbox', prompt],
       options: {},
     };
-  },
-
-  formatInput(content: string): string {
-    return `${content}\n`;
   },
 
   /**

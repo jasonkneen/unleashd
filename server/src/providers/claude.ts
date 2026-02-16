@@ -20,6 +20,7 @@
  */
 
 import type { ModelInfo } from '@claude-web-view/shared';
+import { buildCommand } from '@nbardy/agent-cli';
 import { ProviderParseError, type Provider, type SpawnConfig, type ProviderEvent } from './index';
 
 // =============================================================================
@@ -140,57 +141,44 @@ const claudeProvider: Provider = {
     ];
   },
 
-  modelToParams(modelId?: string): string[] {
-    if (!modelId) return [];
-    // Claude CLI accepts: claude --model <alias>
-    return ['--model', modelId];
-  },
-
   getSpawnConfig(sessionId: string, workingDir: string, resume = false, modelId?: string): SpawnConfig {
-    // Simple and reliable: one process per turn
-    // -p (--print): Process one message then exit
-    // --resume: Continue existing session for context
-    // --output-format stream-json: Real-time streaming output
-    // --include-partial-messages: Get streaming chunks as they arrive
-    const args = [
+    // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
+    // Session management, model flags, and bypass are handled by agent-cli.
+    // Project-specific streaming flags are passed via extraArgs.
+    const maxPermissions = process.env.CLAUDE_MAX_PERMISSIONS !== 'false';
+    if (maxPermissions) {
+      console.log('[claude] MAX PERMISSIONS MODE enabled');
+    }
+
+    // Project-specific flags: streaming config + permissions mode details.
+    // -p (print mode): process one message then exit.
+    // Note: prompt text is NOT passed here — delivered via stdin (formatInput).
+    const extraArgs = [
       '-p',
       '--verbose',
       '--output-format', 'stream-json',
       '--include-partial-messages',
-      ...this.modelToParams(modelId),
     ];
-
-    // MAX PERMISSIONS MODE (enabled by default):
-    // Bypass all permission prompts. Set CLAUDE_MAX_PERMISSIONS=false to disable.
-    // This grants Claude CLI full access to:
-    //   - File operations (Read, Edit, Write)
-    //   - Bash command execution
-    //   - All other tools without confirmation
-    // WARNING: Only use in trusted/sandboxed environments!
-    const maxPermissions = process.env.CLAUDE_MAX_PERMISSIONS !== 'false';
     if (maxPermissions) {
-      args.push(
-        '--dangerously-skip-permissions',
+      extraArgs.push(
         '--permission-mode', 'bypassPermissions',
         '--tools', 'default',
         '--add-dir', workingDir
       );
-      console.log('[claude] MAX PERMISSIONS MODE enabled');
     }
 
-    // First turn: create session. Subsequent turns: resume it.
-    if (resume) {
-      args.push('--resume', sessionId);
-    } else {
-      args.push('--session-id', sessionId);
-    }
+    const spec = buildCommand('claude', {
+      model: modelId,
+      sessionId,
+      resume,
+      bypassPermissions: maxPermissions,
+      extraArgs,
+    });
 
     return {
-      command: 'claude',
-      args,
-      options: {
-        cwd: workingDir,
-      },
+      command: spec.argv[0],
+      args: spec.argv.slice(1),
+      options: { cwd: workingDir },
     };
   },
 
@@ -201,10 +189,6 @@ const claudeProvider: Provider = {
       args: ['-p', prompt, '--output-format', 'text'],
       options: {},
     };
-  },
-
-  formatInput(content: string): string {
-    return `${content}\n`;
   },
 
   /**

@@ -6,9 +6,10 @@
  * Two usage modes:
  *
  * 1. CONVERSATION MODE (stateful, streaming)
- *    - getSpawnConfig() → spawn process → write stdin → close stdin → parse streaming stdout
+ *    - getSpawnConfig() → spawn process → write content + '\n' to stdin → close stdin → parse streaming stdout
  *    - parseOutput() normalizes each JSON line into a ProviderEvent
  *    - Session continuity via sessionId + resume flag
+ *    - Command building delegated to @nbardy/agent-cli (shared with oompa_loompas)
  *    - Used by: Conversation.spawnForMessage() in server.ts
  *
  * 2. SINGLE-SHOT MODE (stateless, collect-all)
@@ -99,7 +100,6 @@ export type ProviderEvent =
  * - parseOutput() MUST return a ProviderEvent or throw ProviderParseError. Never null.
  * - getSpawnConfig() returns the spawn config for CONVERSATION mode (streaming JSON, per-message).
  * - getSingleShotConfig() returns the spawn config for SINGLE-SHOT mode (one prompt, text output).
- * - formatInput() formats a user message string for the CLI's stdin.
  *
  * ADDING A NEW PROVIDER:
  * 1. Create server/src/providers/{name}.ts implementing this interface
@@ -121,38 +121,21 @@ export interface Provider {
   listModels(): ModelInfo[];
 
   /**
-   * Convert a model identifier into CLI args to splice into getSpawnConfig().
-   * Returns an array of strings to spread into the args array.
-   *
-   * Examples:
-   *   Claude 'opus'        → ['--model', 'opus']
-   *   Codex 'gpt-5.3-codex-high' → ['-m', 'gpt-5.3-codex', '-c', 'reasoning.effort=high']
-   *
-   * If modelId is undefined, returns [] (CLI uses its built-in default).
-   */
-  modelToParams(modelId?: string): string[];
-
-  /**
    * CONVERSATION MODE: Get spawn config for a multi-turn session.
    *
    * The server spawns one process per message. Each process:
-   * 1. Receives user input on stdin (formatted by formatInput())
+   * 1. Receives user input on stdin (content + '\n', then close)
    * 2. Emits streaming JSON on stdout (parsed by parseOutput())
    * 3. Exits when the response is complete
    *
+   * Command building is delegated to @nbardy/agent-cli (shared with oompa_loompas).
+   * agent-cli handles: session create/resume, model decomposition, bypass flags.
+   * Project-specific flags (streaming format, permissions mode) are passed via extraArgs.
+   *
    * @param sessionId - Unique session ID for conversation continuity.
-   *   Claude uses this for --session-id/--resume. Codex ignores it (stateless).
-   *   See: Conversation.claudeSessionId in server.ts (should be renamed to sessionId).
-   *
    * @param workingDir - Working directory for the CLI process.
-   *   Passed as cwd in spawn options and/or as a CLI flag.
-   *
    * @param resume - True if this is NOT the first message in the session.
-   *   Claude: first turn uses --session-id, subsequent use --resume.
-   *   Codex: ignores this (each message is independent).
-   *
    * @param modelId - Provider-specific model identifier from listModels().
-   *   Decomposed into CLI flags by modelToParams().
    */
   getSpawnConfig(sessionId: string, workingDir: string, resume?: boolean, modelId?: string): SpawnConfig;
 
@@ -173,17 +156,6 @@ export interface Provider {
    * Codex: `codex -q "<prompt>"` (quiet mode, text output)
    */
   getSingleShotConfig(prompt: string): SpawnConfig;
-
-  /**
-   * Format user input for this provider's CLI stdin (conversation mode only).
-   *
-   * The server writes this to the spawned process's stdin, then closes stdin
-   * to signal that input is complete.
-   *
-   * @param content - Raw user message text
-   * @returns Formatted string to write to stdin (typically content + '\n')
-   */
-  formatInput(content: string): string;
 
   /**
    * Parse one line of CLI JSON output into a unified ProviderEvent (conversation mode only).
