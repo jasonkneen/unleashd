@@ -1466,6 +1466,7 @@ function normalizeStatus(rawStatus: unknown): OompaWorkerStatus {
     status === 'rejected' ||
     status === 'no-changes' ||
     status === 'executor-done' ||
+    status === 'claimed' ||
     status === 'starting'
   ) {
     return status === 'starting' ? 'starting' : 'running';

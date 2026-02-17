@@ -14,7 +14,7 @@
 export interface OompaCycle {
   'worker-id': string;
   cycle: number;
-  outcome: 'merged' | 'rejected' | 'error' | 'done' | 'executor-done' | 'no-changes' | 'working';
+  outcome: 'merged' | 'rejected' | 'error' | 'done' | 'executor-done' | 'no-changes' | 'working' | 'claimed';
   timestamp: string;
   'duration-ms': number;
   /**
