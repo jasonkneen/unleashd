@@ -1033,11 +1033,12 @@ export function inferProviderFromModel(model: string): Provider {
  * create real CLI sessions but should never appear as user-visible conversations.
  * The tag is stripped from the message content.
  */
-const HIDE_TEST_RE = /^\[_HIDE_TEST_\]\s*/;
+const HIDE_TEST_RE = /^\s*(?:"|')?\s*\[_HIDE_TEST_\]\s*/;
 
 /**
  * Oompa worker tag regex. If the first user message starts with this tag,
  * the conversation is classified as a worker (hidden from main UI).
+ * Accepts optional leading whitespace/quote from wrapped prompt payloads.
  *
  * Tag format:
  *   [oompa]                       → isWorker=true
@@ -1046,7 +1047,7 @@ const HIDE_TEST_RE = /^\[_HIDE_TEST_\]\s*/;
  *
  * The tag is stripped from the message content for display.
  */
-const OOMPA_RE = /^\[oompa(?::([^:\]]+)(?::([^\]]+))?)?\]/;
+const OOMPA_RE = /^\s*(?:"|')?\s*\[oompa(?::([^:\]]+)(?::([^\]]+))?)?\]/;
 
 /**
  * Infer worker role from the first user message content (after oompa tag stripped).
@@ -1126,7 +1127,6 @@ export function jsonlSessionToConversation(session: JsonlSession): Conversation 
     confirmed: true,
     createdAt: session.createdAt,
     workingDirectory: session.workingDirectory,
-    loopConfig: null,
     provider: inferProviderFromModel(session.model),
     subAgents: extractSubAgentsFromEntries(session.entries),
     queue: [],
@@ -1152,7 +1152,6 @@ function codexSessionToConversation(session: CodexSession): Conversation | null 
     confirmed: true,
     createdAt: session.createdAt,
     workingDirectory: session.workingDirectory,
-    loopConfig: null,
     provider: 'codex',
     subAgents: [],
     queue: [],
@@ -1178,7 +1177,6 @@ function openCodeSessionToConversation(session: OpenCodeSession): Conversation |
     confirmed: true,
     createdAt: session.createdAt,
     workingDirectory: session.workingDirectory,
-    loopConfig: null,
     provider: 'opencode',
     subAgents: [],
     queue: [],

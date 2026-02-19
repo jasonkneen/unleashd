@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Conversation, Message } from '@claude-web-view/shared';
+import type { Conversation, Message, OompaRuntimeWorker, SwarmRunWorker, SwarmRunSummary, SwarmRunLog, SwarmReviewLog, SwarmRun } from '@claude-web-view/shared';
 import { useConversationStore } from '../stores/conversationStore';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectRoot, getProjectName } from '../utils/swarmUtils';
 import { formatTimeAgo, getLastMessageTime } from '../utils/time';
 import { VirtualizedMessageList } from './VirtualizedMessageList';
 import type { MessageGroup } from './VirtualizedMessageList';
+import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
+import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import './SwarmDetail.css';
 
 // =============================================================================
@@ -83,92 +85,9 @@ interface ExecGroup {
 }
 
 // =============================================================================
-// Types for swarm run persistence data (from oompa agentnet.runs)
-// =============================================================================
-
-interface SwarmRunWorker {
-  id: string;
-  harness: string;
-  model: string;
-  status: string;
-  completed: number;
-  iterations: number;
-  merges: number;
-  rejections: number;
-  errors: number;
-  'review-rounds-total': number;
-}
-
-interface SwarmRunSummary {
-  'swarm-id': string;
-  'finished-at': string;
-  'total-workers': number;
-  'total-completed': number;
-  'total-iterations': number;
-  'status-counts': Record<string, number>;
-  workers: SwarmRunWorker[];
-}
-
-interface SwarmRunLog {
-  'swarm-id': string;
-  'started-at': string;
-  'config-file': string;
-  workers: Array<{
-    id: string;
-    harness: string;
-    model: string;
-    iterations: number;
-  }>;
-}
-
-interface SwarmReviewLog {
-  'worker-id': string;
-  iteration: number;
-  round: number;
-  verdict: string;
-  timestamp: string;
-  output: string;
-  'diff-files': string[];
-}
-
-interface SwarmRun {
-  swarmId: string;
-  run: SwarmRunLog | null;
-  summary: SwarmRunSummary | null;
-}
-
-type OompaWorkerStatus = 'starting' | 'idle' | 'running' | 'done' | 'error';
-
-interface OompaRuntimeWorker {
-  id: string;
-  status: OompaWorkerStatus;
-  lastEvent: string;
-}
-
-interface OompaRuntimeRun {
-  runId: string;
-  swarmId: string | null;
-  isRunning: boolean;
-  totalWorkers: number;
-  activeWorkers: number;
-  doneWorkers: number;
-  configPath: string | null;
-  logFile: string | null;
-  workers: OompaRuntimeWorker[];
-}
-
-interface OompaRuntimeSnapshot {
-  available: boolean;
-  run: OompaRuntimeRun | null;
-  reason: string | null;
-}
-
-// =============================================================================
 // WorkerChatPane — renders one worker's messages in a mini Chat view
 // =============================================================================
 
-const EMPTY_COLLAPSED = new Set<number>();
-const NO_OP_TOGGLE = () => {};
 const NO_OP_SCROLL = () => {};
 
 function WorkerChatPane({
@@ -231,8 +150,6 @@ function WorkerChatPane({
       <div className="worker-pane-messages">
         <VirtualizedMessageList
           messageGroups={messageGroups}
-          collapsedIterations={EMPTY_COLLAPSED}
-          toggleIterationCollapse={NO_OP_TOGGLE}
           isRunning={isStreaming}
           lastMessageRef={lastMessageRef}
           onScrollStateChange={NO_OP_SCROLL}
@@ -553,8 +470,8 @@ export function SwarmDetail() {
   const conversations = useConversationStore((s) => s.conversations);
   const promotedWorkers = useUIStore((s) => s.promotedWorkers);
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
-  const [runtimeSnapshot, setRuntimeSnapshot] = useState<OompaRuntimeSnapshot | null>(null);
-  const [runtimeTick, setRuntimeTick] = useState(0);
+  const runtimeSnapshots = useSwarmRuntimeSnapshots(projectRoot ? [projectRoot] : []);
+  const runtimeSnapshot = projectRoot ? runtimeSnapshots[projectRoot] ?? null : null;
 
   const runtimeWorkerStates = useMemo(() => {
     const map = new Map<string, OompaRuntimeWorker>();
@@ -574,40 +491,6 @@ export function SwarmDetail() {
     },
     [runtimeWorkerStates],
   );
-
-  useEffect(() => {
-    const id = setInterval(() => setRuntimeTick((tick) => tick + 1), 10_000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    if (!projectRoot) {
-      setRuntimeSnapshot(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    const fetchRuntime = async () => {
-      try {
-        const response = await fetch(`/api/swarm-runtime?dir=${encodeURIComponent(projectRoot)}`, {
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          setRuntimeSnapshot({ available: false, run: null, reason: `HTTP ${response.status}` });
-          return;
-        }
-        const snapshot = (await response.json()) as OompaRuntimeSnapshot;
-        setRuntimeSnapshot(snapshot);
-      } catch {
-        if (!controller.signal.aborted) {
-          setRuntimeSnapshot({ available: false, run: null, reason: 'Failed to load runtime snapshot' });
-        }
-      }
-    };
-
-    void fetchRuntime();
-    return () => controller.abort();
-  }, [projectRoot, runtimeTick]);
 
   // Tick every 30s for time-ago
   const [, setTick] = useState(0);
@@ -718,13 +601,12 @@ export function SwarmDetail() {
   }, [conversations, reviewPaneId, isWorkerRunningLive]);
 
   // Computed stats
-  const runningCount = useMemo(
-    () => allWorkers.filter((w) => isWorkerRunningLive(w)).length,
-    [allWorkers, isWorkerRunningLive],
+  const workerVisibility = useMemo(
+    () => getWorkerVisibilitySummary(allWorkers, runtimeSnapshot, isWorkerRunningLive),
+    [allWorkers, isWorkerRunningLive, runtimeSnapshot],
   );
-  const runtimeRunning = runtimeSnapshot?.available ? runtimeSnapshot.run?.activeWorkers ?? 0 : runningCount;
-  const runtimeTotalWorkers = runtimeSnapshot?.available ? runtimeSnapshot.run?.totalWorkers ?? allWorkers.length : allWorkers.length;
-  const displayRunning = runtimeSnapshot?.available ? Math.min(runtimeRunning, runtimeTotalWorkers) : runningCount;
+  const displayRunning = workerVisibility.runningWorkers;
+  const runtimeTotalWorkers = workerVisibility.totalWorkers;
   const displayIdle = Math.max(runtimeTotalWorkers - displayRunning, 0);
 
   const earliestCreated = useMemo(() => {
@@ -769,7 +651,8 @@ export function SwarmDetail() {
             </span>
           </div>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {workCount} exec &middot; {reviewCount} review &middot; {fixCount} fix
+            {runtimeTotalWorkers} workers &middot; {allWorkers.length} sessions
+            ({workCount} exec, {reviewCount} review, {fixCount} fix)
           </span>
           {earliestCreated && (
             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -785,7 +668,7 @@ export function SwarmDetail() {
           className={`swarm-tab ${activeTab === 'workers' ? 'active' : ''}`}
           onClick={() => setActiveTab('workers')}
         >
-          Workers ({allWorkers.length})
+          Sessions ({allWorkers.length})
         </button>
         <button
           className={`swarm-tab ${activeTab === 'runs' ? 'active' : ''}`}
@@ -800,7 +683,7 @@ export function SwarmDetail() {
         <div className="swarm-detail-body">
           {/* Worker Roster sidebar — exec workers with reviews nested below */}
           <div className="swarm-roster">
-            <div className="swarm-roster-header">Workers ({allWorkers.length})</div>
+            <div className="swarm-roster-header">Sessions ({allWorkers.length})</div>
             <div className="swarm-roster-list">
               {execGroups.map((group, groupIdx) => {
                 const w = group.exec;

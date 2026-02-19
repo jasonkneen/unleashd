@@ -6,43 +6,23 @@ import { useUIStore } from '../stores/uiStore';
 import { getProjectRoot, getProjectName } from '../utils/swarmUtils';
 import { getProjectColor } from '../utils/projectColors';
 import { formatTimeAgo, getLastMessageTime } from '../utils/time';
+import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
+import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import './SwarmDashboard.css';
 
 interface SwarmProject {
   projectRoot: string;
   projectName: string;
-  workers: Conversation[];
+  /** Historical JSONL session files (one per worker iteration) */
+  sessions: Conversation[];
+  /** Configured worker slots (from runtime or distinct workerIds) */
+  workerCount: number;
   runningCount: number;
   idleCount: number;
+  /** Recorded swarm runs (from runtime runCount or distinct swarmIds) */
+  runCount: number;
   latestActivity: Date | undefined;
   accentColor: string;
-  swarmIds: Set<string>;
-}
-
-type OompaWorkerStatus = 'starting' | 'idle' | 'running' | 'done' | 'error';
-
-interface OompaRuntimeWorker {
-  id: string;
-  status: OompaWorkerStatus;
-  lastEvent: string;
-}
-
-interface OompaRuntimeRun {
-  runId: string;
-  swarmId: string | null;
-  isRunning: boolean;
-  totalWorkers: number;
-  activeWorkers: number;
-  doneWorkers: number;
-  configPath: string | null;
-  logFile: string | null;
-  workers: OompaRuntimeWorker[];
-}
-
-interface OompaRuntimeSnapshot {
-  available: boolean;
-  run: OompaRuntimeRun | null;
-  reason: string | null;
 }
 
 export function SwarmDashboard() {
@@ -50,23 +30,7 @@ export function SwarmDashboard() {
   const navigate = useNavigate();
   const promotedWorkers = useUIStore((s) => s.promotedWorkers);
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
-  const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, OompaRuntimeSnapshot>>({});
-  const [runtimeTick, setRuntimeTick] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => setRuntimeTick((tick) => tick + 1), 10_000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Tick every 30s to keep time-ago displays current
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Group workers by project root
-  const swarmProjects = useMemo((): SwarmProject[] => {
+  const workerConversationsByProject = useMemo(() => {
     const groups = new Map<string, Conversation[]>();
 
     for (const conv of conversations.values()) {
@@ -76,20 +40,35 @@ export function SwarmDashboard() {
       groups.get(root)!.push(conv);
     }
 
-    return Array.from(groups.entries())
-      .map(([projectRoot, workers]) => {
-        const runningCount = workers.filter((w) => w.isRunning).length;
+    return groups;
+  }, [conversations, promotedSet]);
+  const runtimeProjectRoots = useMemo(
+    () => Array.from(workerConversationsByProject.keys()).sort(),
+    [workerConversationsByProject],
+  );
+  const runtimeSnapshots = useSwarmRuntimeSnapshots(runtimeProjectRoots);
+
+  // Tick every 30s to keep time-ago displays current
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Group worker sessions by project root
+  const swarmProjects = useMemo((): SwarmProject[] => {
+    return Array.from(workerConversationsByProject.entries())
+      .map(([projectRoot, sessions]) => {
         const runtime = runtimeSnapshots[projectRoot];
         const runtimeRun = runtime?.available ? runtime.run : null;
-        const totalWorkers = runtimeRun?.totalWorkers
-          ? Math.max(runtimeRun.totalWorkers, workers.length)
-          : workers.length;
-        const liveRunningCount = runtimeRun ? Math.min(runtimeRun.activeWorkers, totalWorkers) : runningCount;
-        const swarmIds = new Set<string>();
-        let latestActivity: Date | undefined;
+        const visibility = getWorkerVisibilitySummary(sessions, runtime, (worker) => worker.isRunning);
 
-        for (const w of workers) {
-          if (w.swarmId) swarmIds.add(w.swarmId);
+        // Run count: from runtime (disk), fallback to distinct swarmIds from sessions
+        const distinctSwarmIds = new Set(sessions.map((s) => s.swarmId).filter(Boolean));
+        const runCount = runtimeRun?.runCount ?? distinctSwarmIds.size;
+
+        let latestActivity: Date | undefined;
+        for (const w of sessions) {
           const lastTime = getLastMessageTime(w.messages);
           if (lastTime && (!latestActivity || lastTime > latestActivity)) {
             latestActivity = lastTime;
@@ -99,12 +78,13 @@ export function SwarmDashboard() {
         return {
           projectRoot,
           projectName: getProjectName(projectRoot),
-          workers,
-          runningCount: runtimeRun ? liveRunningCount : runningCount,
-          idleCount: Math.max(totalWorkers - (runtimeRun ? liveRunningCount : runningCount), 0),
+          sessions,
+          workerCount: visibility.totalWorkers,
+          runningCount: visibility.runningWorkers,
+          idleCount: Math.max(visibility.totalWorkers - visibility.runningWorkers, 0),
+          runCount,
           latestActivity,
           accentColor: getProjectColor(projectRoot),
-          swarmIds,
         };
       })
       .sort((a, b) => {
@@ -115,47 +95,7 @@ export function SwarmDashboard() {
         const bTime = b.latestActivity?.getTime() ?? 0;
         return bTime - aTime;
       });
-  }, [conversations, promotedSet, runtimeSnapshots]);
-
-  const runtimeProjectRoots = useMemo(() => {
-    return [...new Set(swarmProjects.map((project) => project.projectRoot))].sort();
-  }, [swarmProjects]);
-
-  useEffect(() => {
-    if (runtimeProjectRoots.length === 0) {
-      setRuntimeSnapshots({});
-      return;
-    }
-
-    const controller = new AbortController();
-    const fetchRuntime = async () => {
-      const entries = await Promise.all(
-        runtimeProjectRoots.map(async (projectRoot) => {
-          try {
-            const response = await fetch(`/api/swarm-runtime?dir=${encodeURIComponent(projectRoot)}`, {
-              signal: controller.signal,
-            });
-            if (!response.ok) return { projectRoot, snapshot: null };
-            const snapshot = (await response.json()) as OompaRuntimeSnapshot;
-            return { projectRoot, snapshot };
-          } catch {
-            return { projectRoot, snapshot: null };
-          }
-        }),
-      );
-
-      if (controller.signal.aborted) return;
-      const next: Record<string, OompaRuntimeSnapshot> = {};
-      for (const { projectRoot, snapshot } of entries) {
-        if (!snapshot) continue;
-        next[projectRoot] = snapshot;
-      }
-      setRuntimeSnapshots(next);
-    };
-
-    void fetchRuntime();
-    return () => controller.abort();
-  }, [runtimeProjectRoots, runtimeTick]);
+  }, [runtimeSnapshots, workerConversationsByProject]);
 
   if (swarmProjects.length === 0) {
     return (
@@ -181,7 +121,7 @@ export function SwarmDashboard() {
         <button className="back-to-gallery-btn" onClick={() => navigate('/')}>
           &#8592; Gallery
         </button>
-        <h2>Swarm Dashboard ({swarmProjects.reduce((n, p) => n + p.workers.length, 0)} workers)</h2>
+        <h2>Swarm Dashboard</h2>
       </div>
       <div className="swarm-dashboard-content">
         {swarmProjects.map((project) => (
@@ -198,8 +138,8 @@ export function SwarmDashboard() {
               </div>
               <div className="swarm-project-stats">
                 <span className="swarm-stat">
-                  <span className="swarm-stat-value">{project.workers.length}</span>
-                  worker{project.workers.length !== 1 ? 's' : ''}
+                  <span className="swarm-stat-value">{project.sessions.length}</span>
+                  session{project.sessions.length !== 1 ? 's' : ''}
                 </span>
                 <span className="swarm-stat-divider" />
                 {project.runningCount > 0 && (
@@ -214,12 +154,12 @@ export function SwarmDashboard() {
                     idle
                   </span>
                 )}
-                {project.swarmIds.size > 1 && (
+                {project.runCount > 1 && (
                   <>
                     <span className="swarm-stat-divider" />
                     <span className="swarm-stat">
-                      <span className="swarm-stat-value">{project.swarmIds.size}</span>
-                      swarm runs
+                      <span className="swarm-stat-value">{project.runCount}</span>
+                      swarm run{project.runCount !== 1 ? 's' : ''}
                     </span>
                   </>
                 )}

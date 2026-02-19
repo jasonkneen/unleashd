@@ -217,22 +217,6 @@
   padding: 8px 14px;
 }
 
-.message.loop-marker {
-  background: transparent;
-  margin: 8px 0;
-}
-
-.message.loop-marker .message-content {
-  text-align: center;
-  color: var(--accent-loop);
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 1px;
-  background: transparent;
-  border: none;
-  padding: 8px 0;
-}
-
 /* Header status area */
 .header-status {
   display: flex;
@@ -254,20 +238,6 @@
 .ready-badge.waiting {
   background: var(--accent-warning);
   color: var(--bg-primary);
-  animation: pulse 1.5s infinite;
-}
-
-/* Loop badge in header */
-.loop-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: var(--accent-loop);
-  border-radius: 12px;
-  font-size: 12px;
-  color: var(--text-on-accent);
-  font-weight: 500;
   animation: pulse 1.5s infinite;
 }
 
@@ -350,36 +320,9 @@
 }
 
 .send-btn:disabled,
-.loop-btn:disabled,
 .save-prompt-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-/* Loop button */
-.loop-btn {
-  padding: 4px;
-  background: var(--bg-tertiary);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.loop-btn:hover:not(:disabled) {
-  background: var(--border-color);
-  transform: scale(1.05);
-}
-
-.loop-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  object-fit: cover;
 }
 
 /* Save prompt button */
@@ -402,211 +345,11 @@
 }
 
 .save-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-/* Loop popup */
-.loop-popup {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 8px;
-  min-width: 220px;
-  z-index: 100;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.loop-header {
-  font-weight: 600;
-  margin-bottom: 12px;
-  color: var(--text-emphasis);
-}
-
-.loop-options {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.loop-option {
-  flex: 1;
-  padding: 8px 12px;
-  background: var(--bg-tertiary);
-  border-radius: 6px;
-  text-align: center;
-  cursor: pointer;
-  transition: background 0.2s;
-  color: var(--text-primary);
-}
-
-.loop-option:hover {
-  background: var(--border-color);
-}
-
-.loop-option.selected {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-}
-
-.loop-option input {
-  display: none;
-}
-
-.clear-context-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  font-size: 13px;
+  width: 20px;
+  height: 20px;
   color: var(--text-secondary);
-  cursor: pointer;
 }
 
-.clear-context-option input {
-  accent-color: var(--accent-primary);
-}
-
-.start-loop-btn {
-  width: 100%;
-  padding: 10px 16px;
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: background 0.2s;
-}
-
-.start-loop-btn:hover {
-  background: var(--accent-primary-hover);
-}
-
-/* =============================================================================
-   RALPH LOOP — Active loop bar, iteration groups, and cancel button
-   See docs/ralph_loop_design.md for full UI specification.
-   ============================================================================= */
-
-/* Cancel loop button (standalone, used inside the loop-active-bar) */
-.cancel-loop-btn {
-  padding: 6px 14px;
-  background: var(--accent-error);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  transition: background 0.2s;
-  white-space: nowrap;
-}
-
-.cancel-loop-btn:hover {
-  background: var(--red-dim);
-}
-
-/* Loop active bar — shows Nx countdown + prompt during loop execution */
-.loop-active-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 14px;
-  margin-bottom: 8px;
-  background: color-mix(in srgb, var(--accent-loop) 12%, var(--bg-card));
-  border: 1px solid color-mix(in srgb, var(--accent-loop) 30%, transparent);
-  border-radius: 8px;
-}
-
-.loop-active-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.loop-active-icon {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.loop-active-count {
-  color: var(--accent-loop);
-  font-weight: 700;
-  font-size: 14px;
-  font-family: monospace;
-  white-space: nowrap;
-}
-
-.loop-active-prompt {
-  color: var(--text-secondary);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-/* Loop iteration group — collapsible section for each loop iteration */
-.loop-iteration-group {
-  margin: 4px 0;
-  border-left: 2px solid color-mix(in srgb, var(--accent-loop) 40%, transparent);
-  border-radius: 4px;
-}
-
-.loop-iteration-group.running {
-  border-left-color: var(--accent-loop);
-}
-
-.loop-iteration-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  cursor: pointer;
-  color: var(--accent-loop);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  user-select: none;
-  transition: background 0.15s;
-}
-
-.loop-iteration-header:hover {
-  background: color-mix(in srgb, var(--accent-loop) 8%, transparent);
-}
-
-.loop-iteration-chevron {
-  font-size: 10px;
-  width: 12px;
-  text-align: center;
-}
-
-.loop-iteration-label {
-  font-family: monospace;
-}
-
-.loop-iteration-running {
-  color: var(--accent-success);
-  font-weight: 500;
-  animation: pulse 1.5s infinite;
-}
-
-.loop-iteration-collapsed-hint {
-  color: var(--text-muted);
-  font-weight: 400;
-  font-size: 11px;
-  margin-left: auto;
-}
 
 .empty-state {
   padding: 40px;
@@ -855,15 +598,18 @@
   color: var(--yellow);
 }
 
-/* Links */
+/* Links — always underlined so auto-linked URLs are visually distinct from text */
 .message-content a {
   color: var(--blue);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--blue) 50%, transparent);
+  text-underline-offset: 2px;
   cursor: pointer;
 }
 
 .message-content a:hover {
   text-decoration: underline;
+  text-decoration-color: var(--cyan-bright);
   color: var(--cyan-bright);
 }
 

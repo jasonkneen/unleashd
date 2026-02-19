@@ -13,113 +13,136 @@
 }
 
 .sidebar-header {
-  padding: 20px;
+  padding: 12px 12px 8px;
   border-bottom: 1px solid var(--border-emphasis);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
   background: var(--bg-darkest);
 }
 
-.gallery-btn {
-  width: 100%;
-  padding: 10px 20px;
+/* =============================================================================
+   Nav Sections — IDE-like two-section header (Conversations + Swarms)
+   ============================================================================= */
+
+.nav-section {
+  padding: 0;
+}
+
+.nav-section + .nav-section {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.nav-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px;
+}
+
+/* + button — sharp, monospace, compact */
+.nav-create-btn {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: monospace;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.nav-create-btn:hover {
   background: var(--accent-primary);
   color: var(--text-on-accent);
+  border-color: var(--accent-primary);
+}
+
+.nav-create-btn--swarm:hover {
+  background: var(--violet);
+  border-color: var(--violet);
+  color: var(--text-on-accent);
+}
+
+/* Section label — clickable, navigates to section home */
+.nav-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  background: none;
   border: none;
-  border-radius: 6px;
+  padding: 0;
   cursor: pointer;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: background 0.2s;
+  transition: color 0.1s;
+  white-space: nowrap;
 }
 
-.gallery-btn:hover {
-  background: var(--accent-primary-hover);
-}
-
-.done-nav-btn {
-  width: 100%;
-  padding: 8px 20px;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.2s;
-}
-
-.done-nav-btn:hover {
-  background: var(--border-color);
+.nav-section-label:hover {
   color: var(--text-emphasis);
 }
 
-.workers-nav-btn {
-  width: 100%;
-  padding: 8px 20px;
-  background: var(--bg-tertiary);
-  color: var(--violet-bright);
-  border: 1px solid color-mix(in srgb, var(--violet) 30%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.2s;
-}
-
-.workers-nav-btn:hover {
-  background: color-mix(in srgb, var(--violet) 15%, var(--bg-tertiary));
-  color: var(--violet-bright);
-}
-
-.analytics-nav-btn {
-  width: 100%;
-  padding: 8px 20px;
-  background: var(--bg-tertiary);
-  color: var(--cyan-bright);
-  border: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.2s;
-}
-
-.analytics-nav-btn:hover {
-  background: color-mix(in srgb, var(--cyan) 15%, var(--bg-tertiary));
-  color: var(--cyan-bright);
-}
-
-.new-chat-btn {
-  width: 100%;
-  padding: 12px 20px;
-  background: var(--bg-tertiary);
-  color: var(--text-emphasis);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
+/* Right-aligned count badges */
+.nav-section-counts {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: background 0.2s;
-}
-
-.new-chat-btn:hover {
-  background: var(--border-color);
-}
-
-.shortcut-hint {
   margin-left: auto;
+}
+
+.nav-count {
   font-size: 10px;
-  font-family: inherit;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: monospace;
   color: var(--text-muted);
-  line-height: 1;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.nav-count-link {
+  cursor: pointer;
+  transition: color 0.1s;
+}
+
+.nav-count-link:hover {
+  color: var(--text-primary);
+}
+
+.nav-count--running {
+  color: var(--green-bright);
+}
+
+/* Sub-links row beneath swarms section header */
+.nav-section-sub {
+  display: flex;
+  gap: 0;
+  padding: 0 0 2px 28px;
+}
+
+.nav-sub-link {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.1s;
+}
+
+.nav-sub-link:hover {
+  color: var(--text-emphasis);
 }
 
 /* New Conversation Modal — centered popup overlay */
@@ -315,7 +338,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 12px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .ws-status {
@@ -654,4 +679,32 @@
   border-radius: 8px;
   min-width: 18px;
   text-align: center;
+}
+
+.folder-group-add-btn {
+  opacity: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: none;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.folder-group-header:hover .folder-group-add-btn {
+  opacity: 1;
+}
+
+.folder-group-add-btn:hover {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
 }

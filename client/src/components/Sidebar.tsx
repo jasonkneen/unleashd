@@ -4,8 +4,12 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useConversationStore } from '../stores/conversationStore';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
+import { getProjectRoot } from '../utils/swarmUtils';
 import { formatTimeAgo, getLastMessageTime, getMinutesElapsed } from '../utils/time';
+import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
+import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { PathAutocomplete } from './PathAutocomplete';
+import { SearchPalette } from './SearchPalette';
 import './Sidebar.css';
 
 const RECENT_CUTOFF_MS = 48 * 60 * 60 * 1000;
@@ -64,6 +68,24 @@ export function Sidebar() {
       return bTime - aTime;
     });
   }, [conversations]);
+
+  const workerConversationsByProject = useMemo(() => {
+    const map = new Map<string, Conversation[]>();
+    for (const conv of conversations.values()) {
+      if (!conv.isWorker || promotedSet.has(conv.id)) continue;
+      const projectRoot = getProjectRoot(conv.workingDirectory);
+      const existing = map.get(projectRoot);
+      if (existing) {
+        existing.push(conv);
+      } else {
+        map.set(projectRoot, [conv]);
+      }
+    }
+    return map;
+  }, [conversations, promotedSet]);
+
+  const workerProjectRoots = useMemo(() => Array.from(workerConversationsByProject.keys()), [workerConversationsByProject]);
+  const runtimeSnapshots = useSwarmRuntimeSnapshots(workerProjectRoots);
 
   const visibleConversations = useMemo(
     () =>
@@ -125,20 +147,23 @@ export function Sidebar() {
   const collapsedSet = useMemo(() => new Set(galleryCollapsedProjects), [galleryCollapsedProjects]);
 
   // Count active workers (isRunning && isWorker && not promoted) for the sidebar nav button
-  const activeWorkerCount = useMemo(() => {
-    let count = 0;
-    for (const conv of conversations.values()) {
-      if (conv.isWorker && !promotedSet.has(conv.id) && conv.isRunning) count++;
-    }
-    return count;
-  }, [conversations, promotedSet]);
+  const { hasWorkers, activeWorkerCount, totalWorkerCount } = useMemo(() => {
+    let nextActive = 0;
+    let nextTotal = 0;
+    let nextHasWorkers = false;
 
-  const hasWorkers = useMemo(() => {
-    for (const conv of conversations.values()) {
-      if (conv.isWorker && !promotedSet.has(conv.id)) return true;
+    for (const projectRoot of workerProjectRoots) {
+      const workers = workerConversationsByProject.get(projectRoot) ?? [];
+      const visibility = getWorkerVisibilitySummary(workers, runtimeSnapshots[projectRoot]);
+      nextActive += visibility.runningWorkers;
+      nextTotal += visibility.totalWorkers;
+      if (visibility.hasWorkers) {
+        nextHasWorkers = true;
+      }
     }
-    return false;
-  }, [conversations, promotedSet]);
+
+    return { hasWorkers: nextHasWorkers, activeWorkerCount: nextActive, totalWorkerCount: nextTotal };
+  }, [runtimeSnapshots, workerConversationsByProject, workerProjectRoots]);
 
   // Deduplicated working directories from all conversations — fed to PathAutocomplete for fuzzy matching
   const recentDirectories = useMemo(() => {
@@ -149,6 +174,8 @@ export function Sidebar() {
     return Array.from(dirs);
   }, [conversations]);
 
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchFilterDir, setSearchFilterDir] = useState<string | undefined>(undefined);
   const [showPicker, setShowPicker] = useState(false);
   const [directory, setDirectory] = useState('');
   const [hasPendingDefault, setHasPendingDefault] = useState(false);
@@ -194,6 +221,21 @@ export function Sidebar() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleNewConversation]);
 
+  // Cmd+K / Ctrl+K global shortcut to open search palette.
+  // Skipped when focus is in an input/textarea so it doesn't hijack typing.
+  useEffect(() => {
+    const handleSearchShortcut = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key !== 'k') return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      setSearchFilterDir(undefined);
+      setShowSearch(true);
+    };
+    window.addEventListener('keydown', handleSearchShortcut);
+    return () => window.removeEventListener('keydown', handleSearchShortcut);
+  }, []);
+
   const handleConfirm = () => {
     if (directory.trim()) {
       setLastWorkingDirectory(directory);
@@ -222,37 +264,102 @@ export function Sidebar() {
     }
   };
 
+  const activeConversationCount = topLevelConversations.length;
+  const completedSwarmCount = totalWorkerCount - activeWorkerCount;
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <button type="button" className="gallery-btn" onClick={() => navigate('/')}>
-          <span>◫</span>
-          <span>Gallery</span>
-        </button>
-        {doneConversations.length > 0 && (
-          <button type="button" className="done-nav-btn" onClick={() => navigate('/done')}>
-            Done ({doneConversations.length})
-          </button>
-        )}
-        {hasWorkers && (
-          <>
-            <button type="button" className="workers-nav-btn" onClick={() => navigate('/workers')}>
-              Workers{activeWorkerCount > 0 ? ` (${activeWorkerCount})` : ''}
+        {/* ── Conversations Section ── */}
+        <div className="nav-section">
+          <div className="nav-section-header">
+            <button
+              type="button"
+              className="nav-create-btn"
+              onClick={handleNewConversation}
+              title="New conversation (Shift+Space)"
+            >
+              +
             </button>
             <button
               type="button"
-              className="analytics-nav-btn"
-              onClick={() => navigate('/workers/analytics')}
+              className="nav-section-label"
+              onClick={() => navigate('/')}
             >
-              Analytics
+              Conversations
             </button>
-          </>
+            <button
+              type="button"
+              className="nav-create-btn"
+              onClick={() => { setSearchFilterDir(undefined); setShowSearch(true); }}
+              title="Search conversations (Cmd+K)"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
+                <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            <div className="nav-section-counts">
+              <span className="nav-count">{activeConversationCount} Active</span>
+              {doneConversations.length > 0 && (
+                <button
+                  type="button"
+                  className="nav-count nav-count-link"
+                  onClick={() => navigate('/done')}
+                >
+                  {doneConversations.length} Done
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Swarms Section ── */}
+        {hasWorkers && (
+          <div className="nav-section">
+            <div className="nav-section-header">
+              <button
+                type="button"
+                className="nav-create-btn nav-create-btn--swarm"
+                onClick={() => navigate('/workers')}
+                title="View swarms"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="nav-section-label"
+                onClick={() => navigate('/workers')}
+              >
+                Swarms
+              </button>
+              <div className="nav-section-counts">
+                {activeWorkerCount > 0 && (
+                  <span className="nav-count nav-count--running">{activeWorkerCount} Running</span>
+                )}
+                {completedSwarmCount > 0 && (
+                  <span className="nav-count">{completedSwarmCount} Completed</span>
+                )}
+              </div>
+            </div>
+            <div className="nav-section-sub">
+              <button
+                type="button"
+                className="nav-sub-link"
+                onClick={() => navigate('/workers')}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                className="nav-sub-link"
+                onClick={() => navigate('/workers/analytics')}
+              >
+                Analytics
+              </button>
+            </div>
+          </div>
         )}
-        <button type="button" className="new-chat-btn" onClick={handleNewConversation}>
-          <span>+</span>
-          <span>New Conversation</span>
-          <kbd className="shortcut-hint">Shift Space</kbd>
-        </button>
 
         {showPicker && (
           <div className="new-conv-overlay" onClick={handleCancel}>
@@ -336,24 +443,19 @@ export function Sidebar() {
                   Create
                   <kbd className="btn-shortcut">⇧↵</kbd>
                 </button>
-                <button
-                  type="button"
-                  className="dir-action-btn dir-confirm-btn"
-                  onClick={handleConfirm}
-                  disabled={wsStatus !== 'connected'}
-                  title={
-                    wsStatus !== 'connected'
-                      ? 'Server disconnected'
-                      : 'Create conversation (Shift+Enter)'
-                  }
-                >
-                  Create
-                  <kbd className="btn-shortcut">⇧↵</kbd>
-                </button>
               </div>
             </div>
           </div>
         )}
+
+        <SearchPalette
+          isOpen={showSearch}
+          onClose={() => setShowSearch(false)}
+          onSelectConversation={(id) => {
+            navigate(`/chat/${id}`);
+          }}
+          filterDirectory={searchFilterDir}
+        />
 
         <div className="sidebar-status-row">
           <div className="ws-status">
@@ -427,6 +529,34 @@ export function Sidebar() {
                         <span className="folder-group-name" title={group.directory}>
                           {dirDisplay}
                         </span>
+                        <button
+                          type="button"
+                          className="folder-group-add-btn"
+                          title={`Search in ${dirDisplay}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSearchFilterDir(group.directory);
+                            setShowSearch(true);
+                          }}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                            <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
+                            <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="folder-group-add-btn"
+                          title={`New conversation in ${dirDisplay}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            createConversation(group.directory, provider, model);
+                            const newId = useConversationStore.getState().activeConversationId;
+                            if (newId) navigate(`/chat/${newId}`);
+                          }}
+                        >
+                          +
+                        </button>
                         <span className="folder-group-count">
                           {group.conversations.length}
                         </span>

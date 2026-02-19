@@ -9,7 +9,11 @@ import path from 'node:path';
 import readline from 'node:readline';
 import type {
   Conversation as ConversationData,
+  OompaCycle,
+  OompaReviewLog,
   OompaRuntimeSnapshot,
+  OompaStarted,
+  OompaStopped,
   OompaWorkerStatus,
   Message,
   ModelId,
@@ -1476,20 +1480,22 @@ function normalizeStatus(rawStatus: unknown): OompaWorkerStatus {
 
 /**
  * Read all JSON files from a cycles/ (or iterations/) directory.
- * Returns parsed objects sorted by filename.
+ * Returns parsed OompaCycle objects sorted by filename.
+ * NOTE: Old runs may use 'iteration' instead of 'cycle' field — the OompaCycle
+ * type uses 'cycle' (authoritative from schema). Callers must handle the legacy field.
  */
-function readCycleFiles(dir: string): Record<string, unknown>[] {
+function readCycleFiles(dir: string): OompaCycle[] {
   try {
     const files = fs.readdirSync(dir)
       .filter(f => f.endsWith('.json'))
       .sort();
     return files.map(f => {
       try {
-        return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'));
+        return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as OompaCycle;
       } catch {
         return null;
       }
-    }).filter((x): x is Record<string, unknown> => x !== null);
+    }).filter((x): x is OompaCycle => x !== null);
   } catch {
     return [];
   }
@@ -1565,10 +1571,12 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
   const runId = latestRun.id;
 
   // Read event files: started.json (new) or run.json (old backward compat)
-  const startedData = safeReadJson(path.join(latestRun.path, 'started.json'))
+  // Cast to OompaStarted — safeReadJson returns Record<string,unknown> but the
+  // schema-generated type is authoritative. Old run.json has the same shape.
+  const startedData = (safeReadJson(path.join(latestRun.path, 'started.json'))
     ?? safeReadJson(path.join(latestRun.path, 'run.json'))
-    ?? {};
-  const stoppedData = safeReadJson(path.join(latestRun.path, 'stopped.json'));
+    ?? {}) as Partial<OompaStarted>;
+  const stoppedData = safeReadJson(path.join(latestRun.path, 'stopped.json')) as OompaStopped | null;
 
   // Scan cycles/ (new) or iterations/ (old backward compat)
   const cyclesDir = path.join(latestRun.path, 'cycles');
@@ -1580,20 +1588,24 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
 
   // Worker IDs from started.json config
   const configuredWorkers: string[] = [];
-  if (isObject(startedData) && Array.isArray(startedData['workers'])) {
-    for (const w of startedData['workers'] as unknown[]) {
-      if (isObject(w) && typeof w.id === 'string') configuredWorkers.push(w.id);
+  if (startedData.workers) {
+    for (const w of startedData.workers) {
+      if (w.id) configuredWorkers.push(w.id);
     }
   }
 
-  // Latest cycle per worker (handles both 'cycle' and 'iteration' field names)
-  const latestCycleByWorker = new Map<string, Record<string, unknown>>();
+  // Latest cycle per worker (handles both 'cycle' and legacy 'iteration' field names)
+  // NOTE: OompaCycle uses 'cycle' (schema-authoritative). Old runs may have 'iteration'
+  // instead — we cast to OompaCycle but tolerate the legacy field via bracket access.
+  const latestCycleByWorker = new Map<string, OompaCycle>();
   for (const cycle of cycleFiles) {
-    const wid = cycle['worker-id'] as string;
+    const wid = cycle['worker-id'];
     if (!wid) continue;
     const existing = latestCycleByWorker.get(wid);
-    const cycleNum = (cycle['cycle'] ?? cycle['iteration'] ?? 0) as number;
-    const existingNum = (existing?.['cycle'] ?? existing?.['iteration'] ?? 0) as number;
+    // Legacy compat: old runs used 'iteration' field instead of 'cycle'
+    // Legacy compat: old runs used 'iteration' instead of 'cycle'
+    const cycleNum = cycle.cycle ?? ((cycle as unknown as Record<string, unknown>)['iteration'] as number | undefined) ?? 0;
+    const existingNum = existing?.cycle ?? ((existing as unknown as Record<string, unknown>)?.['iteration'] as number | undefined) ?? 0;
     if (!existing || cycleNum > existingNum) {
       latestCycleByWorker.set(wid, cycle);
     }
@@ -1607,22 +1619,21 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
   // Otherwise check PID from started.json, with isOompaProcessAlive() as fallback
   // for old runs that don't have PID in started.json.
   const swarmStopped = stoppedData !== null;
-  const pid = isObject(startedData) ? startedData['pid'] : null;
+  const pid = startedData.pid;
   const pidAlive = !swarmStopped && typeof pid === 'number' && isPidAlive(String(pid));
   const fallbackAlive = !swarmStopped && !pidAlive && isOompaProcessAlive(projectRoot);
   const isLive = !swarmStopped && (pidAlive || fallbackAlive);
 
   // Build worker snapshots from cycle data
-  const swarmId = typeof startedData['swarm-id'] === 'string' ? startedData['swarm-id'] : runId;
-  const configPath = startedData['config-file'] ? String(startedData['config-file']) : null;
+  const swarmId = startedData['swarm-id'] ?? runId;
+  const configPath = startedData['config-file'] ?? null;
 
   const workerSnapshots = Array.from(workerIds).map(id => {
     const cycle = latestCycleByWorker.get(id);
     let status: OompaWorkerStatus;
 
     if (cycle) {
-      const outcome = cycle['outcome'] as string;
-      status = normalizeStatus(outcome);
+      status = normalizeStatus(cycle.outcome);
     } else if (isLive) {
       status = 'starting';
     } else {
@@ -1638,7 +1649,7 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
       id,
       status,
       lastEvent: cycle
-        ? `Cycle ${cycle['cycle'] ?? cycle['iteration'] ?? '?'}: ${cycle['outcome'] ?? 'unknown'}`
+        ? `Cycle ${cycle.cycle ?? '?'}: ${cycle.outcome ?? 'unknown'}`
         : swarmStopped ? 'Worker completed' : isLive ? 'Starting' : 'No data',
     };
   });
@@ -1751,7 +1762,7 @@ app.get('/api/oompa-config', (req: Request, res: Response) => {
 async function synthesizeSummary(
   runDir: string,
   swarmId: string,
-  run: Record<string, unknown>
+  run: OompaStarted
 ): Promise<Record<string, unknown>> {
   // Read cycle files — these are the primary source of truth for worker progress
   const cyclesDir = path.join(runDir, 'cycles');
@@ -1769,8 +1780,8 @@ async function synthesizeSummary(
     }
   }
 
-  interface CycleEntry { 'worker-id': string; cycle?: number; iteration?: number; outcome: string; timestamp: string }
-  const cyclesByWorker = new Map<string, CycleEntry[]>();
+  // OompaCycle is the schema-authoritative type. Old runs may use 'iteration' instead of 'cycle'.
+  const cyclesByWorker = new Map<string, OompaCycle[]>();
 
   if (cycleFileDir) {
     const cycleFileNames = (await fs.promises.readdir(cycleFileDir)).filter((f) => f.endsWith('.json'));
@@ -1778,7 +1789,7 @@ async function synthesizeSummary(
       cycleFileNames.map(async (cf) => {
         try {
           const content = await fs.promises.readFile(path.join(cycleFileDir!, cf), 'utf-8');
-          const cycle = JSON.parse(content);
+          const cycle = JSON.parse(content) as OompaCycle;
           const wid = cycle['worker-id'];
           if (!wid) return;
           if (!cyclesByWorker.has(wid)) cyclesByWorker.set(wid, []);
@@ -1799,14 +1810,13 @@ async function synthesizeSummary(
     // No reviews directory
   }
 
-  interface ReviewEntry { iteration: number; round: number; verdict: string; timestamp: string }
-  const reviewsByWorker = new Map<string, ReviewEntry[]>();
+  const reviewsByWorker = new Map<string, OompaReviewLog[]>();
 
   await Promise.all(
     reviewFileNames.map(async (rf) => {
       try {
         const content = await fs.promises.readFile(path.join(reviewsDir, rf), 'utf-8');
-        const review = JSON.parse(content);
+        const review = JSON.parse(content) as OompaReviewLog;
         const wid = review['worker-id'];
         if (!wid) return;
         if (!reviewsByWorker.has(wid)) reviewsByWorker.set(wid, []);
@@ -1829,14 +1839,14 @@ async function synthesizeSummary(
 
   let isLive = false;
   if (!isStopped) {
-    const pid = run['pid'];
+    const pid = run.pid;
     if (typeof pid === 'number') {
       isLive = isPidAlive(String(pid));
     }
   }
 
-  const workers = ((run.workers ?? []) as Array<Record<string, unknown>>).map((w) => {
-    const wid = w.id as string;
+  const workers = (run.workers ?? []).map((w) => {
+    const wid = w.id;
     const workerCycles = cyclesByWorker.get(wid) ?? [];
     const workerReviews = reviewsByWorker.get(wid) ?? [];
 
@@ -1844,11 +1854,11 @@ async function synthesizeSummary(
     let merges = 0;
     let rejections = 0;
     let errors = 0;
-    let latestOutcome: string | null = null;
+    let latestOutcome: OompaCycle['outcome'] | null = null;
     let latestCycleNum = 0;
 
     for (const c of workerCycles) {
-      const num = (c.cycle ?? c.iteration ?? 0) as number;
+      const num = c.cycle ?? 0;
       if (num > latestCycleNum) {
         latestCycleNum = num;
         latestOutcome = c.outcome;
@@ -1878,21 +1888,22 @@ async function synthesizeSummary(
 
     // needs-changes from reviews
     let needsChanges = 0;
-    const iterationVerdicts = new Map<number, string>();
+    // OompaReviewLog uses 'cycle' (schema-authoritative), keyed per-cycle for last verdict
+    const cycleVerdicts = new Map<number, OompaReviewLog['verdict']>();
     for (const r of workerReviews) {
-      iterationVerdicts.set(r.iteration, r.verdict);
+      cycleVerdicts.set(r.cycle, r.verdict);
     }
-    for (const verdict of iterationVerdicts.values()) {
+    for (const verdict of cycleVerdicts.values()) {
       if (verdict === 'needs-changes') needsChanges++;
     }
 
     return {
       id: wid,
-      harness: (w.harness as string) ?? 'default',
-      model: (w.model as string) ?? 'unknown',
+      harness: w.harness ?? 'default',
+      model: w.model ?? 'unknown',
       status,
       completed: latestCycleNum,
-      iterations: (w.iterations as number) ?? 0,
+      iterations: w.iterations ?? 0,
       merges,
       rejections,
       'needs-changes': needsChanges,
@@ -1961,15 +1972,15 @@ app.get('/api/swarm-runs', async (req: Request, res: Response) => {
         const runFile = path.join(runDir, 'run.json'); // backward compat
         const summaryFile = path.join(runDir, 'summary.json');
 
-        let run = null;
+        let run: OompaStarted | null = null;
         let summary = null;
 
-        // New format: started.json; old format: run.json
+        // New format: started.json; old format: run.json (same shape = OompaStarted)
         try {
-          run = JSON.parse(await fs.promises.readFile(startedFile, 'utf-8'));
+          run = JSON.parse(await fs.promises.readFile(startedFile, 'utf-8')) as OompaStarted;
         } catch {
           try {
-            run = JSON.parse(await fs.promises.readFile(runFile, 'utf-8'));
+            run = JSON.parse(await fs.promises.readFile(runFile, 'utf-8')) as OompaStarted;
           } catch {
             // No started.json or run.json — skip
           }
@@ -2039,9 +2050,9 @@ app.get('/api/swarm-reviews', (req: Request, res: Response) => {
     .filter((f) => f.endsWith('.json'))
     .sort();
 
-  const reviews = files.map((f) => {
+  const reviews: OompaReviewLog[] = files.map((f) => {
     const content = fs.readFileSync(path.join(reviewsDir, f), 'utf-8');
-    return JSON.parse(content);
+    return JSON.parse(content) as OompaReviewLog;
   });
 
   res.json({ reviews });

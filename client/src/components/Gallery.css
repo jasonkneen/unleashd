@@ -241,17 +241,6 @@
   animation: pulse 1.5s infinite;
 }
 
-/* Looping state - magenta with pulse */
-.state-badge.state-looping {
-  background: color-mix(in srgb, var(--magenta) 20%, transparent);
-  color: var(--magenta);
-}
-
-.state-badge.state-looping .state-indicator {
-  background: var(--magenta);
-  animation: pulse 1.5s infinite;
-}
-
 @keyframes pulse {
   0%,
   100% {

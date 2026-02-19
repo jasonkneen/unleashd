@@ -18,8 +18,8 @@ interface SubAgentPanelProps {
  * Auto-collapses when all agents finish. Can be manually toggled via Ctrl+O.
  */
 export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
-  // Track whether the user has manually toggled — if so, don't auto-collapse
+  const [isExpanded, setIsExpanded] = useState(false);
+  // Track whether the user has manually toggled — if so, don't auto-collapse/expand on hover
   const userToggledRef = useRef(false);
 
   // Filter to show only active (running) sub-agents, plus recently completed ones
@@ -40,13 +40,24 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
       // Transition from running → all done: auto-collapse
       setIsExpanded(false);
     }
-    if (hasRunning) {
-      // Reset manual toggle flag when new agents start running
+    if (hasRunning && !hadRunningRef.current) {
+      // New agents started — reset manual toggle flag but stay collapsed by default
       userToggledRef.current = false;
-      setIsExpanded(true);
     }
     hadRunningRef.current = hasRunning;
   }, [hasRunning]);
+
+  const handleMouseEnter = () => {
+    if (!userToggledRef.current) {
+      setIsExpanded(true);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (!userToggledRef.current) {
+      setIsExpanded(false);
+    }
+  };
 
   // Don't show if no agents
   if (displayAgents.length === 0) {
@@ -80,6 +91,8 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
       className="subagent-panel"
       tabIndex={0}
       onKeyDown={handleKeyDown}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       {/* Header - always visible */}
       <div
@@ -104,8 +117,8 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
         <span className="subagent-shortcut">(ctrl+o to {isExpanded ? 'collapse' : 'expand'})</span>
       </div>
 
-      {/* Tree view - collapsible */}
-      {isExpanded && (
+      {/* Tree view - collapsible with CSS transition */}
+      <div className={`subagent-tree-wrapper ${isExpanded ? 'expanded' : ''}`}>
         <div className="subagent-tree">
           {displayAgents.map((agent, index) => {
             const isLast = index === displayAgents.length - 1;
@@ -166,7 +179,7 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
             );
           })}
         </div>
-      )}
+      </div>
     </div>
   );
 }

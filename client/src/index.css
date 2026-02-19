@@ -161,7 +161,6 @@
   --accent-warning: var(--yellow);
   --accent-error: var(--red);
   --accent-queue: var(--orange);
-  --accent-loop: var(--magenta);
 
   /* =========================================
      DERIVED: Message backgrounds

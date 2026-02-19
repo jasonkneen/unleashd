@@ -61,19 +61,6 @@ Shows a badge on sidebar conversation items when they contain unseen messages. B
 
 ---
 
-### [`ralph_loop_design.md`](./ralph_loop_design.md)
-**Ralph Loop Feature (Iterative Prompts)**
-
-Allows running the same prompt N times (5/10/20 iterations) with optional context clearing between iterations. Server-driven execution with client UI for loop countdown and progress tracking.
-
-**Key sections**:
-- Loop lifecycle (start, iteration, complete, cancel)
-- Server state management
-- Client queue integration
-- Loop markers in message history
-
----
-
 ## UI & Design
 
 ### [`COLOR_DESIGN.md`](./COLOR_DESIGN.md)
@@ -223,7 +210,6 @@ docs/
 ├── agent_client_spec.md           ← Provider pattern
 ├── persistence_design.md          ← JSONL format
 ├── new_badge_feature.md          ← NEW badge (2026-02-02)
-├── ralph_loop_design.md          ← Loop feature
 ├── COLOR_DESIGN.md               ← Color system
 ├── color_palette_redesign.md     ← Color redesign notes
 └── color_palette.md              ← Original color spec

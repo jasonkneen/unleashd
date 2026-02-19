@@ -1,4 +1,4 @@
-import type { Conversation } from '@claude-web-view/shared';
+import type { Conversation, SwarmRunSummary, SwarmRunLog, SwarmReviewLog } from '@claude-web-view/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '../stores/conversationStore';
@@ -18,50 +18,6 @@ interface SwarmProject {
   workers: Conversation[];
   swarmIds: Set<string>;
   accentColor: string;
-}
-
-interface SwarmRunSummary {
-  'swarm-id': string;
-  'finished-at': string;
-  'started-at'?: string;
-  'total-workers': number;
-  'total-completed': number;
-  'total-iterations': number;
-  'status-counts': Record<string, number>;
-  workers: Array<{
-    id: string;
-    harness: string;
-    model: string;
-    status: string;
-    completed: number;
-    iterations: number;
-    merges: number;
-    rejections: number;
-    errors: number;
-    'review-rounds-total': number;
-  }>;
-}
-
-interface SwarmRunLog {
-  'swarm-id': string;
-  'started-at': string;
-  'config-file': string;
-  workers: Array<{
-    id: string;
-    harness: string;
-    model: string;
-    iterations: number;
-  }>;
-}
-
-interface SwarmReviewLog {
-  'worker-id': string;
-  iteration: number;
-  round: number;
-  verdict: 'approved' | 'rejected' | 'needs-changes' | string;
-  timestamp: string;
-  output: string;
-  'diff-files': string[];
 }
 
 interface RunData {
@@ -676,7 +632,7 @@ export function SwarmAnalytics() {
           >
             {projects.map((project) => (
               <option key={project.projectRoot} value={project.projectRoot}>
-                {project.projectName} ({project.workers.length} workers)
+                {project.projectName} ({project.workers.length} sessions)
               </option>
             ))}
           </select>

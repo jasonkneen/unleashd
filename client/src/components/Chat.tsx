@@ -85,8 +85,6 @@ export function Chat() {
 
   // Actions are stable function references — never trigger re-renders
   const setActiveConversationId = useConversationStore((s) => s.setActiveConversationId);
-  const startLoop = useConversationStore((s) => s.startLoop);
-  const cancelLoop = useConversationStore((s) => s.cancelLoop);
   const queueMessage = useConversationStore((s) => s.queueMessage);
   const interruptAndSend = useConversationStore((s) => s.interruptAndSend);
   const cancelQueuedMessage = useConversationStore((s) => s.cancelQueuedMessage);
@@ -139,11 +137,6 @@ export function Chat() {
   // (empty→non-empty, non-empty→empty), not on every keystroke.
   const [hasInput, setHasInput] = useState(false);
 
-  // Loop popup state
-  const [showLoopPopup, setShowLoopPopup] = useState(false);
-  const [loopCount, setLoopCount] = useState<'5' | '10' | '20'>('5');
-  const [clearContext, setClearContext] = useState(true);
-
   // Prompt palette state
   const [showPalette, setShowPalette] = useState(false);
 
@@ -155,7 +148,6 @@ export function Chat() {
   const [isUploading, setIsUploading] = useState(false);
 
   // Derive state variables early (before effects and handlers that use them)
-  const isLooping = conversation?.loopConfig?.isLooping ?? false;
   const confirmed = conversation?.confirmed ?? false;
   const isRunning = conversation?.isRunning ?? false;
   // isStreaming: server-authoritative — assistant is actively producing content.
@@ -167,7 +159,7 @@ export function Chat() {
   const isRunningRef = useRef(isRunning);
   isRunningRef.current = isRunning;
   // Allow input if confirmed, even if running (messages will queue)
-  const canInput = confirmed && !isLooping;
+  const canInput = confirmed;
   // Messages will be queued if running or streaming
   const willQueue = confirmed && (isRunning || isStreaming);
 
@@ -175,7 +167,6 @@ export function Chat() {
   const hasContent = hasInput || pendingFiles.length > 0;
 
   // Split queue: "sending" message is current (already visible in chat), only "pending" are truly queued.
-  // Loop state is read from loopConfig directly — not stored in the queue.
   const currentMessage = queue.find((m) => m.status === 'sending') ?? null;
   const pendingQueue = queue.filter((m) => m.status === 'pending');
 
@@ -371,69 +362,16 @@ export function Chat() {
 
   const timeAgo = useTimeAgo(lastMessageTime);
 
-  // Track which loop iteration groups are collapsed (default: expanded)
-  const [collapsedIterations, setCollapsedIterations] = useState<Set<number>>(new Set());
-
-  // Group messages by loop iteration for collapsible display.
-  // Non-loop messages are wrapped in { type: 'single' } groups.
-  // Loop iterations are wrapped in { type: 'loop-group' } with iteration metadata.
+  // Wrap messages into groups for VirtualizedMessageList
   const messageGroups = useMemo((): MessageGroup[] => {
     if (!conversation) return [];
-    const groups: MessageGroup[] = [];
-    let currentLoopGroup: MessageGroup | null = null;
-
-    for (const msg of conversation.messages) {
-      if (msg.isLoopMarker && msg.content.includes('Start')) {
-        currentLoopGroup = {
-          type: 'loop-group',
-          iteration: msg.loopIteration,
-          total: msg.loopTotal,
-          messages: [],
-        };
-        groups.push(currentLoopGroup);
-      } else if (msg.isLoopMarker && msg.content.includes('End')) {
-        currentLoopGroup = null;
-      } else if (msg.isLoopMarker && msg.content.includes('Error')) {
-        // Error markers — add to current group if open, otherwise standalone
-        if (currentLoopGroup) {
-          currentLoopGroup.messages.push(msg);
-        } else {
-          groups.push({ type: 'single', messages: [msg] });
-        }
-      } else if (currentLoopGroup) {
-        currentLoopGroup.messages.push(msg);
-      } else {
-        groups.push({ type: 'single', messages: [msg] });
-      }
-    }
-
-    // Mark the last loop-group as "running" if the conversation is still looping
-    if (isLooping && groups.length > 0) {
-      const lastGroup = groups[groups.length - 1];
-      if (lastGroup.type === 'loop-group') {
-        lastGroup.isRunning = true;
-      }
-    }
-
-    return groups;
-  }, [conversation?.messages, isLooping]);
+    return conversation.messages.map((msg) => ({ type: 'single' as const, messages: [msg] }));
+  }, [conversation?.messages]);
 
   const unifiedSubAgents = useMemo(() => {
     if (!conversation) return [];
     return buildUnifiedSubAgents(conversation, childSessionConversations);
   }, [conversation, childSessionConversations]);
-
-  const toggleIterationCollapse = useCallback((iteration: number) => {
-    setCollapsedIterations((prev) => {
-      const next = new Set(prev);
-      if (next.has(iteration)) {
-        next.delete(iteration);
-      } else {
-        next.add(iteration);
-      }
-      return next;
-    });
-  }, []);
 
   if (!conversation) {
     return (
@@ -529,21 +467,6 @@ export function Chat() {
     }
   };
 
-  const handleStartLoop = () => {
-    const content = getInputValue().trim();
-    if (content && id) {
-      startLoop(id, content, loopCount, clearContext);
-      clearInput();
-      setShowLoopPopup(false);
-    }
-  };
-
-  const handleCancelLoop = () => {
-    if (id) {
-      cancelLoop(id);
-    }
-  };
-
   const handleSavePrompt = () => {
     const content = getInputValue().trim();
     if (content) {
@@ -579,11 +502,6 @@ export function Chat() {
         </div>
         <div className="header-status">
           {!confirmed && <div className="ready-badge waiting">Starting...</div>}
-          {isLooping && (
-            <div className="loop-badge">
-              {conversation.loopConfig?.currentIteration}/{conversation.loopConfig?.totalIterations}
-            </div>
-          )}
           {currentMessage && (
             <div className="current-message-badge" title="Currently processing">
               Current
@@ -621,8 +539,6 @@ export function Chat() {
         <div className="messages-container-wrapper">
           <VirtualizedMessageList
             messageGroups={messageGroups}
-            collapsedIterations={collapsedIterations}
-            toggleIterationCollapse={toggleIterationCollapse}
             isRunning={isStreaming}
             lastMessageRef={lastMessageRef}
             onScrollStateChange={handleScrollStateChange}
@@ -653,28 +569,6 @@ export function Chat() {
       )}
 
       <div className="input-container">
-        {/* RALPH LOOP STATUS — shows Nx countdown and cancel button during active loop.
-            Popup offers 5x/10x/20x counts + clearContext toggle.
-            On "Start Loop", sends start_loop to server which orchestrates
-            all iterations. The queue area shows "Nx" countdown.
-            See docs/ralph_loop_design.md for full spec. */}
-        {isLooping && (
-          <div className="loop-active-bar">
-            <div className="loop-active-info">
-              <img src="/icons/ralph-wiggum.png" alt="" className="loop-active-icon" />
-              <span className="loop-active-count">
-                {conversation.loopConfig?.loopsRemaining ?? 0}x remaining
-              </span>
-              <span className="loop-active-prompt">
-                {conversation.loopConfig?.prompt?.substring(0, 60) ?? ''}
-              </span>
-            </div>
-            <button type="button" className="cancel-loop-btn" onClick={handleCancelLoop}>
-              Cancel
-            </button>
-          </div>
-        )}
-
         {/* Current message indicator — the "sending" message is already in chat, just label it */}
         {currentMessage && (
           <div className="current-message-indicator">
@@ -781,22 +675,17 @@ export function Chat() {
               title="Save prompt (Ctrl+P to recall)"
               disabled={!hasInput}
             >
-              <img src="/icons/save-prompt.png" alt="Save" className="save-icon" />
-            </button>
-            <button
-              type="button"
-              className="loop-btn"
-              onClick={() => setShowLoopPopup(!showLoopPopup)}
-              disabled={!canInput || !hasInput || willQueue}
-              title="Ralph Wiggum Loop"
-            >
-              <img src="/icons/ralph-wiggum.png" alt="Loop" className="loop-icon" />
+              <svg className="save-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <polyline points="17 21 17 13 7 13 7 21" />
+                <polyline points="7 3 7 8 15 8" />
+              </svg>
             </button>
             <button
               type="button"
               className={`send-btn ${willQueue ? 'interrupt-mode' : ''}`}
               onClick={willQueue ? handleInterrupt : handleSend}
-              disabled={!confirmed || !hasContent || isLooping}
+              disabled={!confirmed || !hasContent}
               title={
                 willQueue ? 'Enter: Interrupt & send | Tab: Queue' : 'Enter: Send | Tab: Queue'
               }
@@ -806,36 +695,6 @@ export function Chat() {
           </div>
         </div>
 
-        {showLoopPopup && (
-          <div className="loop-popup">
-            <div className="loop-header">Loop Options</div>
-            <div className="loop-options">
-              {(['5', '10', '20'] as const).map((n) => (
-                <label key={n} className={`loop-option ${loopCount === n ? 'selected' : ''}`}>
-                  <input
-                    type="radio"
-                    name="loopCount"
-                    value={n}
-                    checked={loopCount === n}
-                    onChange={() => setLoopCount(n)}
-                  />
-                  {n}x
-                </label>
-              ))}
-            </div>
-            <label className="clear-context-option">
-              <input
-                type="checkbox"
-                checked={clearContext}
-                onChange={(e) => setClearContext(e.target.checked)}
-              />
-              Clear context between iterations
-            </label>
-            <button type="button" className="start-loop-btn" onClick={handleStartLoop}>
-              Start Loop
-            </button>
-          </div>
-        )}
       </div>
 
       <PromptPalette

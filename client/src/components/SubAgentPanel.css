@@ -24,8 +24,12 @@
   cursor: pointer;
   user-select: none;
   background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-subtle);
-  transition: background 0.15s;
+  border-bottom: 1px solid transparent;
+  transition: background 0.15s, border-color 0.2s;
+}
+
+.subagent-panel:has(.subagent-tree-wrapper.expanded) .subagent-header {
+  border-bottom-color: var(--border-subtle);
 }
 
 .subagent-header:hover {
@@ -72,8 +76,24 @@
   font-size: 11px;
 }
 
+/* Tree view wrapper — animates open/close via grid row trick */
+.subagent-tree-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease-out;
+}
+
+.subagent-tree-wrapper.expanded {
+  grid-template-rows: 1fr;
+}
+
 /* Tree view container */
 .subagent-tree {
+  padding: 0 14px;
+  overflow: hidden;
+}
+
+.subagent-tree-wrapper.expanded .subagent-tree {
   padding: 8px 14px 12px 14px;
 }
 

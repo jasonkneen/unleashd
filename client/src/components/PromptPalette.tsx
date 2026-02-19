@@ -91,7 +91,20 @@ export function PromptPalette({ isOpen, onClose, onSelect }: Props) {
               >
                 <div className="prompt-item-header">
                   <span className="prompt-name">{prompt.name}</span>
-                  <span className="prompt-usage">used {prompt.usageCount}x</span>
+                  <div className="prompt-item-actions">
+                    <span className="prompt-usage">used {prompt.usageCount}x</span>
+                    <button
+                      type="button"
+                      className="prompt-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deletePrompt(prompt.id);
+                      }}
+                      title="Delete prompt"
+                    >
+                      &times;
+                    </button>
+                  </div>
                 </div>
                 <div className="prompt-preview">
                   {prompt.content.length > 100

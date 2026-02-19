@@ -170,23 +170,9 @@ export const MessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
   content: z.string(),
   timestamp: z.coerce.date(),
-  isLoopMarker: z.boolean().optional(),
-  loopIteration: z.number().int().positive().optional(),   // Which iteration (1-based) this msg belongs to
-  loopTotal: z.number().int().positive().optional(),        // Total iterations in the loop run
 });
 
 export type Message = z.infer<typeof MessageSchema>;
-
-export const LoopConfigSchema = z.object({
-  totalIterations: z.number().int().positive(),
-  currentIteration: z.number().int().nonnegative(),
-  loopsRemaining: z.number().int().nonnegative(),
-  clearContext: z.boolean(),
-  prompt: z.string(),
-  isLooping: z.boolean(),
-});
-
-export type LoopConfig = z.infer<typeof LoopConfigSchema>;
 
 // =============================================================================
 // Sub-Agent Types (for Task tool detection)
@@ -209,7 +195,6 @@ export const SubAgentSchema = z.object({
 export type SubAgent = z.infer<typeof SubAgentSchema>;
 
 // Queue types (shared between server state and client display).
-// Queue is for real messages only — loop state is read from loopConfig.
 export const QueuedMessageSchema = z.object({
   id: z.string(),
   content: z.string(),
@@ -270,7 +255,6 @@ export const ConversationSchema = z.object({
   confirmed: z.boolean().default(true),
   createdAt: z.coerce.date(),
   workingDirectory: z.string(),
-  loopConfig: LoopConfigSchema.nullable().optional(),
   provider: ProviderSchema.default('claude'),
   model: ModelIdSchema.optional(),  // Provider-specific model identifier (undefined = provider default)
   subAgents: z.array(SubAgentSchema).default([]),  // Active/recent sub-agents
@@ -340,6 +324,73 @@ export interface OompaRuntimeSnapshot {
 }
 
 // =============================================================================
+// Swarm Run Persistence Types (from oompa agentnet.runs)
+// These are the JSON shapes written to disk by oompa_loompas:
+//   runs/{swarm-id}/run.json       → SwarmRunLog
+//   runs/{swarm-id}/summary.json   → SwarmRunSummary (or server-synthesized)
+//   runs/{swarm-id}/reviews/*.json → SwarmReviewLog
+// Field names use hyphens to match the on-disk JSON keys.
+// =============================================================================
+
+/** Per-worker metrics within a swarm run summary. */
+export interface SwarmRunWorker {
+  id: string;
+  harness: string;
+  model: string;
+  status: string;
+  completed: number;
+  iterations: number;
+  merges: number;
+  rejections: number;
+  errors: number;
+  'review-rounds-total': number;
+}
+
+/** Aggregate summary of a completed (or synthesized) swarm run. */
+export interface SwarmRunSummary {
+  'swarm-id': string;
+  'finished-at': string;
+  /** Present when synthesized from run.json; absent in raw summary.json. */
+  'started-at'?: string;
+  'total-workers': number;
+  'total-completed': number;
+  'total-iterations': number;
+  'status-counts': Record<string, number>;
+  workers: SwarmRunWorker[];
+}
+
+/** Shape of runs/{swarm-id}/run.json — written at swarm start. */
+export interface SwarmRunLog {
+  'swarm-id': string;
+  'started-at': string;
+  'config-file': string;
+  workers: Array<{
+    id: string;
+    harness: string;
+    model: string;
+    iterations: number;
+  }>;
+}
+
+/** Shape of runs/{swarm-id}/reviews/*.json — one per review round. */
+export interface SwarmReviewLog {
+  'worker-id': string;
+  iteration: number;
+  round: number;
+  verdict: string;
+  timestamp: string;
+  output: string;
+  'diff-files': string[];
+}
+
+/** Container pairing a run log with its summary for a single swarm run. */
+export interface SwarmRun {
+  swarmId: string;
+  run: SwarmRunLog | null;
+  summary: SwarmRunSummary | null;
+}
+
+// =============================================================================
 // Client → Server Messages
 // =============================================================================
 
@@ -374,24 +425,6 @@ export const DeleteConversationMessageSchema = z.object({
 });
 
 export type DeleteConversationMessage = z.infer<typeof DeleteConversationMessageSchema>;
-
-// Loop Messages (Client → Server)
-export const StartLoopMessageSchema = z.object({
-  type: z.literal('start_loop'),
-  conversationId: z.string().uuid(),
-  prompt: z.string().min(1),
-  iterations: z.enum(['5', '10', '20']),
-  clearContext: z.boolean(),
-});
-
-export type StartLoopMessage = z.infer<typeof StartLoopMessageSchema>;
-
-export const CancelLoopMessageSchema = z.object({
-  type: z.literal('cancel_loop'),
-  conversationId: z.string().uuid(),
-});
-
-export type CancelLoopMessage = z.infer<typeof CancelLoopMessageSchema>;
 
 export const SetModelMessageSchema = z.object({
   type: z.literal('set_model'),
@@ -430,8 +463,6 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   SendMessageMessageSchema,
   StopConversationMessageSchema,
   DeleteConversationMessageSchema,
-  StartLoopMessageSchema,
-  CancelLoopMessageSchema,
   SetModelMessageSchema,
   QueueMessageSchema,
   CancelQueuedMessageSchema,
@@ -508,34 +539,6 @@ export const ErrorMessageSchema = z.object({
 
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 
-// Loop Messages (Server → Client)
-export const LoopIterationStartMessageSchema = z.object({
-  type: z.literal('loop_iteration_start'),
-  conversationId: z.string().uuid(),
-  currentIteration: z.number(),
-  totalIterations: z.number(),
-});
-
-export type LoopIterationStartMessage = z.infer<typeof LoopIterationStartMessageSchema>;
-
-export const LoopIterationEndMessageSchema = z.object({
-  type: z.literal('loop_iteration_end'),
-  conversationId: z.string().uuid(),
-  currentIteration: z.number(),
-  totalIterations: z.number(),
-  loopsRemaining: z.number(),
-});
-
-export type LoopIterationEndMessage = z.infer<typeof LoopIterationEndMessageSchema>;
-
-export const LoopCompleteMessageSchema = z.object({
-  type: z.literal('loop_complete'),
-  conversationId: z.string().uuid(),
-  totalIterations: z.number(),
-});
-
-export type LoopCompleteMessage = z.infer<typeof LoopCompleteMessageSchema>;
-
 // Sub-Agent Messages (Server -> Client)
 export const SubAgentStartMessageSchema = z.object({
   type: z.literal('subagent_start'),
@@ -593,9 +596,6 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   MessageCompleteMessageSchema,
   StatusMessageSchema,
   ErrorMessageSchema,
-  LoopIterationStartMessageSchema,
-  LoopIterationEndMessageSchema,
-  LoopCompleteMessageSchema,
   SubAgentStartMessageSchema,
   SubAgentUpdateMessageSchema,
   SubAgentCompleteMessageSchema,
@@ -689,6 +689,14 @@ export {
   isJsonlToolUseBlock,
   isJsonlToolResultBlock,
 } from './adapters/jsonl.types';
+
+// Oompa raw JSON file types (auto-generated from oompa_loompas schemas)
+export type {
+  OompaCycle,
+  OompaReviewLog,
+  OompaStarted,
+  OompaStopped,
+} from './generated/oompa-types';
 
 // Codex Native Session Types (for reading ~/.codex/sessions/)
 export {

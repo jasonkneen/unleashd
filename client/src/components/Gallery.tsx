@@ -258,7 +258,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
           <button className="back-to-gallery-btn" onClick={() => navigate('/')}>
             &#8592; Gallery
           </button>
-          <h2>Worker Conversations ({workerSessionCount})</h2>
+          <h2>Worker Sessions ({workerSessionCount})</h2>
         </div>
       ) : (
         <FolderFilter
@@ -306,18 +306,10 @@ export function Gallery({ filter }: GalleryProps = {}) {
                   <div className="project-grid">
                     {visibleConversations.map((conv) => {
                       // Determine conversation state
-                      const getState = () => {
-                        if (conv.loopConfig?.isLooping) return 'looping';
-                        if (conv.isRunning) return 'running';
-                        return 'idle';
-                      };
-                      const state = getState();
+                      const state = conv.isRunning ? 'running' : 'idle';
 
                       // Get state label with time-ago for idle conversations
                       const getStateLabel = () => {
-                        if (state === 'looping') {
-                          return `Looping ${conv.loopConfig?.currentIteration}/${conv.loopConfig?.totalIterations}`;
-                        }
                         if (state === 'running') return 'Running';
                         const lastTime = getLastMessageTime(conv.messages);
                         return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
@@ -445,16 +437,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
                     <>
                       <div className="project-grid">
                         {visibleConversations.map((conv) => {
-                          const getState = () => {
-                            if (conv.loopConfig?.isLooping) return 'looping';
-                            if (conv.isRunning) return 'running';
-                            return 'idle';
-                          };
-                          const state = getState();
+                          const state = conv.isRunning ? 'running' : 'idle';
                           const getStateLabel = () => {
-                            if (state === 'looping') {
-                              return `Looping ${conv.loopConfig?.currentIteration}/${conv.loopConfig?.totalIterations}`;
-                            }
                             if (state === 'running') return 'Running';
                             const lastTime = getLastMessageTime(conv.messages);
                             return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
@@ -542,9 +526,9 @@ export function Gallery({ filter }: GalleryProps = {}) {
                 <span className={`project-chevron ${!showWorkerConversations ? 'collapsed' : ''}`}>
                   &#9660;
                 </span>
-                {showWorkerConversations ? 'Hide' : 'Show'} {workerSessionCount} worker{workerSessionCount !== 1 ? 's' : ''}
+                {showWorkerConversations ? 'Hide' : 'Show'} {workerSessionCount} worker session{workerSessionCount !== 1 ? 's' : ''}
                 <span className="worker-sessions-hint">
-                  (oompa-spawned conversations)
+                  (oompa-spawned)
                 </span>
               </button>
             )}
@@ -581,16 +565,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
                     <>
                       <div className="project-grid">
                         {visibleConversations.map((conv) => {
-                          const getState = () => {
-                            if (conv.loopConfig?.isLooping) return 'looping';
-                            if (conv.isRunning) return 'running';
-                            return 'idle';
-                          };
-                          const state = getState();
+                          const state = conv.isRunning ? 'running' : 'idle';
                           const getStateLabel = () => {
-                            if (state === 'looping') {
-                              return `Looping ${conv.loopConfig?.currentIteration}/${conv.loopConfig?.totalIterations}`;
-                            }
                             if (state === 'running') return 'Running';
                             const lastTime = getLastMessageTime(conv.messages);
                             return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
@@ -721,16 +697,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
                     <>
                       <div className="project-grid">
                         {visibleConversations.map((conv) => {
-                          const getState = () => {
-                            if (conv.loopConfig?.isLooping) return 'looping';
-                            if (conv.isRunning) return 'running';
-                            return 'idle';
-                          };
-                          const state = getState();
+                          const state = conv.isRunning ? 'running' : 'idle';
                           const getStateLabel = () => {
-                            if (state === 'looping') {
-                              return `Looping ${conv.loopConfig?.currentIteration}/${conv.loopConfig?.totalIterations}`;
-                            }
                             if (state === 'running') return 'Running';
                             const lastTime = getLastMessageTime(conv.messages);
                             return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';

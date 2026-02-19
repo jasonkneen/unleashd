@@ -151,6 +151,17 @@ function makeMarkdownComponents(workingDirectory: string): Components {
         return <code className={className} {...rest}>{children}</code>;
       }
 
+      // Inline code containing a bare URL — render as clickable link.
+      // LLMs sometimes wrap URLs in backticks which prevents remark-gfm
+      // autolink detection.
+      if (!text.includes('\n') && /^https?:\/\/\S+$/.test(text)) {
+        return (
+          <a href={text} target="_blank" rel="noopener noreferrer">
+            <code {...rest}>{children}</code>
+          </a>
+        );
+      }
+
       const previewType = getPreviewType(text);
       if (!previewType) return <code className={className} {...rest}>{children}</code>;
       return <FilePreview path={text} type={previewType} workingDirectory={workingDirectory} />;
@@ -281,17 +292,12 @@ const MemoizedMessage = memo(function MemoizedMessage({ msg, className, forwarde
 // =============================================================================
 
 export interface MessageGroup {
-  type: 'single' | 'loop-group';
-  iteration?: number;
-  total?: number;
+  type: 'single';
   messages: Message[];
-  isRunning?: boolean;
 }
 
 interface VirtualizedMessageListProps {
   messageGroups: MessageGroup[];
-  collapsedIterations: Set<number>;
-  toggleIterationCollapse: (iteration: number) => void;
   isRunning: boolean;
   lastMessageRef: React.RefObject<HTMLDivElement | null>;
   onScrollStateChange: (isNearBottom: boolean, showScrollButton: boolean) => void;
@@ -304,16 +310,9 @@ interface VirtualizedMessageListProps {
 }
 
 // Estimate height based on content — rough approximation before measurement
-function estimateGroupSize(group: MessageGroup, isCollapsed: boolean): number {
-  if (group.type === 'loop-group' && isCollapsed) {
-    return 40; // Just the header
-  }
-
+function estimateGroupSize(group: MessageGroup): number {
   // Estimate based on message content length
   let totalHeight = 0;
-  if (group.type === 'loop-group') {
-    totalHeight += 40; // Header height
-  }
 
   for (const msg of group.messages) {
     const contentLength = msg.content?.length ?? 0;
@@ -327,8 +326,6 @@ function estimateGroupSize(group: MessageGroup, isCollapsed: boolean): number {
 
 export function VirtualizedMessageList({
   messageGroups,
-  collapsedIterations,
-  toggleIterationCollapse,
   isRunning,
   lastMessageRef,
   onScrollStateChange,
@@ -347,11 +344,7 @@ export function VirtualizedMessageList({
     count: messageGroups.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
-      const group = messageGroups[index];
-      const isCollapsed = group.type === 'loop-group' && group.iteration != null
-        ? collapsedIterations.has(group.iteration)
-        : false;
-      return estimateGroupSize(group, isCollapsed);
+      return estimateGroupSize(messageGroups[index]);
     },
     overscan: 3,
     measureElement: (element) => {
@@ -469,8 +462,6 @@ export function VirtualizedMessageList({
                 <VirtualizedGroup
                   group={group}
                   isLastGroup={isLastGroup}
-                  collapsedIterations={collapsedIterations}
-                  toggleIterationCollapse={toggleIterationCollapse}
                   lastMessageRef={lastMessageRef}
                   workingDirectory={workingDirectory}
                 />
@@ -484,14 +475,12 @@ export function VirtualizedMessageList({
 }
 
 // =============================================================================
-// VirtualizedGroup: Renders a single group (either single message or loop-group)
+// VirtualizedGroup: Renders a single message group
 // =============================================================================
 
 interface VirtualizedGroupProps {
   group: MessageGroup;
   isLastGroup: boolean;
-  collapsedIterations: Set<number>;
-  toggleIterationCollapse: (iteration: number) => void;
   lastMessageRef: React.RefObject<HTMLDivElement | null>;
   workingDirectory: string;
 }
@@ -499,51 +488,9 @@ interface VirtualizedGroupProps {
 const VirtualizedGroup = memo(function VirtualizedGroup({
   group,
   isLastGroup,
-  collapsedIterations,
-  toggleIterationCollapse,
   lastMessageRef,
   workingDirectory,
 }: VirtualizedGroupProps) {
-  if (group.type === 'loop-group' && group.iteration != null) {
-    const isCollapsed = collapsedIterations.has(group.iteration);
-    return (
-      <div className={`loop-iteration-group ${group.isRunning ? 'running' : ''}`}>
-        <div
-          className="loop-iteration-header"
-          onClick={() => toggleIterationCollapse(group.iteration!)}
-        >
-          <span className="loop-iteration-chevron">
-            {isCollapsed ? '\u25B6' : '\u25BC'}
-          </span>
-          <span className="loop-iteration-label">
-            Loop {group.iteration}/{group.total}
-          </span>
-          {group.isRunning && (
-            <span className="loop-iteration-running">running...</span>
-          )}
-          {isCollapsed && (
-            <span className="loop-iteration-collapsed-hint">
-              {group.messages.length} message{group.messages.length !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-        {!isCollapsed && group.messages.map((msg, mi) => {
-          const isLastMessage = isLastGroup && mi === group.messages.length - 1;
-          return (
-            <MemoizedMessage
-              key={mi}
-              msg={msg}
-              className={`message ${msg.role} ${msg.isLoopMarker ? 'loop-marker' : ''}`}
-              forwardedRef={isLastMessage ? lastMessageRef : undefined}
-              workingDirectory={workingDirectory}
-            />
-          );
-        })}
-      </div>
-    );
-  }
-
-  // Single (non-loop) messages
   return (
     <>
       {group.messages.map((msg, mi) => {
@@ -552,7 +499,7 @@ const VirtualizedGroup = memo(function VirtualizedGroup({
           <MemoizedMessage
             key={mi}
             msg={msg}
-            className={`message ${msg.role} ${msg.isLoopMarker ? 'loop-marker' : ''}`}
+            className={`message ${msg.role}`}
             forwardedRef={isLastMessage ? lastMessageRef : undefined}
             workingDirectory={workingDirectory}
           />
@@ -561,16 +508,7 @@ const VirtualizedGroup = memo(function VirtualizedGroup({
     </>
   );
 }, (prev, next) => {
-  // Only re-render if the group actually changed
   if (prev.group !== next.group) return false;
   if (prev.isLastGroup !== next.isLastGroup) return false;
-
-  // Check collapsed state for loop groups
-  if (prev.group.type === 'loop-group' && prev.group.iteration != null) {
-    const prevCollapsed = prev.collapsedIterations.has(prev.group.iteration);
-    const nextCollapsed = next.collapsedIterations.has(prev.group.iteration);
-    if (prevCollapsed !== nextCollapsed) return false;
-  }
-
   return true;
 });

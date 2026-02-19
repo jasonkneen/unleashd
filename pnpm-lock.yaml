@@ -81,6 +81,9 @@ importers:
       '@claude-web-view/shared':
         specifier: workspace:*
         version: link:../shared
+      '@nbardy/agent-cli':
+        specifier: ^0.1.0
+        version: link:../../agent-cli
       express:
         specifier: ^4.18.2
         version: 4.22.1

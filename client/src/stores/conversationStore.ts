@@ -123,13 +123,6 @@ interface ConversationStore {
   sendMessage: (conversationId: string, content: string) => void;
   stopConversation: (conversationId: string) => void;
   interruptAndSend: (conversationId: string, content: string) => void;
-  startLoop: (
-    conversationId: string,
-    prompt: string,
-    iterations: '5' | '10' | '20',
-    clearContext: boolean
-  ) => void;
-  cancelLoop: (conversationId: string) => void;
   // Queue operations — thin wrappers that send WS commands to the server.
   // Server owns the queue; client mirrors it via queue_updated broadcasts.
   queueMessage: (conversationId: string, content: string) => void;
@@ -185,7 +178,6 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       workingDirectory,
       provider,
       model,
-      loopConfig: null,
       subAgents: [],
       queue: [],
       isWorker: false, // User-created conversations are never workers
@@ -244,8 +236,11 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   /**
    * Interrupt a running conversation and send a new message.
-   * Kills the current process, clears any pending queue, then queues
-   * a wrapped message that tells the agent to continue with the adjustment.
+   * Kills the current process, then queues one wrapped message:
+   * - If pending queue items exist: include a "flushed pending tasks" block.
+   * - If no pending queue items: use a compact interruption-only format.
+   * This keeps interrupt behavior deterministic and prevents a long pending list
+   * from being replayed as many separate queue entries after resume.
    *
    * KEY BEHAVIOR: Enter while running = interrupt + adjusted prompt.
    * The server will kill the process, then the queue will auto-process
@@ -256,28 +251,32 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     if (!conv) return;
 
     const { _send } = get();
+    const pendingQueuedMessages = (conv.queue ?? []).filter((q) => q.status === 'pending');
+    const hasPendingTasks = pendingQueuedMessages.length > 0;
+    const pendingBlock = pendingQueuedMessages
+      .map((q, index) => `${index + 1}. ${q.content}`)
+      .join('\n');
 
     // Kill running process
     _send({ type: 'stop_conversation', conversationId });
 
-    // Clear any pending queue entries — the interrupt supersedes them
-    _send({ type: 'clear_queue', conversationId });
+    // Merge pending queue items into the interrupt payload and clear them
+    // so they are not replayed separately after the process exits.
+    if (hasPendingTasks) {
+      _send({ type: 'clear_queue', conversationId });
+    }
 
-    // Queue the wrapped interrupt message. Server will auto-process once
-    // the process exits and the conversation becomes ready again.
-    const wrappedContent = `We interrupted, please continue from the last input but with the adjustment: "${content}"`;
+    const wrappedContent = hasPendingTasks
+      ? [
+          'We interrupted and flushed the pending tasks.',
+          'Pending tasks flushed:',
+          pendingBlock,
+          '',
+          `This final message was added as an interruption: "${content}"`,
+        ].join('\n')
+      : `Interrupted.
+This final message was added as an interruption: "${content}"`;
     _send({ type: 'queue_message', conversationId, content: wrappedContent });
-  },
-
-  // Loop execution is server-driven. The server creates a synthetic "loop"
-  // queue entry for display (the "Nx" counter) and broadcasts it via queue_updated.
-  // The server sends loop_iteration_end events to decrement the counter.
-  startLoop: (conversationId, prompt, iterations, clearContext) => {
-    get()._send({ type: 'start_loop', conversationId, prompt, iterations, clearContext });
-  },
-
-  cancelLoop: (conversationId) => {
-    get()._send({ type: 'cancel_loop', conversationId });
   },
 
   // ---------------------------------------------------------------------------
@@ -345,7 +344,6 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
               workingDirectory: pc.workingDirectory,
               provider: pc.provider,
               model: pc.model,
-              loopConfig: null,
               subAgents: [],
               queue: [],
               isWorker: false, // Pending conversations from localStorage are never workers
@@ -483,45 +481,6 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
         flushChunkBuffer();
         // isStreaming is now server-authoritative — cleared by the status broadcast
         // that follows message_complete in the same WS frame. No client-side cleanup needed.
-        break;
-
-      case 'loop_iteration_start':
-      case 'loop_iteration_end':
-        set((state) => {
-          const conversations = new Map(state.conversations);
-          const conv = conversations.get(data.conversationId);
-          if (conv) {
-            conversations.set(data.conversationId, {
-              ...conv,
-              loopConfig: {
-                ...conv.loopConfig,
-                totalIterations: data.totalIterations,
-                currentIteration: data.currentIteration,
-                loopsRemaining:
-                  'loopsRemaining' in data
-                    ? data.loopsRemaining
-                    : (conv.loopConfig?.loopsRemaining ?? 0),
-                clearContext: conv.loopConfig?.clearContext ?? false,
-                prompt: conv.loopConfig?.prompt ?? '',
-                isLooping: true,
-              },
-            });
-          }
-          // Loop queue counter is updated server-side via queue_updated broadcast.
-          return { conversations };
-        });
-        break;
-
-      case 'loop_complete':
-        set((state) => {
-          const conversations = new Map(state.conversations);
-          const conv = conversations.get(data.conversationId);
-          if (conv) {
-            conversations.set(data.conversationId, { ...conv, loopConfig: null });
-          }
-          // Loop queue entry is cleared server-side via queue_updated broadcast.
-          return { conversations };
-        });
         break;
 
       // File polling: server detected external changes to JSONL files
