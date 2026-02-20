@@ -123,6 +123,7 @@ interface ConversationStore {
   sendMessage: (conversationId: string, content: string) => void;
   stopConversation: (conversationId: string) => void;
   interruptAndSend: (conversationId: string, content: string) => void;
+  setModel: (conversationId: string, model: ModelId) => void;
   // Queue operations — thin wrappers that send WS commands to the server.
   // Server owns the queue; client mirrors it via queue_updated broadcasts.
   queueMessage: (conversationId: string, content: string) => void;
@@ -277,6 +278,10 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       : `Interrupted.
 This final message was added as an interruption: "${content}"`;
     _send({ type: 'queue_message', conversationId, content: wrappedContent });
+  },
+
+  setModel: (conversationId, model) => {
+    get()._send({ type: 'set_model', conversationId, model });
   },
 
   // ---------------------------------------------------------------------------

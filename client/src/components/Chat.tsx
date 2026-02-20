@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { Conversation as SharedConversation } from '@claude-web-view/shared';
+import type { Conversation as SharedConversation, ModelId, ModelInfo } from '@claude-web-view/shared';
 import { useDropzone } from 'react-dropzone';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
 import { useConversationStore } from '../stores/conversationStore';
@@ -89,6 +89,33 @@ export function Chat() {
   const interruptAndSend = useConversationStore((s) => s.interruptAndSend);
   const cancelQueuedMessage = useConversationStore((s) => s.cancelQueuedMessage);
   const clearQueue = useConversationStore((s) => s.clearQueue);
+
+  const setModel = useConversationStore((s) => s.setModel);
+
+  // Model picker: fetch available models for the conversation's provider
+  const provider = conversation?.provider ?? 'claude';
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(`/api/models?provider=${provider}`)
+      .then((res) => res.json())
+      .then((data: ModelInfo[]) => setModels(data))
+      .catch(() => setModels([]));
+  }, [provider]);
+
+  // Click-outside to close model picker
+  useEffect(() => {
+    if (!modelPickerOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+        setModelPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [modelPickerOpen]);
 
   const { savePrompt } = useSavedPrompts();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -491,7 +518,43 @@ export function Chat() {
           <span className={`provider-badge provider-${conversation.provider || 'claude'}`}>
             {conversation.provider || 'claude'}
           </span>
-          {conversation.modelName && <span className="model-badge">{conversation.modelName}</span>}
+          {models.length > 0 && (
+            <div className="model-picker" ref={modelPickerRef}>
+              <button
+                type="button"
+                className="model-picker-trigger"
+                onClick={() => setModelPickerOpen((o) => !o)}
+              >
+                {models.find((m) => m.id === conversation.model)?.displayName
+                  ?? models.find((m) => m.isDefault)?.displayName
+                  ?? conversation.modelName
+                  ?? 'default'}
+                <span className="model-picker-caret">&#x25BE;</span>
+              </button>
+              {modelPickerOpen && (
+                <div className="model-picker-menu">
+                  {models.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={`model-picker-option ${
+                        m.id === (conversation.model ?? models.find((d) => d.isDefault)?.id)
+                          ? 'selected'
+                          : ''
+                      }`}
+                      onClick={() => {
+                        setModel(conversation.id, m.id as ModelId);
+                        setModelPickerOpen(false);
+                      }}
+                    >
+                      {m.displayName}
+                      {m.isDefault && <span className="model-default-tag">default</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <Link
             className="chat-dir"
             to={`/?folders=${encodeURIComponent(conversation.workingDirectory)}`}
