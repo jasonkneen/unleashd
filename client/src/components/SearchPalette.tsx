@@ -84,13 +84,21 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
 
   // Reset on open
   useEffect(() => {
-    if (isOpen) {
-      setQuery('');
-      setDebouncedQuery('');
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
+    if (!isOpen) return;
+    setQuery('');
+    setDebouncedQuery('');
+    setSelectedIndex(0);
+    const timer = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
   }, [isOpen]);
+
+  // Snapshot conversations only when the query or filter changes — not on every
+  // streaming chunk. The `conversations` Map reference updates on every streamed
+  // text_delta, which would re-run the full-text scan at ~60fps during streaming.
+  const conversationsSnapshot = useRef(conversations);
+  useEffect(() => {
+    conversationsSnapshot.current = conversations;
+  }, [debouncedQuery, filterDirectory]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const results: SearchResult[] = useMemo(() => {
     const trimmed = debouncedQuery.trim();
@@ -99,7 +107,7 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
     const lowerQuery = trimmed.toLowerCase();
     const matches: SearchResult[] = [];
 
-    for (const conv of conversations.values()) {
+    for (const conv of conversationsSnapshot.current.values()) {
       if (filterDirectory && !conv.workingDirectory.startsWith(filterDirectory)) continue;
       for (let i = 0; i < conv.messages.length; i++) {
         const msg = conv.messages[i];
@@ -118,7 +126,7 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
     }
 
     return matches;
-  }, [conversations, debouncedQuery, filterDirectory]);
+  }, [debouncedQuery, filterDirectory]);
 
   // Reset selection when results change
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on results length change
