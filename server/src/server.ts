@@ -797,6 +797,19 @@ class Conversation extends EventEmitter {
     this.sendMessage(next.content);
   }
 
+  // Harness/provider can only be changed before the first turn has started.
+  // Once a session has started, provider-specific state (session files, resume
+  // IDs, and message history) is no longer safely interchangeable.
+  canChangeProvider(): boolean {
+    return (
+      !this._hasStartedSession &&
+      this.messages.length === 0 &&
+      this.queue.length === 0 &&
+      !this.isRunning &&
+      !this.isStreaming
+    );
+  }
+
   toJSON(): ConversationData {
     return {
       id: this.id,
@@ -871,11 +884,18 @@ interface SetModelData {
   model?: ModelId;
 }
 
+interface SetProviderData {
+  type: 'set_provider';
+  conversationId: string;
+  provider: ProviderName;
+}
+
 type ClientMessageData =
   | NewConversationData
   | SendMessageData
   | StopConversationData
   | DeleteConversationData
+  | SetProviderData
   | QueueMessageData
   | CancelQueuedMessageData
   | ClearQueueData
@@ -1053,6 +1073,49 @@ wss.on('connection', (ws: WebSocket) => {
               `[WS] Model changed for ${data.conversationId}: ${data.model ?? 'default'}`
             );
             // Broadcast updated conversation
+            ws.send(
+              JSON.stringify({
+                type: 'conversation_created',
+                conversation: conv.toJSON(),
+              })
+            );
+          }
+          break;
+        }
+
+        case 'set_provider': {
+          const conv = conversations.get(data.conversationId);
+          if (conv) {
+            if (
+              data.provider !== 'claude' &&
+              data.provider !== 'codex' &&
+              data.provider !== 'opencode'
+            ) {
+              ws.send(
+                JSON.stringify({
+                  type: 'error',
+                  message: `Invalid provider: ${data.provider}. Must be 'claude', 'codex', or 'opencode'.`,
+                })
+              );
+              return;
+            }
+
+            if (!conv.canChangeProvider()) {
+              ws.send(
+                JSON.stringify({
+                  type: 'error',
+                  message: 'Harness can only be changed before the conversation starts.',
+                })
+              );
+              return;
+            }
+
+            conv.provider = data.provider;
+            conv.providerConfig = getProvider(data.provider);
+            // Reset model when switching provider to avoid invalid cross-provider IDs.
+            conv.model = undefined;
+            conv.modelName = null;
+            console.log(`[WS] Provider changed for ${data.conversationId}: ${data.provider}`);
             ws.send(
               JSON.stringify({
                 type: 'conversation_created',
@@ -1640,8 +1703,9 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
       status = 'done';
     }
 
-    // If swarm is stopped, force all non-terminal workers to done
-    if (swarmStopped && status !== 'done' && status !== 'error') {
+    // If swarm is not live (clean stop OR crashed without stopped.json),
+    // force all non-terminal workers to done — their "running" status is stale.
+    if (!isLive && status !== 'done' && status !== 'error') {
       status = 'done';
     }
 

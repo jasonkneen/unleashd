@@ -434,6 +434,14 @@ export const SetModelMessageSchema = z.object({
 
 export type SetModelMessage = z.infer<typeof SetModelMessageSchema>;
 
+export const SetProviderMessageSchema = z.object({
+  type: z.literal('set_provider'),
+  conversationId: z.string().uuid(),
+  provider: ProviderSchema,
+});
+
+export type SetProviderMessage = z.infer<typeof SetProviderMessageSchema>;
+
 // Queue Messages (Client → Server)
 export const QueueMessageSchema = z.object({
   type: z.literal('queue_message'),
@@ -463,6 +471,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   SendMessageMessageSchema,
   StopConversationMessageSchema,
   DeleteConversationMessageSchema,
+  SetProviderMessageSchema,
   SetModelMessageSchema,
   QueueMessageSchema,
   CancelQueuedMessageSchema,

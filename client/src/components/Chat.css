@@ -77,6 +77,95 @@
   color: var(--green);
 }
 
+.provider-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.provider-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.provider-picker-trigger:hover {
+  border-color: color-mix(in srgb, var(--yellow) 40%, transparent);
+  background: color-mix(in srgb, var(--yellow) 22%, transparent);
+}
+
+.provider-picker-trigger.claude {
+  background: color-mix(in srgb, var(--violet) 20%, transparent);
+  color: var(--violet);
+}
+
+.provider-picker-trigger.codex {
+  background: color-mix(in srgb, var(--cyan) 20%, transparent);
+  color: var(--cyan);
+}
+
+.provider-picker-trigger.opencode {
+  background: color-mix(in srgb, var(--green) 20%, transparent);
+  color: var(--green);
+}
+
+.provider-picker-caret {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.provider-picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 140px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 1000;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.provider-picker-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.provider-picker-option:hover {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+.provider-picker-option.selected {
+  background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
 /* Model badge */
 .model-badge {
   display: inline-block;

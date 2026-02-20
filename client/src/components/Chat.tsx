@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { Conversation as SharedConversation, ModelId, ModelInfo } from '@claude-web-view/shared';
+import type { Conversation as SharedConversation, ModelId, ModelInfo, Provider } from '@claude-web-view/shared';
 import { useDropzone } from 'react-dropzone';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
 import { useConversationStore } from '../stores/conversationStore';
@@ -89,6 +89,7 @@ export function Chat() {
   const interruptAndSend = useConversationStore((s) => s.interruptAndSend);
   const cancelQueuedMessage = useConversationStore((s) => s.cancelQueuedMessage);
   const clearQueue = useConversationStore((s) => s.clearQueue);
+  const setProvider = useConversationStore((s) => s.setProvider);
 
   const setModel = useConversationStore((s) => s.setModel);
 
@@ -96,7 +97,9 @@ export function Chat() {
   const provider = conversation?.provider ?? 'claude';
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
   const modelPickerRef = useRef<HTMLDivElement>(null);
+  const providerPickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch(`/api/models?provider=${provider}`)
@@ -105,12 +108,27 @@ export function Chat() {
       .catch(() => setModels([]));
   }, [provider]);
 
-  // Click-outside to close model picker
+  // Click-outside to close pickers
   useEffect(() => {
-    if (!modelPickerOpen) return;
+    if (!modelPickerOpen && !providerPickerOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
+      if (
+        modelPickerRef.current &&
+        !modelPickerRef.current.contains(e.target as Node) &&
+        providerPickerRef.current &&
+        !providerPickerRef.current.contains(e.target as Node)
+      ) {
+        setModelPickerOpen(false);
+        setProviderPickerOpen(false);
+        return;
+      }
+
       if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
         setModelPickerOpen(false);
+      }
+
+      if (providerPickerRef.current && !providerPickerRef.current.contains(e.target as Node)) {
+        setProviderPickerOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -180,6 +198,12 @@ export function Chat() {
   // isStreaming: server-authoritative — assistant is actively producing content.
   // See state machine docs in shared/src/index.ts.
   const isStreaming = conversation?.isStreaming ?? false;
+  const canChangeHarness =
+    confirmed &&
+    (conversation?.messages.length ?? 0) === 0 &&
+    (conversation?.queue.length ?? 0) === 0 &&
+    !isRunning &&
+    !isStreaming;
 
   // Ref to track running state for cleanup — closures in useEffect capture stale values,
   // so we need a ref to read current isRunning when the cleanup function executes.
@@ -187,6 +211,12 @@ export function Chat() {
   isRunningRef.current = isRunning;
   // Allow input if confirmed, even if running (messages will queue)
   const canInput = confirmed;
+  const availableProviders: Array<{ id: Provider; label: string }> = [
+    { id: 'claude', label: 'Claude' },
+    { id: 'codex', label: 'Codex' },
+    { id: 'opencode', label: 'OpenCode' },
+  ];
+
   // Messages will be queued if running or streaming
   const willQueue = confirmed && (isRunning || isStreaming);
 
@@ -515,15 +545,53 @@ export function Chat() {
       <div className="chat-header">
         <div className="chat-title">
           <span className="chat-id">{conversation.id.substring(0, 8)}</span>
-          <span className={`provider-badge provider-${conversation.provider || 'claude'}`}>
-            {conversation.provider || 'claude'}
-          </span>
+          {!canChangeHarness ? (
+            <span className={`provider-badge provider-${conversation.provider || 'claude'}`}>
+              {conversation.provider || 'claude'}
+            </span>
+          ) : (
+            <div className="provider-picker" ref={providerPickerRef}>
+              <button
+                type="button"
+                className={`provider-picker-trigger ${conversation.provider}`}
+                onClick={() => {
+                  setProviderPickerOpen((o) => !o);
+                  setModelPickerOpen(false);
+                }}
+              >
+                {conversation.provider || 'claude'}
+                <span className="provider-picker-caret">&#x25BE;</span>
+              </button>
+              {providerPickerOpen && (
+                <div className="provider-picker-menu">
+                  {availableProviders.map((provider) => (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      className={`provider-picker-option ${
+                        provider.id === conversation.provider ? 'selected' : ''
+                      }`}
+                      onClick={() => {
+                        setProvider(conversation.id, provider.id);
+                        setProviderPickerOpen(false);
+                      }}
+                    >
+                      {provider.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {models.length > 0 && (
             <div className="model-picker" ref={modelPickerRef}>
               <button
                 type="button"
                 className="model-picker-trigger"
-                onClick={() => setModelPickerOpen((o) => !o)}
+                onClick={() => {
+                  setModelPickerOpen((o) => !o);
+                  setProviderPickerOpen(false);
+                }}
               >
                 {models.find((m) => m.id === conversation.model)?.displayName
                   ?? models.find((m) => m.isDefault)?.displayName
