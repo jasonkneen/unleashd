@@ -30,12 +30,25 @@ const VIDEO_EXTENSIONS = /\.(mp4|webm)$/i;
  * Matches absolute paths (`/foo/bar.png`) and relative paths with at least one
  * directory separator (`test_outputs/render.png`). Bare filenames like `foo.png`
  * are rejected to avoid false-matching inline code in prose.
+ *
+ * IMPORTANT: This function handles SINGLE-LINE text only. Multi-line code blocks
+ * must go through classifyPathBlock() in VirtualizedMessageList.tsx, which calls
+ * getPreviewType per-line. Do NOT remove the newline guard below — it is defense
+ * in depth against a bug where a multi-line code block like:
+ *
+ *   ```
+ *   /path/to/img1.png
+ *   /path/to/img2.png
+ *   ...
+ *   /path/to/img3.png
+ *   ```
+ *
+ * was passed as ONE string to this function. Since the string has no spaces,
+ * contains "/", and ends with ".png", it matched — rendering the entire block
+ * as a single FilePreview (all paths collapsed into one line, no hover).
  */
 export function getPreviewType(text: string): 'image' | 'html' | 'video' | null {
-  // Reject multi-line text — a code block with multiple paths can slip past
-  // parsePathBlock (e.g. when "..." lines fail getPreviewType) and reach here
-  // as one big string. Without this check, the whole block matches as a single
-  // file path because it ends with ".png" and contains "/".
+  // DO NOT REMOVE: Rejects multi-line and whitespace text. See docstring above.
   if (text.includes(' ') || text.includes('\n')) return null;
   // Must contain at least one `/` (absolute or relative with directory)
   if (!text.includes('/')) return null;

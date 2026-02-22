@@ -7,10 +7,26 @@ import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
 import type { Root, Text, Break } from 'mdast';
 import type { Plugin } from 'unified';
+import { FilePreview, getPreviewType } from './FilePreview';
+import { ASK_USER_QUESTION_RE, parseAskUserQuestion, AskUserQuestionWidget } from './AskUserQuestion';
 
-// Inline remark-breaks: converts soft newlines in text to <br> hard breaks.
-// Standard Markdown collapses single newlines into spaces within a paragraph,
-// which makes plain-text lists (e.g. file paths) render as one long line.
+// =============================================================================
+// remarkBreaks — inline remark plugin (replaces the `remark-breaks` npm package)
+//
+// Standard Markdown collapses single newlines into spaces within a paragraph.
+// This means plain-text output (e.g. file path lists NOT in code fences) renders
+// as one long run-on line. This plugin converts soft newlines to <br> hard breaks
+// in the mdast, matching chat-UI expectations where each \n is a visual line break.
+//
+// SCOPE: Only affects text nodes inside paragraphs/lists/blockquotes. Does NOT
+// affect code blocks — those are `code` nodes in mdast with a `value` string
+// (no children), so this visitor skips them. Code block whitespace is preserved
+// by the <pre> element's `white-space: pre` CSS.
+//
+// WHY INLINE: The `remark-breaks` npm package does the same thing, but pnpm
+// workspace install was broken by an unrelated server dependency. This is ~20
+// lines and has zero external deps.
+// =============================================================================
 const remarkBreaks: Plugin<[], Root> = () => (tree) => {
   const visit = (node: Root | Root['children'][number]) => {
     if (!('children' in node)) return;
@@ -31,8 +47,6 @@ const remarkBreaks: Plugin<[], Root> = () => (tree) => {
   };
   visit(tree);
 };
-import { FilePreview, getPreviewType } from './FilePreview';
-import { ASK_USER_QUESTION_RE, parseAskUserQuestion, AskUserQuestionWidget } from './AskUserQuestion';
 
 // =============================================================================
 // VirtualizedMessageList: Renders large message lists efficiently using
@@ -241,6 +255,12 @@ function makeMarkdownComponents(workingDirectory: string): Components {
           return <code className={content.className} {...rest}>{children}</code>;
 
         case 'path_block':
+          // Mixed block: each line classified independently. file_path entries
+          // get FilePreview (icon + hover thumbnail), text_line entries (like
+          // "..." or headers) render as plain monospace text. This is the fix
+          // for the "many lines as one line" bug — the old parsePathBlock was
+          // all-or-nothing: if ANY line wasn't a valid path, the ENTIRE block
+          // lost FilePreview functionality.
           return (
             <code className={className} {...rest}>
               {content.entries.map((entry, i) => (
