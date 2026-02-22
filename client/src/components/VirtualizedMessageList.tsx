@@ -5,6 +5,32 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
+import type { Root, Text, Break } from 'mdast';
+import type { Plugin } from 'unified';
+
+// Inline remark-breaks: converts soft newlines in text to <br> hard breaks.
+// Standard Markdown collapses single newlines into spaces within a paragraph,
+// which makes plain-text lists (e.g. file paths) render as one long line.
+const remarkBreaks: Plugin<[], Root> = () => (tree) => {
+  const visit = (node: Root | Root['children'][number]) => {
+    if (!('children' in node)) return;
+    const next: typeof node.children = [];
+    for (const child of node.children) {
+      if (child.type === 'text') {
+        const lines = (child as Text).value.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (i > 0) next.push({ type: 'break' } as Break);
+          if (lines[i]) next.push({ type: 'text', value: lines[i] } as Text);
+        }
+      } else {
+        visit(child as Root['children'][number]);
+        next.push(child);
+      }
+    }
+    node.children = next as typeof node.children;
+  };
+  visit(tree);
+};
 import { FilePreview, getPreviewType } from './FilePreview';
 import { ASK_USER_QUESTION_RE, parseAskUserQuestion, AskUserQuestionWidget } from './AskUserQuestion';
 
@@ -85,41 +111,114 @@ function collapseToolLines(content: string): string {
   return result.join('\n');
 }
 
-// Factory for markdown component overrides. Returns a stable Components object
-// keyed on `workingDirectory` so react-markdown doesn't re-mount on every render.
-// Relative file paths (e.g. `test_outputs/render.png`) are resolved against
-// workingDirectory; absolute paths pass through unchanged.
-function makeMarkdownComponents(workingDirectory: string): Components {
-  const getCodeText = (children: unknown): string | null => {
-    if (typeof children === 'string') return children;
-    if (Array.isArray(children)) {
-      const text = children.map((child) => (typeof child === 'string' ? child : '')).join('');
-      return text.length > 0 ? text : null;
-    }
-    return null;
-  };
+// =============================================================================
+// Code Content Classification
+//
+// react-markdown v10 calls the custom `code` component for BOTH fenced code
+// blocks (`<pre><code>`) and inline code (`<code>`). There is no `inline` prop
+// in v10 — the only signals are:
+//   - className: present when a language tag is specified (e.g. ```python)
+//   - text content: fenced blocks have newlines, inline typically doesn't
+//
+// We classify code content into a discriminated union (CodeContent) and dispatch
+// to one handler per variant. This avoids the old fallthrough chain where a
+// rejected parsePathBlock silently fell to getPreviewType, which treated entire
+// multi-line blocks as a single image path (the "many lines as one line" bug).
+//
+// CONSTRAINT: parsePathBlock used to be all-or-nothing — if ANY line (like "...")
+// wasn't a valid file path, the entire block was rejected. classifyPathBlock
+// replaces it with per-line classification: valid paths → FilePreview with hover,
+// non-path lines → plain text. The block qualifies as a path_block if at least
+// one line is a valid file path.
+//
+// CONSTRAINT: getPreviewType only handles single-line text (rejects newlines).
+// Multi-line text MUST go through classifyPathBlock, never getPreviewType.
+// =============================================================================
 
-  const parsePathBlock = (
-    text: string,
-  ): Array<{ path: string; type: 'image' | 'html' | 'video' }> | null => {
-    const lines = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+// -- Types: what a single line within a multi-line code block can be -----------
+type PathBlockEntry =
+  | { kind: 'file_path'; path: string; type: 'image' | 'html' | 'video' }
+  | { kind: 'text_line'; text: string };
 
-    // Require at least 2 lines to avoid converting arbitrary single-line snippets.
-    if (lines.length < 2) return null;
+// -- Types: what the entire <code> element represents -------------------------
+type CodeContent =
+  | { kind: 'empty' }
+  | { kind: 'syntax_highlighted'; className: string }
+  | { kind: 'path_block'; entries: PathBlockEntry[] }
+  | { kind: 'clickable_url'; url: string }
+  | { kind: 'single_file_path'; path: string; type: 'image' | 'html' | 'video' }
+  | { kind: 'plain_code' };
 
-    const parsed = lines.map((line) => {
+// -- Canonicalization: classify each line independently -----------------------
+// Replaces the old parsePathBlock which returned null if ANY line failed.
+// Now every line gets a classification — valid paths become file_path entries
+// (rendered as FilePreview with hover), everything else becomes text_line
+// (rendered as plain monospace text).
+function classifyPathBlock(text: string): PathBlockEntry[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
       const type = getPreviewType(line);
-      if (!type) return null;
-      return { path: line, type };
+      if (type) return { kind: 'file_path' as const, path: line, type };
+      return { kind: 'text_line' as const, text: line };
     });
+}
 
-    if (parsed.some((entry) => entry == null)) return null;
-    return parsed as Array<{ path: string; type: 'image' | 'html' | 'video' }>;
-  };
+// -- Canonicalization: single entry point for all code content ----------------
+// Ordered by specificity: language-tagged > multi-line > single-line patterns.
+function classifyCodeContent(
+  text: string | null,
+  className: string | undefined,
+): CodeContent {
+  if (!text) return { kind: 'empty' };
 
+  // Language-tagged fenced blocks (className from rehype-highlight, e.g. "language-python").
+  // These always pass through to syntax highlighting — never interpreted as paths.
+  if (className) return { kind: 'syntax_highlighted', className };
+
+  // Multi-line: fenced code block without language tag.
+  if (text.includes('\n')) {
+    const entries = classifyPathBlock(text);
+    // Upgrade to path_block only if at least one line is a real file path.
+    // A block with zero file paths is just plain code.
+    if (entries.some((e) => e.kind === 'file_path')) {
+      return { kind: 'path_block', entries };
+    }
+    return { kind: 'plain_code' };
+  }
+
+  // Single-line: bare URL in backticks (remark-gfm can't autolink inside code spans).
+  if (/^https?:\/\/\S+$/.test(text)) {
+    return { kind: 'clickable_url', url: text };
+  }
+
+  // Single-line: file path with previewable extension.
+  const previewType = getPreviewType(text);
+  if (previewType) {
+    return { kind: 'single_file_path', path: text, type: previewType };
+  }
+
+  return { kind: 'plain_code' };
+}
+
+// -- Helpers ------------------------------------------------------------------
+
+function getCodeText(children: unknown): string | null {
+  if (typeof children === 'string') return children;
+  if (Array.isArray(children)) {
+    const text = children.map((child) => (typeof child === 'string' ? child : '')).join('');
+    return text.length > 0 ? text : null;
+  }
+  return null;
+}
+
+// -- Markdown component overrides ---------------------------------------------
+// Factory returns a stable Components object keyed on `workingDirectory` so
+// react-markdown doesn't re-mount on every render. Relative file paths are
+// resolved against workingDirectory; absolute paths pass through unchanged.
+function makeMarkdownComponents(workingDirectory: string): Components {
   return {
     a({ href, children, ...rest }) {
       return (
@@ -128,43 +227,44 @@ function makeMarkdownComponents(workingDirectory: string): Components {
         </a>
       );
     },
+    // Thin dispatcher: classify once, switch exhaustively, zero work in cases.
     code({ children, className, ...rest }) {
       const text = getCodeText(children)?.trim() ?? null;
-      if (!text) return <code {...rest}>{children}</code>;
+      const content = classifyCodeContent(text, className);
 
-      // Fenced code block of file paths (e.g. command output list) -> preview each line.
-      const pathBlock = text.includes('\n') ? parsePathBlock(text) : null;
-      if (pathBlock) {
-        return (
-          <code className={className} {...rest}>
-            {pathBlock.map((entry, i) => (
-              <span key={`${entry.path}-${i}`}>
-                <FilePreview path={entry.path} type={entry.type} workingDirectory={workingDirectory} />
-                {i < pathBlock.length - 1 && <br />}
-              </span>
-            ))}
-          </code>
-        );
+      switch (content.kind) {
+        case 'empty':
+        case 'plain_code':
+          return <code className={className} {...rest}>{children}</code>;
+
+        case 'syntax_highlighted':
+          return <code className={content.className} {...rest}>{children}</code>;
+
+        case 'path_block':
+          return (
+            <code className={className} {...rest}>
+              {content.entries.map((entry, i) => (
+                <span key={i}>
+                  {entry.kind === 'file_path'
+                    ? <FilePreview path={entry.path} type={entry.type} workingDirectory={workingDirectory} />
+                    : <span className="path-block-text-line">{entry.text}</span>
+                  }
+                  {i < content.entries.length - 1 && <br />}
+                </span>
+              ))}
+            </code>
+          );
+
+        case 'clickable_url':
+          return (
+            <a href={content.url} target="_blank" rel="noopener noreferrer">
+              <code {...rest}>{children}</code>
+            </a>
+          );
+
+        case 'single_file_path':
+          return <FilePreview path={content.path} type={content.type} workingDirectory={workingDirectory} />;
       }
-
-      if (className) {
-        return <code className={className} {...rest}>{children}</code>;
-      }
-
-      // Inline code containing a bare URL — render as clickable link.
-      // LLMs sometimes wrap URLs in backticks which prevents remark-gfm
-      // autolink detection.
-      if (!text.includes('\n') && /^https?:\/\/\S+$/.test(text)) {
-        return (
-          <a href={text} target="_blank" rel="noopener noreferrer">
-            <code {...rest}>{children}</code>
-          </a>
-        );
-      }
-
-      const previewType = getPreviewType(text);
-      if (!previewType) return <code className={className} {...rest}>{children}</code>;
-      return <FilePreview path={text} type={previewType} workingDirectory={workingDirectory} />;
     },
   };
 }
@@ -249,7 +349,7 @@ const MemoizedMessage = memo(function MemoizedMessage({ msg, className, forwarde
               return (
                 <Markdown
                   key={i}
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
                   rehypePlugins={[rehypeHighlight]}
                   components={mdComponents}
                 >
@@ -269,7 +369,7 @@ const MemoizedMessage = memo(function MemoizedMessage({ msg, className, forwarde
         ) : (
           // Fast path: no widgets, render as pure Markdown
           <Markdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             rehypePlugins={[rehypeHighlight]}
             components={mdComponents}
           >

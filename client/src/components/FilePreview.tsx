@@ -32,7 +32,11 @@ const VIDEO_EXTENSIONS = /\.(mp4|webm)$/i;
  * are rejected to avoid false-matching inline code in prose.
  */
 export function getPreviewType(text: string): 'image' | 'html' | 'video' | null {
-  if (text.includes(' ')) return null;
+  // Reject multi-line text — a code block with multiple paths can slip past
+  // parsePathBlock (e.g. when "..." lines fail getPreviewType) and reach here
+  // as one big string. Without this check, the whole block matches as a single
+  // file path because it ends with ".png" and contains "/".
+  if (text.includes(' ') || text.includes('\n')) return null;
   // Must contain at least one `/` (absolute or relative with directory)
   if (!text.includes('/')) return null;
   if (IMAGE_EXTENSIONS.test(text)) return 'image';

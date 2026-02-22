@@ -71,3 +71,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Non-path lines (e.g. "...") within a mixed path block */
+.path-block-text-line {
+  color: var(--text-muted);
+  font-family: inherit;
+}
