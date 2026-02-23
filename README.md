@@ -1,8 +1,24 @@
 # Chocolate Factory
 
-A web dashboard for your CLI coding agents. Reads conversations from Claude Code, Codex, OpenCode, and Gemini CLI — all in one place.
+A hackable client for agentic programming.
+
+Auto-reloads and lets you edit your own programming environment with agents as you code. Wishing your agent tool had a feature you need? Just open a conversation on `~/git/chocolate-factory` and ask for it.
+
+Just like Vim and Emacs ruled the old engineering flow with their open-source extension ecosystems, Chocolate Factory provides that same hackable baseline for the agent era.
 
 ![Chocolate Factory](docs/screenshots/gallery.png)
+
+## What it does
+
+A conversational UI for both individual agent chats and launching agent swarms. Built on top of [oompa](https://github.com/nbardy/oompa) (an open-source swarm library) and a shared CLI interface. Provides a modern web-based UI to get away from the slowness and feature-poor setup of TUIs.
+
+No more flipping between many CLIs trying to remember which one you did which work in. Cross-model, cross-client — one place for everything.
+
+**Features:**
+- Inline hover previews for image paths and videos
+- Multiple color palettes
+- Cross-agent folder-based organization
+- Cross-agent search
 
 ### Swarm Analytics
 
