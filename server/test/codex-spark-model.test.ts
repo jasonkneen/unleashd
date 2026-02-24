@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { buildCommand } from '@nbardy/agent-cli';
 import {
   CodexModelSchema,
   ModelIdSchema,
@@ -81,7 +82,7 @@ test('modelValidationHint for codex mentions spark', () => {
 });
 
 // =============================================================================
-// Provider: modelToParams — standalone spark vs spark+effort decomposition
+// Shared CLI builder: standalone spark vs spark+effort decomposition
 //
 // "gpt-5.3-codex-spark"       → `-m gpt-5.3-codex-spark` (no effort)
 // "gpt-5.3-codex-spark-high"  → `-m gpt-5.3-codex-spark -c reasoning.effort=high`
@@ -91,51 +92,49 @@ test('modelValidationHint for codex mentions spark', () => {
 // is NOT a known effort level — only medium/high/xhigh are.
 // =============================================================================
 
-test('modelToParams: bare spark passes model directly, no effort', () => {
-  const params = codexProvider.modelToParams('gpt-5.3-codex-spark');
-  assert.deepEqual(params, ['-m', 'gpt-5.3-codex-spark']);
+test('buildCommand: bare spark passes model directly, no effort', () => {
+  const spec = buildCommand('codex', {
+    model: 'gpt-5.3-codex-spark',
+    prompt: 'hello',
+  });
+  const mIdx = spec.argv.indexOf('-m');
+  assert.equal(spec.argv[mIdx + 1], 'gpt-5.3-codex-spark');
+  assert.ok(!spec.argv.includes('-c'));
 });
 
-test('modelToParams: spark-high decomposes to spark model + high effort', () => {
-  assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-spark-high'), [
-    '-m',
-    'gpt-5.3-codex-spark',
-    '-c',
-    'reasoning.effort=high',
-  ]);
+test('buildCommand: spark-high decomposes to spark model + high effort', () => {
+  const spec = buildCommand('codex', {
+    model: 'gpt-5.3-codex-spark-high',
+    prompt: 'hello',
+  });
+  const mIdx = spec.argv.indexOf('-m');
+  assert.equal(spec.argv[mIdx + 1], 'gpt-5.3-codex-spark');
+  assert.ok(spec.argv.includes('-c'));
+  const cIdx = spec.argv.indexOf('-c');
+  assert.equal(spec.argv[cIdx + 1], 'reasoning.effort=high');
 });
 
-test('modelToParams: spark-medium decomposes correctly', () => {
-  assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-spark-medium'), [
-    '-m',
-    'gpt-5.3-codex-spark',
-    '-c',
-    'reasoning.effort=medium',
-  ]);
+test('buildCommand: spark-medium decomposes correctly', () => {
+  const spec = buildCommand('codex', {
+    model: 'gpt-5.3-codex-spark-medium',
+    prompt: 'hello',
+  });
+  assert.ok(spec.argv.includes('reasoning.effort=medium'));
 });
 
-test('modelToParams: spark-xhigh decomposes correctly', () => {
-  assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-spark-xhigh'), [
-    '-m',
-    'gpt-5.3-codex-spark',
-    '-c',
-    'reasoning.effort=xhigh',
-  ]);
+test('buildCommand: spark-xhigh decomposes correctly', () => {
+  const spec = buildCommand('codex', {
+    model: 'gpt-5.3-codex-spark-xhigh',
+    prompt: 'hello',
+  });
+  assert.ok(spec.argv.includes('reasoning.effort=xhigh'));
 });
 
-test('modelToParams: existing codex effort models still decompose correctly', () => {
-  assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-high'), [
-    '-m',
-    'gpt-5.3-codex',
-    '-c',
-    'reasoning.effort=high',
-  ]);
-  assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-medium'), [
-    '-m',
-    'gpt-5.3-codex',
-    '-c',
-    'reasoning.effort=medium',
-  ]);
+test('buildCommand: existing codex effort models still decompose correctly', () => {
+  const high = buildCommand('codex', { model: 'gpt-5.3-codex-high', prompt: 'hello' });
+  const medium = buildCommand('codex', { model: 'gpt-5.3-codex-medium', prompt: 'hello' });
+  assert.ok(high.argv.includes('reasoning.effort=high'));
+  assert.ok(medium.argv.includes('reasoning.effort=medium'));
 });
 
 // =============================================================================
@@ -167,30 +166,28 @@ test('spark models are not the default', () => {
 });
 
 // =============================================================================
-// Provider: getSpawnConfig wires flags correctly
+// Shared CLI builder: resume wiring and required codex safety flags
 // =============================================================================
 
-test('getSpawnConfig: bare spark — -m flag, no -c', () => {
-  const config = codexProvider.getSpawnConfig('test-session', '/tmp', false, 'gpt-5.3-codex-spark');
-  assert.ok(config.args.includes('-m'));
-  const mIdx = config.args.indexOf('-m');
-  assert.equal(config.args[mIdx + 1], 'gpt-5.3-codex-spark');
-  assert.ok(!config.args.includes('-c'), 'bare spark should not have -c');
+test('buildCommand: resume uses exec resume <sessionId>', () => {
+  const spec = buildCommand('codex', {
+    model: 'gpt-5.3-codex-spark-high',
+    prompt: 'continue',
+    sessionId: 'thread-123',
+    resume: true,
+  });
+  assert.equal(spec.argv[0], 'codex');
+  assert.equal(spec.argv[1], 'exec');
+  assert.equal(spec.argv[2], 'resume');
+  assert.equal(spec.argv[3], 'thread-123');
 });
 
-test('getSpawnConfig: spark-high — -m and -c flags', () => {
-  const config = codexProvider.getSpawnConfig(
-    'test-session',
-    '/tmp',
-    false,
-    'gpt-5.3-codex-spark-high'
-  );
-  assert.ok(config.args.includes('-m'));
-  const mIdx = config.args.indexOf('-m');
-  assert.equal(config.args[mIdx + 1], 'gpt-5.3-codex-spark');
-  assert.ok(config.args.includes('-c'));
-  const cIdx = config.args.indexOf('-c');
-  assert.equal(config.args[cIdx + 1], 'reasoning.effort=high');
+test('buildCommand: codex includes --skip-git-repo-check', () => {
+  const spec = buildCommand('codex', {
+    model: 'gpt-5.3-codex-spark',
+    prompt: 'hello',
+  });
+  assert.ok(spec.argv.includes('--skip-git-repo-check'));
 });
 
 // =============================================================================

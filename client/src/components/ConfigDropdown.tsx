@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAtomValue } from 'jotai';
+import { wsStatusAtom } from '../atoms/conversations';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ColorPalettePicker } from './ColorPalettePicker';
 import { UsagePanel } from './UsagePanel';
@@ -10,6 +12,7 @@ export function ConfigDropdown() {
   const [showUsagePanel, setShowUsagePanel] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore((s) => s.settings);
+  const wsStatus = useAtomValue(wsStatusAtom);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -48,6 +51,12 @@ export function ConfigDropdown() {
 
       {isOpen && (
         <div className="config-menu">
+          <div className="config-item status-item">
+            <span className="config-item-icon">
+              <span className={`status-dot ${wsStatus}`} style={{ marginLeft: '4px' }} />
+            </span>
+            <span className="config-item-label" style={{ textTransform: 'capitalize' }}>{wsStatus}</span>
+          </div>
           <button
             type="button"
             className="config-item"

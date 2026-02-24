@@ -319,16 +319,17 @@ const handleSubmit = () => {
 
 ### 2. Provider Pattern for CLI Agents
 
-All CLI agent integrations (Claude, Codex, OpenCode) implement the `Provider` interface in `server/src/providers/index.ts`.
+All CLI agent integrations (Claude, Codex, OpenCode, Gemini) are executed through `@nbardy/agent-cli` `executeCommand`.
+`server/src/providers/index.ts` is now a metadata registry for provider name + model listing.
 
 **Two usage modes**:
-1. **Conversation mode**: `getSpawnConfig()` + `parseOutput()` + `formatInput()` for stateful streaming sessions
-2. **Single-shot mode**: `getSingleShotConfig(prompt)` for one-off tasks (palette generation, etc.)
+1. **Conversation mode**: `executeCommand({ mode: 'conversation', ... })` for stateful streaming turns
+2. **Single-shot mode**: `executeCommand({ mode: 'single-shot', ... })` for one-off tasks (palette generation, etc.)
 
 **Adding a new provider**:
-1. Create `server/src/providers/{name}.ts` implementing `Provider`
+1. Add harness/build + event normalization in `agent-cli-tool`
 2. Add to `ProviderSchema` in `shared/src/index.ts`
-3. Register in the `providers` record in `server/src/providers/index.ts`
+3. Register provider metadata (`listModels`) in `server/src/providers/index.ts`
 4. See `docs/agent_client_spec.md` for protocol spec
 
 ---

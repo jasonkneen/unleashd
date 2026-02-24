@@ -162,7 +162,7 @@ export function Sidebar() {
   const collapsedSet = useMemo(() => new Set(galleryCollapsedProjects), [galleryCollapsedProjects]);
 
   // Count active workers (isRunning && isWorker && not promoted) for the sidebar nav button
-  const { hasWorkers, activeWorkerCount, totalWorkerCount } = useMemo(() => {
+  const { hasWorkers } = useMemo(() => {
     let nextActive = 0;
     let nextTotal = 0;
     let nextHasWorkers = false;
@@ -283,59 +283,46 @@ export function Sidebar() {
     }
   };
 
-  const activeConversationCount = topLevelConversations.length;
-  const completedSwarmCount = totalWorkerCount - activeWorkerCount;
-
   return (
     <div className="sidebar">
       <div className="sidebar-header">
         {/* ── Conversations Section ── */}
         <div className="nav-section">
-          <div className="nav-section-header">
-            <button
-              type="button"
-              className="nav-create-btn"
-              onClick={handleNewConversation}
-              title="New conversation (Shift+Space)"
-            >
-              +
-            </button>
+          <div className="nav-section-header" style={{ justifyContent: 'space-between' }}>
             <button type="button" className="nav-section-label" onClick={() => navigate('/')}>
               Conversations
             </button>
-            <button
-              type="button"
-              className="nav-create-btn"
-              onClick={() => {
-                setSearchFilterDir(undefined);
-                setShowSearch(true);
-              }}
-              title="Search conversations (Cmd+K)"
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
-                <line
-                  x1="11"
-                  y1="11"
-                  x2="14.5"
-                  y2="14.5"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-            <div className="nav-section-counts">
-              <span className="nav-count">{activeConversationCount} Active</span>
-              {doneConversations.length > 0 && (
-                <button
-                  type="button"
-                  className="nav-count nav-count-link"
-                  onClick={() => navigate('/done')}
-                >
-                  {doneConversations.length} Done
-                </button>
-              )}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                className="nav-create-btn"
+                onClick={() => {
+                  setSearchFilterDir(undefined);
+                  setShowSearch(true);
+                }}
+                title="Search conversations (Cmd+K)"
+              >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
+                  <line
+                    x1="11"
+                    y1="11"
+                    x2="14.5"
+                    y2="14.5"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="nav-create-btn"
+                onClick={handleNewConversation}
+                title="New conversation (Shift+Space)"
+              >
+                +
+              </button>
             </div>
           </div>
         </div>
@@ -343,15 +330,7 @@ export function Sidebar() {
         {/* ── Swarms Section ── */}
         {hasWorkers && (
           <div className="nav-section">
-            <div className="nav-section-header">
-              <button
-                type="button"
-                className="nav-create-btn nav-create-btn--swarm"
-                onClick={() => navigate('/workers')}
-                title="View swarms"
-              >
-                +
-              </button>
+            <div className="nav-section-header" style={{ justifyContent: 'space-between' }}>
               <button
                 type="button"
                 className="nav-section-label"
@@ -359,25 +338,13 @@ export function Sidebar() {
               >
                 Swarms
               </button>
-              <div className="nav-section-counts">
-                {activeWorkerCount > 0 && (
-                  <span className="nav-count nav-count--running">{activeWorkerCount} Running</span>
-                )}
-                {completedSwarmCount > 0 && (
-                  <span className="nav-count">{completedSwarmCount} Completed</span>
-                )}
-              </div>
-            </div>
-            <div className="nav-section-sub">
-              <button type="button" className="nav-sub-link" onClick={() => navigate('/workers')}>
-                Dashboard
-              </button>
               <button
                 type="button"
-                className="nav-sub-link"
-                onClick={() => navigate('/workers/analytics')}
+                className="nav-create-btn nav-create-btn--swarm"
+                onClick={() => navigate('/workers')}
+                title="View swarms"
               >
-                Analytics
+                +
               </button>
             </div>
           </div>
@@ -463,52 +430,42 @@ export function Sidebar() {
           }}
           filterDirectory={searchFilterDir}
         />
-
-        <div className="sidebar-status-row">
-          <div className="ws-status">
-            <span className={`status-dot ${wsStatus}`} />
-            {wsStatus}
-          </div>
-          <div className="view-mode-toggle">
-            <button
-              type="button"
-              className={`view-mode-btn ${sidebarViewMode === 'grouped' ? 'active' : ''}`}
-              onClick={() => setSidebarViewMode('grouped')}
-              title="Grouped by folder"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect x="1" y="1" width="12" height="3" rx="1" fill="currentColor" opacity="0.5" />
-                <rect x="3" y="5.5" width="10" height="2" rx="0.5" fill="currentColor" />
-                <rect x="3" y="8.5" width="10" height="2" rx="0.5" fill="currentColor" />
-                <rect
-                  x="1"
-                  y="11.5"
-                  width="12"
-                  height="1.5"
-                  rx="0.5"
-                  fill="currentColor"
-                  opacity="0.5"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`view-mode-btn ${sidebarViewMode === 'list' ? 'active' : ''}`}
-              onClick={() => setSidebarViewMode('list')}
-              title="Flat list"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect x="1" y="1" width="12" height="2" rx="0.5" fill="currentColor" />
-                <rect x="1" y="4.5" width="12" height="2" rx="0.5" fill="currentColor" />
-                <rect x="1" y="8" width="12" height="2" rx="0.5" fill="currentColor" />
-                <rect x="1" y="11.5" width="12" height="2" rx="0.5" fill="currentColor" />
-              </svg>
-            </button>
-          </div>
-        </div>
       </div>
 
       <div className="conversations-list">
+        {(topLevelConversations.length > 0) && (
+          <div className="sidebar-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span>{sidebarViewMode === 'list' ? 'All Conversations' : 'Recent Projects'}</span>
+            <div className="view-mode-toggle">
+              <button
+                type="button"
+                className={`view-mode-btn ${sidebarViewMode === 'grouped' ? 'active' : ''}`}
+                onClick={() => setSidebarViewMode('grouped')}
+                title="Grouped by folder"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <rect x="1" y="1" width="12" height="3" rx="1" fill="currentColor" opacity="0.5" />
+                  <rect x="3" y="5.5" width="10" height="2" rx="0.5" fill="currentColor" />
+                  <rect x="3" y="8.5" width="10" height="2" rx="0.5" fill="currentColor" />
+                  <rect x="1" y="11.5" width="12" height="1.5" rx="0.5" fill="currentColor" opacity="0.5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`view-mode-btn ${sidebarViewMode === 'list' ? 'active' : ''}`}
+                onClick={() => setSidebarViewMode('list')}
+                title="Flat list"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <rect x="1" y="1" width="12" height="2" rx="0.5" fill="currentColor" />
+                  <rect x="1" y="4.5" width="12" height="2" rx="0.5" fill="currentColor" />
+                  <rect x="1" y="8" width="12" height="2" rx="0.5" fill="currentColor" />
+                  <rect x="1" y="11.5" width="12" height="2" rx="0.5" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
         {sidebarViewMode === 'list' ? (
           topLevelConversations.map((conv) => (
             <ConversationItem
@@ -525,7 +482,6 @@ export function Sidebar() {
           <>
             {recentGroups.length > 0 && (
               <div className="sidebar-section">
-                <div className="sidebar-section-header">Recent Projects</div>
                 {recentGroups.map((group) => {
                   const isCollapsed = collapsedSet.has(group.directory);
                   const dirDisplay = group.directory.replace(/^\/Users\/[^/]+/, '~');

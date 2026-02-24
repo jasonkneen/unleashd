@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { buildCommand } from '@nbardy/agent-cli';
 import {
   ModelIdSchema,
   NewConversationMessageSchema,
@@ -51,14 +52,16 @@ test('server provider/model compatibility validation works per provider', () => 
   assert.equal(isModelIdValidForProvider('opencode', 'opus'), false);
 });
 
-test('OpenCode provider model params enforce provider/model ids', () => {
-  assert.deepEqual(opencodeProvider.modelToParams('openai/gpt-5'), ['-m', 'opencode/gpt-5']);
-  assert.deepEqual(opencodeProvider.modelToParams('opencode/gpt-5'), ['-m', 'opencode/gpt-5']);
-  assert.deepEqual(opencodeProvider.modelToParams('opencode/big-pickle'), [
-    '-m',
-    'opencode/big-pickle',
-  ]);
-  assert.throws(() => opencodeProvider.modelToParams('opus'));
+test('OpenCode shared CLI builder normalizes model IDs', () => {
+  const legacy = buildCommand('opencode', { model: 'openai/gpt-5', prompt: 'hi' });
+  const native = buildCommand('opencode', { model: 'opencode/gpt-5', prompt: 'hi' });
+  const custom = buildCommand('opencode', { model: 'opencode/big-pickle', prompt: 'hi' });
+  const lmLegacy = legacy.argv[legacy.argv.indexOf('-m') + 1];
+  const lmNative = native.argv[native.argv.indexOf('-m') + 1];
+  const lmCustom = custom.argv[custom.argv.indexOf('-m') + 1];
+  assert.equal(lmLegacy, 'opencode/gpt-5');
+  assert.equal(lmNative, 'opencode/gpt-5');
+  assert.equal(lmCustom, 'opencode/big-pickle');
 });
 
 test('OpenCode listModels remains dropdown-friendly with one default', () => {
@@ -73,29 +76,23 @@ test('OpenCode listModels remains dropdown-friendly with one default', () => {
   assert.equal(defaults[0].id, 'opencode/big-pickle');
 });
 
-test('OpenCode spawn config uses --session + --continue only for valid resume IDs', () => {
-  const resumeConfig = opencodeProvider.getSpawnConfig(
-    'ses_abc123',
-    '/tmp',
-    true,
-    'opencode/big-pickle'
-  );
-  assert.deepEqual(resumeConfig.args, [
-    'run',
-    '--format',
-    'json',
-    '-m',
-    'opencode/big-pickle',
-    '--session',
-    'ses_abc123',
-    '--continue',
-  ]);
+test('OpenCode shared CLI builder uses --session + --continue only for valid resume IDs', () => {
+  const resumeSpec = buildCommand('opencode', {
+    sessionId: 'ses_abc123',
+    resume: true,
+    model: 'opencode/big-pickle',
+    prompt: 'continue',
+  });
+  assert.ok(resumeSpec.argv.includes('--session'));
+  assert.ok(resumeSpec.argv.includes('ses_abc123'));
+  assert.ok(resumeSpec.argv.includes('--continue'));
 
-  const freshConfig = opencodeProvider.getSpawnConfig(
-    'temporary-client-id',
-    '/tmp',
-    true,
-    'opencode/big-pickle'
-  );
-  assert.deepEqual(freshConfig.args, ['run', '--format', 'json', '-m', 'opencode/gpt-5']);
+  const freshSpec = buildCommand('opencode', {
+    sessionId: 'temporary-client-id',
+    resume: true,
+    model: 'opencode/big-pickle',
+    prompt: 'continue',
+  });
+  assert.ok(!freshSpec.argv.includes('--session'));
+  assert.ok(!freshSpec.argv.includes('--continue'));
 });

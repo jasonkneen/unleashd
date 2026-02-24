@@ -85,64 +85,13 @@
   border: none;
   padding: 0;
   cursor: pointer;
-  transition: color 0.1s;
+  transition: color 0.15s, text-shadow 0.15s;
   white-space: nowrap;
 }
 
 .nav-section-label:hover {
   color: var(--text-emphasis);
-}
-
-/* Right-aligned count badges */
-.nav-section-counts {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.nav-count {
-  font-size: 10px;
-  font-family: monospace;
-  color: var(--text-muted);
-  white-space: nowrap;
-  background: none;
-  border: none;
-  padding: 0;
-}
-
-.nav-count-link {
-  cursor: pointer;
-  transition: color 0.1s;
-}
-
-.nav-count-link:hover {
-  color: var(--text-primary);
-}
-
-.nav-count--running {
-  color: var(--green-bright);
-}
-
-/* Sub-links row beneath swarms section header */
-.nav-section-sub {
-  display: flex;
-  gap: 0;
-  padding: 0 0 2px 28px;
-}
-
-.nav-sub-link {
-  font-size: 10px;
-  color: var(--text-muted);
-  background: none;
-  border: none;
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: color 0.1s;
-}
-
-.nav-sub-link:hover {
-  color: var(--text-emphasis);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--text-emphasis) 40%, transparent);
 }
 
 /* New Conversation Modal — centered popup overlay */
@@ -332,24 +281,6 @@
 
 .dir-cancel-btn:hover {
   background: var(--border-color);
-}
-
-/* Status row: ws-status on left, view toggle on right */
-.sidebar-status-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.ws-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* View mode toggle: grouped vs list */

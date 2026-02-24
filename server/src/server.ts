@@ -1,4 +1,4 @@
-import { type ChildProcess, execSync, spawn } from 'node:child_process';
+import { type ChildProcess, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -22,11 +22,12 @@ import type {
   ServerMessage,
   SubAgent,
 } from '@claude-web-view/shared';
+import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadAllConversations, pollForChanges } from './adapters/loader';
-import { type Provider, ProviderParseError, getProvider, providers } from './providers';
+import { type ProviderEvent, getProvider, providers } from './providers';
 import { isModelIdValidForProvider, modelValidationHint } from './providers/model-validation';
 
 import multer from 'multer';
@@ -146,6 +147,17 @@ function stderrSnippet(value: string, maxLength = 400): string {
   return tail.length > maxLength ? `${tail.slice(0, maxLength - 3)}...` : tail;
 }
 
+const OUT_OF_TOKENS_PATTERN =
+  /out of tokens|token limit|usage limit|insufficient (?:credits|balance)|exceeded(?: your)?(?: current)? quota|credit balance|rate limit exceeded/i;
+
+function normalizeProviderErrorMessage(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) return 'Unknown provider error';
+  if (!OUT_OF_TOKENS_PATTERN.test(trimmed)) return trimmed;
+  if (/^out of tokens:/i.test(trimmed)) return trimmed;
+  return `Out of tokens: ${trimmed}`;
+}
+
 // =============================================================================
 // Conversation Class
 // =============================================================================
@@ -192,7 +204,6 @@ class Conversation extends EventEmitter {
   workingDirectory: string;
   provider: ProviderName;
   model: ModelId | undefined; // Provider-specific model identifier (e.g. 'opus', 'gpt-5.3-codex-high')
-  providerConfig: Provider | null;
   // Oompa worker detection — true if first user message started with "[oompa]".
   // Set during JSONL loading, preserved across restarts.
   isWorker: boolean;
@@ -219,11 +230,9 @@ class Conversation extends EventEmitter {
   private _pendingTaskTools: Map<string, { id: string; startedAt: Date }>;
   // Track if we've started a CLI session (for --resume vs --session-id)
   private _hasStartedSession: boolean;
-  // Buffer for incomplete JSON lines from stdout
-  private _stdoutBuffer: string;
   // Buffer stderr for this process run so silent failures can be surfaced to UI.
   private _stderrBuffer: string;
-  // Tracks whether we received provider JSON events for this process run.
+  // Tracks whether we received provider stream events for this process run.
   private _sawStdoutEventThisRun: boolean;
   // When true, close handler is a no-op — resetProcess() handles its own cleanup.
   // Prevents duplicate broadcasts and spurious dequeue during loop context resets.
@@ -276,30 +285,24 @@ class Conversation extends EventEmitter {
     this.parentConversationId = parentConversationId;
     this.modelName = modelName;
     this.swarmDebugPrefix = swarmDebugPrefix;
-    this.providerConfig = getProvider(provider);
     this.subAgents = [];
     this.queue = [];
     this._pendingTaskTools = new Map();
     // Mark session as started if loading existing (use --resume for next message)
     this._hasStartedSession = existingSessionId !== undefined;
-    this._stdoutBuffer = '';
     this._stderrBuffer = '';
     this._sawStdoutEventThisRun = false;
     this._isResetting = false;
   }
 
   /**
-   * Send a message by spawning a new CLI process.
+   * Send a message via executeCommand (conversation mode).
    *
    * HYBRID SYNC STRATEGY:
-   * 1. STDOUT (Live): Used for real-time UI interactivity ("typewriter" effect).
-   *    CLI agents (Gemini, Codex) only write to disk after the process exits.
-   *    Streaming stdout is mandatory to prevent the UI from appearing frozen.
-   * 2. DISK (Persistence): Used for rehydration and history. The file poller
-   *    ensures that sessions are preserved across server restarts and refreshes.
+   * 1. Event stream (live): drives UI text streaming in real time.
+   * 2. Disk poller (persistence): rehydrates sessions/history across restarts.
    *
-   * Claude CLI requires stdin EOF to process input, so we spawn fresh for each message.
-   * First message uses --session-id, subsequent messages use --resume.
+   * First turn omits resumeSessionId; subsequent turns resume with the captured session ID.
    */
   private spawnForMessage(content: string): void {
     if (this.isRunning) {
@@ -313,144 +316,93 @@ class Conversation extends EventEmitter {
     );
     console.log(`[${this.id}] Message: "${content.substring(0, 50)}"`);
 
-    // Reset stdout buffer for new process
-    this._stdoutBuffer = '';
+    // Reset per-run buffers
     this._stderrBuffer = '';
     this._sawStdoutEventThisRun = false;
     this._processStartTime = Date.now();
 
-    // Use sessionId (not conversation id) for CLI session tracking
-    const spawnConfig = this.providerConfig!.getSpawnConfig(
-      this.sessionId,
-      this.workingDirectory,
-      shouldResume,
-      this.model,
-      content
-    );
-    // Detached: child gets own process group, survives server SIGTERM (hot-reload).
-    // unref(): Node won't block exit waiting for this child.
-    // Pipes work while server is alive. When server exits, pipes break:
-    //   - Node.js CLIs (Claude): SIGPIPE is ignored by default → gets EPIPE on
-    //     stdout writes, continues running, completes work, writes to JSONL.
-    //   - Non-Node CLIs: may die from SIGPIPE. Current response would be truncated
-    //     but whatever was written to JSONL is preserved.
-    // In both cases, the file poller re-adopts via JSONL mtime detection on restart.
-    this.process = spawn(spawnConfig.command, spawnConfig.args, {
-      ...spawnConfig.options,
+    const turn = executeCommand({
+      harness: this.provider,
+      mode: 'conversation',
+      prompt: content,
+      cwd: this.workingDirectory,
+      model: this.model,
+      resumeSessionId: shouldResume ? this.sessionId : undefined,
+      yolo: true,
       detached: true,
     });
-    this.process.unref();
+
+    this.process = turn.child;
     this.isRunning = true;
     this._hasStartedSession = true; // Mark session as started for next message
     this.broadcastStatus();
 
-    this.process.stdout?.on('data', (data: Buffer) => {
-      const rawOutput = data.toString();
-
-      // Append to buffer - JSON may be split across multiple data events
-      this._stdoutBuffer += rawOutput;
-
-      // Split by newlines and process complete lines
-      const lines = this._stdoutBuffer.split('\n');
-
-      // Keep the last element in the buffer if it's incomplete (doesn't end with newline)
-      // If buffer ends with newline, last element is empty string
-      this._stdoutBuffer = lines.pop() || '';
-
-      // Process complete lines
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        this._sawStdoutEventThisRun = true;
-
-        // Skip parsing if the provider doesn't output JSONL on stdout (e.g. Gemini).
-        // Gemini reads from disk, so we can safely ignore its raw text stdout.
-        if (spawnConfig.stdout !== 'jsonl') {
-          continue;
-        }
-
-        try {
-          const json = JSON.parse(trimmed) as unknown;
-          const jsonType = (json as { type?: string }).type;
-          const eventType = (json as { event?: { type?: string } }).event?.type;
-          if (VERBOSE)
-            console.log(
-              `[${this.id}] RAW: type=${jsonType}${eventType ? `, event.type=${eventType}` : ''}`
-            );
-
-          // Codex emits thread.started with the real session ID (thread_id).
-          // Capture it so subsequent messages use `codex exec resume <thread_id>`.
-          if (jsonType === 'thread.started' && this.provider === 'codex') {
-            const threadId = (json as { thread_id?: string }).thread_id;
-            if (threadId) {
-              console.log(`[${this.id}] Codex thread_id captured: ${threadId}`);
-              this.sessionId = threadId;
-              knownSessionIds.add(threadId);
+    const consumeEvents = async (): Promise<void> => {
+      for await (const event of turn.events) {
+        switch (event.type) {
+          case 'session.started': {
+            if (event.sessionId !== this.sessionId) {
+              console.log(`[${this.id}] Session captured: ${event.sessionId}`);
             }
+            this.sessionId = event.sessionId;
+            knownSessionIds.add(event.sessionId);
+            break;
           }
-
-          // OpenCode emits sessionID on every JSON event.
-          // Capture it so subsequent messages can use `opencode run --session <id>`.
-          if (this.provider === 'opencode') {
-            const part = (json as { part?: unknown }).part;
-            const partObj =
-              typeof part === 'object' && part !== null ? (part as Record<string, unknown>) : null;
-            const openCodeSessionId =
-              (json as { sessionID?: unknown }).sessionID ??
-              (json as { sessionId?: unknown }).sessionId ??
-              (json as { session_id?: unknown }).session_id ??
-              partObj?.sessionID ??
-              partObj?.sessionId ??
-              partObj?.session_id;
-            if (typeof openCodeSessionId === 'string' && openCodeSessionId.length > 0) {
-              if (this.sessionId !== openCodeSessionId) {
-                console.log(`[${this.id}] OpenCode sessionID captured: ${openCodeSessionId}`);
-              }
-              this.sessionId = openCodeSessionId;
-              knownSessionIds.add(openCodeSessionId);
-            }
+          case 'text.delta': {
+            this._sawStdoutEventThisRun = true;
+            this.handleOutput({ type: 'text_delta', text: event.text });
+            break;
           }
-
-          this.handleOutput(json);
-        } catch (e) {
-          if (e instanceof SyntaxError) {
-            // This shouldn't happen now since we're buffering properly
-            console.error(`[${this.provider}] Failed to parse JSON:`, trimmed.substring(0, 100));
-          } else if (e instanceof ProviderParseError) {
-            console.error(`[${this.provider}] Parse error:`, e.message);
-          } else if (e instanceof Error) {
-            console.error(`[${this.provider}] Error:`, e.message);
+          case 'tool.use': {
+            this._sawStdoutEventThisRun = true;
+            this.handleOutput({
+              type: 'tool_use',
+              name: event.name,
+              input: event.input,
+              displayText: event.displayText,
+            });
+            break;
           }
+          case 'turn.complete': {
+            this.handleOutput({ type: 'message_complete' });
+            break;
+          }
+          case 'out_of_tokens': {
+            this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(event.message) });
+            break;
+          }
+          case 'error': {
+            this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(event.message) });
+            break;
+          }
+          case 'stderr': {
+            this._stderrBuffer = (this._stderrBuffer + event.text).slice(-4096);
+            console.error(`[${this.id}] stderr:`, event.text);
+            break;
+          }
+          case 'turn.started':
+            break;
+          default:
+            break;
         }
       }
+    };
+
+    void consumeEvents().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[${this.id}] Event stream error: ${message}`);
+      this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(message) });
     });
 
-    this.process.stderr?.on('data', (data: Buffer) => {
-      const chunk = data.toString();
-      // Cap at 4KB — stderrSnippet only uses the last 1200 chars; unbounded growth
-      // leaks memory for runaway processes that write megabytes to stderr.
-      this._stderrBuffer = (this._stderrBuffer + chunk).slice(-4096);
-      console.error(`[${this.id}] stderr:`, chunk);
-    });
+    void turn.completed
+      .then(({ exitCode, sessionId }) => {
+        if (sessionId && sessionId !== this.sessionId) {
+          this.sessionId = sessionId;
+          knownSessionIds.add(sessionId);
+        }
 
-    // Handle spawn errors (ENOENT, EACCES, etc.) — without this handler,
-    // a failed spawn leaves isRunning=true forever, blocking the queue.
-    // The 'close' event still fires after 'error', so we just log here
-    // and let the close handler do the state cleanup.
-    this.process.on('error', (err: Error) => {
-      console.error(`[${this.id}] Process spawn error: ${err.message}`);
-      // Broadcast error to client so they see why the conversation died
-      broadcastToAll({
-        type: 'message',
-        conversationId: this.id,
-        role: 'system',
-        content: `Process error: ${err.message}`,
-      });
-    });
-
-    this.process.on('close', (code: number | null) => {
       const durationMs = Date.now() - this._processStartTime;
-      console.log(`[${this.id}] Process closed with code ${code} after ${durationMs}ms`);
+      console.log(`[${this.id}] Process closed with code ${exitCode} after ${durationMs}ms`);
 
       // resetProcess() handles its own cleanup. If _isResetting, the kill was
       // intentional (loop context clear) and the loop engine will immediately
@@ -458,11 +410,11 @@ class Conversation extends EventEmitter {
       if (this._isResetting) return;
 
       // Surface non-zero exit or silent zero-exit failures as system messages.
-      if (code !== null && code !== 0) {
+      if (exitCode !== null && exitCode !== 0) {
         const details = stderrSnippet(this._stderrBuffer);
         const errorMsg = details
-          ? `Process exited with code ${code}: ${details}`
-          : `Process exited with code ${code}`;
+          ? `Process exited with code ${exitCode}: ${details}`
+          : `Process exited with code ${exitCode}`;
         console.error(`[${this.id}] ${errorMsg}`);
         this.messages.push({ role: 'system', content: errorMsg, timestamp: new Date() });
         broadcastToAll({
@@ -471,7 +423,7 @@ class Conversation extends EventEmitter {
           role: 'system',
           content: errorMsg,
         });
-      } else if (code === 0 && !this._sawStdoutEventThisRun) {
+      } else if (exitCode === 0 && !this._sawStdoutEventThisRun) {
         // Some providers (OpenCode) can fail with exit code 0 but write error to stderr.
         const details = stderrSnippet(this._stderrBuffer);
         if (details) {
@@ -516,33 +468,28 @@ class Conversation extends EventEmitter {
       // WS message ordering guarantees clients see status:false before the
       // next spawn's status:true. No delay needed.
       this.processQueue();
-    });
-
-    // Write message and close stdin ONLY if the provider expects it.
-    // Claude expects prompt on stdin. Gemini/Codex take it via flags.
-    if (spawnConfig.stdin === 'prompt') {
-      console.log(`[${this.id}] Writing prompt to stdin and closing...`);
-      this.process.stdin?.write(content + '\n');
-      this.process.stdin?.end();
-    } else {
-      console.log(`[${this.id}] Closing stdin immediately (stdin mode: ${spawnConfig.stdin})`);
-      this.process.stdin?.end();
-    }
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[${this.id}] Process completion error: ${message}`);
+        this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(message) });
+        this.isStreaming = false;
+        this.isRunning = false;
+        this.process = null;
+        this._pendingTaskTools.clear();
+        this.broadcastStatus();
+        if (this.queue.length > 0 && this.queue[0].status === 'sending') {
+          this.queue.shift();
+          this.broadcastQueue();
+        }
+        this.processQueue();
+      });
   }
 
   /**
-   * Unified output handler - uses provider's parseOutput for abstraction
-   * One clean path. parseOutput throws on unknown types.
-   * @param json - Raw JSON from CLI stdout
+   * Unified output handler from executeCommand normalized events.
    */
-  handleOutput(json: unknown): void {
-    if (!this.providerConfig) {
-      throw new Error(`No provider config available for conversation ${this.id}`);
-    }
-
-    // parseOutput throws on unknown types - no fallbacks
-    const event = this.providerConfig.parseOutput(json);
-
+  handleOutput(event: ProviderEvent): void {
     switch (event.type) {
       case 'message_start':
         // Only create assistant message if we don't have one pending
@@ -1228,7 +1175,6 @@ wss.on('connection', (ws: WebSocket) => {
             }
 
             conv.provider = data.provider;
-            conv.providerConfig = getProvider(data.provider);
             // Reset model when switching provider to avoid invalid cross-provider IDs.
             conv.model = undefined;
             conv.modelName = null;
@@ -2596,8 +2542,8 @@ app.get('/api/custom-palettes', (_req: Request, res: Response) => {
   res.json(paletteCache);
 });
 
-// POST /api/generate-palette — spawn an agent in single-shot mode to generate a palette
-// Uses provider.getSingleShotConfig() so any provider (claude, codex) can be used.
+// POST /api/generate-palette — run executeCommand in single-shot mode to generate a palette.
+// Query param ?provider=... selects the harness (defaults to 'claude').
 // Query param ?provider=codex to use a different agent (defaults to 'claude').
 app.post('/api/generate-palette', (req: Request, res: Response) => {
   const { description } = req.body as { description?: string };
@@ -2608,7 +2554,7 @@ app.post('/api/generate-palette', (req: Request, res: Response) => {
 
   // Allow choosing which agent generates the palette (default: claude)
   const providerName = (req.query.provider as string) || 'claude';
-  const provider = getProvider(providerName as ProviderName);
+  getProvider(providerName as ProviderName);
 
   // 4 example palettes from our library so the AI understands the color system
   const examplePalettes = `
@@ -2662,128 +2608,142 @@ Requirements:
   const n = nextPaletteNumber;
   nextPaletteNumber++;
 
-  // Use the provider's single-shot config instead of hardcoding spawn args
-  const spawnConfig = provider.getSingleShotConfig(prompt);
-  console.log(
-    `[generate-palette] Spawning ${providerName}: ${spawnConfig.command} ${spawnConfig.args.map((a) => (a.length > 80 ? a.slice(0, 80) + '...' : a)).join(' ')}`
-  );
-  const agentProcess = spawn(spawnConfig.command, spawnConfig.args, spawnConfig.options);
+  void (async () => {
+    let stdout = '';
+    let stderr = '';
+    let responded = false;
 
-  let stdout = '';
-  let stderr = '';
-  let responded = false;
-
-  // Guard: only send one HTTP response per request
-  const sendError = (status: number, error: string) => {
-    if (responded) return;
-    responded = true;
-    console.error(`[generate-palette] Error: ${error}`);
-    res.status(status).json({ error });
-  };
-
-  // Timeout: kill the process if it takes longer than 90 seconds
-  const TIMEOUT_MS = 90_000;
-  const timeout = setTimeout(() => {
-    console.error(`[generate-palette] Timed out after ${TIMEOUT_MS / 1000}s — killing process`);
-    agentProcess.kill('SIGTERM');
-    sendError(504, `Palette generation timed out after ${TIMEOUT_MS / 1000}s`);
-  }, TIMEOUT_MS);
-
-  // Handle spawn errors (e.g. command not found, ENOENT)
-  agentProcess.on('error', (err: Error) => {
-    clearTimeout(timeout);
-    sendError(500, `Failed to spawn ${providerName}: ${err.message}`);
-  });
-
-  agentProcess.stdout?.on('data', (data: Buffer) => {
-    stdout += data.toString();
-  });
-
-  agentProcess.stderr?.on('data', (data: Buffer) => {
-    stderr += data.toString();
-  });
-
-  agentProcess.on('close', (code: number | null) => {
-    clearTimeout(timeout);
-
-    if (code !== 0) {
-      sendError(
-        500,
-        `${providerName} process failed (exit code ${code})${stderr ? `: ${stderr.slice(0, 500)}` : ''}`
-      );
-      return;
-    }
-
-    let parsed: Record<string, string>;
-    try {
-      const trimmed = stdout.trim();
-      // Strip markdown fences if the agent added them despite instructions
-      const jsonStr = trimmed.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '');
-      parsed = JSON.parse(jsonStr) as Record<string, string>;
-      if (!parsed.name) {
-        throw new Error('Missing "name" field');
-      }
-      // Validate all 14 palette keys are present and are valid hex
-      for (const key of PALETTE16_KEYS) {
-        if (!parsed[key] || !/^#[0-9a-fA-F]{6}$/.test(parsed[key])) {
-          throw new Error(`Missing or invalid hex for key "${key}": ${parsed[key]}`);
-        }
-      }
-    } catch (parseErr) {
-      console.error(`[generate-palette] Raw stdout (first 500 chars):`, stdout.substring(0, 500));
-      const msg = parseErr instanceof Error ? parseErr.message : 'Unknown parse error';
-      sendError(500, `Failed to parse palette from ${providerName} response: ${msg}`);
-      return;
-    }
-
-    // Build StoredPalette (Palette16 + description for provenance)
-    const stored: StoredPalette = {
-      name: parsed.name,
-      description: description.trim(),
-      base03: parsed.base03,
-      base02: parsed.base02,
-      base01: parsed.base01,
-      base00: parsed.base00,
-      base0: parsed.base0,
-      base1: parsed.base1,
-      yellow: parsed.yellow,
-      orange: parsed.orange,
-      red: parsed.red,
-      magenta: parsed.magenta,
-      violet: parsed.violet,
-      blue: parsed.blue,
-      cyan: parsed.cyan,
-      green: parsed.green,
+    // Guard: only send one HTTP response per request
+    const sendError = (status: number, error: string) => {
+      if (responded) return;
+      responded = true;
+      console.error(`[generate-palette] Error: ${error}`);
+      res.status(status).json({ error });
     };
 
-    // Build Palette16 shape for client and cache
-    const key = `custom_${n}`;
-    const palette: Record<string, string> = { name: parsed.name };
-    for (const k of PALETTE16_KEYS) {
-      palette[k] = parsed[k];
-    }
+    const turn = executeCommand({
+      harness: providerName as 'claude' | 'codex' | 'gemini' | 'opencode',
+      mode: 'single-shot',
+      prompt,
+      cwd: process.cwd(),
+      yolo: true,
+    });
 
-    // Update cache immediately
-    paletteCache[key] = palette;
+    // Timeout: kill the process if it takes longer than 90 seconds
+    const TIMEOUT_MS = 90_000;
+    const timeout = setTimeout(() => {
+      console.error(`[generate-palette] Timed out after ${TIMEOUT_MS / 1000}s — killing process`);
+      turn.stop('SIGTERM');
+      sendError(504, `Palette generation timed out after ${TIMEOUT_MS / 1000}s`);
+    }, TIMEOUT_MS);
 
-    // Fire-and-forget disk write (error logged but doesn't fail the request)
-    (async () => {
-      try {
-        await fs.promises.mkdir(PALETTES_DIR, { recursive: true });
-        const filePath = path.join(PALETTES_DIR, `palette_${n}.json`);
-        await fs.promises.writeFile(filePath, JSON.stringify(stored, null, 2));
-        console.log(`[generate-palette] Saved palette to ${filePath}`);
-      } catch (writeErr) {
-        console.error(`[generate-palette] Failed to save palette file:`, writeErr);
+    try {
+      for await (const event of turn.events) {
+        switch (event.type) {
+          case 'text.delta':
+            stdout += event.text;
+            break;
+          case 'stderr':
+            stderr += event.text;
+            break;
+          case 'out_of_tokens':
+          case 'error':
+            stderr += `${event.message}\n`;
+            break;
+          default:
+            break;
+        }
       }
-    })();
 
-    // Return Palette16 shape to client
-    if (responded) return; // timeout already fired
-    responded = true;
-    console.log(`[generate-palette] Success: "${parsed.name}" -> ${key}`);
-    res.json({ key, palette });
-  });
+      const completion = await turn.completed;
+      clearTimeout(timeout);
+
+      if (completion.exitCode !== 0 || completion.reason !== 'success') {
+        sendError(
+          500,
+          `${providerName} process failed (exit code ${completion.exitCode})${stderr ? `: ${stderr.slice(0, 500)}` : ''}`
+        );
+        return;
+      }
+
+      let parsed: Record<string, string>;
+      try {
+        const trimmed = stdout.trim();
+        // Strip markdown fences if the agent added them despite instructions
+        const jsonStr = trimmed.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '');
+        parsed = JSON.parse(jsonStr) as Record<string, string>;
+        if (!parsed.name) {
+          throw new Error('Missing "name" field');
+        }
+        // Validate all 14 palette keys are present and are valid hex
+        for (const key of PALETTE16_KEYS) {
+          if (!parsed[key] || !/^#[0-9a-fA-F]{6}$/.test(parsed[key])) {
+            throw new Error(`Missing or invalid hex for key "${key}": ${parsed[key]}`);
+          }
+        }
+      } catch (parseErr) {
+        console.error(
+          `[generate-palette] Raw stdout (first 500 chars):`,
+          stdout.substring(0, 500)
+        );
+        const msg = parseErr instanceof Error ? parseErr.message : 'Unknown parse error';
+        sendError(500, `Failed to parse palette from ${providerName} response: ${msg}`);
+        return;
+      }
+
+      // Build StoredPalette (Palette16 + description for provenance)
+      const stored: StoredPalette = {
+        name: parsed.name,
+        description: description.trim(),
+        base03: parsed.base03,
+        base02: parsed.base02,
+        base01: parsed.base01,
+        base00: parsed.base00,
+        base0: parsed.base0,
+        base1: parsed.base1,
+        yellow: parsed.yellow,
+        orange: parsed.orange,
+        red: parsed.red,
+        magenta: parsed.magenta,
+        violet: parsed.violet,
+        blue: parsed.blue,
+        cyan: parsed.cyan,
+        green: parsed.green,
+      };
+
+      // Build Palette16 shape for client and cache
+      const key = `custom_${n}`;
+      const palette: Record<string, string> = { name: parsed.name };
+      for (const k of PALETTE16_KEYS) {
+        palette[k] = parsed[k];
+      }
+
+      // Update cache immediately
+      paletteCache[key] = palette;
+
+      // Fire-and-forget disk write (error logged but doesn't fail the request)
+      void (async () => {
+        try {
+          await fs.promises.mkdir(PALETTES_DIR, { recursive: true });
+          const filePath = path.join(PALETTES_DIR, `palette_${n}.json`);
+          await fs.promises.writeFile(filePath, JSON.stringify(stored, null, 2));
+          console.log(`[generate-palette] Saved palette to ${filePath}`);
+        } catch (writeErr) {
+          console.error(`[generate-palette] Failed to save palette file:`, writeErr);
+        }
+      })();
+
+      // Return Palette16 shape to client
+      if (responded) return; // timeout already fired
+      responded = true;
+      console.log(`[generate-palette] Success: "${parsed.name}" -> ${key}`);
+      res.json({ key, palette });
+    } catch (err) {
+      clearTimeout(timeout);
+      const message = err instanceof Error ? err.message : String(err);
+      sendError(500, `Palette generation failed: ${message}`);
+    }
+  })();
 });
 
 // =============================================================================
@@ -3473,6 +3433,7 @@ async function loadExistingConversations(): Promise<void> {
   console.log('Loading conversations from persisted session files...');
 
   try {
+    const limit = 500;
     const { mtimes } = await loadAllConversations((batch, progress) => {
       // Hydrate each batch into server-side Conversation instances
       const broadcastBatch: ConversationData[] = [];
@@ -3493,7 +3454,7 @@ async function loadExistingConversations(): Promise<void> {
       console.log(
         `Loaded ${progress.loaded}/${progress.total} files (${conversations.size} conversations)...`
       );
-    });
+    }, limit);
 
     fileMtimes = mtimes;
 
@@ -3535,6 +3496,16 @@ function findConversationBySessionId(sessionId: string): Conversation | undefine
   }
 
   return undefined;
+}
+
+function collectActiveConversationAndSessionIds(): Set<string> {
+  const activeIds = new Set<string>();
+  for (const [id, conversation] of conversations) {
+    if (!conversation.isRunning) continue;
+    activeIds.add(id);
+    activeIds.add(conversation.sessionId);
+  }
+  return activeIds;
 }
 
 function getLastUserMessageContent(messages: Message[]): string | null {
@@ -3613,18 +3584,16 @@ function startFilePolling(): void {
 
   setInterval(async () => {
     try {
-      // Collect both UI conversation IDs and provider session IDs for running conversations.
-      // Codex can rotate to a thread ID, so id and sessionId are not always the same.
-      const activeIds = new Set<string>();
-      for (const [id, conv] of conversations) {
-        if (conv.isRunning) {
-          activeIds.add(id);
-          activeIds.add(conv.sessionId);
-        }
-      }
-
-      const { updated, mtimes } = await pollForChanges(fileMtimes, activeIds);
+      // Snapshot active IDs for pollForChanges skip-list.
+      const activeIdsAtPollStart = collectActiveConversationAndSessionIds();
+      const { updated, mtimes } = await pollForChanges(fileMtimes, activeIdsAtPollStart);
       fileMtimes = mtimes;
+      // Re-snapshot after poll returns to catch session ID changes during an active run,
+      // then union with the pre-poll snapshot so both old/new IDs are treated as active.
+      const activeIds = collectActiveConversationAndSessionIds();
+      for (const activeId of activeIdsAtPollStart) {
+        activeIds.add(activeId);
+      }
 
       // --- External process detection ---
       // Sessions in `updated` had their files modified this cycle.
@@ -3675,6 +3644,11 @@ function startFilePolling(): void {
       const changedForBroadcast: ConversationData[] = [];
 
       for (const [sessionId, convData] of updated) {
+        // Never let disk updates clobber active in-memory streaming turns.
+        if (activeIds.has(sessionId)) {
+          continue;
+        }
+
         let existing = findConversationBySessionId(sessionId);
 
         if (!existing) {
@@ -3691,7 +3665,7 @@ function startFilePolling(): void {
         }
 
         if (existing && !existing.isRunning) {
-          // Update existing conversation in-place (preserve process handles, provider config).
+          // Update existing conversation in-place (preserve process handles).
           // Preserve server-injected system messages (error reports, exit info) that
           // exist only in memory — disk files don't contain these. Without this,
           // the poller would nuke error messages like "usage limit" within one poll cycle.
