@@ -2792,7 +2792,7 @@ Requirements:
 
 interface UsageEntry {
   sessionId: string;
-  provider: 'claude' | 'codex' | 'opencode';
+  provider: ProviderName;
   model: string;
   inputTokens: number;
   outputTokens: number;
@@ -2806,7 +2806,7 @@ interface UsageEntry {
 // Claude: input $3, output $15, cache read $0.30, cache write $3.75
 // Codex: input $2.50, output $10
 function estimateCost(
-  provider: 'claude' | 'codex' | 'opencode',
+  provider: ProviderName,
   input: number,
   output: number,
   cacheRead: number,
@@ -2816,6 +2816,7 @@ function estimateCost(
     return (input * 3 + output * 15 + cacheRead * 0.3 + cacheWrite * 3.75) / 1_000_000;
   }
   // Codex/OpenAI and OpenCode (provider-backed model pricing can vary by backend).
+  // Gemini mirrors Codex-like pricing here until token billing data is emitted per-provider.
   return (input * 2.5 + output * 10) / 1_000_000;
 }
 
@@ -2853,7 +2854,7 @@ interface UsageResponse {
     sessions: number;
   }[];
   topSessions: UsageEntry[];
-  rateLimits: { codex: RateLimit[]; claude: RateLimit[] };
+  rateLimits: Record<ProviderName, RateLimit[]>;
 }
 const usageResponseCache = new Map<number, { time: number; data: UsageResponse }>();
 const USAGE_CACHE_TTL_MS = 60_000; // 60s
@@ -3092,12 +3093,10 @@ app.get('/api/usage', async (_req: Request, res: Response) => {
 
   // --- Codex sessions (single pass: usage entries + rate limits from most recent) ---
   const codexDir = path.join(os.homedir(), '.codex', 'sessions');
-  const rateLimits: Record<ProviderName, RateLimit[]> = {
-    claude: [],
-    codex: [],
-    opencode: [],
-    gemini: [],
-  };
+  const rateLimits = {} as Record<ProviderName, RateLimit[]>;
+  for (const provider of Object.keys(providers) as ProviderName[]) {
+    rateLimits[provider] = [];
+  }
   let newestCodexFile = '';
   let newestCodexMtime = 0;
 
@@ -3310,7 +3309,8 @@ app.get('/api/usage', async (_req: Request, res: Response) => {
   const topSessions = sortedEntries.slice(0, 20);
 
   // Keep provider tabs useful even when one provider's sessions are lower-cost.
-  for (const provider of ['claude', 'codex', 'opencode'] as const) {
+  const orderedProviders = Object.keys(providers) as ProviderName[];
+  for (const provider of orderedProviders) {
     if (topSessions.some((entry) => entry.provider === provider)) {
       continue;
     }

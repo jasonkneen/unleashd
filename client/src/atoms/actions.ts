@@ -88,8 +88,33 @@ interface PendingConversation {
 function normalizeWorkingDirectory(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return trimmed;
-  const withoutTrailingSlashes = trimmed.replace(/\/+$/, '');
-  return withoutTrailingSlashes || '/';
+  if (trimmed.startsWith('~')) {
+    return trimmed.replace(/\/+$/, '') || '~';
+  }
+
+  const withSingleSlashes = trimmed.replace(/\/+/g, '/');
+  const hasLeadingSlash = withSingleSlashes.startsWith('/');
+  const segments = withSingleSlashes.split('/');
+  const normalized: string[] = [];
+
+  for (const segment of segments) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (normalized.length > 0) {
+        normalized.pop();
+      }
+      continue;
+    }
+    normalized.push(segment);
+  }
+
+  if (hasLeadingSlash) {
+    const rootPath = `/${normalized.join('/')}`;
+    return rootPath === '/' ? '/' : rootPath.replace(/\/+$/, '');
+  }
+
+  const fallback = normalized.join('/');
+  return fallback || '.';
 }
 
 function loadPendingConversations(): PendingConversation[] {
