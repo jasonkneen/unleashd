@@ -140,12 +140,14 @@ export interface Provider {
    * @param workingDir - Working directory for the CLI process.
    * @param resume - True if this is NOT the first message in the session.
    * @param modelId - Provider-specific model identifier from listModels().
+   * @param prompt - Optional: the prompt text to include in the spawn config.
    */
   getSpawnConfig(
     sessionId: string,
     workingDir: string,
     resume?: boolean,
-    modelId?: string
+    modelId?: string,
+    prompt?: string
   ): SpawnConfig;
 
   /**

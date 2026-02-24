@@ -155,7 +155,8 @@ const claudeProvider: Provider = {
     sessionId: string,
     workingDir: string,
     resume = false,
-    modelId?: string
+    modelId?: string,
+    prompt?: string
   ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
     // Session management, model flags, and bypass are handled by agent-cli.
@@ -188,6 +189,7 @@ const claudeProvider: Provider = {
 
     const spec = buildCommand('claude', {
       model: modelId,
+      prompt,
       sessionId,
       resume,
       bypassPermissions: maxPermissions,

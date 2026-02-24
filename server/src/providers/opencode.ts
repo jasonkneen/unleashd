@@ -147,15 +147,16 @@ const opencodeProvider: Provider = {
     sessionId: string,
     workingDir: string,
     resume = false,
-    modelId?: string
+    modelId?: string,
+    prompt?: string
   ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
     // Agent-cli handles: run subcommand, model normalization (openai/ → opencode/),
     // ses_ session guard, resume flags.
     // Project-specific: --format json (streaming output).
-    // Prompt text is NOT passed here — delivered via stdin (formatInput).
     const spec = buildCommand('opencode', {
       model: modelId,
+      prompt,
       sessionId,
       resume,
       extraArgs: ['--format', 'json'],

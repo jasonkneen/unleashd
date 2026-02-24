@@ -40,13 +40,15 @@ const geminiProvider: Provider = {
     sessionId: string,
     workingDir: string,
     resume = false,
-    modelId?: string
+    modelId?: string,
+    prompt?: string
   ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli.
     // Gemini resumes by CWD (--resume latest), not by session ID.
     // harness uses --output-format stream-json by default now.
     const spec = buildCommand('gemini', {
       model: modelId,
+      prompt,
       sessionId,
       resume,
       bypassPermissions: true, // adds --yolo

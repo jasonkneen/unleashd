@@ -301,14 +301,14 @@ const codexProvider: Provider = {
     sessionId: string,
     workingDir: string,
     resume = false,
-    modelId?: string
+    modelId?: string,
+    prompt?: string
   ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
     // Agent-cli handles: exec subcommand, resume <id> restructuring, -C suppression
     // on resume, model decomposition (composite IDs), bypass flags.
     //
-    // Project-specific: --json (streaming output) and `-` (read prompt from stdin).
-    // Prompt text is NOT passed here — delivered via stdin (formatInput).
+    // Project-specific: --json (streaming output).
     const maxPermissions = process.env.CODEX_MAX_PERMISSIONS !== 'false';
     if (maxPermissions) {
       console.log('[codex] MAX PERMISSIONS MODE enabled');
@@ -316,11 +316,12 @@ const codexProvider: Provider = {
 
     const spec = buildCommand('codex', {
       model: modelId,
+      prompt,
       sessionId,
       resume,
       cwd: workingDir,
       bypassPermissions: maxPermissions,
-      extraArgs: ['--json', '-'],
+      extraArgs: ['--json'],
     });
 
     return {

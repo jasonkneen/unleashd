@@ -286,7 +286,8 @@ class Conversation extends EventEmitter {
       this.sessionId,
       this.workingDirectory,
       shouldResume,
-      this.model
+      this.model,
+      content
     );
     // Detached: child gets own process group, survives server SIGTERM (hot-reload).
     // unref(): Node won't block exit waiting for this child.
