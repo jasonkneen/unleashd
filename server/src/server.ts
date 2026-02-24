@@ -93,6 +93,20 @@ type BroadcastData = ServerMessage | ChunkData | MessageCompleteData | MessageDa
 // Helper Functions
 // =============================================================================
 
+interface SearchResult {
+  conversationId: string;
+  messageIndex: number;
+  role: 'user' | 'assistant' | 'system';
+  snippet: string;
+  workingDirectory: string;
+  timestampMs: number;
+}
+
+const SEARCH_SNIPPET_RADIUS = 60; // chars before/after match to show
+const MIN_SEARCH_QUERY_LENGTH = 2;
+const SEARCH_MAX_RESULTS = 50;
+const SEARCH_HARD_RESULT_LIMIT = 200;
+
 /**
  * Broadcast data to all connected WebSocket clients.
  * Serializes once and sends the same string to all — avoids redundant JSON.stringify
@@ -109,6 +123,19 @@ function broadcastToAll(data: BroadcastData): void {
 
 function stripAnsi(value: string): string {
   return value.replace(/\x1B\[[0-9;]*m/g, '');
+}
+
+function buildSearchSnippet(content: string, query: string): string {
+  const lowerContent = content.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const matchIndex = lowerContent.indexOf(lowerQuery);
+  if (matchIndex === -1) return content.substring(0, 120);
+
+  const start = Math.max(0, matchIndex - SEARCH_SNIPPET_RADIUS);
+  const end = Math.min(content.length, matchIndex + query.length + SEARCH_SNIPPET_RADIUS);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < content.length ? '...' : '';
+  return prefix + content.substring(start, end) + suffix;
 }
 
 function stderrSnippet(value: string, maxLength = 400): string {
@@ -201,6 +228,8 @@ class Conversation extends EventEmitter {
   // When true, close handler is a no-op — resetProcess() handles its own cleanup.
   // Prevents duplicate broadcasts and spurious dequeue during loop context resets.
   private _isResetting: boolean;
+  // Start time of the current CLI process run (for duration tracking).
+  private _processStartTime = 0;
 
   constructor(
     id: string,
@@ -280,6 +309,7 @@ class Conversation extends EventEmitter {
     this._stdoutBuffer = '';
     this._stderrBuffer = '';
     this._sawStdoutEventThisRun = false;
+    this._processStartTime = Date.now();
 
     // Use sessionId (not conversation id) for CLI session tracking
     const spawnConfig = this.providerConfig!.getSpawnConfig(
@@ -411,17 +441,15 @@ class Conversation extends EventEmitter {
     });
 
     this.process.on('close', (code: number | null) => {
-      console.log(`[${this.id}] Process closed with code ${code}`);
+      const durationMs = Date.now() - this._processStartTime;
+      console.log(`[${this.id}] Process closed with code ${code} after ${durationMs}ms`);
 
       // resetProcess() handles its own cleanup. If _isResetting, the kill was
       // intentional (loop context clear) and the loop engine will immediately
-      // call sendMessage() to spawn the next iteration. Skip all cleanup here.
+      // call sendMessage() and spawn the next iteration. Skip all cleanup here.
       if (this._isResetting) return;
 
-      // Non-zero exit = crash. Notify the client so the user sees why
-      // the response stopped mid-sentence instead of silently ending.
-      // Push to this.messages so the poller preserves it (see trailing system
-      // messages merge in startFilePolling).
+      // Surface non-zero exit or silent zero-exit failures as system messages.
       if (code !== null && code !== 0) {
         const details = stderrSnippet(this._stderrBuffer);
         const errorMsg = details
@@ -435,12 +463,8 @@ class Conversation extends EventEmitter {
           role: 'system',
           content: errorMsg,
         });
-      }
-
-      // Some providers (notably OpenCode) can fail with exit code 0 and write
-      // the actionable error only to stderr. If no stdout events were emitted,
-      // surface that stderr as a system message instead of failing silently.
-      if (code === 0 && !this._sawStdoutEventThisRun) {
+      } else if (code === 0 && !this._sawStdoutEventThisRun) {
+        // Some providers (OpenCode) can fail with exit code 0 but write error to stderr.
         const details = stderrSnippet(this._stderrBuffer);
         if (details) {
           const content = `Provider reported an error without response output: ${details}`;
@@ -452,6 +476,17 @@ class Conversation extends EventEmitter {
             content,
           });
         }
+      } else {
+        // Successful completion - add a system message with duration
+        const durationSec = (durationMs / 1000).toFixed(1);
+        const successMsg = `Process completed successfully in ${durationSec}s`;
+        this.messages.push({ role: 'system', content: successMsg, timestamp: new Date() });
+        broadcastToAll({
+          type: 'message',
+          conversationId: this.id,
+          role: 'system',
+          content: successMsg,
+        });
       }
 
       // INVARIANT: dead process can't stream. Clear both atomically.
@@ -1373,6 +1408,66 @@ app.get('/api/models', (req: Request, res: Response) => {
   }
   const provider = getProvider(providerName as ProviderName);
   res.json(provider.listModels());
+});
+
+// Search across all messages.
+// Used by SearchPalette to fetch message-level matches without loading every
+// conversation into client state.
+app.get('/api/search', (req: Request, res: Response) => {
+  const rawQuery = req.query.q;
+  const filterDirectory = (typeof req.query.filterDirectory === 'string' ? req.query.filterDirectory : '').trim();
+  const rawLimit = Number(req.query.limit);
+
+  const limit =
+    Number.isInteger(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, SEARCH_HARD_RESULT_LIMIT)
+      : SEARCH_MAX_RESULTS;
+
+  if (typeof rawQuery !== 'string') {
+    res.status(400).json({ error: 'q is required' });
+    return;
+  }
+
+  const query = rawQuery.trim();
+  if (query.length < MIN_SEARCH_QUERY_LENGTH) {
+    res.json({ query, results: [] });
+    return;
+  }
+
+  const lowerQuery = query.toLowerCase();
+  const matches: SearchResult[] = [];
+
+  for (const conversation of conversations.values()) {
+    if (filterDirectory && !conversation.workingDirectory.startsWith(filterDirectory)) continue;
+
+    for (let i = 0; i < conversation.messages.length; i++) {
+      const message = conversation.messages[i];
+      const content = message.content;
+
+      if (!content.toLowerCase().includes(lowerQuery)) continue;
+
+      matches.push({
+        conversationId: conversation.id,
+        messageIndex: i,
+        role: message.role,
+        snippet: buildSearchSnippet(content, query),
+        workingDirectory: conversation.workingDirectory,
+        timestampMs: new Date(message.timestamp).getTime(),
+      });
+    }
+  }
+
+  matches.sort((a, b) => b.timestampMs - a.timestampMs);
+  const response = matches.slice(0, limit).map((match) => ({
+    conversationId: match.conversationId,
+    messageIndex: match.messageIndex,
+    role: match.role,
+    snippet: match.snippet,
+    workingDirectory: match.workingDirectory,
+    timestamp: new Date(match.timestampMs).toISOString(),
+  }));
+
+  res.json({ query, results: response });
 });
 
 // Path autocomplete API - returns directory listings for a given path

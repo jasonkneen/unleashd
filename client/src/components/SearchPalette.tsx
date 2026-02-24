@@ -1,6 +1,4 @@
-import { useAtomValue } from 'jotai';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { allConversationsAtom } from '../atoms/conversations';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatTimeAgo } from '../utils/time';
 import './SearchPalette.css';
 
@@ -13,6 +11,20 @@ interface SearchResult {
   timestamp: Date;
 }
 
+interface SearchResultResponse {
+  conversationId: string;
+  messageIndex: number;
+  role: string;
+  snippet: string;
+  workingDirectory: string;
+  timestamp: string;
+}
+
+interface SearchApiResponse {
+  results: SearchResultResponse[];
+  query: string;
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -22,20 +34,8 @@ interface Props {
 }
 
 const MAX_RESULTS = 50;
-const SNIPPET_RADIUS = 60; // chars before/after match to show
-
-function buildSnippet(content: string, query: string): string {
-  const lowerContent = content.toLowerCase();
-  const lowerQuery = query.toLowerCase();
-  const matchIndex = lowerContent.indexOf(lowerQuery);
-  if (matchIndex === -1) return content.substring(0, 120);
-
-  const start = Math.max(0, matchIndex - SNIPPET_RADIUS);
-  const end = Math.min(content.length, matchIndex + query.length + SNIPPET_RADIUS);
-  const prefix = start > 0 ? '...' : '';
-  const suffix = end < content.length ? '...' : '';
-  return prefix + content.substring(start, end) + suffix;
-}
+const MIN_SEARCH_QUERY_LENGTH = 2;
+const SEARCH_DEBOUNCE_MS = 150;
 
 function highlightMatch(snippet: string, query: string): React.ReactNode[] {
   if (!query) return [snippet];
@@ -70,17 +70,18 @@ function highlightMatch(snippet: string, query: string): React.ReactNode[] {
 }
 
 export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDirectory }: Props) {
-  // allConversationsAtom is stable during streaming — no snapshot hack needed
-  const allConversations = useAtomValue(allConversationsAtom);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   // Debounce query by 150ms
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query), 150);
+    const timer = setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [query]);
 
@@ -89,38 +90,72 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
     if (!isOpen) return;
     setQuery('');
     setDebouncedQuery('');
+    setResults([]);
     setSelectedIndex(0);
+    setSearchError(null);
+    setIsSearching(false);
     const timer = setTimeout(() => inputRef.current?.focus(), 0);
     return () => clearTimeout(timer);
   }, [isOpen]);
 
-  const results: SearchResult[] = useMemo(() => {
+  useEffect(() => {
     const trimmed = debouncedQuery.trim();
-    if (trimmed.length < 2) return [];
-
-    const lowerQuery = trimmed.toLowerCase();
-    const matches: SearchResult[] = [];
-
-    for (const conv of allConversations) {
-      if (filterDirectory && !conv.workingDirectory.startsWith(filterDirectory)) continue;
-      for (let i = 0; i < conv.messages.length; i++) {
-        const msg = conv.messages[i];
-        if (msg.content.toLowerCase().includes(lowerQuery)) {
-          matches.push({
-            conversationId: conv.id,
-            messageIndex: i,
-            role: msg.role,
-            snippet: buildSnippet(msg.content, trimmed),
-            workingDirectory: conv.workingDirectory,
-            timestamp: new Date(msg.timestamp),
-          });
-          if (matches.length >= MAX_RESULTS) return matches;
-        }
-      }
+    if (trimmed.length < MIN_SEARCH_QUERY_LENGTH) {
+      setResults([]);
+      setSearchError(null);
+      setIsSearching(false);
+      return;
     }
 
-    return matches;
-  }, [allConversations, debouncedQuery, filterDirectory]);
+    const params = new URLSearchParams({
+      q: trimmed,
+      limit: String(MAX_RESULTS),
+    });
+    if (filterDirectory) {
+      params.set('filterDirectory', filterDirectory);
+    }
+
+    const controller = new AbortController();
+    setIsSearching(true);
+    setSearchError(null);
+    setResults([]);
+
+    const runSearch = async () => {
+      try {
+        const response = await fetch(`/api/search?${params.toString()}`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as { error?: string } | null;
+          const message = data?.error ?? `Search failed with status ${response.status}`;
+          throw new Error(message);
+        }
+
+        const data = (await response.json().catch(() => null)) as SearchApiResponse | null;
+        const apiResults = Array.isArray(data?.results) ? data.results : [];
+        const normalizedResults = apiResults.map((result: SearchResultResponse) => ({
+          ...result,
+          timestamp: new Date(result.timestamp),
+        }));
+        setResults(normalizedResults);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        setSearchError(error instanceof Error ? error.message : 'Search failed');
+        setResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+
+    runSearch();
+    return () => {
+      controller.abort();
+    };
+  }, [debouncedQuery, filterDirectory]);
 
   // Reset selection when results change
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on results length change
@@ -140,10 +175,12 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
     (e: React.KeyboardEvent) => {
       switch (e.key) {
         case 'ArrowDown':
+          if (!results.length) return;
           e.preventDefault();
           setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
           break;
         case 'ArrowUp':
+          if (!results.length) return;
           e.preventDefault();
           setSelectedIndex((i) => Math.max(i - 1, 0));
           break;
@@ -204,7 +241,11 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
           <kbd className="search-palette-shortcut">esc</kbd>
         </div>
         <div className="search-palette-results" ref={resultsRef}>
-          {results.length > 0 ? (
+          {isSearching ? (
+            <div className="search-palette-empty">Searching…</div>
+          ) : searchError ? (
+            <div className="search-palette-empty">{searchError}</div>
+          ) : results.length > 0 ? (
             results.map((result, i) => (
               <div
                 key={`${result.conversationId}-${result.messageIndex}`}
@@ -229,10 +270,12 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
                 </div>
               </div>
             ))
-          ) : debouncedQuery.trim().length >= 2 ? (
+          ) : debouncedQuery.trim().length >= MIN_SEARCH_QUERY_LENGTH ? (
             <div className="search-palette-empty">No matches found</div>
           ) : (
-            <div className="search-palette-empty">Type at least 2 characters to search</div>
+            <div className="search-palette-empty">
+              Type at least {MIN_SEARCH_QUERY_LENGTH} characters to search
+            </div>
           )}
         </div>
         {results.length >= MAX_RESULTS && (
