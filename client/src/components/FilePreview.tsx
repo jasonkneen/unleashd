@@ -109,32 +109,32 @@ export function FilePreview({ path, type, workingDirectory }: FilePreviewProps) 
     setHovered(false);
   };
 
-  const popup = hovered && position && createPortal(
-    <div
-      className="file-preview-popup"
-      style={{
-        // 'above': popup bottom edge aligns to `position.top` (above trigger)
-        // 'below': popup top edge aligns to `position.top` (below trigger)
-        ...(position.placement === 'above'
-          ? { bottom: `${window.innerHeight - position.top}px` }
-          : { top: `${position.top}px` }
-        ),
-        left: `${position.left}px`,
-      }}
-    >
-      {type === 'image' && (
-        <img className="file-preview-image" src={fileUrl} alt={path} />
-      )}
-      {type === 'video' && (
-        <video className="file-preview-video" src={fileUrl} autoPlay loop muted playsInline />
-      )}
-      {type === 'html' && (
-        <iframe className="file-preview-iframe" src={fileUrl} sandbox="" title={path} />
-      )}
-      <span className="file-preview-path">{path}</span>
-    </div>,
-    document.body
-  );
+  const popup =
+    hovered &&
+    position &&
+    createPortal(
+      <div
+        className="file-preview-popup"
+        style={{
+          // 'above': popup bottom edge aligns to `position.top` (above trigger)
+          // 'below': popup top edge aligns to `position.top` (below trigger)
+          ...(position.placement === 'above'
+            ? { bottom: `${window.innerHeight - position.top}px` }
+            : { top: `${position.top}px` }),
+          left: `${position.left}px`,
+        }}
+      >
+        {type === 'image' && <img className="file-preview-image" src={fileUrl} alt={path} />}
+        {type === 'video' && (
+          <video className="file-preview-video" src={fileUrl} autoPlay loop muted playsInline />
+        )}
+        {type === 'html' && (
+          <iframe className="file-preview-iframe" src={fileUrl} sandbox="" title={path} />
+        )}
+        <span className="file-preview-path">{path}</span>
+      </div>,
+      document.body
+    );
 
   return (
     <span

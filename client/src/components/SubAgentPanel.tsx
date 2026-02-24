@@ -23,12 +23,10 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
   const userToggledRef = useRef(false);
 
   // Filter to show only active (running) sub-agents, plus recently completed ones
-  const activeAgents = subAgents.filter(
-    (a) => a.status === 'running' || a.status === 'pending'
-  );
-  const recentlyCompleted = subAgents.filter(
-    (a) => a.status === 'completed' || a.status === 'error'
-  ).slice(-3); // Show last 3 completed
+  const activeAgents = subAgents.filter((a) => a.status === 'running' || a.status === 'pending');
+  const recentlyCompleted = subAgents
+    .filter((a) => a.status === 'completed' || a.status === 'error')
+    .slice(-3); // Show last 3 completed
 
   const displayAgents = [...activeAgents, ...recentlyCompleted];
 
@@ -109,7 +107,9 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
         <span className={`subagent-indicator ${runningCount > 0 ? 'running' : 'done'}`} />
         <span className="subagent-summary">
           {runningCount > 0 ? (
-            <>Running {runningCount} sub-agent session{runningCount !== 1 ? 's' : ''}...</>
+            <>
+              Running {runningCount} sub-agent session{runningCount !== 1 ? 's' : ''}...
+            </>
           ) : (
             <>Sub-agent sessions completed</>
           )}
@@ -127,9 +127,7 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
             return (
               <div key={agent.id} className="subagent-item">
                 {/* Tree connector */}
-                <span className="tree-connector">
-                  {isLast ? '\u2514\u2500' : '\u251C\u2500'}
-                </span>
+                <span className="tree-connector">{isLast ? '\u2514\u2500' : '\u251C\u2500'}</span>
 
                 {/* Status indicator */}
                 <span className={`subagent-status ${agent.status}`}>
@@ -151,7 +149,9 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
                     {agent.toolUses > 0 && (
                       <>
                         <span className="stat-divider">{'\u00B7'}</span>
-                        <span className="stat">{agent.toolUses} tool use{agent.toolUses !== 1 ? 's' : ''}</span>
+                        <span className="stat">
+                          {agent.toolUses} tool use{agent.toolUses !== 1 ? 's' : ''}
+                        </span>
                       </>
                     )}
                     {agent.tokens > 0 && (
@@ -166,9 +166,7 @@ export function SubAgentPanel({ subAgents }: SubAgentPanelProps) {
                 {/* Current action (shown on second line for running agents) */}
                 {agent.currentAction && (
                   <div className="subagent-current-action">
-                    <span className="tree-connector-sub">
-                      {isLast ? '   ' : '\u2502  '}
-                    </span>
+                    <span className="tree-connector-sub">{isLast ? '   ' : '\u2502  '}</span>
                     <span className="action-connector">{'\u2514'}</span>
                     <span className={`current-action ${isRunning ? 'active' : 'done'}`}>
                       {agent.currentAction}

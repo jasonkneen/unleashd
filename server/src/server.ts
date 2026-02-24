@@ -9,14 +9,14 @@ import path from 'node:path';
 import readline from 'node:readline';
 import type {
   Conversation as ConversationData,
+  Message,
+  ModelId,
   OompaCycle,
   OompaReviewLog,
   OompaRuntimeSnapshot,
   OompaStarted,
   OompaStopped,
   OompaWorkerStatus,
-  Message,
-  ModelId,
   Provider as ProviderName,
   QueuedMessage,
   ServerMessage,
@@ -327,9 +327,10 @@ class Conversation extends EventEmitter {
           const json = JSON.parse(trimmed) as unknown;
           const jsonType = (json as { type?: string }).type;
           const eventType = (json as { event?: { type?: string } }).event?.type;
-          if (VERBOSE) console.log(
-            `[${this.id}] RAW: type=${jsonType}${eventType ? `, event.type=${eventType}` : ''}`
-          );
+          if (VERBOSE)
+            console.log(
+              `[${this.id}] RAW: type=${jsonType}${eventType ? `, event.type=${eventType}` : ''}`
+            );
 
           // Codex emits thread.started with the real session ID (thread_id).
           // Capture it so subsequent messages use `codex exec resume <thread_id>`.
@@ -527,9 +528,10 @@ class Conversation extends EventEmitter {
           currentMsg.content += event.text;
         }
         // Now send the text chunk - client will append to the assistant message
-        if (VERBOSE) console.log(
-          `[${this.id}] chunk (${event.text.length} chars): "${event.text.substring(0, 30).replace(/\n/g, '\\n')}..."`
-        );
+        if (VERBOSE)
+          console.log(
+            `[${this.id}] chunk (${event.text.length} chars): "${event.text.substring(0, 30).replace(/\n/g, '\\n')}..."`
+          );
         this.broadcastChunk({
           type: 'chunk',
           conversationId: this.id,
@@ -1050,7 +1052,20 @@ wss.on('connection', (ws: WebSocket) => {
             return;
           }
 
-          const conv = new Conversation(id, workingDir, provider, undefined, model, false, null, null, null, null, null, swarmDebugPrefix);
+          const conv = new Conversation(
+            id,
+            workingDir,
+            provider,
+            undefined,
+            model,
+            false,
+            null,
+            null,
+            null,
+            null,
+            null,
+            swarmDebugPrefix
+          );
           conversations.set(id, conv);
 
           // No need to start - we spawn per message now
@@ -1600,16 +1615,19 @@ function normalizeStatus(rawStatus: unknown): OompaWorkerStatus {
  */
 function readCycleFiles(dir: string): OompaCycle[] {
   try {
-    const files = fs.readdirSync(dir)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.json'))
       .sort();
-    return files.map(f => {
-      try {
-        return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as OompaCycle;
-      } catch {
-        return null;
-      }
-    }).filter((x): x is OompaCycle => x !== null);
+    return files
+      .map((f) => {
+        try {
+          return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as OompaCycle;
+        } catch {
+          return null;
+        }
+      })
+      .filter((x): x is OompaCycle => x !== null);
   } catch {
     return [];
   }
@@ -1637,7 +1655,8 @@ function isPidAlive(pidValue: string | undefined): boolean {
 function isOompaProcessAlive(projectRoot: string): boolean {
   const logsDir = path.join(projectRoot, 'oompa', 'logs');
   try {
-    const metaFiles = fs.readdirSync(logsDir)
+    const metaFiles = fs
+      .readdirSync(logsDir)
       .filter((f) => /^run_.+\.meta$/.test(f))
       .map((f) => path.join(logsDir, f));
 
@@ -1678,25 +1697,33 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
 
   let runCount = 0;
   try {
-    runCount = fs.readdirSync(runsDir, { withFileTypes: true })
-      .filter(entry => entry.isDirectory()).length;
-  } catch { runCount = 0; }
+    runCount = fs
+      .readdirSync(runsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory()).length;
+  } catch {
+    runCount = 0;
+  }
 
   const runId = latestRun.id;
 
   // Read event files: started.json (new) or run.json (old backward compat)
   // Cast to OompaStarted — safeReadJson returns Record<string,unknown> but the
   // schema-generated type is authoritative. Old run.json has the same shape.
-  const startedData = (safeReadJson(path.join(latestRun.path, 'started.json'))
-    ?? safeReadJson(path.join(latestRun.path, 'run.json'))
-    ?? {}) as Partial<OompaStarted>;
-  const stoppedData = safeReadJson(path.join(latestRun.path, 'stopped.json')) as OompaStopped | null;
+  const startedData = (safeReadJson(path.join(latestRun.path, 'started.json')) ??
+    safeReadJson(path.join(latestRun.path, 'run.json')) ??
+    {}) as Partial<OompaStarted>;
+  const stoppedData = safeReadJson(
+    path.join(latestRun.path, 'stopped.json')
+  ) as OompaStopped | null;
 
   // Scan cycles/ (new) or iterations/ (old backward compat)
   const cyclesDir = path.join(latestRun.path, 'cycles');
   const iterationsDir = path.join(latestRun.path, 'iterations');
-  const scanDir = fs.existsSync(cyclesDir) ? cyclesDir :
-                  fs.existsSync(iterationsDir) ? iterationsDir : null;
+  const scanDir = fs.existsSync(cyclesDir)
+    ? cyclesDir
+    : fs.existsSync(iterationsDir)
+      ? iterationsDir
+      : null;
 
   const cycleFiles = scanDir ? readCycleFiles(scanDir) : [];
 
@@ -1718,8 +1745,14 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
     const existing = latestCycleByWorker.get(wid);
     // Legacy compat: old runs used 'iteration' field instead of 'cycle'
     // Legacy compat: old runs used 'iteration' instead of 'cycle'
-    const cycleNum = cycle.cycle ?? ((cycle as unknown as Record<string, unknown>)['iteration'] as number | undefined) ?? 0;
-    const existingNum = existing?.cycle ?? ((existing as unknown as Record<string, unknown>)?.['iteration'] as number | undefined) ?? 0;
+    const cycleNum =
+      cycle.cycle ??
+      ((cycle as unknown as Record<string, unknown>)['iteration'] as number | undefined) ??
+      0;
+    const existingNum =
+      existing?.cycle ??
+      ((existing as unknown as Record<string, unknown>)?.['iteration'] as number | undefined) ??
+      0;
     if (!existing || cycleNum > existingNum) {
       latestCycleByWorker.set(wid, cycle);
     }
@@ -1744,7 +1777,7 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
   const swarmId = startedData['swarm-id'] ?? runId;
   const configPath = startedData['config-file'] ?? null;
 
-  const workerSnapshots = Array.from(workerIds).map(id => {
+  const workerSnapshots = Array.from(workerIds).map((id) => {
     const cycle = latestCycleByWorker.get(id);
     let status: OompaWorkerStatus;
 
@@ -1754,7 +1787,7 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
       // Avoid "eternal starting": once the swarm is live past a short grace period,
       // workers with no completed cycles yet should be shown as running.
       const noCycleShouldBeRunning =
-        !Number.isFinite(startedAtMs) || (Date.now() - startedAtMs) > liveNoCycleGraceMs;
+        !Number.isFinite(startedAtMs) || Date.now() - startedAtMs > liveNoCycleGraceMs;
       status = noCycleShouldBeRunning ? 'running' : 'starting';
     } else {
       status = 'done';
@@ -1771,13 +1804,17 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
       status,
       lastEvent: cycle
         ? `Cycle ${cycle.cycle ?? '?'}: ${cycle.outcome ?? 'unknown'}`
-        : swarmStopped ? 'Worker completed' : isLive ? 'Starting' : 'No data',
+        : swarmStopped
+          ? 'Worker completed'
+          : isLive
+            ? 'Starting'
+            : 'No data',
     };
   });
 
   const states = workerSnapshots.sort((a, b) => a.id.localeCompare(b.id));
-  const doneWorkers = states.filter(w => isTerminalWorkerStatus(w.status)).length;
-  const activeWorkers = states.filter(w => !isTerminalWorkerStatus(w.status)).length;
+  const doneWorkers = states.filter((w) => isTerminalWorkerStatus(w.status)).length;
+  const activeWorkers = states.filter((w) => !isTerminalWorkerStatus(w.status)).length;
 
   return {
     available: true,
@@ -1905,7 +1942,9 @@ async function synthesizeSummary(
   const cyclesByWorker = new Map<string, OompaCycle[]>();
 
   if (cycleFileDir) {
-    const cycleFileNames = (await fs.promises.readdir(cycleFileDir)).filter((f) => f.endsWith('.json'));
+    const cycleFileNames = (await fs.promises.readdir(cycleFileDir)).filter((f) =>
+      f.endsWith('.json')
+    );
     await Promise.all(
       cycleFileNames.map(async (cf) => {
         try {
@@ -1995,10 +2034,10 @@ async function synthesizeSummary(
     // Derive status from what we actually know — never fabricate
     let status: string;
     if (workerCycles.length === 0 && !isLive) {
-      status = 'unknown';  // No data and not running — don't pretend we know
+      status = 'unknown'; // No data and not running — don't pretend we know
     } else if (workerCycles.length === 0 && isLive) {
       const noCycleShouldBeRunning =
-        !Number.isFinite(startedAtMs) || (Date.now() - startedAtMs) > liveNoCycleGraceMs;
+        !Number.isFinite(startedAtMs) || Date.now() - startedAtMs > liveNoCycleGraceMs;
       status = noCycleShouldBeRunning ? 'running' : 'starting';
     } else if (latestOutcome === 'done' || latestOutcome === 'executor-done') {
       status = 'completed';
@@ -2009,7 +2048,7 @@ async function synthesizeSummary(
     } else if (isStopped) {
       status = 'completed';
     } else {
-      status = 'unknown';  // Not running, no stopped.json, ambiguous — say so
+      status = 'unknown'; // Not running, no stopped.json, ambiguous — say so
     }
 
     // needs-changes from reviews
@@ -2058,7 +2097,7 @@ async function synthesizeSummary(
   return {
     'swarm-id': swarmId,
     // Don't fabricate finished-at from started-at — null means "we don't know"
-    'finished-at': isStopped ? (latestTimestamp || null) : (isLive ? null : (latestTimestamp || null)),
+    'finished-at': isStopped ? latestTimestamp || null : isLive ? null : latestTimestamp || null,
     'total-workers': workers.length,
     'total-completed': workers.filter((w) => w.status === 'completed').length,
     'total-iterations': workers.reduce((s, w) => s + w.iterations, 0),
@@ -2206,7 +2245,10 @@ app.post('/api/swarm-signal', (req: Request, res: Response) => {
   }
 
   // Read PID from started.json
-  const startedData = safeReadJson(path.join(runDir, 'started.json')) as Record<string, unknown> | null;
+  const startedData = safeReadJson(path.join(runDir, 'started.json')) as Record<
+    string,
+    unknown
+  > | null;
   const pid = startedData?.pid as number | undefined;
   if (!pid || !Number.isFinite(pid) || pid <= 0) {
     res.json({ ok: false, message: 'No valid PID found in started.json' });
@@ -2231,7 +2273,10 @@ app.post('/api/swarm-signal', (req: Request, res: Response) => {
   try {
     if (signal === 'stop') {
       process.kill(pid, 'SIGTERM');
-      res.json({ ok: true, message: `SIGTERM sent to PID ${pid}. Workers will finish current cycle.` });
+      res.json({
+        ok: true,
+        message: `SIGTERM sent to PID ${pid}. Workers will finish current cycle.`,
+      });
     } else {
       process.kill(pid, 'SIGKILL');
       // SIGKILL bypasses shutdown hooks — write stopped.json ourselves
@@ -3323,7 +3368,9 @@ async function loadExistingConversations(): Promise<void> {
         });
       }
 
-      console.log(`Loaded ${progress.loaded}/${progress.total} files (${conversations.size} conversations)...`);
+      console.log(
+        `Loaded ${progress.loaded}/${progress.total} files (${conversations.size} conversations)...`
+      );
     });
 
     fileMtimes = mtimes;
@@ -3529,9 +3576,10 @@ function startFilePolling(): void {
           const trailingSystemMessages = existing.messages.filter(
             (m, i) => m.role === 'system' && i >= convData.messages.length
           );
-          existing.messages = trailingSystemMessages.length > 0
-            ? [...convData.messages, ...trailingSystemMessages]
-            : convData.messages;
+          existing.messages =
+            trailingSystemMessages.length > 0
+              ? [...convData.messages, ...trailingSystemMessages]
+              : convData.messages;
           existing.subAgents = convData.subAgents;
           existing.createdAt = convData.createdAt;
           existing.isWorker = convData.isWorker;

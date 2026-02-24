@@ -6,18 +6,27 @@ const { spawn } = require('node:child_process');
 
 console.log('=== Testing Claude CLI Streaming Mode ===\n');
 
-const proc = spawn('claude', [
-  '--verbose',
-  '--input-format', 'stream-json',
-  '--output-format', 'stream-json',
-  '--include-partial-messages',
-], {
-  cwd: process.cwd(),
-});
+const proc = spawn(
+  'claude',
+  [
+    '--verbose',
+    '--input-format',
+    'stream-json',
+    '--output-format',
+    'stream-json',
+    '--include-partial-messages',
+  ],
+  {
+    cwd: process.cwd(),
+  }
+);
 
 proc.stdout.on('data', (data) => {
-  const lines = data.toString().split('\n').filter(l => l.trim());
-  lines.forEach(line => {
+  const lines = data
+    .toString()
+    .split('\n')
+    .filter((l) => l.trim());
+  lines.forEach((line) => {
     try {
       const json = JSON.parse(line);
       console.log(`[stdout] type=${json.type}`, JSON.stringify(json).substring(0, 150));

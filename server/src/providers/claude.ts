@@ -21,7 +21,7 @@
 
 import type { ModelInfo } from '@claude-web-view/shared';
 import { buildCommand } from '@nbardy/agent-cli';
-import { ProviderParseError, type Provider, type SpawnConfig, type ProviderEvent } from './index';
+import { type Provider, type ProviderEvent, ProviderParseError, type SpawnConfig } from './index';
 
 // =============================================================================
 // Claude CLI JSON Output Types - STRICT, NO CATCH-ALL
@@ -113,16 +113,26 @@ function isClaudeOutput(data: unknown): data is ClaudeOutput {
 
 function claudeToolEmoji(toolName: string): string {
   switch (toolName) {
-    case 'Read': return '📖';
-    case 'Write': return '✍️';
-    case 'Edit': return '✏️';
-    case 'Bash': return '⚡';
-    case 'Glob': return '📂';
-    case 'Grep': return '🔍';
-    case 'WebSearch': return '🌐';
-    case 'WebFetch': return '🌐';
-    case 'NotebookEdit': return '📓';
-    default: return '🔧';
+    case 'Read':
+      return '📖';
+    case 'Write':
+      return '✍️';
+    case 'Edit':
+      return '✏️';
+    case 'Bash':
+      return '⚡';
+    case 'Glob':
+      return '📂';
+    case 'Grep':
+      return '🔍';
+    case 'WebSearch':
+      return '🌐';
+    case 'WebFetch':
+      return '🌐';
+    case 'NotebookEdit':
+      return '📓';
+    default:
+      return '🔧';
   }
 }
 
@@ -141,7 +151,12 @@ const claudeProvider: Provider = {
     ];
   },
 
-  getSpawnConfig(sessionId: string, workingDir: string, resume = false, modelId?: string): SpawnConfig {
+  getSpawnConfig(
+    sessionId: string,
+    workingDir: string,
+    resume = false,
+    modelId?: string
+  ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
     // Session management, model flags, and bypass are handled by agent-cli.
     // Project-specific streaming flags are passed via extraArgs.
@@ -156,14 +171,18 @@ const claudeProvider: Provider = {
     const extraArgs = [
       '-p',
       '--verbose',
-      '--output-format', 'stream-json',
+      '--output-format',
+      'stream-json',
       '--include-partial-messages',
     ];
     if (maxPermissions) {
       extraArgs.push(
-        '--permission-mode', 'bypassPermissions',
-        '--tools', 'default',
-        '--add-dir', workingDir
+        '--permission-mode',
+        'bypassPermissions',
+        '--tools',
+        'default',
+        '--add-dir',
+        workingDir
       );
     }
 
@@ -198,11 +217,7 @@ const claudeProvider: Provider = {
   parseOutput(json: unknown): ProviderEvent {
     // Validate this is a known Claude output type
     if (!isClaudeOutput(json)) {
-      throw new ProviderParseError(
-        'claude',
-        json,
-        `Unknown message type: ${JSON.stringify(json)}`
-      );
+      throw new ProviderParseError('claude', json, `Unknown message type: ${JSON.stringify(json)}`);
     }
 
     switch (json.type) {
@@ -286,9 +301,13 @@ const claudeProvider: Provider = {
         // place we get the complete input is here in the full assistant message.
         // We emit a special marker as text_delta that the client renders as a widget.
         const content = json.message?.content;
-        const textBlock = Array.isArray(content) ? content.find((b: ClaudeContentItem) => b.type === 'text') : null;
+        const textBlock = Array.isArray(content)
+          ? content.find((b: ClaudeContentItem) => b.type === 'text')
+          : null;
         const textLength = (textBlock as ClaudeTextContent | null)?.text?.length ?? 0;
-        console.log(`[claude] assistant message arrived (${textLength} chars) - checking for AskUserQuestion`);
+        console.log(
+          `[claude] assistant message arrived (${textLength} chars) - checking for AskUserQuestion`
+        );
 
         // Extract AskUserQuestion tool_use blocks and emit as structured markers
         if (Array.isArray(content)) {
@@ -314,11 +333,7 @@ const claudeProvider: Provider = {
       default: {
         // TypeScript exhaustive check
         const _exhaustive: never = json;
-        throw new ProviderParseError(
-          'claude',
-          _exhaustive,
-          'Unhandled message type'
-        );
+        throw new ProviderParseError('claude', _exhaustive, 'Unhandled message type');
       }
     }
   },

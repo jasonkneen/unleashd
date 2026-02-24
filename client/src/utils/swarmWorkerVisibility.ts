@@ -11,7 +11,7 @@ export interface WorkerVisibilitySummary {
 export function getWorkerVisibilitySummary(
   workers: readonly Conversation[],
   runtimeSnapshot: OompaRuntimeSnapshot | null | undefined,
-  isRunning: (worker: Conversation) => boolean = (worker) => worker.isRunning,
+  isRunning: (worker: Conversation) => boolean = (worker) => worker.isRunning
 ): WorkerVisibilitySummary {
   const sessionCount = workers.length;
   const workerIds = workers.map((worker) => worker.workerId || worker.id);
@@ -28,7 +28,9 @@ export function getWorkerVisibilitySummary(
     };
   }
 
-  const runningWorkers = new Set(workers.filter(isRunning).map((worker) => worker.workerId || worker.id)).size;
+  const runningWorkers = new Set(
+    workers.filter(isRunning).map((worker) => worker.workerId || worker.id)
+  ).size;
   return {
     sessionCount,
     hasWorkers: sessionCount > 0,

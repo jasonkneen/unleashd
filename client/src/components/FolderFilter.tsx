@@ -15,9 +15,9 @@
  * score higher, so exact substring matches rank above scattered matches.
  */
 
-import { useState, useMemo } from 'react';
-import { fuzzyMatch, highlightMatches } from '../utils/fuzzyMatch';
 import type { Conversation } from '@claude-web-view/shared';
+import { useMemo, useState } from 'react';
+import { fuzzyMatch, highlightMatches } from '../utils/fuzzyMatch';
 import './FolderFilter.css';
 
 const VISIBLE_COUNT = 8;
@@ -87,14 +87,34 @@ export function FolderFilter({
       // Pick whichever scores higher
       if (fmtResult && rawResult) {
         if (fmtResult.score >= rawResult.score) {
-          results.push({ folder, score: fmtResult.score, matches: fmtResult.matches, matchedFormatted: true });
+          results.push({
+            folder,
+            score: fmtResult.score,
+            matches: fmtResult.matches,
+            matchedFormatted: true,
+          });
         } else {
-          results.push({ folder, score: rawResult.score, matches: rawResult.matches, matchedFormatted: false });
+          results.push({
+            folder,
+            score: rawResult.score,
+            matches: rawResult.matches,
+            matchedFormatted: false,
+          });
         }
       } else if (fmtResult) {
-        results.push({ folder, score: fmtResult.score, matches: fmtResult.matches, matchedFormatted: true });
+        results.push({
+          folder,
+          score: fmtResult.score,
+          matches: fmtResult.matches,
+          matchedFormatted: true,
+        });
       } else if (rawResult) {
-        results.push({ folder, score: rawResult.score, matches: rawResult.matches, matchedFormatted: false });
+        results.push({
+          folder,
+          score: rawResult.score,
+          matches: rawResult.matches,
+          matchedFormatted: false,
+        });
       }
     }
 
@@ -110,7 +130,7 @@ export function FolderFilter({
     const results: ConversationMatch[] = [];
 
     for (const conv of conversations) {
-      let bestScore = -Infinity;
+      let bestScore = Number.NEGATIVE_INFINITY;
       let bestSnippet = '';
       let bestMatches: number[] = [];
 
@@ -140,14 +160,22 @@ export function FolderFilter({
           const adjustedMatches = result.matches
             .filter((i) => i >= snippetStart && i < snippetEnd)
             .map((i) => i - snippetStart);
-          bestSnippet = (snippetStart > 0 ? '...' : '') + rawSnippet + (snippetEnd < content.length ? '...' : '');
+          bestSnippet =
+            (snippetStart > 0 ? '...' : '') +
+            rawSnippet +
+            (snippetEnd < content.length ? '...' : '');
           // Offset adjusted matches if we prepended "..."
           bestMatches = snippetStart > 0 ? adjustedMatches.map((i) => i + 3) : adjustedMatches;
         }
       }
 
-      if (bestScore > -Infinity) {
-        results.push({ conversation: conv, score: bestScore, snippet: bestSnippet, matches: bestMatches });
+      if (bestScore > Number.NEGATIVE_INFINITY) {
+        results.push({
+          conversation: conv,
+          score: bestScore,
+          snippet: bestSnippet,
+          matches: bestMatches,
+        });
       }
     }
 

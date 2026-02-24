@@ -16,14 +16,13 @@ function sendMessage(prompt) {
   return new Promise((resolve, reject) => {
     console.log(`[send] "${prompt}"`);
 
-    const proc = spawn('claude', [
-      '--print',
-      '--verbose',
-      '--output-format=stream-json',
-      '--session-id', SESSION_ID,
-    ], {
-      cwd: process.cwd(),
-    });
+    const proc = spawn(
+      'claude',
+      ['--print', '--verbose', '--output-format=stream-json', '--session-id', SESSION_ID],
+      {
+        cwd: process.cwd(),
+      }
+    );
 
     let fullOutput = '';
 
@@ -32,17 +31,20 @@ function sendMessage(prompt) {
       fullOutput += chunk;
 
       // Parse each line
-      chunk.split('\n').filter(l => l.trim()).forEach(line => {
-        try {
-          const json = JSON.parse(line);
-          if (json.type === 'assistant') {
-            const text = json.message?.content?.[0]?.text || '';
-            console.log(`[assistant] ${text.substring(0, 100)}`);
+      chunk
+        .split('\n')
+        .filter((l) => l.trim())
+        .forEach((line) => {
+          try {
+            const json = JSON.parse(line);
+            if (json.type === 'assistant') {
+              const text = json.message?.content?.[0]?.text || '';
+              console.log(`[assistant] ${text.substring(0, 100)}`);
+            }
+          } catch (e) {
+            // Ignore parse errors for partial lines
           }
-        } catch (e) {
-          // Ignore parse errors for partial lines
-        }
-      });
+        });
     });
 
     proc.stderr.on('data', (data) => {

@@ -42,7 +42,10 @@ function parseWorkerTable(prefix: string): {
   const sectionMatch = prefix.match(/## Worker Status\n([\s\S]*?)(?=\n##|\n\nGiven|$)/);
   if (!sectionMatch) return null;
 
-  const lines = sectionMatch[1].trim().split('\n').filter((l) => l.trim() && !l.startsWith('---'));
+  const lines = sectionMatch[1]
+    .trim()
+    .split('\n')
+    .filter((l) => l.trim() && !l.startsWith('---'));
   if (lines.length < 2) return null;
 
   const headers = lines[0].split('|').map((h) => h.trim());
@@ -61,8 +64,10 @@ export function SwarmConvoPrefix({ prefix, swarmId }: SwarmConvoPrefixProps) {
   const statChips: Array<{ label: string; value: string; kind: string }> = [];
   if (stats.completed) statChips.push({ label: 'Done', value: stats.completed, kind: 'neutral' });
   if (stats.merges) statChips.push({ label: 'Merges', value: stats.merges, kind: 'success' });
-  if (stats.rejections && stats.rejections !== '0') statChips.push({ label: 'Rej', value: stats.rejections, kind: 'warning' });
-  if (stats.errors && stats.errors !== '0') statChips.push({ label: 'Err', value: stats.errors, kind: 'error' });
+  if (stats.rejections && stats.rejections !== '0')
+    statChips.push({ label: 'Rej', value: stats.rejections, kind: 'warning' });
+  if (stats.errors && stats.errors !== '0')
+    statChips.push({ label: 'Err', value: stats.errors, kind: 'error' });
 
   return (
     <div className="swarm-convo-prefix">
@@ -126,7 +131,9 @@ export function SwarmConvoPrefix({ prefix, swarmId }: SwarmConvoPrefixProps) {
                 <span className="swarm-prefix-stat-label">Merges</span>
               </div>
               <div className="swarm-prefix-stat">
-                <span className="swarm-prefix-stat-value stat-warning">{stats.rejections ?? '0'}</span>
+                <span className="swarm-prefix-stat-value stat-warning">
+                  {stats.rejections ?? '0'}
+                </span>
                 <span className="swarm-prefix-stat-label">Rejections</span>
               </div>
               <div className="swarm-prefix-stat">

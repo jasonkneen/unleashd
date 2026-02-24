@@ -176,15 +176,33 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
     <div className="search-palette-overlay" onClick={onClose}>
       <div className="search-palette" onClick={(e) => e.stopPropagation()}>
         <div className="search-palette-input-row">
-          <svg className="search-palette-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <svg
+            className="search-palette-icon"
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+          >
             <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.5" />
-            <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <line
+              x1="11"
+              y1="11"
+              x2="14.5"
+              y2="14.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
           </svg>
           <input
             ref={inputRef}
             type="text"
             className="search-palette-input"
-            placeholder={filterDirectory ? `Search in ${filterDirectory.split('/').filter(Boolean).pop()}...` : 'Search all conversations...'}
+            placeholder={
+              filterDirectory
+                ? `Search in ${filterDirectory.split('/').filter(Boolean).pop()}...`
+                : 'Search all conversations...'
+            }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -204,7 +222,9 @@ export function SearchPalette({ isOpen, onClose, onSelectConversation, filterDir
                 onMouseEnter={() => setSelectedIndex(i)}
               >
                 <div className="search-result-header">
-                  <span className="search-result-folder">{folderName(result.workingDirectory)}</span>
+                  <span className="search-result-folder">
+                    {folderName(result.workingDirectory)}
+                  </span>
                   <span className={`search-result-role search-result-role--${result.role}`}>
                     {result.role}
                   </span>

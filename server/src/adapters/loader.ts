@@ -12,16 +12,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Conversation } from '@claude-web-view/shared';
-import type { DiskAdapter, LoadResult, PollResult, LoadProgressCallback } from './disk-adapter';
+import type { DiskAdapter, LoadProgressCallback, LoadResult, PollResult } from './disk-adapter';
 import { sessionToConversation } from './disk-adapter';
+import { extractCodexSessionIdFromFilename } from './jsonl';
 import { diskAdapters } from './registry';
-import {
-  getOpenCodeSessionMtime,
-  OPENCODE_PART_DIR,
-} from './registry';
-import {
-  extractCodexSessionIdFromFilename,
-} from './jsonl';
+import { OPENCODE_PART_DIR, getOpenCodeSessionMtime } from './registry';
 
 // =============================================================================
 // DiscoveredFile — adapter-tagged file entry from Phase 1
@@ -53,7 +48,9 @@ async function discoverAll(adapters: DiskAdapter[]): Promise<DiscoveredFile[]> {
       try {
         paths = await adapter.discoverFiles();
       } catch (err) {
-        console.warn(`[discover] ${adapter.provider}: discoverFiles() failed: ${err instanceof Error ? err.message : err}`);
+        console.warn(
+          `[discover] ${adapter.provider}: discoverFiles() failed: ${err instanceof Error ? err.message : err}`
+        );
         return;
       }
 
@@ -179,11 +176,9 @@ async function parseOneFile(file: DiscoveredFile): Promise<ParsedResult> {
  * @param onProgress - Optional callback invoked with batches of parsed conversations
  * @returns conversations + mtime index for subsequent polling
  */
-export async function loadAllConversations(
-  onProgress?: LoadProgressCallback
-): Promise<LoadResult> {
+export async function loadAllConversations(onProgress?: LoadProgressCallback): Promise<LoadResult> {
   const CONCURRENCY = 10; // macOS default fd limit is 256; 10 is very safe
-  const BATCH_SIZE = 50;  // Emit progress every N files
+  const BATCH_SIZE = 50; // Emit progress every N files
 
   // Phase 1: Discover all files (sorted by mtime descending)
   const discoverStart = performance.now();
@@ -202,7 +197,10 @@ export async function loadAllConversations(
   const mtimes = new Map<string, number>();
   // Running accumulators for parse timing — avoids allocating a 1500-element array
   // just to compute summary stats that are immediately discarded after logging.
-  let parseTimeMin = Infinity, parseTimeMax = 0, parseTimeSum = 0, parseTimeCount = 0;
+  let parseTimeMin = Number.POSITIVE_INFINITY,
+    parseTimeMax = 0,
+    parseTimeSum = 0,
+    parseTimeCount = 0;
   let batchBuffer: Conversation[] = [];
   let filesProcessed = 0;
   let conversationCount = 0;
@@ -291,7 +289,9 @@ export async function pollForChanges(
     try {
       paths = await adapter.discoverFiles();
     } catch (err) {
-      console.warn(`[poll] ${adapter.provider}: discoverFiles() failed: ${err instanceof Error ? err.message : err}`);
+      console.warn(
+        `[poll] ${adapter.provider}: discoverFiles() failed: ${err instanceof Error ? err.message : err}`
+      );
       continue;
     }
 
@@ -299,7 +299,8 @@ export async function pollForChanges(
     // (stored on opencodeAdapter._sessionIndex). Reuse it instead of re-fetching.
     const openCodeSessionIndex: Map<string, string> | null =
       adapter.provider === 'opencode'
-        ? ((adapter as typeof adapter & { _sessionIndex: Map<string, string> | null })._sessionIndex ?? null)
+        ? ((adapter as typeof adapter & { _sessionIndex: Map<string, string> | null })
+            ._sessionIndex ?? null)
         : null;
 
     for (const filePath of paths) {

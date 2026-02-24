@@ -247,7 +247,9 @@ export const JsonlEntrySchema = z.union([
   JsonlFileHistorySnapshotEntrySchema,
   JsonlQueueOperationEntrySchema,
   // Fallback for unknown types
-  z.object({ type: z.string() }).passthrough(),
+  z
+    .object({ type: z.string() })
+    .passthrough(),
 ]);
 
 export type JsonlEntry = z.infer<typeof JsonlEntrySchema>;

@@ -33,7 +33,12 @@ interface UseFolderFilterResult<T> {
   filtered: T[];
 }
 
-export function useFolderFilter<T>({ items, getFolder, selected, setSelected }: UseFolderFilterOptions<T>): UseFolderFilterResult<T> {
+export function useFolderFilter<T>({
+  items,
+  getFolder,
+  selected,
+  setSelected,
+}: UseFolderFilterOptions<T>): UseFolderFilterResult<T> {
   // Extract unique folders, sorted alphabetically
   const folders = useMemo(() => {
     const uniqueFolders = new Set<string>();
@@ -44,17 +49,20 @@ export function useFolderFilter<T>({ items, getFolder, selected, setSelected }: 
   }, [items, getFolder]);
 
   // Toggle a folder in/out of selection
-  const toggle = useCallback((folder: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(folder)) {
-        next.delete(folder);
-      } else {
-        next.add(folder);
-      }
-      return next;
-    });
-  }, [setSelected]);
+  const toggle = useCallback(
+    (folder: string) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(folder)) {
+          next.delete(folder);
+        } else {
+          next.add(folder);
+        }
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   // Clear all selections
   const clear = useCallback(() => {

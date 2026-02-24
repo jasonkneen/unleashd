@@ -54,7 +54,10 @@ test('server provider/model compatibility validation works per provider', () => 
 test('OpenCode provider model params enforce provider/model ids', () => {
   assert.deepEqual(opencodeProvider.modelToParams('openai/gpt-5'), ['-m', 'opencode/gpt-5']);
   assert.deepEqual(opencodeProvider.modelToParams('opencode/gpt-5'), ['-m', 'opencode/gpt-5']);
-  assert.deepEqual(opencodeProvider.modelToParams('opencode/big-pickle'), ['-m', 'opencode/big-pickle']);
+  assert.deepEqual(opencodeProvider.modelToParams('opencode/big-pickle'), [
+    '-m',
+    'opencode/big-pickle',
+  ]);
   assert.throws(() => opencodeProvider.modelToParams('opus'));
 });
 
@@ -62,7 +65,10 @@ test('OpenCode listModels remains dropdown-friendly with one default', () => {
   const models = opencodeProvider.listModels();
   const defaults = models.filter((m) => m.isDefault);
 
-  assert.equal(models.some((m) => m.id === 'opencode/big-pickle'), true);
+  assert.equal(
+    models.some((m) => m.id === 'opencode/big-pickle'),
+    true
+  );
   assert.equal(defaults.length, 1);
   assert.equal(defaults[0].id, 'opencode/big-pickle');
 });
@@ -91,11 +97,5 @@ test('OpenCode spawn config uses --session + --continue only for valid resume ID
     true,
     'opencode/big-pickle'
   );
-  assert.deepEqual(freshConfig.args, [
-    'run',
-    '--format',
-    'json',
-    '-m',
-    'opencode/gpt-5',
-  ]);
+  assert.deepEqual(freshConfig.args, ['run', '--format', 'json', '-m', 'opencode/gpt-5']);
 });

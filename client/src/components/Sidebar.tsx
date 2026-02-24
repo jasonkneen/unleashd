@@ -1,13 +1,13 @@
 import type { Conversation, ModelId, ModelInfo, Provider } from '@claude-web-view/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useConversationStore } from '../stores/conversationStore';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
 import { getProjectRoot } from '../utils/swarmUtils';
-import { formatTimeAgo, getLastMessageTime, getMinutesElapsed } from '../utils/time';
 import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
-import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
+import { formatTimeAgo, getLastMessageTime, getMinutesElapsed } from '../utils/time';
 import { PathAutocomplete } from './PathAutocomplete';
 import { SearchPalette } from './SearchPalette';
 import './Sidebar.css';
@@ -84,7 +84,10 @@ export function Sidebar() {
     return map;
   }, [conversations, promotedSet]);
 
-  const workerProjectRoots = useMemo(() => Array.from(workerConversationsByProject.keys()), [workerConversationsByProject]);
+  const workerProjectRoots = useMemo(
+    () => Array.from(workerConversationsByProject.keys()),
+    [workerConversationsByProject]
+  );
   const runtimeSnapshots = useSwarmRuntimeSnapshots(workerProjectRoots);
 
   const visibleConversations = useMemo(
@@ -120,7 +123,7 @@ export function Sidebar() {
 
     for (const conv of topLevelConversations) {
       const lastTime = getLastMessageTime(conv.messages);
-      const isRecent = lastTime && (now - lastTime.getTime()) < RECENT_CUTOFF_MS;
+      const isRecent = lastTime && now - lastTime.getTime() < RECENT_CUTOFF_MS;
 
       if (isRecent) {
         const existing = recentMap.get(conv.workingDirectory);
@@ -137,7 +140,9 @@ export function Sidebar() {
     const groups: FolderGroup[] = Array.from(recentMap.entries()).map(([directory, convs]) => ({
       directory,
       conversations: convs,
-      lastMessageTime: Math.max(...convs.map(c => getLastMessageTime(c.messages)?.getTime() ?? 0)),
+      lastMessageTime: Math.max(
+        ...convs.map((c) => getLastMessageTime(c.messages)?.getTime() ?? 0)
+      ),
     }));
     groups.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 
@@ -162,7 +167,11 @@ export function Sidebar() {
       }
     }
 
-    return { hasWorkers: nextHasWorkers, activeWorkerCount: nextActive, totalWorkerCount: nextTotal };
+    return {
+      hasWorkers: nextHasWorkers,
+      activeWorkerCount: nextActive,
+      totalWorkerCount: nextTotal,
+    };
   }, [runtimeSnapshots, workerConversationsByProject, workerProjectRoots]);
 
   // Deduplicated working directories from all conversations — fed to PathAutocomplete for fuzzy matching
@@ -281,22 +290,29 @@ export function Sidebar() {
             >
               +
             </button>
-            <button
-              type="button"
-              className="nav-section-label"
-              onClick={() => navigate('/')}
-            >
+            <button type="button" className="nav-section-label" onClick={() => navigate('/')}>
               Conversations
             </button>
             <button
               type="button"
               className="nav-create-btn"
-              onClick={() => { setSearchFilterDir(undefined); setShowSearch(true); }}
+              onClick={() => {
+                setSearchFilterDir(undefined);
+                setShowSearch(true);
+              }}
               title="Search conversations (Cmd+K)"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
-                <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <line
+                  x1="11"
+                  y1="11"
+                  x2="14.5"
+                  y2="14.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
               </svg>
             </button>
             <div className="nav-section-counts">
@@ -343,11 +359,7 @@ export function Sidebar() {
               </div>
             </div>
             <div className="nav-section-sub">
-              <button
-                type="button"
-                className="nav-sub-link"
-                onClick={() => navigate('/workers')}
-              >
+              <button type="button" className="nav-sub-link" onClick={() => navigate('/workers')}>
                 Dashboard
               </button>
               <button
@@ -483,7 +495,15 @@ export function Sidebar() {
                 <rect x="1" y="1" width="12" height="3" rx="1" fill="currentColor" opacity="0.5" />
                 <rect x="3" y="5.5" width="10" height="2" rx="0.5" fill="currentColor" />
                 <rect x="3" y="8.5" width="10" height="2" rx="0.5" fill="currentColor" />
-                <rect x="1" y="11.5" width="12" height="1.5" rx="0.5" fill="currentColor" opacity="0.5" />
+                <rect
+                  x="1"
+                  y="11.5"
+                  width="12"
+                  height="1.5"
+                  rx="0.5"
+                  fill="currentColor"
+                  opacity="0.5"
+                />
               </svg>
             </button>
             <button
@@ -551,7 +571,15 @@ export function Sidebar() {
                         >
                           <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                             <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
-                            <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            <line
+                              x1="11"
+                              y1="11"
+                              x2="14.5"
+                              y2="14.5"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
                           </svg>
                         </button>
                         <button
@@ -567,21 +595,20 @@ export function Sidebar() {
                         >
                           +
                         </button>
-                        <span className="folder-group-count">
-                          {group.conversations.length}
-                        </span>
+                        <span className="folder-group-count">{group.conversations.length}</span>
                       </div>
-                      {!isCollapsed && group.conversations.map((conv) => (
-                        <ConversationItem
-                          key={conv.id}
-                          conv={conv}
-                          isActive={conv.id === activeConversationId}
-                          hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
-                          showFolderBadge={false}
-                          onSelect={handleSelectConversation}
-                          onDone={handleDone}
-                        />
-                      ))}
+                      {!isCollapsed &&
+                        group.conversations.map((conv) => (
+                          <ConversationItem
+                            key={conv.id}
+                            conv={conv}
+                            isActive={conv.id === activeConversationId}
+                            hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
+                            showFolderBadge={false}
+                            onSelect={handleSelectConversation}
+                            onDone={handleDone}
+                          />
+                        ))}
                     </div>
                   );
                 })}
@@ -615,7 +642,14 @@ export function Sidebar() {
  * Extracted conversation item — avoids duplicating JSX across list/grouped modes.
  * showFolderBadge=false in grouped mode since the folder header already shows the path.
  */
-function ConversationItem({ conv, isActive, hasUnseen, showFolderBadge, onSelect, onDone }: {
+function ConversationItem({
+  conv,
+  isActive,
+  hasUnseen,
+  showFolderBadge,
+  onSelect,
+  onDone,
+}: {
   conv: Conversation;
   isActive: boolean;
   hasUnseen: boolean;

@@ -17,8 +17,7 @@
 
 import type { ModelInfo } from '@claude-web-view/shared';
 import { buildCommand } from '@nbardy/agent-cli';
-import { ProviderParseError, type Provider, type ProviderEvent, type SpawnConfig } from './index';
-
+import { type Provider, type ProviderEvent, ProviderParseError, type SpawnConfig } from './index';
 
 type JsonObject = Record<string, unknown>;
 
@@ -41,16 +40,26 @@ function normalizeType(raw: string | null): string | null {
 
 function opencodeToolEmoji(toolName: string): string {
   switch (toolName.toLowerCase()) {
-    case 'read': return '📖';
-    case 'write': return '✍️';
-    case 'edit': return '✏️';
-    case 'bash': return '⚡';
-    case 'glob': return '📂';
-    case 'grep': return '🔍';
-    case 'webfetch': return '🌐';
-    case 'websearch': return '🌐';
-    case 'task': return '🤖';
-    default: return '🔧';
+    case 'read':
+      return '📖';
+    case 'write':
+      return '✍️';
+    case 'edit':
+      return '✏️';
+    case 'bash':
+      return '⚡';
+    case 'glob':
+      return '📂';
+    case 'grep':
+      return '🔍';
+    case 'webfetch':
+      return '🌐';
+    case 'websearch':
+      return '🌐';
+    case 'task':
+      return '🤖';
+    default:
+      return '🔧';
   }
 }
 
@@ -126,11 +135,20 @@ const opencodeProvider: Provider = {
       { id: 'opencode/big-pickle', displayName: 'OpenCode Big Pickle (Free)', isDefault: true },
       { id: 'opencode/gpt-5-nano', displayName: 'OpenCode GPT-5 Nano (Free)', isDefault: false },
       { id: 'opencode/kimi-k2.5-free', displayName: 'OpenCode Kimi K2.5 Free', isDefault: false },
-      { id: 'opencode/minimax-m2.5-free', displayName: 'OpenCode MiniMax M2.5 Free', isDefault: false },
+      {
+        id: 'opencode/minimax-m2.5-free',
+        displayName: 'OpenCode MiniMax M2.5 Free',
+        isDefault: false,
+      },
     ];
   },
 
-  getSpawnConfig(sessionId: string, workingDir: string, resume = false, modelId?: string): SpawnConfig {
+  getSpawnConfig(
+    sessionId: string,
+    workingDir: string,
+    resume = false,
+    modelId?: string
+  ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
     // Agent-cli handles: run subcommand, model normalization (openai/ → opencode/),
     // ses_ session guard, resume flags.
@@ -192,9 +210,7 @@ const opencodeProvider: Provider = {
         const status = asString(state?.status);
         const label = buildToolDisplayName(toolName, input);
         const statusSuffix =
-          status === 'failed' || status === 'error' ? ' ❌'
-            : status === 'running' ? ' …'
-              : '';
+          status === 'failed' || status === 'error' ? ' ❌' : status === 'running' ? ' …' : '';
 
         return {
           type: 'tool_use',
@@ -243,9 +259,7 @@ const opencodeProvider: Provider = {
 
       case 'error': {
         const message =
-          asString(obj.message) ??
-          asString(asObject(obj.error)?.message) ??
-          'OpenCode error';
+          asString(obj.message) ?? asString(asObject(obj.error)?.message) ?? 'OpenCode error';
         return { type: 'error', message };
       }
 

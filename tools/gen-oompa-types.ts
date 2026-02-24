@@ -9,8 +9,8 @@
  *   npx tsx tools/gen-oompa-types.ts
  */
 
-import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
-import { join, basename, resolve, dirname } from 'node:path';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile } from 'json-schema-to-typescript';
 

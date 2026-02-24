@@ -2,9 +2,13 @@ import type { Provider as ProviderName } from '@claude-web-view/shared';
 
 const CLAUDE_MODEL_IDS = new Set(['opus', 'sonnet', 'haiku']);
 const CODEX_MODEL_IDS = new Set([
-  'gpt-5.3-codex-medium', 'gpt-5.3-codex-high', 'gpt-5.3-codex-xhigh',
+  'gpt-5.3-codex-medium',
+  'gpt-5.3-codex-high',
+  'gpt-5.3-codex-xhigh',
   'gpt-5.3-codex-spark',
-  'gpt-5.3-codex-spark-medium', 'gpt-5.3-codex-spark-high', 'gpt-5.3-codex-spark-xhigh',
+  'gpt-5.3-codex-spark-medium',
+  'gpt-5.3-codex-spark-high',
+  'gpt-5.3-codex-spark-xhigh',
 ]);
 const GEMINI_MODEL_IDS = new Set([
   'gemini-3-pro-preview',

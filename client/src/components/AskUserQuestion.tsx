@@ -54,7 +54,7 @@ function QuestionCard({ question }: { question: Question }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const toggle = (idx: number) => {
-    setSelected(prev => {
+    setSelected((prev) => {
       const next = new Set(prev);
       if (question.multiSelect) {
         if (next.has(idx)) next.delete(idx);
@@ -70,9 +70,7 @@ function QuestionCard({ question }: { question: Question }) {
 
   return (
     <div className="ask-question-card">
-      {question.header && (
-        <span className="ask-question-header">{question.header}</span>
-      )}
+      {question.header && <span className="ask-question-header">{question.header}</span>}
       <p className="ask-question-text">{question.question}</p>
       <div className="ask-question-options">
         {question.options.map((opt, oi) => (
@@ -82,9 +80,7 @@ function QuestionCard({ question }: { question: Question }) {
             onClick={() => toggle(oi)}
           >
             <span className="option-label">{opt.label}</span>
-            {opt.description && (
-              <span className="option-description">{opt.description}</span>
-            )}
+            {opt.description && <span className="option-description">{opt.description}</span>}
           </button>
         ))}
       </div>

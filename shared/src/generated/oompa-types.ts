@@ -107,4 +107,3 @@ export interface OompaStopped {
   reason: 'completed' | 'interrupted' | 'error';
   error?: string | null;
 }
-

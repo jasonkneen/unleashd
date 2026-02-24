@@ -1,37 +1,25 @@
-/**
- * DiskAdapter Registry
- *
- * Four thin DiskAdapter implementations that wrap the existing parsing functions
- * in jsonl.ts. Each adapter maps its provider-specific session type to ParsedSession.
- *
- * Adding a new provider (e.g. Grok) = one new adapter object appended to diskAdapters.
- * Zero changes to loader.ts or any other file.
- */
-
-import * as fs from 'fs';
-import * as path from 'path';
 import type { DiskAdapter, ParsedSession } from './disk-adapter';
 import {
   CLAUDE_PROJECTS_DIR,
   CODEX_SESSIONS_DIR,
+  GEMINI_SESSIONS_DIR,
   OPENCODE_MESSAGE_DIR,
   OPENCODE_PART_DIR,
-  GEMINI_SESSIONS_DIR,
-  getProjectDirectories,
-  scanSessionDirectory,
+  extractMessagesFromCodexEntries,
+  extractMessagesFromEntries,
+  extractSubAgentsFromEntries,
   getCodexSessionDirectories,
+  getGeminiSessionFiles,
   getOpenCodeSessionDirectories,
   getOpenCodeSessionMetadataIndex,
   getOpenCodeSessionMtime,
-  getGeminiSessionFiles,
-  parseJsonlFile,
-  parseCodexJsonlFile,
-  parseOpenCodeSessionDirectory,
-  parseGeminiSessionFile,
-  extractMessagesFromEntries,
-  extractMessagesFromCodexEntries,
-  extractSubAgentsFromEntries,
+  getProjectDirectories,
   inferProviderFromModel,
+  parseCodexJsonlFile,
+  parseGeminiSessionFile,
+  parseJsonlFile,
+  parseOpenCodeSessionDirectory,
+  scanSessionDirectory,
 } from './jsonl';
 
 // =============================================================================

@@ -11,7 +11,7 @@
  *   sessionToConversation(ParsedSession) → Conversation | null  (null = hidden)
  */
 
-import type { Message, Conversation, Provider, SubAgent } from '@claude-web-view/shared';
+import type { Conversation, Message, Provider, SubAgent } from '@claude-web-view/shared';
 import { extractWorkerMetadata } from './jsonl';
 
 // =============================================================================
@@ -25,14 +25,14 @@ import { extractWorkerMetadata } from './jsonl';
  */
 export interface ParsedSession {
   sessionId: string;
-  filePath: string;        // path used for mtime tracking
+  filePath: string; // path used for mtime tracking
   workingDirectory: string;
-  provider: Provider;      // set by the adapter (claude may use inferProviderFromModel)
-  model: string;           // 'unknown' if unavailable
+  provider: Provider; // set by the adapter (claude may use inferProviderFromModel)
+  model: string; // 'unknown' if unavailable
   createdAt: Date;
   modifiedAt: Date;
   messages: Message[];
-  subAgents?: SubAgent[];          // Claude only — extracted from JSONL entries
+  subAgents?: SubAgent[]; // Claude only — extracted from JSONL entries
   parentSessionId?: string | null; // Codex only — for nested thread display
 }
 
@@ -62,7 +62,7 @@ export interface LoadResult {
 
 export interface PollResult {
   updated: Map<string, Conversation>; // changed or new conversations
-  mtimes: Map<string, number>;        // full updated mtime index
+  mtimes: Map<string, number>; // full updated mtime index
 }
 
 export type LoadProgressCallback = (

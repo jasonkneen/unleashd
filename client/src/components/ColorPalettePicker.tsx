@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { useSettingsStore, PALETTES, applyPalette, type Palette16 } from '../stores/settingsStore';
+import { PALETTES, type Palette16, applyPalette, useSettingsStore } from '../stores/settingsStore';
 import './ColorPalettePicker.css';
 
 interface Props {
@@ -11,12 +11,18 @@ interface Props {
 // render computed swatches in the picker. The formulas match index.css exactly.
 
 function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
+  const n = Number.parseInt(hex.slice(1), 16);
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 }
 
 function rgbToHex(r: number, g: number, b: number): string {
-  return `#${[r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('')}`;
+  return `#${[r, g, b]
+    .map((v) =>
+      Math.round(Math.max(0, Math.min(255, v)))
+        .toString(16)
+        .padStart(2, '0')
+    )
+    .join('')}`;
 }
 
 // sRGB → linear
@@ -44,9 +50,9 @@ function rgbToOklch(r: number, g: number, b: number): [number, number, number] {
   const m1 = Math.cbrt(m_);
   const s1 = Math.cbrt(s_);
 
-  const L = 0.2104542553 * l1 + 0.7936177850 * m1 - 0.0040720468 * s1;
-  const a = 1.9779984951 * l1 - 2.4285922050 * m1 + 0.4505937099 * s1;
-  const bVal = 0.0259040371 * l1 + 0.7827717662 * m1 - 0.8086757660 * s1;
+  const L = 0.2104542553 * l1 + 0.793617785 * m1 - 0.0040720468 * s1;
+  const a = 1.9779984951 * l1 - 2.428592205 * m1 + 0.4505937099 * s1;
+  const bVal = 0.0259040371 * l1 + 0.7827717662 * m1 - 0.808675766 * s1;
 
   const C = Math.sqrt(a * a + bVal * bVal);
   let H = Math.atan2(bVal, a) * (180 / Math.PI);
@@ -62,7 +68,7 @@ function oklchToRgb(L: number, C: number, H: number): [number, number, number] {
 
   const l1 = L + 0.3963377774 * a + 0.2158037573 * b;
   const m1 = L - 0.1055613458 * a - 0.0638541728 * b;
-  const s1 = L - 0.0894841775 * a - 1.2914855480 * b;
+  const s1 = L - 0.0894841775 * a - 1.291485548 * b;
 
   const l_ = l1 * l1 * l1;
   const m_ = m1 * m1 * m1;
@@ -70,7 +76,7 @@ function oklchToRgb(L: number, C: number, H: number): [number, number, number] {
 
   const r = +4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_;
   const g = -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_;
-  const bVal = -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_;
+  const bVal = -0.0041960863 * l_ - 0.7034186147 * m_ + 1.707614701 * s_;
 
   return [delinearize(r), delinearize(g), delinearize(bVal)];
 }
@@ -132,9 +138,18 @@ interface DerivedTokens {
   messages: { label: string; color: string }[];
 }
 
-const ACCENT_KEYS = ['blue', 'cyan', 'violet', 'green', 'yellow', 'orange', 'red', 'magenta'] as const;
+const ACCENT_KEYS = [
+  'blue',
+  'cyan',
+  'violet',
+  'green',
+  'yellow',
+  'orange',
+  'red',
+  'magenta',
+] as const;
 
-const SEMANTIC_MAP: { label: string; key: typeof ACCENT_KEYS[number] }[] = [
+const SEMANTIC_MAP: { label: string; key: (typeof ACCENT_KEYS)[number] }[] = [
   { label: 'Primary', key: 'violet' },
   { label: 'User', key: 'blue' },
   { label: 'Assistant', key: 'cyan' },
@@ -209,23 +224,37 @@ function AccentStrip({ name, family }: { name: string; family: DerivedTokens['ac
       <span className="strip-label">{name}</span>
       <div className="strip-swatches">
         <div className="strip-swatch" style={{ backgroundColor: family.dim }} title="dim" />
-        <div className="strip-swatch strip-swatch-base" style={{ backgroundColor: family.base }} title="base" />
+        <div
+          className="strip-swatch strip-swatch-base"
+          style={{ backgroundColor: family.base }}
+          title="base"
+        />
         <div className="strip-swatch" style={{ backgroundColor: family.bright }} title="bright" />
-        <div className="strip-swatch strip-swatch-glow" style={{ background: family.glow, border: `1px solid ${family.base}` }} title="glow" />
+        <div
+          className="strip-swatch strip-swatch-glow"
+          style={{ background: family.glow, border: `1px solid ${family.base}` }}
+          title="glow"
+        />
       </div>
     </div>
   );
 }
 
 /** Horizontal ramp of colors with labels below */
-function ColorRamp({ items, bgColor }: { items: { label: string; color: string }[]; bgColor?: string }) {
+function ColorRamp({
+  items,
+  bgColor,
+}: { items: { label: string; color: string }[]; bgColor?: string }) {
   return (
     <div className="color-ramp">
       {items.map((item) => (
         <div key={item.label} className="ramp-item">
           <div
             className="ramp-swatch"
-            style={{ backgroundColor: item.color, ...(bgColor ? { border: `1px solid ${bgColor}` } : {}) }}
+            style={{
+              backgroundColor: item.color,
+              ...(bgColor ? { border: `1px solid ${bgColor}` } : {}),
+            }}
           />
           <span className="ramp-label">{item.label}</span>
         </div>
@@ -259,13 +288,18 @@ function ChatPreview({ palette, derived }: { palette: Palette16; derived: Derive
     >
       <div className="preview-header" style={{ borderColor: palette.base02 }}>
         <span style={{ color: palette.base0 }}>Chat Preview</span>
-        <span className="preview-badge" style={{ backgroundColor: palette.violet, color: palette.base03 }}>
+        <span
+          className="preview-badge"
+          style={{ backgroundColor: palette.violet, color: palette.base03 }}
+        >
           claude
         </span>
       </div>
       <div className="preview-messages">
         <div className="preview-message user">
-          <span className="preview-role" style={{ color: palette.blue }}>user</span>
+          <span className="preview-role" style={{ color: palette.blue }}>
+            user
+          </span>
           <div
             className="preview-content"
             style={{
@@ -278,7 +312,9 @@ function ChatPreview({ palette, derived }: { palette: Palette16; derived: Derive
           </div>
         </div>
         <div className="preview-message assistant">
-          <span className="preview-role" style={{ color: palette.cyan }}>assistant</span>
+          <span className="preview-role" style={{ color: palette.cyan }}>
+            assistant
+          </span>
           <div
             className="preview-content"
             style={{
@@ -288,7 +324,13 @@ function ChatPreview({ palette, derived }: { palette: Palette16; derived: Derive
             }}
           >
             Here's a binary search implementation:
-            <pre style={{ backgroundColor: palette.base03, borderColor: palette.base02, color: palette.base01 }}>
+            <pre
+              style={{
+                backgroundColor: palette.base03,
+                borderColor: palette.base02,
+                color: palette.base01,
+              }}
+            >
               {`function binarySearch(arr, target) {
   let lo = 0, hi = arr.length - 1;
   while (lo <= hi) {
@@ -357,11 +399,11 @@ export function ColorPalettePicker({ onClose }: Props) {
       });
 
       if (!res.ok) {
-        const data = await res.json() as { error: string };
+        const data = (await res.json()) as { error: string };
         throw new Error(data.error);
       }
 
-      const { key, palette } = await res.json() as { key: string; palette: Palette16 };
+      const { key, palette } = (await res.json()) as { key: string; palette: Palette16 };
       addCustomPalette(key, palette);
       setSelectedPalette(key);
       // Apply directly — previewPalette would read stale customPalettes closure
@@ -380,7 +422,9 @@ export function ColorPalettePicker({ onClose }: Props) {
       <div className="palette-picker" onClick={(e) => e.stopPropagation()}>
         <div className="palette-picker-header">
           <h2>Color Palette</h2>
-          <button type="button" className="close-btn" onClick={handleCancel}>&times;</button>
+          <button type="button" className="close-btn" onClick={handleCancel}>
+            &times;
+          </button>
         </div>
 
         <div className="palette-picker-content">
@@ -395,7 +439,11 @@ export function ColorPalettePicker({ onClose }: Props) {
               >
                 <div className="palette-swatches">
                   {ACCENT_KEYS.map((ak) => (
-                    <div key={ak} className="mini-swatch" style={{ backgroundColor: palette[ak] }} />
+                    <div
+                      key={ak}
+                      className="mini-swatch"
+                      style={{ backgroundColor: palette[ak] }}
+                    />
                   ))}
                 </div>
                 <span className="palette-name">{palette.name}</span>
@@ -441,7 +489,10 @@ export function ColorPalettePicker({ onClose }: Props) {
                     disabled={isGenerating || !aiDescription.trim()}
                   >
                     {isGenerating ? (
-                      <span className="ai-generating">Generating<span className="ai-dots" /></span>
+                      <span className="ai-generating">
+                        Generating
+                        <span className="ai-dots" />
+                      </span>
                     ) : (
                       'Generate'
                     )}
@@ -456,7 +507,9 @@ export function ColorPalettePicker({ onClose }: Props) {
                 {/* Accent families: dim → base → bright → glow strips */}
                 <div className="section-group">
                   <h3 className="section-title">Accent Families</h3>
-                  <p className="section-subtitle">dim &middot; base &middot; bright &middot; glow</p>
+                  <p className="section-subtitle">
+                    dim &middot; base &middot; bright &middot; glow
+                  </p>
                   <div className="accent-strips">
                     {ACCENT_KEYS.map((key) => (
                       <AccentStrip key={key} name={key} family={derived.accents[key]} />
@@ -499,8 +552,12 @@ export function ColorPalettePicker({ onClose }: Props) {
         </div>
 
         <div className="palette-picker-footer">
-          <button type="button" className="cancel-btn" onClick={handleCancel}>Cancel</button>
-          <button type="button" className="save-btn" onClick={handleSave}>Save</button>
+          <button type="button" className="cancel-btn" onClick={handleCancel}>
+            Cancel
+          </button>
+          <button type="button" className="save-btn" onClick={handleSave}>
+            Save
+          </button>
         </div>
       </div>
     </div>

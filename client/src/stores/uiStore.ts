@@ -41,7 +41,7 @@ interface UIState {
   lastWorkingDirectory: string | null;
 
   // Gallery UI
-  galleryExpandedProjects: string[];   // Stored as array, used as Set at call sites
+  galleryExpandedProjects: string[]; // Stored as array, used as Set at call sites
   galleryCollapsedProjects: string[];
   showTempSessions: boolean;
   showDoneConversations: boolean;
@@ -107,58 +107,65 @@ export const useUIStore = create<UIState>()(
 
       setLastWorkingDirectory: (dir) => set({ lastWorkingDirectory: dir }),
 
-      toggleGalleryExpanded: (dir) => set((s) => {
-        const current = new Set(s.galleryExpandedProjects);
-        if (current.has(dir)) {
-          current.delete(dir);
-        } else {
-          current.add(dir);
-        }
-        return { galleryExpandedProjects: Array.from(current) };
-      }),
+      toggleGalleryExpanded: (dir) =>
+        set((s) => {
+          const current = new Set(s.galleryExpandedProjects);
+          if (current.has(dir)) {
+            current.delete(dir);
+          } else {
+            current.add(dir);
+          }
+          return { galleryExpandedProjects: Array.from(current) };
+        }),
 
-      toggleGalleryCollapsed: (dir) => set((s) => {
-        const current = new Set(s.galleryCollapsedProjects);
-        if (current.has(dir)) {
-          current.delete(dir);
-        } else {
-          current.add(dir);
-        }
-        return { galleryCollapsedProjects: Array.from(current) };
-      }),
+      toggleGalleryCollapsed: (dir) =>
+        set((s) => {
+          const current = new Set(s.galleryCollapsedProjects);
+          if (current.has(dir)) {
+            current.delete(dir);
+          } else {
+            current.add(dir);
+          }
+          return { galleryCollapsedProjects: Array.from(current) };
+        }),
 
       setShowTempSessions: (show) => set({ showTempSessions: show }),
 
       setShowDoneConversations: (show) => set({ showDoneConversations: show }),
 
-      markDone: (conversationId) => set((s) => {
-        if (s.doneConversations.includes(conversationId)) return s;
-        return { doneConversations: [...s.doneConversations, conversationId] };
-      }),
+      markDone: (conversationId) =>
+        set((s) => {
+          if (s.doneConversations.includes(conversationId)) return s;
+          return { doneConversations: [...s.doneConversations, conversationId] };
+        }),
 
-      unmarkDone: (conversationId) => set((s) => ({
-        doneConversations: s.doneConversations.filter((id) => id !== conversationId),
-      })),
+      unmarkDone: (conversationId) =>
+        set((s) => ({
+          doneConversations: s.doneConversations.filter((id) => id !== conversationId),
+        })),
 
       isDone: (conversationId) => get().doneConversations.includes(conversationId),
 
-      promoteWorker: (conversationId) => set((s) => {
-        if (s.promotedWorkers.includes(conversationId)) return s;
-        return { promotedWorkers: [...s.promotedWorkers, conversationId] };
-      }),
+      promoteWorker: (conversationId) =>
+        set((s) => {
+          if (s.promotedWorkers.includes(conversationId)) return s;
+          return { promotedWorkers: [...s.promotedWorkers, conversationId] };
+        }),
 
-      demoteToWorker: (conversationId) => set((s) => ({
-        promotedWorkers: s.promotedWorkers.filter((id) => id !== conversationId),
-      })),
+      demoteToWorker: (conversationId) =>
+        set((s) => ({
+          promotedWorkers: s.promotedWorkers.filter((id) => id !== conversationId),
+        })),
 
       setShowWorkerConversations: (show) => set({ showWorkerConversations: show }),
 
-      markMessagesSeen: (conversationId, messageIndex) => set((s) => ({
-        lastSeenMessageIndex: {
-          ...s.lastSeenMessageIndex,
-          [conversationId]: messageIndex,
-        },
-      })),
+      markMessagesSeen: (conversationId, messageIndex) =>
+        set((s) => ({
+          lastSeenMessageIndex: {
+            ...s.lastSeenMessageIndex,
+            [conversationId]: messageIndex,
+          },
+        })),
 
       setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
 
@@ -212,6 +219,6 @@ export const useUIStore = create<UIState>()(
         }
         return persistedState;
       },
-    },
-  ),
+    }
+  )
 );

@@ -13,7 +13,8 @@ export default defineConfig({
         // Vite reconnects automatically — these errors are expected and transient.
         configure: (proxy) => {
           const silence = (err: NodeJS.ErrnoException) => {
-            if (err.code === 'EPIPE' || err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED') return;
+            if (err.code === 'EPIPE' || err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED')
+              return;
             console.error('[ws proxy]', err.message);
           };
           proxy.on('error', silence);

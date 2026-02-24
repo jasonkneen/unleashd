@@ -17,17 +17,22 @@ ws.on('open', () => {
 
 ws.on('message', (data) => {
   const msg = JSON.parse(data.toString());
-  console.log(`[WS] Received: ${msg.type}`, msg.type === 'chunk' ? `"${msg.text?.substring(0, 30)}..."` : '');
+  console.log(
+    `[WS] Received: ${msg.type}`,
+    msg.type === 'chunk' ? `"${msg.text?.substring(0, 30)}..."` : ''
+  );
 
   switch (msg.type) {
     case 'init':
       console.log(`[WS] Init - ${msg.conversations.length} existing conversations`);
       // Create new conversation
-      ws.send(JSON.stringify({
-        type: 'new_conversation',
-        workingDirectory: process.cwd(),
-        provider: 'claude',
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'new_conversation',
+          workingDirectory: process.cwd(),
+          provider: 'claude',
+        })
+      );
       break;
 
     case 'conversation_created':
@@ -35,11 +40,13 @@ ws.on('message', (data) => {
       console.log(`[WS] Conversation created: ${conversationId}`);
       // Send test message
       console.log('[WS] Sending test message...');
-      ws.send(JSON.stringify({
-        type: 'send_message',
-        conversationId,
-        content: 'Say "hello test" and nothing else.',
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'send_message',
+          conversationId,
+          content: 'Say "hello test" and nothing else.',
+        })
+      );
       break;
 
     case 'message':

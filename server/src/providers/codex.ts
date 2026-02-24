@@ -41,7 +41,7 @@
 
 import type { ModelInfo } from '@claude-web-view/shared';
 import { buildCommand } from '@nbardy/agent-cli';
-import { ProviderParseError, type Provider, type SpawnConfig, type ProviderEvent } from './index';
+import { type Provider, type ProviderEvent, ProviderParseError, type SpawnConfig } from './index';
 
 // =============================================================================
 // Codex CLI JSON Output Types - STRICT, NO CATCH-ALL
@@ -164,7 +164,7 @@ function isCodexOutput(data: unknown): data is { type: CodexTopLevelType } {
 
 interface ClassifiedCommand {
   emoji: string;
-  label: string;  // e.g. "train.py" or "python3 run.py"
+  label: string; // e.g. "train.py" or "python3 run.py"
 }
 
 /**
@@ -172,8 +172,9 @@ interface ClassifiedCommand {
  */
 function unwrapShell(cmd: string): string {
   // Match: /bin/{sh,bash,zsh} -lc "..." or '...'
-  const match = cmd.match(/^\/bin\/(?:ba)?sh\s+-\w*c\s+(['"])(.*)\1$/s)
-    ?? cmd.match(/^\/bin\/zsh\s+-\w*c\s+(['"])(.*)\1$/s);
+  const match =
+    cmd.match(/^\/bin\/(?:ba)?sh\s+-\w*c\s+(['"])(.*)\1$/s) ??
+    cmd.match(/^\/bin\/zsh\s+-\w*c\s+(['"])(.*)\1$/s);
   if (match) return match[2];
   return cmd;
 }
@@ -240,7 +241,8 @@ function classifyCommand(rawCommand: string): ClassifiedCommand {
   // mkdir / cp / mv / rm = file ops
   if (/^(?:mkdir|cp|mv|rm)\s/.test(cmd)) {
     const fileMatch = cmd.match(/([\w./-]+)\s*$/);
-    if (fileMatch) return { emoji: '📁', label: `${cmd.split(/\s+/)[0]} ${basename(fileMatch[1])}` };
+    if (fileMatch)
+      return { emoji: '📁', label: `${cmd.split(/\s+/)[0]} ${basename(fileMatch[1])}` };
   }
 
   // chmod / chown = permissions
@@ -262,16 +264,45 @@ const codexProvider: Provider = {
   listModels(): ModelInfo[] {
     return [
       { id: 'gpt-5.3-codex-high', displayName: 'GPT-5.3 Codex (High Effort)', isDefault: true },
-      { id: 'gpt-5.3-codex-medium', displayName: 'GPT-5.3 Codex (Medium Effort)', isDefault: false },
-      { id: 'gpt-5.3-codex-xhigh', displayName: 'GPT-5.3 Codex (Extra High Effort)', isDefault: false },
-      { id: 'gpt-5.3-codex-spark', displayName: 'GPT-5.3 Codex Spark (Ultra-Fast)', isDefault: false },
-      { id: 'gpt-5.3-codex-spark-high', displayName: 'GPT-5.3 Codex Spark (High Effort)', isDefault: false },
-      { id: 'gpt-5.3-codex-spark-medium', displayName: 'GPT-5.3 Codex Spark (Medium Effort)', isDefault: false },
-      { id: 'gpt-5.3-codex-spark-xhigh', displayName: 'GPT-5.3 Codex Spark (Extra High Effort)', isDefault: false },
+      {
+        id: 'gpt-5.3-codex-medium',
+        displayName: 'GPT-5.3 Codex (Medium Effort)',
+        isDefault: false,
+      },
+      {
+        id: 'gpt-5.3-codex-xhigh',
+        displayName: 'GPT-5.3 Codex (Extra High Effort)',
+        isDefault: false,
+      },
+      {
+        id: 'gpt-5.3-codex-spark',
+        displayName: 'GPT-5.3 Codex Spark (Ultra-Fast)',
+        isDefault: false,
+      },
+      {
+        id: 'gpt-5.3-codex-spark-high',
+        displayName: 'GPT-5.3 Codex Spark (High Effort)',
+        isDefault: false,
+      },
+      {
+        id: 'gpt-5.3-codex-spark-medium',
+        displayName: 'GPT-5.3 Codex Spark (Medium Effort)',
+        isDefault: false,
+      },
+      {
+        id: 'gpt-5.3-codex-spark-xhigh',
+        displayName: 'GPT-5.3 Codex Spark (Extra High Effort)',
+        isDefault: false,
+      },
     ];
   },
 
-  getSpawnConfig(sessionId: string, workingDir: string, resume = false, modelId?: string): SpawnConfig {
+  getSpawnConfig(
+    sessionId: string,
+    workingDir: string,
+    resume = false,
+    modelId?: string
+  ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli (shared with oompa_loompas).
     // Agent-cli handles: exec subcommand, resume <id> restructuring, -C suppression
     // on resume, model decomposition (composite IDs), bypass flags.
@@ -327,11 +358,7 @@ const codexProvider: Provider = {
    */
   parseOutput(json: unknown): ProviderEvent {
     if (!isCodexOutput(json)) {
-      throw new ProviderParseError(
-        'codex',
-        json,
-        `Unknown message type: ${JSON.stringify(json)}`
-      );
+      throw new ProviderParseError('codex', json, `Unknown message type: ${JSON.stringify(json)}`);
     }
 
     switch (json.type) {
@@ -370,7 +397,10 @@ const codexProvider: Provider = {
       }
 
       case 'item.completed': {
-        const msg = json as { type: 'item.completed'; item: { type: string; [k: string]: unknown } };
+        const msg = json as {
+          type: 'item.completed';
+          item: { type: string; [k: string]: unknown };
+        };
         const itemType = msg.item.type;
 
         switch (itemType) {
@@ -460,11 +490,12 @@ const codexProvider: Provider = {
         // Turn errored — surface to user.
         // The error field can be a string or an object (e.g. {message: "..."}).
         const rawErr = (json as { error?: unknown }).error;
-        const errMsg = typeof rawErr === 'string'
-          ? rawErr
-          : typeof rawErr === 'object' && rawErr !== null && 'message' in rawErr
-            ? String((rawErr as { message: unknown }).message)
-            : JSON.stringify(rawErr) ?? 'Unknown error';
+        const errMsg =
+          typeof rawErr === 'string'
+            ? rawErr
+            : typeof rawErr === 'object' && rawErr !== null && 'message' in rawErr
+              ? String((rawErr as { message: unknown }).message)
+              : (JSON.stringify(rawErr) ?? 'Unknown error');
         return { type: 'error', message: `Codex turn failed: ${errMsg}` };
       }
 

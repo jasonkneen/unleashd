@@ -436,7 +436,9 @@
 }
 
 /* Loading / error states */
-.panel-loading, .panel-error, .panel-empty {
+.panel-loading,
+.panel-error,
+.panel-empty {
   padding: 16px;
   text-align: center;
   color: var(--text-muted);
@@ -635,15 +637,23 @@
   cursor: pointer;
   transition: border-color 0.15s;
 }
-.run-selector-btn:hover { border-color: var(--cyan); }
+.run-selector-btn:hover {
+  border-color: var(--cyan);
+}
 .run-selector-btn.active {
   border-color: var(--cyan);
   background: var(--cyan-dim);
   color: var(--text-primary);
 }
 
-.run-id { font-family: var(--font-mono, monospace); font-weight: 600; }
-.run-time { color: var(--text-muted); font-size: 11px; }
+.run-id {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+}
+.run-time {
+  color: var(--text-muted);
+  font-size: 11px;
+}
 
 .run-status-badge {
   padding: 1px 6px;
@@ -677,7 +687,8 @@
   color: var(--text-primary);
   font-size: 14px;
 }
-.run-started, .run-finished {
+.run-started,
+.run-finished {
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -741,9 +752,18 @@
   font-size: 10px;
   font-weight: 600;
 }
-.worker-status-badge.status-exhausted { background: var(--yellow-dim); color: var(--yellow-bright); }
-.worker-status-badge.status-done { background: var(--green-dim); color: var(--green-bright); }
-.worker-status-badge.status-error { background: var(--red-dim); color: var(--red-bright); }
+.worker-status-badge.status-exhausted {
+  background: var(--yellow-dim);
+  color: var(--yellow-bright);
+}
+.worker-status-badge.status-done {
+  background: var(--green-dim);
+  color: var(--green-bright);
+}
+.worker-status-badge.status-error {
+  background: var(--red-dim);
+  color: var(--red-bright);
+}
 
 /* Review log entries */
 .run-reviews {
@@ -779,7 +799,9 @@
   font-size: 12px;
   transition: background 0.15s;
 }
-.run-review-header:hover { background: var(--bg-elevated); }
+.run-review-header:hover {
+  background: var(--bg-elevated);
+}
 
 .run-review-worker {
   font-family: var(--font-mono, monospace);

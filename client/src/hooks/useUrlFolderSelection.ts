@@ -16,34 +16,34 @@ type SetSelected = (value: Set<string> | ((prev: Set<string>) => Set<string>)) =
 export function useUrlFolderSelection(): [Set<string>, SetSelected] {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const selected = useMemo(
-    () => new Set(searchParams.getAll('folders')),
-    [searchParams],
-  );
+  const selected = useMemo(() => new Set(searchParams.getAll('folders')), [searchParams]);
 
   const setSelected: SetSelected = useCallback(
     (value) => {
-      setSearchParams((prev) => {
-        const currentFolders = new Set(prev.getAll('folders'));
-        const next = value instanceof Function ? value(currentFolders) : value;
+      setSearchParams(
+        (prev) => {
+          const currentFolders = new Set(prev.getAll('folders'));
+          const next = value instanceof Function ? value(currentFolders) : value;
 
-        // Preserve non-folder params
-        const updated = new URLSearchParams();
-        for (const [key, val] of prev.entries()) {
-          if (key !== 'folders') {
-            updated.append(key, val);
+          // Preserve non-folder params
+          const updated = new URLSearchParams();
+          for (const [key, val] of prev.entries()) {
+            if (key !== 'folders') {
+              updated.append(key, val);
+            }
           }
-        }
 
-        // Add folder params
-        for (const folder of next) {
-          updated.append('folders', folder);
-        }
+          // Add folder params
+          for (const folder of next) {
+            updated.append('folders', folder);
+          }
 
-        return updated;
-      }, { replace: true });
+          return updated;
+        },
+        { replace: true }
+      );
     },
-    [setSearchParams],
+    [setSearchParams]
   );
 
   return [selected, setSelected];

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
 import type { OompaRuntimeSnapshot } from '@claude-web-view/shared';
+import { useEffect, useMemo, useState } from 'react';
 
 interface UseSwarmRuntimeSnapshotsOptions {
   pollMs?: number;
@@ -14,15 +14,17 @@ const makeUnavailable = (reason: string): OompaRuntimeSnapshot => ({
 
 export function useSwarmRuntimeSnapshots(
   projectRoots: string[],
-  options: UseSwarmRuntimeSnapshotsOptions = {},
+  options: UseSwarmRuntimeSnapshotsOptions = {}
 ): Record<string, OompaRuntimeSnapshot> {
   const { pollMs = 10_000, enabled = true } = options;
   const normalizedProjectRoots = useMemo(
     () => Array.from(new Set(projectRoots)).sort(),
-    [projectRoots],
+    [projectRoots]
   );
 
-  const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, OompaRuntimeSnapshot>>({});
+  const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, OompaRuntimeSnapshot>>(
+    {}
+  );
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -50,9 +52,12 @@ export function useSwarmRuntimeSnapshots(
       const entries = await Promise.all(
         normalizedProjectRoots.map(async (projectRoot) => {
           try {
-            const response = await fetch(`/api/swarm-runtime?dir=${encodeURIComponent(projectRoot)}`, {
-              signal: controller.signal,
-            });
+            const response = await fetch(
+              `/api/swarm-runtime?dir=${encodeURIComponent(projectRoot)}`,
+              {
+                signal: controller.signal,
+              }
+            );
             if (!response.ok) {
               return { projectRoot, snapshot: makeUnavailable(`HTTP ${response.status}`) };
             }
@@ -62,7 +67,7 @@ export function useSwarmRuntimeSnapshots(
             if (controller.signal.aborted) return null;
             return { projectRoot, snapshot: makeUnavailable('Failed to load runtime snapshot') };
           }
-        }),
+        })
       );
 
       if (controller.signal.aborted) return;

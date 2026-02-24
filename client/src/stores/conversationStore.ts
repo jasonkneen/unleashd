@@ -119,7 +119,12 @@ interface ConversationStore {
 
   // Actions
   setActiveConversationId: (id: string | null) => void;
-  createConversation: (workingDirectory: string, provider?: Provider, model?: ModelId, swarmDebugPrefix?: string) => string;
+  createConversation: (
+    workingDirectory: string,
+    provider?: Provider,
+    model?: ModelId,
+    swarmDebugPrefix?: string
+  ) => string;
   deleteConversation: (id: string) => void;
   sendMessage: (conversationId: string, content: string) => void;
   stopConversation: (conversationId: string) => void;
@@ -210,7 +215,14 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
     // Tell server to create the real conversation with this ID
     // swarmDebugPrefix is included so the server can prepend it to the first CLI message.
-    get()._send({ type: 'new_conversation', id, workingDirectory, provider, model, swarmDebugPrefix });
+    get()._send({
+      type: 'new_conversation',
+      id,
+      workingDirectory,
+      provider,
+      model,
+      swarmDebugPrefix,
+    });
 
     return id;
   },
@@ -417,7 +429,8 @@ This final message was added as an interruption: "${content}"`;
           conversations.set(data.conversation.id, {
             ...data.conversation,
             // Preserve client-only metadata from optimistic stub
-            swarmDebugPrefix: data.conversation.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
+            swarmDebugPrefix:
+              data.conversation.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
           });
           return { conversations };
         });

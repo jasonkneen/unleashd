@@ -1,13 +1,13 @@
+import type { Conversation, Message } from '@claude-web-view/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useConversationStore } from '../stores/conversationStore';
-import { useUIStore } from '../stores/uiStore';
 import { useFolderFilter } from '../hooks/useFolderFilter';
 import { useUrlFolderSelection } from '../hooks/useUrlFolderSelection';
-import { formatTimeAgo, getLastMessageTime } from '../utils/time';
+import { useConversationStore } from '../stores/conversationStore';
+import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
+import { formatTimeAgo, getLastMessageTime } from '../utils/time';
 import { FolderFilter } from './FolderFilter';
-import type { Conversation, Message } from '@claude-web-view/shared';
 import './Gallery.css';
 
 /**
@@ -65,8 +65,14 @@ export function Gallery({ filter }: GalleryProps = {}) {
   const setShowWorkerConversations = useUIStore((s) => s.setShowWorkerConversations);
 
   // Derived Sets for O(1) lookup
-  const expandedProjects = useMemo(() => new Set(galleryExpandedProjects), [galleryExpandedProjects]);
-  const collapsedProjects = useMemo(() => new Set(galleryCollapsedProjects), [galleryCollapsedProjects]);
+  const expandedProjects = useMemo(
+    () => new Set(galleryExpandedProjects),
+    [galleryExpandedProjects]
+  );
+  const collapsedProjects = useMemo(
+    () => new Set(galleryCollapsedProjects),
+    [galleryCollapsedProjects]
+  );
   const doneSet = useMemo(() => new Set(doneConversations), [doneConversations]);
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
 
@@ -98,7 +104,13 @@ export function Gallery({ filter }: GalleryProps = {}) {
   const [selectedFolders, setSelectedFolders] = useUrlFolderSelection();
 
   // Folder filter hook — pure computation, caller owns state
-  const { folders: allFolders, selected, toggle, clear, filtered } = useFolderFilter({
+  const {
+    folders: allFolders,
+    selected,
+    toggle,
+    clear,
+    filtered,
+  } = useFolderFilter({
     items: sortedConversations,
     getFolder,
     selected: selectedFolders,
@@ -107,7 +119,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
 
   // Filter temp directories and sort folders by most recent conversation (not alphabetical)
   const folders = useMemo(() => {
-    const nonTemp = allFolders.filter(folder => !isTempDirectory(folder));
+    const nonTemp = allFolders.filter((folder) => !isTempDirectory(folder));
 
     // Build a map of folder -> most recent conversation date
     const folderRecency = new Map<string, number>();
@@ -128,7 +140,15 @@ export function Gallery({ filter }: GalleryProps = {}) {
   }, [allFolders, sortedConversations]);
 
   // Group filtered conversations by working directory, separating done → worker → temp → real
-  const { projectGroups, tempGroups, tempSessionCount, doneGroups, doneSessionCount, workerGroups, workerSessionCount } = useMemo(() => {
+  const {
+    projectGroups,
+    tempGroups,
+    tempSessionCount,
+    doneGroups,
+    doneSessionCount,
+    workerGroups,
+    workerSessionCount,
+  } = useMemo(() => {
     const realGroups = new Map<string, Conversation[]>();
     const tempGroupsMap = new Map<string, Conversation[]>();
     const doneGroupsMap = new Map<string, Conversation[]>();
@@ -273,118 +293,119 @@ export function Gallery({ filter }: GalleryProps = {}) {
       )}
       <div className="gallery-content">
         {/* Regular project groups — hidden in done/workers view */}
-        {!isDoneView && !isWorkersView && projectGroups.map((group) => {
-          const isCollapsed = collapsedProjects.has(group.directory);
-          const isExpanded = expandedProjects.has(group.directory);
-          const dirDisplay = formatFolder(group.directory);
-          const totalCount = group.conversations.length;
-          const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-          const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-          const visibleConversations = isExpanded
-            ? group.conversations
-            : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
+        {!isDoneView &&
+          !isWorkersView &&
+          projectGroups.map((group) => {
+            const isCollapsed = collapsedProjects.has(group.directory);
+            const isExpanded = expandedProjects.has(group.directory);
+            const dirDisplay = formatFolder(group.directory);
+            const totalCount = group.conversations.length;
+            const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
+            const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
+            const visibleConversations = isExpanded
+              ? group.conversations
+              : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
 
-          return (
-            <div key={group.directory} className="project-section">
-              <div
-                className="project-header"
-                onClick={() => toggleCollapsed(group.directory)}
-              >
-                <div className="project-header-left">
-                  <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                    &#9660;
+            return (
+              <div key={group.directory} className="project-section">
+                <div className="project-header" onClick={() => toggleCollapsed(group.directory)}>
+                  <div className="project-header-left">
+                    <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
+                      &#9660;
+                    </span>
+                    <span className="project-path">{dirDisplay}</span>
+                  </div>
+                  <span className="project-count">
+                    {totalCount} conversation{totalCount !== 1 ? 's' : ''}
                   </span>
-                  <span className="project-path">{dirDisplay}</span>
                 </div>
-                <span className="project-count">
-                  {totalCount} conversation{totalCount !== 1 ? 's' : ''}
-                </span>
-              </div>
 
-              {!isCollapsed && (
-                <>
-                  <div className="project-grid">
-                    {visibleConversations.map((conv) => {
-                      // Determine conversation state
-                      const state = conv.isRunning ? 'running' : 'idle';
+                {!isCollapsed && (
+                  <>
+                    <div className="project-grid">
+                      {visibleConversations.map((conv) => {
+                        // Determine conversation state
+                        const state = conv.isRunning ? 'running' : 'idle';
 
-                      // Get state label with time-ago for idle conversations
-                      const getStateLabel = () => {
-                        if (state === 'running') return 'Running';
-                        const lastTime = getLastMessageTime(conv.messages);
-                        return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                      };
+                        // Get state label with time-ago for idle conversations
+                        const getStateLabel = () => {
+                          if (state === 'running') return 'Running';
+                          const lastTime = getLastMessageTime(conv.messages);
+                          return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
+                        };
 
-                      // Get viridis accent color based on project directory
-                      const accentColor = getProjectColor(conv.workingDirectory);
+                        // Get viridis accent color based on project directory
+                        const accentColor = getProjectColor(conv.workingDirectory);
 
-                      return (
-                        <div
-                          key={conv.id}
-                          className="gallery-card"
-                          onClick={() => navigate(`/chat/${conv.id}`)}
-                          style={{ borderTopColor: accentColor }}
-                        >
-                          <div className="gallery-card-header">
-                            <div className="gallery-card-id">
-                              {conv.id.substring(0, 8)}
-                              <span className={`provider-badge provider-${conv.provider || 'claude'}`}>
-                                {conv.provider || 'claude'}
-                              </span>
-                            </div>
-                            <div className="gallery-card-status">
-                              <div className={`state-badge state-${state}`}>
-                                <div className="state-indicator" />
-                                <span className="state-label">{getStateLabel()}</span>
+                        return (
+                          <div
+                            key={conv.id}
+                            className="gallery-card"
+                            onClick={() => navigate(`/chat/${conv.id}`)}
+                            style={{ borderTopColor: accentColor }}
+                          >
+                            <div className="gallery-card-header">
+                              <div className="gallery-card-id">
+                                {conv.id.substring(0, 8)}
+                                <span
+                                  className={`provider-badge provider-${conv.provider || 'claude'}`}
+                                >
+                                  {conv.provider || 'claude'}
+                                </span>
+                              </div>
+                              <div className="gallery-card-status">
+                                <div className={`state-badge state-${state}`}>
+                                  <div className="state-indicator" />
+                                  <span className="state-label">{getStateLabel()}</span>
+                                </div>
                               </div>
                             </div>
+                            <div>{conv.messages.length} messages</div>
+                            <div className="gallery-messages">
+                              {conv.messages.length === 0 ? (
+                                <div className="empty-state">No messages yet</div>
+                              ) : (
+                                conv.messages.slice(-3).map((msg: Message, i: number) => (
+                                  <div key={i} className={`gallery-message ${msg.role}`}>
+                                    <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
+                                    {msg.content.length > 100 ? '...' : ''}
+                                  </div>
+                                ))
+                              )}
+                            </div>
                           </div>
-                          <div>{conv.messages.length} messages</div>
-                          <div className="gallery-messages">
-                            {conv.messages.length === 0 ? (
-                              <div className="empty-state">No messages yet</div>
-                            ) : (
-                              conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                <div key={i} className={`gallery-message ${msg.role}`}>
-                                  <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                  {msg.content.length > 100 ? '...' : ''}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
 
-                  {showMoreButton && (
-                    <button
-                      className="show-more-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleExpanded(group.directory);
-                      }}
-                    >
-                      Show more... ({hiddenCount} hidden)
-                    </button>
-                  )}
+                    {showMoreButton && (
+                      <button
+                        className="show-more-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpanded(group.directory);
+                        }}
+                      >
+                        Show more... ({hiddenCount} hidden)
+                      </button>
+                    )}
 
-                  {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                    <button
-                      className="show-more-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleExpanded(group.directory);
-                      }}
-                    >
-                      Show less
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })}
+                    {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
+                      <button
+                        className="show-more-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpanded(group.directory);
+                        }}
+                      >
+                        Show less
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
 
         {/* Temp sessions toggle and groups — hidden in done/workers view */}
         {!isDoneView && !isWorkersView && tempSessionCount > 0 && (
@@ -396,122 +417,124 @@ export function Gallery({ filter }: GalleryProps = {}) {
               <span className={`project-chevron ${!showTempSessions ? 'collapsed' : ''}`}>
                 &#9660;
               </span>
-              {showTempSessions ? 'Hide' : 'Show'} {tempSessionCount} temporary session{tempSessionCount !== 1 ? 's' : ''}
-              <span className="temp-sessions-hint">
-                (sessions from /tmp, /var/folders, etc.)
-              </span>
+              {showTempSessions ? 'Hide' : 'Show'} {tempSessionCount} temporary session
+              {tempSessionCount !== 1 ? 's' : ''}
+              <span className="temp-sessions-hint">(sessions from /tmp, /var/folders, etc.)</span>
             </button>
 
-            {showTempSessions && tempGroups.map((group) => {
-              const isCollapsed = collapsedProjects.has(group.directory);
-              const isExpanded = expandedProjects.has(group.directory);
-              // Shorten temp directory display
-              const dirDisplay = group.directory.includes('/T/tmp')
-                ? `[Temp] ${group.directory.match(/tmp[A-Za-z0-9_-]*/)?.[0] || 'session'}`
-                : formatFolder(group.directory);
-              const totalCount = group.conversations.length;
-              const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-              const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-              const visibleConversations = isExpanded
-                ? group.conversations
-                : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
+            {showTempSessions &&
+              tempGroups.map((group) => {
+                const isCollapsed = collapsedProjects.has(group.directory);
+                const isExpanded = expandedProjects.has(group.directory);
+                // Shorten temp directory display
+                const dirDisplay = group.directory.includes('/T/tmp')
+                  ? `[Temp] ${group.directory.match(/tmp[A-Za-z0-9_-]*/)?.[0] || 'session'}`
+                  : formatFolder(group.directory);
+                const totalCount = group.conversations.length;
+                const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
+                const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
+                const visibleConversations = isExpanded
+                  ? group.conversations
+                  : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
 
-              return (
-                <div key={group.directory} className="project-section temp-project">
-                  <div
-                    className="project-header"
-                    onClick={() => toggleCollapsed(group.directory)}
-                  >
-                    <div className="project-header-left">
-                      <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                        &#9660;
+                return (
+                  <div key={group.directory} className="project-section temp-project">
+                    <div
+                      className="project-header"
+                      onClick={() => toggleCollapsed(group.directory)}
+                    >
+                      <div className="project-header-left">
+                        <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
+                          &#9660;
+                        </span>
+                        <span className="project-path">{dirDisplay}</span>
+                      </div>
+                      <span className="project-count">
+                        {totalCount} conversation{totalCount !== 1 ? 's' : ''}
                       </span>
-                      <span className="project-path">{dirDisplay}</span>
                     </div>
-                    <span className="project-count">
-                      {totalCount} conversation{totalCount !== 1 ? 's' : ''}
-                    </span>
-                  </div>
 
-                  {!isCollapsed && (
-                    <>
-                      <div className="project-grid">
-                        {visibleConversations.map((conv) => {
-                          const state = conv.isRunning ? 'running' : 'idle';
-                          const getStateLabel = () => {
-                            if (state === 'running') return 'Running';
-                            const lastTime = getLastMessageTime(conv.messages);
-                            return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                          };
-                          const accentColor = getProjectColor(conv.workingDirectory);
+                    {!isCollapsed && (
+                      <>
+                        <div className="project-grid">
+                          {visibleConversations.map((conv) => {
+                            const state = conv.isRunning ? 'running' : 'idle';
+                            const getStateLabel = () => {
+                              if (state === 'running') return 'Running';
+                              const lastTime = getLastMessageTime(conv.messages);
+                              return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
+                            };
+                            const accentColor = getProjectColor(conv.workingDirectory);
 
-                          return (
-                            <div
-                              key={conv.id}
-                              className="gallery-card"
-                              onClick={() => navigate(`/chat/${conv.id}`)}
-                              style={{ borderTopColor: accentColor }}
-                            >
-                              <div className="gallery-card-header">
-                                <div className="gallery-card-id">
-                                  {conv.id.substring(0, 8)}
-                                  <span className={`provider-badge provider-${conv.provider || 'claude'}`}>
-                                    {conv.provider || 'claude'}
-                                  </span>
-                                </div>
-                                <div className="gallery-card-status">
-                                  <div className={`state-badge state-${state}`}>
-                                    <div className="state-indicator" />
-                                    <span className="state-label">{getStateLabel()}</span>
+                            return (
+                              <div
+                                key={conv.id}
+                                className="gallery-card"
+                                onClick={() => navigate(`/chat/${conv.id}`)}
+                                style={{ borderTopColor: accentColor }}
+                              >
+                                <div className="gallery-card-header">
+                                  <div className="gallery-card-id">
+                                    {conv.id.substring(0, 8)}
+                                    <span
+                                      className={`provider-badge provider-${conv.provider || 'claude'}`}
+                                    >
+                                      {conv.provider || 'claude'}
+                                    </span>
+                                  </div>
+                                  <div className="gallery-card-status">
+                                    <div className={`state-badge state-${state}`}>
+                                      <div className="state-indicator" />
+                                      <span className="state-label">{getStateLabel()}</span>
+                                    </div>
                                   </div>
                                 </div>
+                                <div>{conv.messages.length} messages</div>
+                                <div className="gallery-messages">
+                                  {conv.messages.length === 0 ? (
+                                    <div className="empty-state">No messages yet</div>
+                                  ) : (
+                                    conv.messages.slice(-3).map((msg: Message, i: number) => (
+                                      <div key={i} className={`gallery-message ${msg.role}`}>
+                                        <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
+                                        {msg.content.length > 100 ? '...' : ''}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
                               </div>
-                              <div>{conv.messages.length} messages</div>
-                              <div className="gallery-messages">
-                                {conv.messages.length === 0 ? (
-                                  <div className="empty-state">No messages yet</div>
-                                ) : (
-                                  conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                    <div key={i} className={`gallery-message ${msg.role}`}>
-                                      <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                      {msg.content.length > 100 ? '...' : ''}
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                        </div>
 
-                      {showMoreButton && (
-                        <button
-                          className="show-more-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpanded(group.directory);
-                          }}
-                        >
-                          Show more... ({hiddenCount} hidden)
-                        </button>
-                      )}
+                        {showMoreButton && (
+                          <button
+                            className="show-more-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(group.directory);
+                            }}
+                          >
+                            Show more... ({hiddenCount} hidden)
+                          </button>
+                        )}
 
-                      {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                        <button
-                          className="show-more-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpanded(group.directory);
-                          }}
-                        >
-                          Show less
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-            })}
+                        {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
+                          <button
+                            className="show-more-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(group.directory);
+                            }}
+                          >
+                            Show less
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
 
@@ -526,127 +549,127 @@ export function Gallery({ filter }: GalleryProps = {}) {
                 <span className={`project-chevron ${!showWorkerConversations ? 'collapsed' : ''}`}>
                   &#9660;
                 </span>
-                {showWorkerConversations ? 'Hide' : 'Show'} {workerSessionCount} worker session{workerSessionCount !== 1 ? 's' : ''}
-                <span className="worker-sessions-hint">
-                  (oompa-spawned)
-                </span>
+                {showWorkerConversations ? 'Hide' : 'Show'} {workerSessionCount} worker session
+                {workerSessionCount !== 1 ? 's' : ''}
+                <span className="worker-sessions-hint">(oompa-spawned)</span>
               </button>
             )}
 
-            {(isWorkersView || showWorkerConversations) && workerGroups.map((group) => {
-              const isCollapsed = collapsedProjects.has(group.directory);
-              const isExpanded = expandedProjects.has(group.directory);
-              const dirDisplay = formatFolder(group.directory);
-              const totalCount = group.conversations.length;
-              const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-              const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-              const visibleConversations = isExpanded
-                ? group.conversations
-                : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
+            {(isWorkersView || showWorkerConversations) &&
+              workerGroups.map((group) => {
+                const isCollapsed = collapsedProjects.has(group.directory);
+                const isExpanded = expandedProjects.has(group.directory);
+                const dirDisplay = formatFolder(group.directory);
+                const totalCount = group.conversations.length;
+                const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
+                const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
+                const visibleConversations = isExpanded
+                  ? group.conversations
+                  : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
 
-              return (
-                <div key={group.directory} className="project-section worker-project">
-                  <div
-                    className="project-header"
-                    onClick={() => toggleCollapsed(group.directory)}
-                  >
-                    <div className="project-header-left">
-                      <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                        &#9660;
+                return (
+                  <div key={group.directory} className="project-section worker-project">
+                    <div
+                      className="project-header"
+                      onClick={() => toggleCollapsed(group.directory)}
+                    >
+                      <div className="project-header-left">
+                        <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
+                          &#9660;
+                        </span>
+                        <span className="project-path">{dirDisplay}</span>
+                      </div>
+                      <span className="project-count">
+                        {totalCount} worker{totalCount !== 1 ? 's' : ''}
                       </span>
-                      <span className="project-path">{dirDisplay}</span>
                     </div>
-                    <span className="project-count">
-                      {totalCount} worker{totalCount !== 1 ? 's' : ''}
-                    </span>
-                  </div>
 
-                  {!isCollapsed && (
-                    <>
-                      <div className="project-grid">
-                        {visibleConversations.map((conv) => {
-                          const state = conv.isRunning ? 'running' : 'idle';
-                          const getStateLabel = () => {
-                            if (state === 'running') return 'Running';
-                            const lastTime = getLastMessageTime(conv.messages);
-                            return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                          };
-                          const accentColor = getProjectColor(conv.workingDirectory);
+                    {!isCollapsed && (
+                      <>
+                        <div className="project-grid">
+                          {visibleConversations.map((conv) => {
+                            const state = conv.isRunning ? 'running' : 'idle';
+                            const getStateLabel = () => {
+                              if (state === 'running') return 'Running';
+                              const lastTime = getLastMessageTime(conv.messages);
+                              return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
+                            };
+                            const accentColor = getProjectColor(conv.workingDirectory);
 
-                          return (
-                            <div
-                              key={conv.id}
-                              className={`gallery-card${isWorkersView ? '' : ' worker-card'}`}
-                              onClick={() => navigate(`/chat/${conv.id}`)}
-                              style={{ borderTopColor: accentColor }}
-                            >
-                              <div className="gallery-card-header">
-                                <div className="gallery-card-id">
-                                  {conv.id.substring(0, 8)}
-                                  <span className="provider-badge provider-worker">worker</span>
-                                </div>
-                                <div className="gallery-card-status">
-                                  <button
-                                    className="promote-worker-btn"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      promoteWorker(conv.id);
-                                    }}
-                                  >
-                                    Promote
-                                  </button>
-                                  <div className={`state-badge state-${state}`}>
-                                    <div className="state-indicator" />
-                                    <span className="state-label">{getStateLabel()}</span>
+                            return (
+                              <div
+                                key={conv.id}
+                                className={`gallery-card${isWorkersView ? '' : ' worker-card'}`}
+                                onClick={() => navigate(`/chat/${conv.id}`)}
+                                style={{ borderTopColor: accentColor }}
+                              >
+                                <div className="gallery-card-header">
+                                  <div className="gallery-card-id">
+                                    {conv.id.substring(0, 8)}
+                                    <span className="provider-badge provider-worker">worker</span>
+                                  </div>
+                                  <div className="gallery-card-status">
+                                    <button
+                                      className="promote-worker-btn"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        promoteWorker(conv.id);
+                                      }}
+                                    >
+                                      Promote
+                                    </button>
+                                    <div className={`state-badge state-${state}`}>
+                                      <div className="state-indicator" />
+                                      <span className="state-label">{getStateLabel()}</span>
+                                    </div>
                                   </div>
                                 </div>
+                                <div>{conv.messages.length} messages</div>
+                                <div className="gallery-messages">
+                                  {conv.messages.length === 0 ? (
+                                    <div className="empty-state">No messages yet</div>
+                                  ) : (
+                                    conv.messages.slice(-3).map((msg: Message, i: number) => (
+                                      <div key={i} className={`gallery-message ${msg.role}`}>
+                                        <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
+                                        {msg.content.length > 100 ? '...' : ''}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
                               </div>
-                              <div>{conv.messages.length} messages</div>
-                              <div className="gallery-messages">
-                                {conv.messages.length === 0 ? (
-                                  <div className="empty-state">No messages yet</div>
-                                ) : (
-                                  conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                    <div key={i} className={`gallery-message ${msg.role}`}>
-                                      <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                      {msg.content.length > 100 ? '...' : ''}
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                        </div>
 
-                      {showMoreButton && (
-                        <button
-                          className="show-more-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpanded(group.directory);
-                          }}
-                        >
-                          Show more... ({hiddenCount} hidden)
-                        </button>
-                      )}
+                        {showMoreButton && (
+                          <button
+                            className="show-more-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(group.directory);
+                            }}
+                          >
+                            Show more... ({hiddenCount} hidden)
+                          </button>
+                        )}
 
-                      {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                        <button
-                          className="show-more-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpanded(group.directory);
-                          }}
-                        >
-                          Show less
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-            })}
+                        {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
+                          <button
+                            className="show-more-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(group.directory);
+                            }}
+                          >
+                            Show less
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
 
@@ -661,126 +684,130 @@ export function Gallery({ filter }: GalleryProps = {}) {
                 <span className={`project-chevron ${!showDoneConversations ? 'collapsed' : ''}`}>
                   &#9660;
                 </span>
-                {showDoneConversations ? 'Hide' : 'Show'} {doneSessionCount} done conversation{doneSessionCount !== 1 ? 's' : ''}
+                {showDoneConversations ? 'Hide' : 'Show'} {doneSessionCount} done conversation
+                {doneSessionCount !== 1 ? 's' : ''}
               </button>
             )}
 
-            {(isDoneView || showDoneConversations) && doneGroups.map((group) => {
-              const isCollapsed = collapsedProjects.has(group.directory);
-              const isExpanded = expandedProjects.has(group.directory);
-              const dirDisplay = formatFolder(group.directory);
-              const totalCount = group.conversations.length;
-              const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-              const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-              const visibleConversations = isExpanded
-                ? group.conversations
-                : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
+            {(isDoneView || showDoneConversations) &&
+              doneGroups.map((group) => {
+                const isCollapsed = collapsedProjects.has(group.directory);
+                const isExpanded = expandedProjects.has(group.directory);
+                const dirDisplay = formatFolder(group.directory);
+                const totalCount = group.conversations.length;
+                const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
+                const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
+                const visibleConversations = isExpanded
+                  ? group.conversations
+                  : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
 
-              return (
-                <div key={group.directory} className="project-section done-project">
-                  <div
-                    className="project-header"
-                    onClick={() => toggleCollapsed(group.directory)}
-                  >
-                    <div className="project-header-left">
-                      <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                        &#9660;
+                return (
+                  <div key={group.directory} className="project-section done-project">
+                    <div
+                      className="project-header"
+                      onClick={() => toggleCollapsed(group.directory)}
+                    >
+                      <div className="project-header-left">
+                        <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
+                          &#9660;
+                        </span>
+                        <span className="project-path">{dirDisplay}</span>
+                      </div>
+                      <span className="project-count">
+                        {totalCount} conversation{totalCount !== 1 ? 's' : ''}
                       </span>
-                      <span className="project-path">{dirDisplay}</span>
                     </div>
-                    <span className="project-count">
-                      {totalCount} conversation{totalCount !== 1 ? 's' : ''}
-                    </span>
-                  </div>
 
-                  {!isCollapsed && (
-                    <>
-                      <div className="project-grid">
-                        {visibleConversations.map((conv) => {
-                          const state = conv.isRunning ? 'running' : 'idle';
-                          const getStateLabel = () => {
-                            if (state === 'running') return 'Running';
-                            const lastTime = getLastMessageTime(conv.messages);
-                            return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                          };
-                          const accentColor = getProjectColor(conv.workingDirectory);
+                    {!isCollapsed && (
+                      <>
+                        <div className="project-grid">
+                          {visibleConversations.map((conv) => {
+                            const state = conv.isRunning ? 'running' : 'idle';
+                            const getStateLabel = () => {
+                              if (state === 'running') return 'Running';
+                              const lastTime = getLastMessageTime(conv.messages);
+                              return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
+                            };
+                            const accentColor = getProjectColor(conv.workingDirectory);
 
-                          return (
-                            <div
-                              key={conv.id}
-                              className={`gallery-card${isDoneView ? '' : ' done-card'}`}
-                              onClick={() => navigate(`/chat/${conv.id}`)}
-                              style={{ borderTopColor: accentColor }}
-                            >
-                              <div className="gallery-card-header">
-                                <div className="gallery-card-id">
-                                  {conv.id.substring(0, 8)}
-                                  <span className={`provider-badge provider-${conv.provider || 'claude'}`}>
-                                    {conv.provider || 'claude'}
-                                  </span>
-                                </div>
-                                <div className="gallery-card-status">
-                                  <button
-                                    className="undo-done-btn"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      unmarkDone(conv.id);
-                                    }}
-                                  >
-                                    Restore
-                                  </button>
-                                  <div className={`state-badge state-${state}`}>
-                                    <div className="state-indicator" />
-                                    <span className="state-label">{getStateLabel()}</span>
+                            return (
+                              <div
+                                key={conv.id}
+                                className={`gallery-card${isDoneView ? '' : ' done-card'}`}
+                                onClick={() => navigate(`/chat/${conv.id}`)}
+                                style={{ borderTopColor: accentColor }}
+                              >
+                                <div className="gallery-card-header">
+                                  <div className="gallery-card-id">
+                                    {conv.id.substring(0, 8)}
+                                    <span
+                                      className={`provider-badge provider-${conv.provider || 'claude'}`}
+                                    >
+                                      {conv.provider || 'claude'}
+                                    </span>
+                                  </div>
+                                  <div className="gallery-card-status">
+                                    <button
+                                      className="undo-done-btn"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        unmarkDone(conv.id);
+                                      }}
+                                    >
+                                      Restore
+                                    </button>
+                                    <div className={`state-badge state-${state}`}>
+                                      <div className="state-indicator" />
+                                      <span className="state-label">{getStateLabel()}</span>
+                                    </div>
                                   </div>
                                 </div>
+                                <div>{conv.messages.length} messages</div>
+                                <div className="gallery-messages">
+                                  {conv.messages.length === 0 ? (
+                                    <div className="empty-state">No messages yet</div>
+                                  ) : (
+                                    conv.messages.slice(-3).map((msg: Message, i: number) => (
+                                      <div key={i} className={`gallery-message ${msg.role}`}>
+                                        <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
+                                        {msg.content.length > 100 ? '...' : ''}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
                               </div>
-                              <div>{conv.messages.length} messages</div>
-                              <div className="gallery-messages">
-                                {conv.messages.length === 0 ? (
-                                  <div className="empty-state">No messages yet</div>
-                                ) : (
-                                  conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                    <div key={i} className={`gallery-message ${msg.role}`}>
-                                      <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                      {msg.content.length > 100 ? '...' : ''}
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                        </div>
 
-                      {showMoreButton && (
-                        <button
-                          className="show-more-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpanded(group.directory);
-                          }}
-                        >
-                          Show more... ({hiddenCount} hidden)
-                        </button>
-                      )}
+                        {showMoreButton && (
+                          <button
+                            className="show-more-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(group.directory);
+                            }}
+                          >
+                            Show more... ({hiddenCount} hidden)
+                          </button>
+                        )}
 
-                      {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                        <button
-                          className="show-more-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpanded(group.directory);
-                          }}
-                        >
-                          Show less
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-            })}
+                        {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
+                          <button
+                            className="show-more-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(group.directory);
+                            }}
+                          >
+                            Show less
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>

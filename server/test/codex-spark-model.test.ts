@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ModelIdSchema,
   CodexModelSchema,
+  ModelIdSchema,
   NewConversationMessageSchema,
   SetModelMessageSchema,
 } from '../../shared/src/index';
-import { isModelIdValidForProvider, modelValidationHint } from '../src/providers/model-validation';
-import codexProvider from '../src/providers/codex';
 import { inferProviderFromModel } from '../src/adapters/jsonl';
+import codexProvider from '../src/providers/codex';
+import { isModelIdValidForProvider, modelValidationHint } from '../src/providers/model-validation';
 
 // =============================================================================
 // Schema validation: spark base + effort variants accepted
@@ -22,7 +22,12 @@ test('CodexModelSchema accepts spark base and effort variants', () => {
 });
 
 test('ModelIdSchema accepts all spark variants', () => {
-  for (const id of ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-high', 'gpt-5.3-codex-spark-medium', 'gpt-5.3-codex-spark-xhigh']) {
+  for (const id of [
+    'gpt-5.3-codex-spark',
+    'gpt-5.3-codex-spark-high',
+    'gpt-5.3-codex-spark-medium',
+    'gpt-5.3-codex-spark-xhigh',
+  ]) {
     assert.equal(ModelIdSchema.safeParse(id).success, true, `${id} should be valid`);
   }
 });
@@ -54,7 +59,12 @@ test('SetModelMessage accepts spark variants', () => {
 // =============================================================================
 
 test('isModelIdValidForProvider accepts spark variants for codex', () => {
-  for (const id of ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-high', 'gpt-5.3-codex-spark-medium', 'gpt-5.3-codex-spark-xhigh']) {
+  for (const id of [
+    'gpt-5.3-codex-spark',
+    'gpt-5.3-codex-spark-high',
+    'gpt-5.3-codex-spark-medium',
+    'gpt-5.3-codex-spark-xhigh',
+  ]) {
     assert.equal(isModelIdValidForProvider('codex', id), true, `codex should accept ${id}`);
   }
 });
@@ -88,28 +98,43 @@ test('modelToParams: bare spark passes model directly, no effort', () => {
 
 test('modelToParams: spark-high decomposes to spark model + high effort', () => {
   assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-spark-high'), [
-    '-m', 'gpt-5.3-codex-spark', '-c', 'reasoning.effort=high',
+    '-m',
+    'gpt-5.3-codex-spark',
+    '-c',
+    'reasoning.effort=high',
   ]);
 });
 
 test('modelToParams: spark-medium decomposes correctly', () => {
   assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-spark-medium'), [
-    '-m', 'gpt-5.3-codex-spark', '-c', 'reasoning.effort=medium',
+    '-m',
+    'gpt-5.3-codex-spark',
+    '-c',
+    'reasoning.effort=medium',
   ]);
 });
 
 test('modelToParams: spark-xhigh decomposes correctly', () => {
   assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-spark-xhigh'), [
-    '-m', 'gpt-5.3-codex-spark', '-c', 'reasoning.effort=xhigh',
+    '-m',
+    'gpt-5.3-codex-spark',
+    '-c',
+    'reasoning.effort=xhigh',
   ]);
 });
 
 test('modelToParams: existing codex effort models still decompose correctly', () => {
   assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-high'), [
-    '-m', 'gpt-5.3-codex', '-c', 'reasoning.effort=high',
+    '-m',
+    'gpt-5.3-codex',
+    '-c',
+    'reasoning.effort=high',
   ]);
   assert.deepEqual(codexProvider.modelToParams('gpt-5.3-codex-medium'), [
-    '-m', 'gpt-5.3-codex', '-c', 'reasoning.effort=medium',
+    '-m',
+    'gpt-5.3-codex',
+    '-c',
+    'reasoning.effort=medium',
   ]);
 });
 
@@ -154,7 +179,12 @@ test('getSpawnConfig: bare spark — -m flag, no -c', () => {
 });
 
 test('getSpawnConfig: spark-high — -m and -c flags', () => {
-  const config = codexProvider.getSpawnConfig('test-session', '/tmp', false, 'gpt-5.3-codex-spark-high');
+  const config = codexProvider.getSpawnConfig(
+    'test-session',
+    '/tmp',
+    false,
+    'gpt-5.3-codex-spark-high'
+  );
   assert.ok(config.args.includes('-m'));
   const mIdx = config.args.indexOf('-m');
   assert.equal(config.args[mIdx + 1], 'gpt-5.3-codex-spark');
@@ -168,7 +198,11 @@ test('getSpawnConfig: spark-high — -m and -c flags', () => {
 // =============================================================================
 
 test('inferProviderFromModel: spark variants map to codex', () => {
-  for (const model of ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-high', 'gpt-5.3-codex-spark-medium']) {
+  for (const model of [
+    'gpt-5.3-codex-spark',
+    'gpt-5.3-codex-spark-high',
+    'gpt-5.3-codex-spark-medium',
+  ]) {
     assert.equal(inferProviderFromModel(model), 'codex', `${model} should infer codex`);
   }
 });

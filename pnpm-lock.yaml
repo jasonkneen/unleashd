@@ -57,6 +57,9 @@ importers:
         specifier: ^5.0.10
         version: 5.0.10(@types/react@19.2.10)(react@19.2.4)
     devDependencies:
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
       '@types/node':
         specifier: ^24.10.1
         version: 24.10.9
@@ -72,6 +75,9 @@ importers:
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
       vite:
         specifier: ^7.2.4
         version: 7.3.1(@types/node@24.10.9)(tsx@4.21.0)

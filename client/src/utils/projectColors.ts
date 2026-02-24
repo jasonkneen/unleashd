@@ -22,7 +22,7 @@ const ACCENT_VARS = [
 function hashToIndex(value: string): number {
   let hash = 0;
   for (let i = 0; i < value.length; i++) {
-    hash = ((hash << 5) - hash) + value.charCodeAt(i);
+    hash = (hash << 5) - hash + value.charCodeAt(i);
     hash = hash & hash; // Convert to 32-bit integer
   }
   return Math.abs(hash) % ACCENT_VARS.length;

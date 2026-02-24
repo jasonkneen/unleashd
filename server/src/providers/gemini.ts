@@ -19,7 +19,7 @@
 
 import type { ModelInfo } from '@claude-web-view/shared';
 import { buildCommand } from '@nbardy/agent-cli';
-import { type Provider, type ProviderEvent, type SpawnConfig } from './index';
+import type { Provider, ProviderEvent, SpawnConfig } from './index';
 
 const geminiProvider: Provider = {
   name: 'gemini',
@@ -33,7 +33,12 @@ const geminiProvider: Provider = {
     ];
   },
 
-  getSpawnConfig(sessionId: string, workingDir: string, resume = false, modelId?: string): SpawnConfig {
+  getSpawnConfig(
+    sessionId: string,
+    workingDir: string,
+    resume = false,
+    modelId?: string
+  ): SpawnConfig {
     // Command building delegated to @nbardy/agent-cli.
     // Gemini resumes by CWD (--resume latest), not by session ID.
     // Prompt is delivered via stdin — server writes content + '\n' then closes.

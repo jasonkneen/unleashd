@@ -9,7 +9,7 @@ console.log('=== Testing Multi-Turn WebSocket Conversation ===\n');
 const ws = new WebSocket('ws://localhost:3000');
 let conversationId = null;
 let messageCount = 0;
-let responses = [];
+const responses = [];
 
 ws.on('open', () => {
   console.log('[WS] Connected');
@@ -26,21 +26,25 @@ ws.on('message', (data) => {
 
   switch (msg.type) {
     case 'init':
-      ws.send(JSON.stringify({
-        type: 'new_conversation',
-        workingDirectory: process.cwd(),
-        provider: 'claude',
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'new_conversation',
+          workingDirectory: process.cwd(),
+          provider: 'claude',
+        })
+      );
       break;
 
     case 'conversation_created':
       conversationId = msg.conversation.id;
       console.log(`\n--- Turn 1: Sending first message ---`);
-      ws.send(JSON.stringify({
-        type: 'send_message',
-        conversationId,
-        content: 'Remember the secret word: ELEPHANT. Just say "OK, I will remember ELEPHANT"',
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'send_message',
+          conversationId,
+          content: 'Remember the secret word: ELEPHANT. Just say "OK, I will remember ELEPHANT"',
+        })
+      );
       break;
 
     case 'message':
@@ -62,11 +66,13 @@ ws.on('message', (data) => {
         messageCount++;
         console.log(`\n[Turn 1 Response]: "${responses[0]}"\n`);
         console.log(`--- Turn 2: Asking for the secret word ---`);
-        ws.send(JSON.stringify({
-          type: 'send_message',
-          conversationId,
-          content: 'What was the secret word I asked you to remember? Just say the word.',
-        }));
+        ws.send(
+          JSON.stringify({
+            type: 'send_message',
+            conversationId,
+            content: 'What was the secret word I asked you to remember? Just say the word.',
+          })
+        );
       } else if (!msg.isRunning && messageCount === 1 && responses[1]) {
         // Second message complete
         console.log(`\n[Turn 2 Response]: "${responses[1]}"\n`);

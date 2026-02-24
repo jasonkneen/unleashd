@@ -16,11 +16,7 @@ function testClaude() {
     console.log('--- Test: Claude CLI ---');
     console.log('Command: claude --print --output-format=stream-json');
 
-    const proc = spawn('claude', [
-      '--print',
-      '--verbose',
-      '--output-format=stream-json',
-    ], {
+    const proc = spawn('claude', ['--print', '--verbose', '--output-format=stream-json'], {
       cwd: process.cwd(),
     });
 

@@ -20,52 +20,52 @@
      ========================================= */
 
   /* Base tones */
-  --pal-base03: #002b36;  /* Darkest background */
-  --pal-base02: #073642;  /* Surface / raised background */
-  --pal-base01: #586e75;  /* Muted text, comments */
-  --pal-base00: #657b83;  /* Secondary text */
-  --pal-base0:  #839496;  /* Primary body text */
-  --pal-base1:  #93a1a1;  /* Emphasized text */
-  --pal-base2:  #eee8d5;  /* Light background (reserved for light theme) */
-  --pal-base3:  #fdf6e3;  /* Light highlight (reserved for light theme) */
+  --pal-base03: #002b36; /* Darkest background */
+  --pal-base02: #073642; /* Surface / raised background */
+  --pal-base01: #586e75; /* Muted text, comments */
+  --pal-base00: #657b83; /* Secondary text */
+  --pal-base0: #839496; /* Primary body text */
+  --pal-base1: #93a1a1; /* Emphasized text */
+  --pal-base2: #eee8d5; /* Light background (reserved for light theme) */
+  --pal-base3: #fdf6e3; /* Light highlight (reserved for light theme) */
 
   /* Accent colors */
-  --pal-yellow:  #b58900;
-  --pal-orange:  #cb4b16;
-  --pal-red:     #dc322f;
+  --pal-yellow: #b58900;
+  --pal-orange: #cb4b16;
+  --pal-red: #dc322f;
   --pal-magenta: #d33682;
-  --pal-violet:  #6c71c4;
-  --pal-blue:    #268bd2;
-  --pal-cyan:    #2aa198;
-  --pal-green:   #859900;
+  --pal-violet: #6c71c4;
+  --pal-blue: #268bd2;
+  --pal-cyan: #2aa198;
+  --pal-green: #859900;
 
   /* =========================================
      DERIVED: Background elevation scale
      9 levels derived from --pal-base03 and --pal-base02.
      Each step increases perceived lightness.
      ========================================= */
-  --bg-darkest:   color-mix(in oklch, var(--pal-base03) 70%, black);
-  --bg-base:      color-mix(in oklch, var(--pal-base03) 85%, black);
-  --bg-raised-1:  var(--pal-base03);
-  --bg-raised-2:  color-mix(in oklch, var(--pal-base03) 85%, var(--pal-base02));
-  --bg-raised-3:  var(--pal-base02);
-  --bg-raised-4:  color-mix(in oklch, var(--pal-base02) 80%, var(--pal-base01));
-  --bg-raised-5:  color-mix(in oklch, var(--pal-base02) 65%, var(--pal-base01));
-  --bg-raised-6:  color-mix(in oklch, var(--pal-base02) 50%, var(--pal-base01));
+  --bg-darkest: color-mix(in oklch, var(--pal-base03) 70%, black);
+  --bg-base: color-mix(in oklch, var(--pal-base03) 85%, black);
+  --bg-raised-1: var(--pal-base03);
+  --bg-raised-2: color-mix(in oklch, var(--pal-base03) 85%, var(--pal-base02));
+  --bg-raised-3: var(--pal-base02);
+  --bg-raised-4: color-mix(in oklch, var(--pal-base02) 80%, var(--pal-base01));
+  --bg-raised-5: color-mix(in oklch, var(--pal-base02) 65%, var(--pal-base01));
+  --bg-raised-6: color-mix(in oklch, var(--pal-base02) 50%, var(--pal-base01));
   --bg-highlight: color-mix(in oklch, var(--pal-base02) 35%, var(--pal-base01));
 
   /* =========================================
      DERIVED: Semantic backgrounds
      Named aliases for the elevation scale.
      ========================================= */
-  --bg-page:       var(--bg-base);
-  --bg-sidebar:    color-mix(in oklch, var(--pal-base03) 92%, black);
-  --bg-content:    var(--bg-raised-1);
-  --bg-card:       var(--bg-raised-2);
-  --bg-panel:      var(--bg-raised-3);
-  --bg-hover:      var(--bg-raised-4);
-  --bg-active:     var(--bg-raised-5);
-  --bg-popup:      var(--bg-raised-6);
+  --bg-page: var(--bg-base);
+  --bg-sidebar: color-mix(in oklch, var(--pal-base03) 92%, black);
+  --bg-content: var(--bg-raised-1);
+  --bg-card: var(--bg-raised-2);
+  --bg-panel: var(--bg-raised-3);
+  --bg-hover: var(--bg-raised-4);
+  --bg-active: var(--bg-raised-5);
+  --bg-popup: var(--bg-raised-6);
 
   /* Legacy mappings for compatibility */
   --bg-primary: var(--bg-base);
@@ -76,21 +76,21 @@
      DERIVED: Border scale (4 intensities)
      All derived from --pal-base1 at varying alpha.
      ========================================= */
-  --border-subtle:   color-mix(in srgb, var(--pal-base1) 10%, transparent);
-  --border-default:  color-mix(in srgb, var(--pal-base1) 18%, transparent);
+  --border-subtle: color-mix(in srgb, var(--pal-base1) 10%, transparent);
+  --border-default: color-mix(in srgb, var(--pal-base1) 18%, transparent);
   --border-emphasis: color-mix(in srgb, var(--pal-base1) 28%, transparent);
-  --border-strong:   color-mix(in srgb, var(--pal-base1) 42%, transparent);
+  --border-strong: color-mix(in srgb, var(--pal-base1) 42%, transparent);
   --border-color: var(--bg-panel);
 
   /* =========================================
      DERIVED: Text scale
      Mapped from palette base tones.
      ========================================= */
-  --text-muted:     var(--pal-base01);
+  --text-muted: var(--pal-base01);
   --text-secondary: var(--pal-base00);
-  --text-primary:   var(--pal-base0);
-  --text-emphasis:  var(--pal-base1);
-  --text-bright:    color-mix(in oklch, var(--pal-base1) 70%, white);
+  --text-primary: var(--pal-base0);
+  --text-emphasis: var(--pal-base1);
+  --text-bright: color-mix(in oklch, var(--pal-base1) 70%, white);
   --text-on-accent: color-mix(in oklch, var(--pal-base03) 90%, black);
 
   /* =========================================
@@ -102,52 +102,52 @@
      ========================================= */
 
   /* Blue */
-  --blue:        var(--pal-blue);
-  --blue-dim:    color-mix(in oklch, var(--pal-blue) 65%, black);
+  --blue: var(--pal-blue);
+  --blue-dim: color-mix(in oklch, var(--pal-blue) 65%, black);
   --blue-bright: color-mix(in oklch, var(--pal-blue) 75%, white);
-  --blue-glow:   color-mix(in srgb, var(--pal-blue) 22%, transparent);
+  --blue-glow: color-mix(in srgb, var(--pal-blue) 22%, transparent);
 
   /* Cyan */
-  --cyan:        var(--pal-cyan);
-  --cyan-dim:    color-mix(in oklch, var(--pal-cyan) 65%, black);
+  --cyan: var(--pal-cyan);
+  --cyan-dim: color-mix(in oklch, var(--pal-cyan) 65%, black);
   --cyan-bright: color-mix(in oklch, var(--pal-cyan) 75%, white);
-  --cyan-glow:   color-mix(in srgb, var(--pal-cyan) 22%, transparent);
+  --cyan-glow: color-mix(in srgb, var(--pal-cyan) 22%, transparent);
 
   /* Violet */
-  --violet:        var(--pal-violet);
-  --violet-dim:    color-mix(in oklch, var(--pal-violet) 65%, black);
+  --violet: var(--pal-violet);
+  --violet-dim: color-mix(in oklch, var(--pal-violet) 65%, black);
   --violet-bright: color-mix(in oklch, var(--pal-violet) 75%, white);
-  --violet-glow:   color-mix(in srgb, var(--pal-violet) 22%, transparent);
+  --violet-glow: color-mix(in srgb, var(--pal-violet) 22%, transparent);
 
   /* Green */
-  --green:        var(--pal-green);
-  --green-dim:    color-mix(in oklch, var(--pal-green) 65%, black);
+  --green: var(--pal-green);
+  --green-dim: color-mix(in oklch, var(--pal-green) 65%, black);
   --green-bright: color-mix(in oklch, var(--pal-green) 75%, white);
-  --green-glow:   color-mix(in srgb, var(--pal-green) 22%, transparent);
+  --green-glow: color-mix(in srgb, var(--pal-green) 22%, transparent);
 
   /* Yellow */
-  --yellow:        var(--pal-yellow);
-  --yellow-dim:    color-mix(in oklch, var(--pal-yellow) 65%, black);
+  --yellow: var(--pal-yellow);
+  --yellow-dim: color-mix(in oklch, var(--pal-yellow) 65%, black);
   --yellow-bright: color-mix(in oklch, var(--pal-yellow) 75%, white);
-  --yellow-glow:   color-mix(in srgb, var(--pal-yellow) 22%, transparent);
+  --yellow-glow: color-mix(in srgb, var(--pal-yellow) 22%, transparent);
 
   /* Orange */
-  --orange:        var(--pal-orange);
-  --orange-dim:    color-mix(in oklch, var(--pal-orange) 65%, black);
+  --orange: var(--pal-orange);
+  --orange-dim: color-mix(in oklch, var(--pal-orange) 65%, black);
   --orange-bright: color-mix(in oklch, var(--pal-orange) 75%, white);
-  --orange-glow:   color-mix(in srgb, var(--pal-orange) 22%, transparent);
+  --orange-glow: color-mix(in srgb, var(--pal-orange) 22%, transparent);
 
   /* Red */
-  --red:        var(--pal-red);
-  --red-dim:    color-mix(in oklch, var(--pal-red) 65%, black);
+  --red: var(--pal-red);
+  --red-dim: color-mix(in oklch, var(--pal-red) 65%, black);
   --red-bright: color-mix(in oklch, var(--pal-red) 75%, white);
-  --red-glow:   color-mix(in srgb, var(--pal-red) 22%, transparent);
+  --red-glow: color-mix(in srgb, var(--pal-red) 22%, transparent);
 
   /* Magenta */
-  --magenta:        var(--pal-magenta);
-  --magenta-dim:    color-mix(in oklch, var(--pal-magenta) 65%, black);
+  --magenta: var(--pal-magenta);
+  --magenta-dim: color-mix(in oklch, var(--pal-magenta) 65%, black);
   --magenta-bright: color-mix(in oklch, var(--pal-magenta) 75%, white);
-  --magenta-glow:   color-mix(in srgb, var(--pal-magenta) 22%, transparent);
+  --magenta-glow: color-mix(in srgb, var(--pal-magenta) 22%, transparent);
 
   /* =========================================
      DERIVED: Semantic accent mappings
@@ -166,10 +166,10 @@
      DERIVED: Message backgrounds
      Tint of semantic accent into base background.
      ========================================= */
-  --bg-user-message:      color-mix(in oklch, var(--accent-user) 8%, var(--bg-content));
+  --bg-user-message: color-mix(in oklch, var(--accent-user) 8%, var(--bg-content));
   --bg-assistant-message: color-mix(in oklch, var(--accent-assistant) 8%, var(--bg-content));
-  --bg-system-message:    color-mix(in oklch, var(--accent-warning) 8%, var(--bg-content));
-  --bg-error-message:     color-mix(in oklch, var(--accent-error) 8%, var(--bg-content));
+  --bg-system-message: color-mix(in oklch, var(--accent-warning) 8%, var(--bg-content));
+  --bg-error-message: color-mix(in oklch, var(--accent-error) 8%, var(--bg-content));
 
   /* =========================================
      CODE STYLING

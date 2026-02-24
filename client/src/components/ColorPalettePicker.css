@@ -235,7 +235,7 @@
   font-size: 11px;
   line-height: 1.4;
   overflow-x: auto;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-family: "Menlo", "Monaco", "Courier New", monospace;
 }
 
 /* ─── Section groups (accent families, bg, text, etc.) ─── */
@@ -441,15 +441,23 @@
 }
 
 .ai-dots::after {
-  content: '';
+  content: "";
   animation: ai-dot-animation 1.4s infinite steps(4, end);
 }
 
 @keyframes ai-dot-animation {
-  0%  { content: ''; }
-  25% { content: '.'; }
-  50% { content: '..'; }
-  75% { content: '...'; }
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
 }
 
 .ai-error {

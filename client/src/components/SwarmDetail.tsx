@@ -1,14 +1,21 @@
+import type {
+  Conversation,
+  Message,
+  OompaRuntimeWorker,
+  SwarmReviewLog,
+  SwarmRun,
+  SwarmRunSummary,
+} from '@claude-web-view/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Conversation, Message, OompaRuntimeWorker, SwarmRunWorker, SwarmRunSummary, SwarmRunLog, SwarmReviewLog, SwarmRun } from '@claude-web-view/shared';
+import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useConversationStore } from '../stores/conversationStore';
 import { useUIStore } from '../stores/uiStore';
-import { getProjectRoot, getProjectName } from '../utils/swarmUtils';
+import { getProjectName, getProjectRoot } from '../utils/swarmUtils';
+import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getLastMessageTime } from '../utils/time';
 import { VirtualizedMessageList } from './VirtualizedMessageList';
 import type { MessageGroup } from './VirtualizedMessageList';
-import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
-import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import './SwarmDetail.css';
 
 // =============================================================================
@@ -42,7 +49,7 @@ interface OompaConfig {
 
 async function sendSwarmSignal(
   projectRoot: string,
-  signal: 'stop' | 'kill',
+  signal: 'stop' | 'kill'
 ): Promise<{ ok: boolean; message: string }> {
   const res = await fetch('/api/swarm-signal', {
     method: 'POST',
@@ -50,7 +57,7 @@ async function sendSwarmSignal(
     body: JSON.stringify({ dir: projectRoot, signal }),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string; message?: string };
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
     throw new Error(body.error ?? body.message ?? `HTTP ${res.status}`);
   }
   return res.json();
@@ -95,7 +102,7 @@ function buildSwarmDebugPrefix(
   configPath: string | null,
   swarmId: string | null,
   summary: SwarmRunSummary | null,
-  startedAt: string | null,
+  startedAt: string | null
 ): string {
   const configDisplay = configPath ?? `${projectRoot}/oompa.json`;
   const swarmDisplay = swarmId ?? 'unknown';
@@ -126,7 +133,7 @@ function buildSwarmDebugPrefix(
       `- Total Iterations: ${summary['total-iterations']}`,
       `- Merges: ${totalMerges}`,
       `- Rejections: ${totalRej}`,
-      `- Errors: ${totalErr}`,
+      `- Errors: ${totalErr}`
     );
 
     if (summary.workers.length > 0) {
@@ -134,11 +141,11 @@ function buildSwarmDebugPrefix(
         '',
         '## Worker Status',
         'Worker | Harness | Status | Done | Merges | Rej | Err | Reviews',
-        '-------|---------|--------|------|--------|-----|-----|--------',
+        '-------|---------|--------|------|--------|-----|-----|--------'
       );
       for (const w of summary.workers) {
         lines.push(
-          `${w.id} | ${w.harness}:${w.model ?? 'default'} | ${w.status} | ${w.completed}/${w.iterations} | ${w.merges} | ${w.rejections} | ${w.errors} | ${w['review-rounds-total']}`,
+          `${w.id} | ${w.harness}:${w.model ?? 'default'} | ${w.status} | ${w.completed}/${w.iterations} | ${w.merges} | ${w.rejections} | ${w.errors} | ${w['review-rounds-total']}`
         );
       }
     }
@@ -157,7 +164,7 @@ function buildSwarmDebugPrefix(
     `To list run artifacts: ls ${runsDir}/`,
     `To read a review: cat ${runsDir}/reviews/<file>.json`,
     '',
-    'Given this context, help the user debug and investigate the swarm run.',
+    'Given this context, help the user debug and investigate the swarm run.'
   );
 
   return lines.join('\n');
@@ -173,7 +180,7 @@ type SwarmTab = 'workers' | 'runs';
 
 interface ExecGroup {
   exec: Conversation;
-  reviews: Conversation[];  // review + fix sessions matched to this exec, newest first
+  reviews: Conversation[]; // review + fix sessions matched to this exec, newest first
 }
 
 // =============================================================================
@@ -194,7 +201,7 @@ function WorkerChatPane({
   runningState: 'running' | 'idle';
 }) {
   const conversation = useConversationStore((s) =>
-    conversationId ? s.conversations.get(conversationId) ?? null : null,
+    conversationId ? (s.conversations.get(conversationId) ?? null) : null
   );
   const isStreaming = conversation?.isStreaming ?? false;
 
@@ -312,28 +319,31 @@ function OompaConfigPanel({ projectRoot }: { projectRoot: string }) {
       .catch((e: Error) => setError(e.message));
   }, [projectRoot]);
 
-  const togglePrompt = useCallback((promptPath: string) => {
-    setExpandedPrompts((prev) => {
-      const next = new Map(prev);
-      if (next.has(promptPath)) {
-        next.delete(promptPath);
+  const togglePrompt = useCallback(
+    (promptPath: string) => {
+      setExpandedPrompts((prev) => {
+        const next = new Map(prev);
+        if (next.has(promptPath)) {
+          next.delete(promptPath);
+          return next;
+        }
+        const absolutePath = promptPath.startsWith('/')
+          ? promptPath
+          : `${projectRoot}/${promptPath}`;
+        fetch(`/api/read-file?path=${encodeURIComponent(absolutePath)}`)
+          .then((res) => res.json())
+          .then((data: { content: string }) => {
+            setExpandedPrompts((p) => new Map(p).set(promptPath, data.content));
+          })
+          .catch(() => {
+            setExpandedPrompts((p) => new Map(p).set(promptPath, '(failed to load)'));
+          });
+        next.set(promptPath, 'Loading...');
         return next;
-      }
-      const absolutePath = promptPath.startsWith('/')
-        ? promptPath
-        : `${projectRoot}/${promptPath}`;
-      fetch(`/api/read-file?path=${encodeURIComponent(absolutePath)}`)
-        .then((res) => res.json())
-        .then((data: { content: string }) => {
-          setExpandedPrompts((p) => new Map(p).set(promptPath, data.content));
-        })
-        .catch(() => {
-          setExpandedPrompts((p) => new Map(p).set(promptPath, '(failed to load)'));
-        });
-      next.set(promptPath, 'Loading...');
-      return next;
-    });
-  }, [projectRoot]);
+      });
+    },
+    [projectRoot]
+  );
 
   return (
     <div className="swarm-bottom-panel">
@@ -407,7 +417,9 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
   // Fetch reviews when a run is selected
   useEffect(() => {
     if (!selectedRunId) return;
-    fetch(`/api/swarm-reviews?dir=${encodeURIComponent(projectRoot)}&swarmId=${encodeURIComponent(selectedRunId)}`)
+    fetch(
+      `/api/swarm-reviews?dir=${encodeURIComponent(projectRoot)}&swarmId=${encodeURIComponent(selectedRunId)}`
+    )
       .then((res) => res.json())
       .then((data: { reviews: SwarmReviewLog[] }) => setReviews(data.reviews))
       .catch(() => setReviews([]));
@@ -435,7 +447,9 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
               <span className="run-time">{new Date(r.run['started-at']).toLocaleDateString()}</span>
             )}
             {r.summary && (
-              <span className={`run-status-badge ${r.summary['total-completed'] > 0 ? 'has-completions' : ''}`}>
+              <span
+                className={`run-status-badge ${r.summary['total-completed'] > 0 ? 'has-completions' : ''}`}
+              >
                 {r.summary['total-completed']}/{r.summary['total-iterations']}
               </span>
             )}
@@ -448,9 +462,15 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
         <div className="run-summary">
           <div className="run-summary-header">
             <h4>Summary</h4>
-            {runLog && <span className="run-started">Started {new Date(runLog['started-at']).toLocaleString()}</span>}
+            {runLog && (
+              <span className="run-started">
+                Started {new Date(runLog['started-at']).toLocaleString()}
+              </span>
+            )}
             {summary['finished-at'] && (
-              <span className="run-finished">Finished {new Date(summary['finished-at']).toLocaleString()}</span>
+              <span className="run-finished">
+                Finished {new Date(summary['finished-at']).toLocaleString()}
+              </span>
             )}
           </div>
           <div className="run-summary-stats">
@@ -463,15 +483,21 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
               <span className="run-stat-label">Total Iters</span>
             </div>
             <div className="run-stat">
-              <span className="run-stat-value">{summary.workers.reduce((s, w) => s + w.merges, 0)}</span>
+              <span className="run-stat-value">
+                {summary.workers.reduce((s, w) => s + w.merges, 0)}
+              </span>
               <span className="run-stat-label">Merges</span>
             </div>
             <div className="run-stat">
-              <span className="run-stat-value">{summary.workers.reduce((s, w) => s + w.rejections, 0)}</span>
+              <span className="run-stat-value">
+                {summary.workers.reduce((s, w) => s + w.rejections, 0)}
+              </span>
               <span className="run-stat-label">Rejections</span>
             </div>
             <div className="run-stat">
-              <span className="run-stat-value">{summary.workers.reduce((s, w) => s + w.errors, 0)}</span>
+              <span className="run-stat-value">
+                {summary.workers.reduce((s, w) => s + w.errors, 0)}
+              </span>
               <span className="run-stat-label">Errors</span>
             </div>
           </div>
@@ -494,9 +520,15 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
               {summary.workers.map((w) => (
                 <tr key={w.id}>
                   <td className="worker-id-cell">{w.id}</td>
-                  <td>{w.harness}:{w.model ?? 'default'}</td>
-                  <td><span className={`worker-status-badge status-${w.status}`}>{w.status}</span></td>
-                  <td>{w.completed}/{w.iterations}</td>
+                  <td>
+                    {w.harness}:{w.model ?? 'default'}
+                  </td>
+                  <td>
+                    <span className={`worker-status-badge status-${w.status}`}>{w.status}</span>
+                  </td>
+                  <td>
+                    {w.completed}/{w.iterations}
+                  </td>
                   <td>{w.merges}</td>
                   <td>{w.rejections}</td>
                   <td>{w.errors}</td>
@@ -523,13 +555,13 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
                     onClick={() => setExpandedReview(isExpanded ? null : key)}
                   >
                     <span className="run-review-worker">{r['worker-id']}</span>
-                    <span className="run-review-iter">i{r.iteration} r{r.round}</span>
+                    <span className="run-review-iter">
+                      i{r.iteration} r{r.round}
+                    </span>
                     <span className={`verdict-badge verdict-${r.verdict}`}>
                       {r.verdict.toUpperCase().replace('-', ' ')}
                     </span>
-                    <span className="run-review-files">
-                      {r['diff-files']?.length ?? 0} files
-                    </span>
+                    <span className="run-review-files">{r['diff-files']?.length ?? 0} files</span>
                     <span className="run-review-time">
                       {new Date(r.timestamp).toLocaleTimeString()}
                     </span>
@@ -563,7 +595,7 @@ export function SwarmDetail() {
   const promotedWorkers = useUIStore((s) => s.promotedWorkers);
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
   const runtimeSnapshots = useSwarmRuntimeSnapshots(projectRoot ? [projectRoot] : []);
-  const runtimeSnapshot = projectRoot ? runtimeSnapshots[projectRoot] ?? null : null;
+  const runtimeSnapshot = projectRoot ? (runtimeSnapshots[projectRoot] ?? null) : null;
 
   const runtimeWorkerStates = useMemo(() => {
     const map = new Map<string, OompaRuntimeWorker>();
@@ -581,7 +613,7 @@ export function SwarmDetail() {
       if (!state) return worker.isRunning;
       return state.status === 'running' || state.status === 'starting';
     },
-    [runtimeWorkerStates],
+    [runtimeWorkerStates]
   );
 
   // Tick every 30s for time-ago
@@ -609,9 +641,7 @@ export function SwarmDetail() {
       if (res.ok) {
         const data: { runs: SwarmRun[] } = await res.json();
         // Find matching run by swarmId, or use the most recent
-        const match = swarmId
-          ? data.runs.find((r) => r.swarmId === swarmId)
-          : data.runs[0];
+        const match = swarmId ? data.runs.find((r) => r.swarmId === swarmId) : data.runs[0];
         if (match) {
           summary = match.summary;
           startedAt = match.run?.['started-at'] ?? null;
@@ -661,11 +691,12 @@ export function SwarmDetail() {
     for (const rf of reviewsAndFixes) {
       const rfCreated = new Date(rf.createdAt).getTime();
       let bestGroup: ExecGroup | null = null;
-      let bestDelta = Infinity;
+      let bestDelta = Number.POSITIVE_INFINITY;
       for (const g of groups) {
         // Must share swarmId (or both null)
         if (g.exec.swarmId !== rf.swarmId) continue;
-        const execTime = getLastMessageTime(g.exec.messages)?.getTime() ?? new Date(g.exec.createdAt).getTime();
+        const execTime =
+          getLastMessageTime(g.exec.messages)?.getTime() ?? new Date(g.exec.createdAt).getTime();
         const delta = Math.abs(rfCreated - execTime);
         if (delta < bestDelta) {
           bestDelta = delta;
@@ -727,7 +758,7 @@ export function SwarmDetail() {
   // Computed stats
   const workerVisibility = useMemo(
     () => getWorkerVisibilitySummary(allWorkers, runtimeSnapshot, isWorkerRunningLive),
-    [allWorkers, isWorkerRunningLive, runtimeSnapshot],
+    [allWorkers, isWorkerRunningLive, runtimeSnapshot]
   );
   const displayRunning = workerVisibility.runningWorkers;
   const runtimeTotalWorkers = workerVisibility.totalWorkers;
@@ -785,16 +816,23 @@ export function SwarmDetail() {
             <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
               <button
                 style={{
-                  padding: '3px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
-                  cursor: 'pointer', border: '1px solid var(--yellow, #b58900)',
-                  background: 'var(--bg-card)', color: 'var(--yellow, #b58900)',
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  border: '1px solid var(--yellow, #b58900)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--yellow, #b58900)',
                 }}
                 title="Stop swarm gracefully (finish current cycle)"
                 onClick={(e) => {
                   e.stopPropagation();
                   if (confirm('Stop swarm? Workers will finish their current cycle and exit.')) {
                     sendSwarmSignal(projectRoot, 'stop')
-                      .then((r) => { if (!r.ok) alert(`Stop failed: ${r.message}`); })
+                      .then((r) => {
+                        if (!r.ok) alert(`Stop failed: ${r.message}`);
+                      })
                       .catch((err: Error) => alert(`Stop failed: ${err.message}`));
                   }
                 }}
@@ -803,16 +841,25 @@ export function SwarmDetail() {
               </button>
               <button
                 style={{
-                  padding: '3px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
-                  cursor: 'pointer', border: '1px solid var(--red, #dc322f)',
-                  background: 'var(--bg-card)', color: 'var(--red, #dc322f)',
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  border: '1px solid var(--red, #dc322f)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--red, #dc322f)',
                 }}
                 title="Kill swarm immediately (SIGKILL)"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (confirm('Kill swarm immediately? This will forcibly terminate all workers.')) {
+                  if (
+                    confirm('Kill swarm immediately? This will forcibly terminate all workers.')
+                  ) {
                     sendSwarmSignal(projectRoot, 'kill')
-                      .then((r) => { if (!r.ok) alert(`Kill failed: ${r.message}`); })
+                      .then((r) => {
+                        if (!r.ok) alert(`Kill failed: ${r.message}`);
+                      })
                       .catch((err: Error) => alert(`Kill failed: ${err.message}`));
                   }
                 }}
@@ -822,8 +869,8 @@ export function SwarmDetail() {
             </div>
           )}
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {runtimeTotalWorkers} workers &middot; {allWorkers.length} sessions
-            ({workCount} exec, {reviewCount} review, {fixCount} fix)
+            {runtimeTotalWorkers} workers &middot; {allWorkers.length} sessions ({workCount} exec,{' '}
+            {reviewCount} review, {fixCount} fix)
           </span>
           {earliestCreated && (
             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -863,9 +910,10 @@ export function SwarmDetail() {
                 const isRunning = isWorkerRunningLive(w);
                 const statusClass = isRunning ? 'running' : 'idle';
                 // Aggregate verdict from most recent review
-                const latestVerdict = group.reviews.length > 0 && group.reviews[0].workerRole === 'review'
-                  ? extractVerdict(group.reviews[0])
-                  : null;
+                const latestVerdict =
+                  group.reviews.length > 0 && group.reviews[0].workerRole === 'review'
+                    ? extractVerdict(group.reviews[0])
+                    : null;
                 return (
                   <div
                     key={w.id}
@@ -874,9 +922,7 @@ export function SwarmDetail() {
                   >
                     <div className={`roster-worker ${isSelected ? 'selected' : ''}`}>
                       <span className={`roster-status-dot ${statusClass}`} />
-                      <span className="roster-worker-id">
-                        {w.workerId ?? w.id.substring(0, 8)}
-                      </span>
+                      <span className="roster-worker-id">{w.workerId ?? w.id.substring(0, 8)}</span>
                       <span className="role-badge role-work">{ROLE_LABELS.work}</span>
                       {model && <span className="roster-model">{model}</span>}
                       <span className="roster-worker-msgs">{w.messages.length}m</span>
@@ -884,7 +930,10 @@ export function SwarmDetail() {
                         <span className="roster-review-count">{group.reviews.length}r</span>
                       )}
                       {latestVerdict && (
-                        <span className={`verdict-pip verdict-${latestVerdict}`} title={latestVerdict} />
+                        <span
+                          className={`verdict-pip verdict-${latestVerdict}`}
+                          title={latestVerdict}
+                        />
                       )}
                     </div>
                   </div>

@@ -116,7 +116,10 @@ function scoreMatches(matches: number[], target: string): number {
  * Render a target string with matched indices wrapped in <mark> tags.
  * Returns an array of React-compatible elements (strings and JSX).
  */
-export function highlightMatches(target: string, matches: number[]): (string | { highlighted: string; key: number })[] {
+export function highlightMatches(
+  target: string,
+  matches: number[]
+): (string | { highlighted: string; key: number })[] {
   const matchSet = new Set(matches);
   const parts: (string | { highlighted: string; key: number })[] = [];
   let current = '';

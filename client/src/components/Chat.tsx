@@ -3,7 +3,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { Conversation as SharedConversation, ModelId, ModelInfo, Provider } from '@claude-web-view/shared';
+import type {
+  ModelId,
+  ModelInfo,
+  Provider,
+  Conversation as SharedConversation,
+} from '@claude-web-view/shared';
 import { useDropzone } from 'react-dropzone';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
 import { useConversationStore } from '../stores/conversationStore';
@@ -628,10 +633,10 @@ export function Chat() {
                   setProviderPickerOpen(false);
                 }}
               >
-                {models.find((m) => m.id === conversation.model)?.displayName
-                  ?? models.find((m) => m.isDefault)?.displayName
-                  ?? conversation.modelName
-                  ?? 'default'}
+                {models.find((m) => m.id === conversation.model)?.displayName ??
+                  models.find((m) => m.isDefault)?.displayName ??
+                  conversation.modelName ??
+                  'default'}
                 <span className="model-picker-caret">&#x25BE;</span>
               </button>
               {modelPickerOpen && (
@@ -848,7 +853,15 @@ export function Chat() {
               title="Save prompt (Ctrl+P to recall)"
               disabled={!hasInput}
             >
-              <svg className="save-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                className="save-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
                 <polyline points="17 21 17 13 7 13 7 21" />
                 <polyline points="7 3 7 8 15 8" />
@@ -867,7 +880,6 @@ export function Chat() {
             </button>
           </div>
         </div>
-
       </div>
 
       <PromptPalette

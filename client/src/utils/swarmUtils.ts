@@ -20,8 +20,8 @@
  */
 export function getProjectRoot(workerDir: string): string {
   return workerDir
-    .replace(/\/\.w[^/]+-i\d+$/, '')           // .wN-iN oompa worktree pattern
-    .replace(/\/\.workers\/worker-\d+$/, '');   // .workers/worker-N worktree pattern
+    .replace(/\/\.w[^/]+-i\d+$/, '') // .wN-iN oompa worktree pattern
+    .replace(/\/\.workers\/worker-\d+$/, ''); // .workers/worker-N worktree pattern
 }
 
 /**

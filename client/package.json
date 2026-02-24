@@ -22,11 +22,13 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@types/mdast": "^4.0.4",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "typescript": "~5.9.3",
+    "unified": "^11.0.5",
     "vite": "^7.2.4"
   }
 }

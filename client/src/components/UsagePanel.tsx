@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import './UsagePanel.css';
 
 interface Props {
@@ -94,7 +94,10 @@ function RateLimitGauge({ rl }: { rl: RateLimit }) {
         <div className="usage-rate-bar">
           <div
             className="usage-rate-bar-fill"
-            style={{ width: `${Math.min(rl.usedPercent, 100)}%`, background: barColor(rl.usedPercent) }}
+            style={{
+              width: `${Math.min(rl.usedPercent, 100)}%`,
+              background: barColor(rl.usedPercent),
+            }}
           />
         </div>
       )}
@@ -120,7 +123,7 @@ let clientCache: { days: number; data: UsageData; time: number } | null = null;
 export function UsagePanel({ onClose }: Props) {
   // Seed from cache if available for the same days value
   const [data, setData] = useState<UsageData | null>(() =>
-    clientCache && clientCache.days === 7 ? clientCache.data : null,
+    clientCache && clientCache.days === 7 ? clientCache.data : null
   );
   const [loading, setLoading] = useState(data === null);
   const [days, setDays] = useState(7);
@@ -152,18 +155,31 @@ export function UsagePanel({ onClose }: Props) {
       : data.topSessions.filter((s) => s.provider === tab)
     : [];
 
-  const maxDailyCost = filteredDaily.length > 0 ? Math.max(...filteredDaily.map((d) => d.costUsd)) : 0;
+  const maxDailyCost =
+    filteredDaily.length > 0 ? Math.max(...filteredDaily.map((d) => d.costUsd)) : 0;
 
   const hasClaude = data ? data.rateLimits.claude.length > 0 : false;
   const hasCodex = data ? data.rateLimits.codex.length > 0 : false;
 
   return (
-    <div className="usage-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="usage-overlay"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="usage-panel">
         <div className="usage-panel-header">
           <h2>Usage</h2>
           <button type="button" className="close-btn" onClick={onClose}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
           </button>
@@ -184,7 +200,15 @@ export function UsagePanel({ onClose }: Props) {
                     className={`usage-tab ${tab === t ? 'active' : ''}`}
                     onClick={() => setTab(t)}
                   >
-                    {t === 'all' ? 'All' : t === 'claude' ? 'Claude' : t === 'codex' ? 'Codex' : t === 'opencode' ? 'OpenCode' : 'Gemini'}
+                    {t === 'all'
+                      ? 'All'
+                      : t === 'claude'
+                        ? 'Claude'
+                        : t === 'codex'
+                          ? 'Codex'
+                          : t === 'opencode'
+                            ? 'OpenCode'
+                            : 'Gemini'}
                   </button>
                 ))}
               </div>
@@ -253,7 +277,9 @@ export function UsagePanel({ onClose }: Props) {
                       <div className="usage-conv-bar">
                         <div
                           className="usage-conv-bar-fill"
-                          style={{ width: `${maxDailyCost > 0 ? (day.costUsd / maxDailyCost) * 100 : 0}%` }}
+                          style={{
+                            width: `${maxDailyCost > 0 ? (day.costUsd / maxDailyCost) * 100 : 0}%`,
+                          }}
                         />
                       </div>
                       <span className="usage-conv-cost">{formatCost(day.costUsd)}</span>
@@ -273,7 +299,13 @@ export function UsagePanel({ onClose }: Props) {
                     {filteredSessions.slice(0, 10).map((s) => (
                       <div key={s.sessionId} className="usage-daily-row">
                         <span className="usage-session-provider">
-                          {s.provider === 'claude' ? 'C' : s.provider === 'codex' ? 'X' : s.provider === 'gemini' ? 'G' : 'O'}
+                          {s.provider === 'claude'
+                            ? 'C'
+                            : s.provider === 'codex'
+                              ? 'X'
+                              : s.provider === 'gemini'
+                                ? 'G'
+                                : 'O'}
                         </span>
                         <span className="usage-session-id">{s.sessionId.slice(0, 8)}</span>
                         <span className="usage-daily-date">{s.date.slice(5)}</span>

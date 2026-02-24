@@ -33,10 +33,7 @@ export interface ClaudeToolResultBlock {
   content: string;
 }
 
-export type ClaudeContentBlock =
-  | ClaudeTextBlock
-  | ClaudeToolUseBlock
-  | ClaudeToolResultBlock;
+export type ClaudeContentBlock = ClaudeTextBlock | ClaudeToolUseBlock | ClaudeToolResultBlock;
 
 /**
  * System init message - sent at the start of a session
@@ -115,9 +112,7 @@ export interface ClaudeResultErrorOutput {
   session_id: string;
 }
 
-export type ClaudeResultOutput =
-  | ClaudeResultSuccessOutput
-  | ClaudeResultErrorOutput;
+export type ClaudeResultOutput = ClaudeResultSuccessOutput | ClaudeResultErrorOutput;
 
 /**
  * User message echo - confirms what was sent
@@ -214,9 +209,7 @@ export type ClaudeEvent =
 /**
  * Type guard for ClaudeSystemInitOutput
  */
-export function isClaudeSystemInitOutput(
-  output: unknown
-): output is ClaudeSystemInitOutput {
+export function isClaudeSystemInitOutput(output: unknown): output is ClaudeSystemInitOutput {
   if (typeof output !== 'object' || output === null) return false;
   const obj = output as Record<string, unknown>;
   return obj.type === 'system' && obj.subtype === 'init';
@@ -225,80 +218,50 @@ export function isClaudeSystemInitOutput(
 /**
  * Type guard for ClaudeAssistantOutput
  */
-export function isClaudeAssistantOutput(
-  output: unknown
-): output is ClaudeAssistantOutput {
+export function isClaudeAssistantOutput(output: unknown): output is ClaudeAssistantOutput {
   if (typeof output !== 'object' || output === null) return false;
   const obj = output as Record<string, unknown>;
-  return (
-    obj.type === 'assistant' &&
-    typeof obj.message === 'object' &&
-    obj.message !== null
-  );
+  return obj.type === 'assistant' && typeof obj.message === 'object' && obj.message !== null;
 }
 
 /**
  * Type guard for ClaudeResultSuccessOutput
  */
-export function isClaudeResultSuccessOutput(
-  output: unknown
-): output is ClaudeResultSuccessOutput {
+export function isClaudeResultSuccessOutput(output: unknown): output is ClaudeResultSuccessOutput {
   if (typeof output !== 'object' || output === null) return false;
   const obj = output as Record<string, unknown>;
-  return (
-    obj.type === 'result' &&
-    obj.subtype === 'success' &&
-    obj.is_error === false
-  );
+  return obj.type === 'result' && obj.subtype === 'success' && obj.is_error === false;
 }
 
 /**
  * Type guard for ClaudeResultErrorOutput
  */
-export function isClaudeResultErrorOutput(
-  output: unknown
-): output is ClaudeResultErrorOutput {
+export function isClaudeResultErrorOutput(output: unknown): output is ClaudeResultErrorOutput {
   if (typeof output !== 'object' || output === null) return false;
   const obj = output as Record<string, unknown>;
-  return (
-    obj.type === 'result' &&
-    obj.subtype === 'error' &&
-    obj.is_error === true
-  );
+  return obj.type === 'result' && obj.subtype === 'error' && obj.is_error === true;
 }
 
 /**
  * Type guard for ClaudeResultOutput (success or error)
  */
-export function isClaudeResultOutput(
-  output: unknown
-): output is ClaudeResultOutput {
-  return (
-    isClaudeResultSuccessOutput(output) || isClaudeResultErrorOutput(output)
-  );
+export function isClaudeResultOutput(output: unknown): output is ClaudeResultOutput {
+  return isClaudeResultSuccessOutput(output) || isClaudeResultErrorOutput(output);
 }
 
 /**
  * Type guard for ClaudeUserOutput
  */
-export function isClaudeUserOutput(
-  output: unknown
-): output is ClaudeUserOutput {
+export function isClaudeUserOutput(output: unknown): output is ClaudeUserOutput {
   if (typeof output !== 'object' || output === null) return false;
   const obj = output as Record<string, unknown>;
-  return (
-    obj.type === 'user' &&
-    typeof obj.message === 'object' &&
-    obj.message !== null
-  );
+  return obj.type === 'user' && typeof obj.message === 'object' && obj.message !== null;
 }
 
 /**
  * Type guard for ClaudeTextBlock
  */
-export function isClaudeTextBlock(
-  block: unknown
-): block is ClaudeTextBlock {
+export function isClaudeTextBlock(block: unknown): block is ClaudeTextBlock {
   if (typeof block !== 'object' || block === null) return false;
   const obj = block as Record<string, unknown>;
   return obj.type === 'text' && typeof obj.text === 'string';
@@ -307,30 +270,19 @@ export function isClaudeTextBlock(
 /**
  * Type guard for ClaudeToolUseBlock
  */
-export function isClaudeToolUseBlock(
-  block: unknown
-): block is ClaudeToolUseBlock {
+export function isClaudeToolUseBlock(block: unknown): block is ClaudeToolUseBlock {
   if (typeof block !== 'object' || block === null) return false;
   const obj = block as Record<string, unknown>;
-  return (
-    obj.type === 'tool_use' &&
-    typeof obj.id === 'string' &&
-    typeof obj.name === 'string'
-  );
+  return obj.type === 'tool_use' && typeof obj.id === 'string' && typeof obj.name === 'string';
 }
 
 /**
  * Type guard for ClaudeToolResultBlock
  */
-export function isClaudeToolResultBlock(
-  block: unknown
-): block is ClaudeToolResultBlock {
+export function isClaudeToolResultBlock(block: unknown): block is ClaudeToolResultBlock {
   if (typeof block !== 'object' || block === null) return false;
   const obj = block as Record<string, unknown>;
-  return (
-    obj.type === 'tool_result' &&
-    typeof obj.tool_use_id === 'string'
-  );
+  return obj.type === 'tool_result' && typeof obj.tool_use_id === 'string';
 }
 
 // =============================================================================
@@ -371,19 +323,13 @@ export function parseClaudeCliOutput(jsonLine: string): ClaudeCliOutput {
   }
 
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new ClaudeParseError(
-      'Expected JSON object, got: ' + typeof parsed,
-      parsed
-    );
+    throw new ClaudeParseError('Expected JSON object, got: ' + typeof parsed, parsed);
   }
 
   const obj = parsed as Record<string, unknown>;
 
   if (typeof obj.type !== 'string') {
-    throw new ClaudeParseError(
-      'Missing or invalid "type" field in Claude CLI output',
-      parsed
-    );
+    throw new ClaudeParseError('Missing or invalid "type" field in Claude CLI output', parsed);
   }
 
   // Use type guards to validate and narrow the type
@@ -447,9 +393,7 @@ export function formatClaudeCliInput(text: string): string {
  * @param blocks - Array of content blocks from assistant message
  * @returns Concatenated text from all text blocks
  */
-export function extractTextFromContentBlocks(
-  blocks: ClaudeContentBlock[]
-): string {
+export function extractTextFromContentBlocks(blocks: ClaudeContentBlock[]): string {
   return blocks
     .filter(isClaudeTextBlock)
     .map((block) => block.text)

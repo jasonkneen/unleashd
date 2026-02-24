@@ -28,12 +28,12 @@
  * No fallbacks. No nulls. Fail eagerly.
  */
 
-import type { Provider as ProviderName, ModelInfo } from '@claude-web-view/shared';
 import type { SpawnOptionsWithoutStdio } from 'node:child_process';
+import type { ModelInfo, Provider as ProviderName } from '@claude-web-view/shared';
 import claudeProvider from './claude';
 import codexProvider from './codex';
-import opencodeProvider from './opencode';
 import geminiProvider from './gemini';
+import opencodeProvider from './opencode';
 
 // =============================================================================
 // Error Types
@@ -138,7 +138,12 @@ export interface Provider {
    * @param resume - True if this is NOT the first message in the session.
    * @param modelId - Provider-specific model identifier from listModels().
    */
-  getSpawnConfig(sessionId: string, workingDir: string, resume?: boolean, modelId?: string): SpawnConfig;
+  getSpawnConfig(
+    sessionId: string,
+    workingDir: string,
+    resume?: boolean,
+    modelId?: string
+  ): SpawnConfig;
 
   /**
    * SINGLE-SHOT MODE: Get spawn config for a one-off prompt.

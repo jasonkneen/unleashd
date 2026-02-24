@@ -1,14 +1,18 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Message } from '@claude-web-view/shared';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import type { Break, Root, Text } from 'mdast';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
-import type { Root, Text, Break } from 'mdast';
+import rehypeHighlight from 'rehype-highlight';
+import remarkGfm from 'remark-gfm';
 import type { Plugin } from 'unified';
+import {
+  ASK_USER_QUESTION_RE,
+  AskUserQuestionWidget,
+  parseAskUserQuestion,
+} from './AskUserQuestion';
 import { FilePreview, getPreviewType } from './FilePreview';
-import { ASK_USER_QUESTION_RE, parseAskUserQuestion, AskUserQuestionWidget } from './AskUserQuestion';
 
 // =============================================================================
 // remarkBreaks — inline remark plugin (replaces the `remark-breaks` npm package)
@@ -30,7 +34,7 @@ import { ASK_USER_QUESTION_RE, parseAskUserQuestion, AskUserQuestionWidget } fro
 const remarkBreaks: Plugin<[], Root> = () => (tree) => {
   const visit = (node: Root | Root['children'][number]) => {
     if (!('children' in node)) return;
-    const next: typeof node.children = [];
+    const next: Root['children'] = [];
     for (const child of node.children) {
       if (child.type === 'text') {
         const lines = (child as Text).value.split('\n');
@@ -182,10 +186,7 @@ function classifyPathBlock(text: string): PathBlockEntry[] {
 
 // -- Canonicalization: single entry point for all code content ----------------
 // Ordered by specificity: language-tagged > multi-line > single-line patterns.
-function classifyCodeContent(
-  text: string | null,
-  className: string | undefined,
-): CodeContent {
+function classifyCodeContent(text: string | null, className: string | undefined): CodeContent {
   if (!text) return { kind: 'empty' };
 
   // Language-tagged fenced blocks (className from rehype-highlight, e.g. "language-python").
@@ -249,10 +250,18 @@ function makeMarkdownComponents(workingDirectory: string): Components {
       switch (content.kind) {
         case 'empty':
         case 'plain_code':
-          return <code className={className} {...rest}>{children}</code>;
+          return (
+            <code className={className} {...rest}>
+              {children}
+            </code>
+          );
 
         case 'syntax_highlighted':
-          return <code className={content.className} {...rest}>{children}</code>;
+          return (
+            <code className={content.className} {...rest}>
+              {children}
+            </code>
+          );
 
         case 'path_block':
           // Mixed block: each line classified independently. file_path entries
@@ -265,10 +274,15 @@ function makeMarkdownComponents(workingDirectory: string): Components {
             <code className={className} {...rest}>
               {content.entries.map((entry, i) => (
                 <span key={i}>
-                  {entry.kind === 'file_path'
-                    ? <FilePreview path={entry.path} type={entry.type} workingDirectory={workingDirectory} />
-                    : <span className="path-block-text-line">{entry.text}</span>
-                  }
+                  {entry.kind === 'file_path' ? (
+                    <FilePreview
+                      path={entry.path}
+                      type={entry.type}
+                      workingDirectory={workingDirectory}
+                    />
+                  ) : (
+                    <span className="path-block-text-line">{entry.text}</span>
+                  )}
                   {i < content.entries.length - 1 && <br />}
                 </span>
               ))}
@@ -283,7 +297,13 @@ function makeMarkdownComponents(workingDirectory: string): Components {
           );
 
         case 'single_file_path':
-          return <FilePreview path={content.path} type={content.type} workingDirectory={workingDirectory} />;
+          return (
+            <FilePreview
+              path={content.path}
+              type={content.type}
+              workingDirectory={workingDirectory}
+            />
+          );
       }
     },
   };
@@ -338,74 +358,85 @@ function splitAskUserSegments(content: string): ContentSegment[] {
   return segments;
 }
 
-const MemoizedMessage = memo(function MemoizedMessage({ msg, className, forwardedRef, workingDirectory }: MemoizedMessageProps) {
-  // Collapse consecutive tool-emoji lines in assistant messages to reduce noise.
-  // User/system messages pass through unchanged.
-  const displayContent = useMemo(() => {
-    if (msg.role !== 'assistant') return msg.content || '...';
-    return collapseToolLines(msg.content || '...');
-  }, [msg.content, msg.role]);
+const MemoizedMessage = memo(
+  function MemoizedMessage({
+    msg,
+    className,
+    forwardedRef,
+    workingDirectory,
+  }: MemoizedMessageProps) {
+    // Collapse consecutive tool-emoji lines in assistant messages to reduce noise.
+    // User/system messages pass through unchanged.
+    const displayContent = useMemo(() => {
+      if (msg.role !== 'assistant') return msg.content || '...';
+      return collapseToolLines(msg.content || '...');
+    }, [msg.content, msg.role]);
 
-  // Split content into text + AskUserQuestion widget segments
-  const segments = useMemo(() => splitAskUserSegments(displayContent), [displayContent]);
-  const hasAskWidget = segments.some(s => s.type === 'ask_user_question');
+    // Split content into text + AskUserQuestion widget segments
+    const segments = useMemo(() => splitAskUserSegments(displayContent), [displayContent]);
+    const hasAskWidget = segments.some((s) => s.type === 'ask_user_question');
 
-  // Memoize markdown components keyed on workingDirectory so react-markdown
-  // gets a stable reference and doesn't re-mount its component tree.
-  const mdComponents = useMemo(() => makeMarkdownComponents(workingDirectory), [workingDirectory]);
+    // Memoize markdown components keyed on workingDirectory so react-markdown
+    // gets a stable reference and doesn't re-mount its component tree.
+    const mdComponents = useMemo(
+      () => makeMarkdownComponents(workingDirectory),
+      [workingDirectory]
+    );
 
-  return (
-    <div className={className} ref={forwardedRef}>
-      {msg.role !== 'system' && (
-        <div className={`message-role ${msg.role}`}>{msg.role}</div>
-      )}
-      <div className="message-content">
-        {hasAskWidget ? (
-          // Mixed content: interleave Markdown and AskUserQuestion widgets
-          segments.map((seg, i) => {
-            if (seg.type === 'text') {
-              const trimmed = seg.content.trim();
-              if (!trimmed) return null;
-              return (
-                <Markdown
-                  key={i}
-                  remarkPlugins={[remarkGfm, remarkBreaks]}
-                  rehypePlugins={[rehypeHighlight]}
-                  components={mdComponents}
-                >
-                  {trimmed}
-                </Markdown>
-              );
-            }
-            // AskUserQuestion widget
-            try {
-              const data = parseAskUserQuestion(seg.json);
-              return <AskUserQuestionWidget key={i} data={data} />;
-            } catch {
-              // Malformed JSON — render raw marker as text
-              return <code key={i}>AskUserQuestion (parse error)</code>;
-            }
-          })
-        ) : (
-          // Fast path: no widgets, render as pure Markdown
-          <Markdown
-            remarkPlugins={[remarkGfm, remarkBreaks]}
-            rehypePlugins={[rehypeHighlight]}
-            components={mdComponents}
-          >
-            {displayContent}
-          </Markdown>
-        )}
+    return (
+      <div className={className} ref={forwardedRef}>
+        {msg.role !== 'system' && <div className={`message-role ${msg.role}`}>{msg.role}</div>}
+        <div className="message-content">
+          {hasAskWidget ? (
+            // Mixed content: interleave Markdown and AskUserQuestion widgets
+            segments.map((seg, i) => {
+              if (seg.type === 'text') {
+                const trimmed = seg.content.trim();
+                if (!trimmed) return null;
+                return (
+                  <Markdown
+                    key={i}
+                    remarkPlugins={[remarkGfm, remarkBreaks]}
+                    rehypePlugins={[rehypeHighlight]}
+                    components={mdComponents}
+                  >
+                    {trimmed}
+                  </Markdown>
+                );
+              }
+              // AskUserQuestion widget
+              try {
+                const data = parseAskUserQuestion(seg.json);
+                return <AskUserQuestionWidget key={i} data={data} />;
+              } catch {
+                // Malformed JSON — render raw marker as text
+                return <code key={i}>AskUserQuestion (parse error)</code>;
+              }
+            })
+          ) : (
+            // Fast path: no widgets, render as pure Markdown
+            <Markdown
+              remarkPlugins={[remarkGfm, remarkBreaks]}
+              rehypePlugins={[rehypeHighlight]}
+              components={mdComponents}
+            >
+              {displayContent}
+            </Markdown>
+          )}
+        </div>
       </div>
-    </div>
-  );
-}, (prev, next) => {
-  return prev.msg.content === next.msg.content
-    && prev.msg.role === next.msg.role
-    && prev.className === next.className
-    && prev.forwardedRef === next.forwardedRef
-    && prev.workingDirectory === next.workingDirectory;
-});
+    );
+  },
+  (prev, next) => {
+    return (
+      prev.msg.content === next.msg.content &&
+      prev.msg.role === next.msg.role &&
+      prev.className === next.className &&
+      prev.forwardedRef === next.forwardedRef &&
+      prev.workingDirectory === next.workingDirectory
+    );
+  }
+);
 
 // =============================================================================
 // Message Group Types
@@ -605,30 +636,33 @@ interface VirtualizedGroupProps {
   workingDirectory: string;
 }
 
-const VirtualizedGroup = memo(function VirtualizedGroup({
-  group,
-  isLastGroup,
-  lastMessageRef,
-  workingDirectory,
-}: VirtualizedGroupProps) {
-  return (
-    <>
-      {group.messages.map((msg, mi) => {
-        const isLastMessage = isLastGroup && mi === group.messages.length - 1;
-        return (
-          <MemoizedMessage
-            key={mi}
-            msg={msg}
-            className={`message ${msg.role}`}
-            forwardedRef={isLastMessage ? lastMessageRef : undefined}
-            workingDirectory={workingDirectory}
-          />
-        );
-      })}
-    </>
-  );
-}, (prev, next) => {
-  if (prev.group !== next.group) return false;
-  if (prev.isLastGroup !== next.isLastGroup) return false;
-  return true;
-});
+const VirtualizedGroup = memo(
+  function VirtualizedGroup({
+    group,
+    isLastGroup,
+    lastMessageRef,
+    workingDirectory,
+  }: VirtualizedGroupProps) {
+    return (
+      <>
+        {group.messages.map((msg, mi) => {
+          const isLastMessage = isLastGroup && mi === group.messages.length - 1;
+          return (
+            <MemoizedMessage
+              key={mi}
+              msg={msg}
+              className={`message ${msg.role}`}
+              forwardedRef={isLastMessage ? lastMessageRef : undefined}
+              workingDirectory={workingDirectory}
+            />
+          );
+        })}
+      </>
+    );
+  },
+  (prev, next) => {
+    if (prev.group !== next.group) return false;
+    if (prev.isLastGroup !== next.isLastGroup) return false;
+    return true;
+  }
+);

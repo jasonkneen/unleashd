@@ -4,7 +4,8 @@
   margin: 0;
   background: radial-gradient(1200px 800px at 50% 30%, #121a2b 0%, #0b0f17 55%, #070a10 100%);
   color: #eaeef8;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
   display: grid;
   place-items: center;
 }
@@ -39,8 +40,15 @@
 }
 
 @keyframes robot-breathe {
-  0%, 100% { transform: scale(0.985); opacity: 0.95; }
-  50% { transform: scale(1.015); opacity: 1; }
+  0%,
+  100% {
+    transform: scale(0.985);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.015);
+    opacity: 1;
+  }
 }
 
 /* The spinning color sweep */
@@ -50,12 +58,14 @@
 }
 
 @keyframes robot-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Base dots */
 .robot-dots use {
-  fill: rgba(255, 255, 255, 0.10);
+  fill: rgba(255, 255, 255, 0.1);
   opacity: 1;
 }
 

@@ -1,13 +1,13 @@
+import type { Conversation } from '@claude-web-view/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Conversation } from '@claude-web-view/shared';
+import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useConversationStore } from '../stores/conversationStore';
 import { useUIStore } from '../stores/uiStore';
-import { getProjectRoot, getProjectName } from '../utils/swarmUtils';
 import { getProjectColor } from '../utils/projectColors';
-import { formatTimeAgo, getLastMessageTime } from '../utils/time';
+import { getProjectName, getProjectRoot } from '../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
-import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
+import { formatTimeAgo, getLastMessageTime } from '../utils/time';
 import './SwarmDashboard.css';
 
 interface SwarmProject {
@@ -44,7 +44,7 @@ export function SwarmDashboard() {
   }, [conversations, promotedSet]);
   const runtimeProjectRoots = useMemo(
     () => Array.from(workerConversationsByProject.keys()).sort(),
-    [workerConversationsByProject],
+    [workerConversationsByProject]
   );
   const runtimeSnapshots = useSwarmRuntimeSnapshots(runtimeProjectRoots);
 
@@ -61,7 +61,11 @@ export function SwarmDashboard() {
       .map(([projectRoot, sessions]) => {
         const runtime = runtimeSnapshots[projectRoot];
         const runtimeRun = runtime?.available ? runtime.run : null;
-        const visibility = getWorkerVisibilitySummary(sessions, runtime, (worker) => worker.isRunning);
+        const visibility = getWorkerVisibilitySummary(
+          sessions,
+          runtime,
+          (worker) => worker.isRunning
+        );
 
         // Run count: from runtime (disk), fallback to distinct swarmIds from sessions
         const distinctSwarmIds = new Set(sessions.map((s) => s.swarmId).filter(Boolean));
@@ -108,7 +112,8 @@ export function SwarmDashboard() {
         </div>
         <div className="swarm-dashboard-content">
           <div className="empty-state">
-            No worker conversations. Workers are detected by the [oompa] prefix in the first message.
+            No worker conversations. Workers are detected by the [oompa] prefix in the first
+            message.
           </div>
         </div>
       </div>
@@ -129,7 +134,9 @@ export function SwarmDashboard() {
             key={project.projectRoot}
             className={`swarm-project-card ${project.runningCount > 0 ? 'has-running' : ''}`}
             style={{ borderLeftColor: project.accentColor }}
-            onClick={() => navigate(`/workers/detail?project=${encodeURIComponent(project.projectRoot)}`)}
+            onClick={() =>
+              navigate(`/workers/detail?project=${encodeURIComponent(project.projectRoot)}`)
+            }
           >
             <div className="swarm-project-info">
               <div className="swarm-project-name">{project.projectName}</div>

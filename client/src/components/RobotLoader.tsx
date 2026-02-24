@@ -52,12 +52,19 @@ export function RobotLoader() {
     <div className="robot-loader-page">
       <div
         className="robot-loader-wrap"
-        style={{
-          '--spin': fast ? '0.85s' : '1.35s',
-          '--glow': glowOn ? '0.55' : '0.0',
-        } as React.CSSProperties}
+        style={
+          {
+            '--spin': fast ? '0.85s' : '1.35s',
+            '--glow': glowOn ? '0.55' : '0.0',
+          } as React.CSSProperties
+        }
       >
-        <svg className="robot-loader-svg" viewBox="0 0 180 180" role="img" aria-label="Robot loader">
+        <svg
+          className="robot-loader-svg"
+          viewBox="0 0 180 180"
+          role="img"
+          aria-label="Robot loader"
+        >
           <defs>
             <path
               id="robotHead"
@@ -176,12 +183,8 @@ export function RobotLoader() {
         <div className="robot-loader-label">Loading...</div>
 
         <div className="robot-loader-controls">
-          <button onClick={() => setFast((f) => !f)}>
-            Toggle speed
-          </button>
-          <button onClick={() => setGlowOn((g) => !g)}>
-            Toggle glow
-          </button>
+          <button onClick={() => setFast((f) => !f)}>Toggle speed</button>
+          <button onClick={() => setGlowOn((g) => !g)}>Toggle glow</button>
           <button onClick={() => setDensity((d) => (d === 'dense' ? 'normal' : 'dense'))}>
             Toggle dot density
           </button>

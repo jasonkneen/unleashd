@@ -3,7 +3,7 @@
   flex-direction: column;
   gap: 10px;
   padding: 12px 24px;
-  background: var(--bg-card);  /* Tier 2 */
+  background: var(--bg-card); /* Tier 2 */
   border-bottom: 1px solid var(--border-default);
 }
 
@@ -52,7 +52,7 @@
 
 .folder-chip {
   padding: 4px 12px;
-  background: var(--bg-panel);  /* Tier 3 */
+  background: var(--bg-panel); /* Tier 3 */
   border: 1px solid var(--border-subtle);
   border-radius: 16px;
   color: var(--text-secondary);
@@ -66,7 +66,7 @@
 }
 
 .folder-chip:hover {
-  background: var(--bg-hover);  /* Tier 4 on hover */
+  background: var(--bg-hover); /* Tier 4 on hover */
   border-color: var(--border-default);
   color: var(--text-primary);
 }

@@ -6,14 +6,11 @@ const { spawn } = require('node:child_process');
 
 console.log('=== Testing Claude CLI Interactive Mode ===');
 
-const proc = spawn('claude', [
-  '--verbose',
-  '--output-format=stream-json',
-], {
+const proc = spawn('claude', ['--verbose', '--output-format=stream-json'], {
   cwd: process.cwd(),
 });
 
-let messageCount = 0;
+const messageCount = 0;
 
 proc.stdout.on('data', (data) => {
   console.log('[stdout]', data.toString().substring(0, 300));

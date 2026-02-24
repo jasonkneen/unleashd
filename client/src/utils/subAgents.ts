@@ -7,10 +7,7 @@ function firstUserSummary(messages: Conversation['messages']): string | null {
   const firstUser = messages.find((message) => message.role === 'user');
   if (!firstUser) return null;
 
-  const normalized = firstUser.content
-    .replace(OOMPA_TAG_RE, '')
-    .trim()
-    .replace(/\s+/g, ' ');
+  const normalized = firstUser.content.replace(OOMPA_TAG_RE, '').trim().replace(/\s+/g, ' ');
 
   if (!normalized) return null;
   return normalized.length > 90 ? `${normalized.slice(0, 87)}...` : normalized;
@@ -26,8 +23,17 @@ function lastMessageSummary(messages: Conversation['messages']): string | undefi
 
 function projectChildConversationToSubAgent(child: Conversation): SubAgent {
   const startedAt = new Date(child.createdAt);
-  const completedAt = child.isRunning ? undefined : (getLastMessageTime(child.messages) ?? startedAt);
-  const roleLabel = child.provider === 'codex' ? 'Codex' : child.provider === 'opencode' ? 'OpenCode' : child.provider === 'gemini' ? 'Gemini' : 'Claude';
+  const completedAt = child.isRunning
+    ? undefined
+    : (getLastMessageTime(child.messages) ?? startedAt);
+  const roleLabel =
+    child.provider === 'codex'
+      ? 'Codex'
+      : child.provider === 'opencode'
+        ? 'OpenCode'
+        : child.provider === 'gemini'
+          ? 'Gemini'
+          : 'Claude';
   const description = firstUserSummary(child.messages) ?? `${roleLabel} spawned session`;
 
   return {

@@ -26,28 +26,38 @@ import { z } from 'zod';
 export const CodexSessionMetaSchema = z.object({
   timestamp: z.string(),
   type: z.literal('session_meta'),
-  payload: z.object({
-    id: z.string(),
-    timestamp: z.string(),
-    cwd: z.string(),
-    originator: z.string(),
-    cli_version: z.string(),
-    source: z.union([
-      z.string(),
-      z.object({
-        subagent: z.object({
-          thread_spawn: z.object({
-            parent_thread_id: z.string(),
-            depth: z.number().optional(),
-          }).passthrough(),
-        }).passthrough(),
-      }).passthrough(),
-    ]),
-    model_provider: z.string(),
-    base_instructions: z.object({
-      text: z.string(),
-    }).optional(),
-  }).passthrough(),
+  payload: z
+    .object({
+      id: z.string(),
+      timestamp: z.string(),
+      cwd: z.string(),
+      originator: z.string(),
+      cli_version: z.string(),
+      source: z.union([
+        z.string(),
+        z
+          .object({
+            subagent: z
+              .object({
+                thread_spawn: z
+                  .object({
+                    parent_thread_id: z.string(),
+                    depth: z.number().optional(),
+                  })
+                  .passthrough(),
+              })
+              .passthrough(),
+          })
+          .passthrough(),
+      ]),
+      model_provider: z.string(),
+      base_instructions: z
+        .object({
+          text: z.string(),
+        })
+        .optional(),
+    })
+    .passthrough(),
 });
 
 export type CodexSessionMeta = z.infer<typeof CodexSessionMetaSchema>;
@@ -60,14 +70,20 @@ export type CodexSessionMeta = z.infer<typeof CodexSessionMetaSchema>;
 export const CodexResponseMessageSchema = z.object({
   timestamp: z.string(),
   type: z.literal('response_item'),
-  payload: z.object({
-    type: z.literal('message'),
-    role: z.enum(['user', 'assistant', 'developer']),
-    content: z.array(z.object({
-      type: z.string(),
-      text: z.string().optional(),
-    }).passthrough()),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('message'),
+      role: z.enum(['user', 'assistant', 'developer']),
+      content: z.array(
+        z
+          .object({
+            type: z.string(),
+            text: z.string().optional(),
+          })
+          .passthrough()
+      ),
+    })
+    .passthrough(),
 });
 
 export type CodexResponseMessage = z.infer<typeof CodexResponseMessageSchema>;
@@ -76,12 +92,14 @@ export type CodexResponseMessage = z.infer<typeof CodexResponseMessageSchema>;
 export const CodexFunctionCallSchema = z.object({
   timestamp: z.string(),
   type: z.literal('response_item'),
-  payload: z.object({
-    type: z.literal('function_call'),
-    name: z.string(),
-    arguments: z.string(),
-    call_id: z.string(),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('function_call'),
+      name: z.string(),
+      arguments: z.string(),
+      call_id: z.string(),
+    })
+    .passthrough(),
 });
 
 export type CodexFunctionCall = z.infer<typeof CodexFunctionCallSchema>;
@@ -90,11 +108,13 @@ export type CodexFunctionCall = z.infer<typeof CodexFunctionCallSchema>;
 export const CodexFunctionCallOutputSchema = z.object({
   timestamp: z.string(),
   type: z.literal('response_item'),
-  payload: z.object({
-    type: z.literal('function_call_output'),
-    call_id: z.string(),
-    output: z.string(),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('function_call_output'),
+      call_id: z.string(),
+      output: z.string(),
+    })
+    .passthrough(),
 });
 
 export type CodexFunctionCallOutput = z.infer<typeof CodexFunctionCallOutputSchema>;
@@ -103,9 +123,11 @@ export type CodexFunctionCallOutput = z.infer<typeof CodexFunctionCallOutputSche
 export const CodexReasoningSchema = z.object({
   timestamp: z.string(),
   type: z.literal('response_item'),
-  payload: z.object({
-    type: z.literal('reasoning'),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('reasoning'),
+    })
+    .passthrough(),
 });
 
 export type CodexReasoning = z.infer<typeof CodexReasoningSchema>;
@@ -114,9 +136,11 @@ export type CodexReasoning = z.infer<typeof CodexReasoningSchema>;
 export const CodexCustomToolCallSchema = z.object({
   timestamp: z.string(),
   type: z.literal('response_item'),
-  payload: z.object({
-    type: z.literal('custom_tool_call'),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('custom_tool_call'),
+    })
+    .passthrough(),
 });
 
 export type CodexCustomToolCall = z.infer<typeof CodexCustomToolCallSchema>;
@@ -125,9 +149,11 @@ export type CodexCustomToolCall = z.infer<typeof CodexCustomToolCallSchema>;
 export const CodexCustomToolCallOutputSchema = z.object({
   timestamp: z.string(),
   type: z.literal('response_item'),
-  payload: z.object({
-    type: z.literal('custom_tool_call_output'),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('custom_tool_call_output'),
+    })
+    .passthrough(),
 });
 
 export type CodexCustomToolCallOutput = z.infer<typeof CodexCustomToolCallOutputSchema>;
@@ -139,10 +165,12 @@ export type CodexCustomToolCallOutput = z.infer<typeof CodexCustomToolCallOutput
 export const CodexUserMessageEventSchema = z.object({
   timestamp: z.string(),
   type: z.literal('event_msg'),
-  payload: z.object({
-    type: z.literal('user_message'),
-    message: z.string(),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('user_message'),
+      message: z.string(),
+    })
+    .passthrough(),
 });
 
 export type CodexUserMessageEvent = z.infer<typeof CodexUserMessageEventSchema>;
@@ -150,10 +178,12 @@ export type CodexUserMessageEvent = z.infer<typeof CodexUserMessageEventSchema>;
 export const CodexAgentMessageEventSchema = z.object({
   timestamp: z.string(),
   type: z.literal('event_msg'),
-  payload: z.object({
-    type: z.literal('agent_message'),
-    message: z.string(),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('agent_message'),
+      message: z.string(),
+    })
+    .passthrough(),
 });
 
 export type CodexAgentMessageEvent = z.infer<typeof CodexAgentMessageEventSchema>;
@@ -161,9 +191,11 @@ export type CodexAgentMessageEvent = z.infer<typeof CodexAgentMessageEventSchema
 export const CodexAgentReasoningEventSchema = z.object({
   timestamp: z.string(),
   type: z.literal('event_msg'),
-  payload: z.object({
-    type: z.literal('agent_reasoning'),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('agent_reasoning'),
+    })
+    .passthrough(),
 });
 
 export type CodexAgentReasoningEvent = z.infer<typeof CodexAgentReasoningEventSchema>;
@@ -171,9 +203,11 @@ export type CodexAgentReasoningEvent = z.infer<typeof CodexAgentReasoningEventSc
 export const CodexTokenCountEventSchema = z.object({
   timestamp: z.string(),
   type: z.literal('event_msg'),
-  payload: z.object({
-    type: z.literal('token_count'),
-  }).passthrough(),
+  payload: z
+    .object({
+      type: z.literal('token_count'),
+    })
+    .passthrough(),
 });
 
 export type CodexTokenCountEvent = z.infer<typeof CodexTokenCountEventSchema>;
@@ -185,11 +219,13 @@ export type CodexTokenCountEvent = z.infer<typeof CodexTokenCountEventSchema>;
 export const CodexTurnContextSchema = z.object({
   timestamp: z.string(),
   type: z.literal('turn_context'),
-  payload: z.object({
-    cwd: z.string().optional(),
-    model: z.string().optional(),
-    effort: z.string().optional(),
-  }).passthrough(),
+  payload: z
+    .object({
+      cwd: z.string().optional(),
+      model: z.string().optional(),
+      effort: z.string().optional(),
+    })
+    .passthrough(),
 });
 
 export type CodexTurnContext = z.infer<typeof CodexTurnContextSchema>;
@@ -212,7 +248,9 @@ export const CodexSessionEntrySchema = z.union([
   CodexTokenCountEventSchema,
   CodexTurnContextSchema,
   // Fallback for unknown entry types — Codex may add new types in future versions
-  z.object({ type: z.string(), timestamp: z.string() }).passthrough(),
+  z
+    .object({ type: z.string(), timestamp: z.string() })
+    .passthrough(),
 ]);
 
 export type CodexSessionEntry = z.infer<typeof CodexSessionEntrySchema>;
@@ -249,26 +287,40 @@ export function isCodexSessionMeta(entry: CodexSessionEntry): entry is CodexSess
 }
 
 export function isCodexResponseMessage(entry: CodexSessionEntry): entry is CodexResponseMessage {
-  return entry.type === 'response_item' &&
-    (entry as { payload?: { type?: string } }).payload?.type === 'message';
+  return (
+    entry.type === 'response_item' &&
+    (entry as { payload?: { type?: string } }).payload?.type === 'message'
+  );
 }
 
 export function isCodexFunctionCall(entry: CodexSessionEntry): entry is CodexFunctionCall {
-  return entry.type === 'response_item' &&
-    (entry as { payload?: { type?: string } }).payload?.type === 'function_call';
+  return (
+    entry.type === 'response_item' &&
+    (entry as { payload?: { type?: string } }).payload?.type === 'function_call'
+  );
 }
 
-export function isCodexFunctionCallOutput(entry: CodexSessionEntry): entry is CodexFunctionCallOutput {
-  return entry.type === 'response_item' &&
-    (entry as { payload?: { type?: string } }).payload?.type === 'function_call_output';
+export function isCodexFunctionCallOutput(
+  entry: CodexSessionEntry
+): entry is CodexFunctionCallOutput {
+  return (
+    entry.type === 'response_item' &&
+    (entry as { payload?: { type?: string } }).payload?.type === 'function_call_output'
+  );
 }
 
 export function isCodexUserMessageEvent(entry: CodexSessionEntry): entry is CodexUserMessageEvent {
-  return entry.type === 'event_msg' &&
-    (entry as { payload?: { type?: string } }).payload?.type === 'user_message';
+  return (
+    entry.type === 'event_msg' &&
+    (entry as { payload?: { type?: string } }).payload?.type === 'user_message'
+  );
 }
 
-export function isCodexAgentMessageEvent(entry: CodexSessionEntry): entry is CodexAgentMessageEvent {
-  return entry.type === 'event_msg' &&
-    (entry as { payload?: { type?: string } }).payload?.type === 'agent_message';
+export function isCodexAgentMessageEvent(
+  entry: CodexSessionEntry
+): entry is CodexAgentMessageEvent {
+  return (
+    entry.type === 'event_msg' &&
+    (entry as { payload?: { type?: string } }).payload?.type === 'agent_message'
+  );
 }

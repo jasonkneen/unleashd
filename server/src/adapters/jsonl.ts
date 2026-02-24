@@ -12,31 +12,30 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import * as os from 'os';
+import * as path from 'path';
 import * as readline from 'readline';
 import type {
-  Message,
-  Conversation,
-  Provider,
-  SubAgent,
+  CodexSessionEntry,
+  JsonlAssistantEntry,
   JsonlEntry,
   JsonlSession,
-  JsonlUserEntry,
-  JsonlAssistantEntry,
   JsonlTextBlock,
   JsonlToolUseBlock,
-  CodexSessionEntry,
+  JsonlUserEntry,
+  Message,
+  Provider,
+  SubAgent,
 } from '@claude-web-view/shared';
 import {
-  isJsonlUserEntry,
+  isCodexAgentMessageEvent,
+  isCodexResponseMessage,
+  isCodexSessionMeta,
+  isCodexUserMessageEvent,
   isJsonlAssistantEntry,
   isJsonlTextBlock,
   isJsonlToolUseBlock,
-  isCodexSessionMeta,
-  isCodexUserMessageEvent,
-  isCodexAgentMessageEvent,
-  isCodexResponseMessage,
+  isJsonlUserEntry,
 } from '@claude-web-view/shared';
 
 /** Canonicalize a directory path: resolve `.`/`..` and strip trailing slashes
@@ -83,7 +82,8 @@ export async function getProjectDirectories(
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
       .map((entry) => path.join(projectsDir, entry.name));
   } catch (error: unknown) {
-    const code = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
+    const code =
+      error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
     if (code === 'ENOENT') {
       // Only warn once per directory to avoid log spam during polling
       if (!warnedDirectories.has(projectsDir)) {
@@ -91,7 +91,9 @@ export async function getProjectDirectories(
         console.warn(`Projects directory not found, skipping: ${projectsDir}`);
       }
     } else {
-      console.warn(`Failed to read projects directory: ${projectsDir} (${error instanceof Error ? error.message : error})`);
+      console.warn(
+        `Failed to read projects directory: ${projectsDir} (${error instanceof Error ? error.message : error})`
+      );
     }
     return [];
   }
@@ -107,11 +109,14 @@ async function scanDirectoryByExtension(projectPath: string, extension: string):
       .filter((entry) => entry.isFile() && entry.name.endsWith(extension))
       .map((entry) => path.join(projectPath, entry.name));
   } catch (error: unknown) {
-    const code = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
+    const code =
+      error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
     if (code === 'ENOENT') {
       return [];
     }
-    console.warn(`Failed to scan project directory: ${projectPath} (${error instanceof Error ? error.message : error})`);
+    console.warn(
+      `Failed to scan project directory: ${projectPath} (${error instanceof Error ? error.message : error})`
+    );
     return [];
   }
 }
@@ -138,9 +143,13 @@ export async function getCodexSessionDirectories(
   sessionsDir: string = CODEX_SESSIONS_DIR
 ): Promise<string[]> {
   const yearDirs = await getProjectDirectories(sessionsDir);
-  const monthDirsNested = await Promise.all(yearDirs.map((yearDir) => getProjectDirectories(yearDir)));
+  const monthDirsNested = await Promise.all(
+    yearDirs.map((yearDir) => getProjectDirectories(yearDir))
+  );
   const monthDirs = monthDirsNested.flat();
-  const dayDirsNested = await Promise.all(monthDirs.map((monthDir) => getProjectDirectories(monthDir)));
+  const dayDirsNested = await Promise.all(
+    monthDirs.map((monthDir) => getProjectDirectories(monthDir))
+  );
   return dayDirsNested.flat();
 }
 
@@ -205,7 +214,7 @@ export async function parseJsonlFile(filePath: string): Promise<JsonlSession> {
   const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({
     input: fileStream,
-    crlfDelay: Infinity,
+    crlfDelay: Number.POSITIVE_INFINITY,
   });
 
   let skippedLines = 0;
@@ -248,7 +257,9 @@ export async function parseJsonlFile(filePath: string): Promise<JsonlSession> {
   }
 
   if (skippedLines > 0) {
-    console.warn(`Skipped ${skippedLines} malformed line${skippedLines > 1 ? 's' : ''} in ${filePath}`);
+    console.warn(
+      `Skipped ${skippedLines} malformed line${skippedLines > 1 ? 's' : ''} in ${filePath}`
+    );
   }
 
   // Extract session ID from filename
@@ -325,7 +336,7 @@ export async function parseCodexJsonlFile(filePath: string): Promise<CodexSessio
   const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({
     input: fileStream,
-    crlfDelay: Infinity,
+    crlfDelay: Number.POSITIVE_INFINITY,
   });
 
   let skippedLines = 0;
@@ -381,10 +392,13 @@ export async function parseCodexJsonlFile(filePath: string): Promise<CodexSessio
   }
 
   if (skippedLines > 0) {
-    console.warn(`Skipped ${skippedLines} malformed line${skippedLines > 1 ? 's' : ''} in ${filePath}`);
+    console.warn(
+      `Skipped ${skippedLines} malformed line${skippedLines > 1 ? 's' : ''} in ${filePath}`
+    );
   }
 
-  sessionId = sessionId || extractCodexSessionIdFromFilename(filePath) || path.basename(filePath, '.jsonl');
+  sessionId =
+    sessionId || extractCodexSessionIdFromFilename(filePath) || path.basename(filePath, '.jsonl');
   workingDirectory = workingDirectory || process.cwd();
 
   return {
@@ -519,10 +533,7 @@ async function parseOpenCodePartFiles(
     if (!partType) continue;
 
     const timeObj = asObject(partData.time);
-    const order =
-      asNumber(timeObj?.start) ??
-      asNumber(timeObj?.end) ??
-      Number.MAX_SAFE_INTEGER;
+    const order = asNumber(timeObj?.start) ?? asNumber(timeObj?.end) ?? Number.MAX_SAFE_INTEGER;
 
     const state = asObject(partData.state);
     const patchFiles = Array.isArray(partData.files)
@@ -660,10 +671,7 @@ export async function parseOpenCodeSessionDirectory(
 
     const pathObj = asObject(messageData.path);
     if (!workingDirectory) {
-      workingDirectory =
-        asString(pathObj?.cwd) ??
-        asString(pathObj?.root) ??
-        workingDirectory;
+      workingDirectory = asString(pathObj?.cwd) ?? asString(pathObj?.root) ?? workingDirectory;
     }
 
     if (role === 'assistant') {
@@ -699,7 +707,8 @@ export async function parseOpenCodeSessionDirectory(
     });
   }
 
-  const metadataPath = sessionMetadataIndex.get(sessionId) ?? sessionMetadataIndex.get(fallbackSessionId);
+  const metadataPath =
+    sessionMetadataIndex.get(sessionId) ?? sessionMetadataIndex.get(fallbackSessionId);
   if (metadataPath) {
     const metadata = await readJsonObject(metadataPath);
     if (metadata) {
@@ -874,8 +883,8 @@ function extractCodexContentText(content: unknown): string {
 export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): Message[] {
   const messages: Message[] = [];
 
-  const hasEventMessages = entries.some((entry) =>
-    isCodexUserMessageEvent(entry) || isCodexAgentMessageEvent(entry)
+  const hasEventMessages = entries.some(
+    (entry) => isCodexUserMessageEvent(entry) || isCodexAgentMessageEvent(entry)
   );
 
   if (hasEventMessages) {
@@ -1066,7 +1075,8 @@ const OOMPA_RE = /^\s*(?:"|')?\s*\[oompa(?::([^:\]]+)(?::([^\]]+))?)?\]/;
  */
 function inferWorkerRole(content: string): 'work' | 'review' | 'fix' {
   if (content.startsWith('The reviewer found issues')) return 'fix';
-  if (content.includes('VERDICT: APPROVED') && content.includes('VERDICT: NEEDS_CHANGES')) return 'review';
+  if (content.includes('VERDICT: APPROVED') && content.includes('VERDICT: NEEDS_CHANGES'))
+    return 'review';
   return 'work';
 }
 

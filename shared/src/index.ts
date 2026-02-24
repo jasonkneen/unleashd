@@ -144,9 +144,13 @@ export const GeminiModelSchema = z.enum([
 export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 
 export const CodexModelSchema = z.enum([
-  'gpt-5.3-codex-medium', 'gpt-5.3-codex-high', 'gpt-5.3-codex-xhigh',
+  'gpt-5.3-codex-medium',
+  'gpt-5.3-codex-high',
+  'gpt-5.3-codex-xhigh',
   'gpt-5.3-codex-spark',
-  'gpt-5.3-codex-spark-medium', 'gpt-5.3-codex-spark-high', 'gpt-5.3-codex-spark-xhigh',
+  'gpt-5.3-codex-spark-medium',
+  'gpt-5.3-codex-spark-high',
+  'gpt-5.3-codex-spark-xhigh',
 ]);
 export type CodexModel = z.infer<typeof CodexModelSchema>;
 
@@ -157,13 +161,20 @@ export type OpenCodeModel = `${string}/${string}`;
 const OPENCODE_MODEL_ID_REGEX = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._:+-]*)+$/i;
 
 export const OpenCodeModelSchema = z.custom<OpenCodeModel>(
-  (value): value is OpenCodeModel => typeof value === 'string' && OPENCODE_MODEL_ID_REGEX.test(value),
+  (value): value is OpenCodeModel =>
+    typeof value === 'string' && OPENCODE_MODEL_ID_REGEX.test(value),
   {
-    message: "Invalid OpenCode model identifier. Expected 'provider/model' format (e.g. 'opencode/big-pickle').",
+    message:
+      "Invalid OpenCode model identifier. Expected 'provider/model' format (e.g. 'opencode/big-pickle').",
   }
 );
 
-export const ModelIdSchema = z.union([ClaudeModelSchema, CodexModelSchema, GeminiModelSchema, OpenCodeModelSchema]);
+export const ModelIdSchema = z.union([
+  ClaudeModelSchema,
+  CodexModelSchema,
+  GeminiModelSchema,
+  OpenCodeModelSchema,
+]);
 export type ModelId = z.infer<typeof ModelIdSchema>;
 
 /** Display metadata returned by Provider.listModels() for the model dropdown */
@@ -195,7 +206,7 @@ export const SubAgentSchema = z.object({
   status: SubAgentStatusSchema,
   toolUses: z.number().int().nonnegative(),
   tokens: z.number().int().nonnegative(),
-  currentAction: z.string().optional(),  // e.g., "Write: client/src/App.css"
+  currentAction: z.string().optional(), // e.g., "Write: client/src/App.css"
   startedAt: z.coerce.date(),
   completedAt: z.coerce.date().optional(),
 });
@@ -264,9 +275,9 @@ export const ConversationSchema = z.object({
   createdAt: z.coerce.date(),
   workingDirectory: z.string(),
   provider: ProviderSchema.default('claude'),
-  model: ModelIdSchema.optional(),  // Provider-specific model identifier (undefined = provider default)
-  subAgents: z.array(SubAgentSchema).default([]),  // Active/recent sub-agents
-  queue: z.array(QueuedMessageSchema).default([]),  // Server-owned message queue
+  model: ModelIdSchema.optional(), // Provider-specific model identifier (undefined = provider default)
+  subAgents: z.array(SubAgentSchema).default([]), // Active/recent sub-agents
+  queue: z.array(QueuedMessageSchema).default([]), // Server-owned message queue
   // Oompa worker detection: true if first user message started with "[oompa]".
   // Workers are hidden from main Gallery/Sidebar and shown in a dedicated Workers section.
   // Tag format: [oompa], [oompa:<swarmId>], or [oompa:<swarmId>:<workerId>]
@@ -411,7 +422,7 @@ export const NewConversationMessageSchema = z.object({
   id: z.string().uuid().optional(), // Client-generated UUID for optimistic insert
   workingDirectory: z.string().optional(),
   provider: ProviderSchema.optional(), // Defaults to 'claude' when not specified
-  model: ModelIdSchema.optional(),     // Provider-specific model (undefined = provider default)
+  model: ModelIdSchema.optional(), // Provider-specific model (undefined = provider default)
   swarmDebugPrefix: z.string().optional(), // Debug prefix prepended to first CLI message
 });
 
