@@ -64,6 +64,9 @@ export function Chat() {
   // Select active conversation + only its linked child sessions needed for
   // unified sub-agent rendering (avoids subscribing to all conversations).
   const conversation = useConversationStore((s) => (id ? (s.conversations.get(id) ?? null) : null));
+  // Live streaming text — kept separate from conversations so Sidebar doesn't re-render at 60Hz.
+  // Merged with conversation.messages at render time (see conversationMessages below).
+  const streamingText = useConversationStore((s) => (id ? (s.streamingContent.get(id) ?? '') : ''));
   const childSessionConversations = useConversationStore(
     useShallow((s) => {
       if (!id) return EMPTY_CHILD_CONVERSATIONS;
@@ -296,6 +299,14 @@ export function Chat() {
   const markMessagesSeen = useUIStore((s) => s.markMessagesSeen);
 
   useEffect(() => {
+    // Clear any pending draft save from the PREVIOUS conversation before switching.
+    // The old timer captures the old saveDraft closure, which reads textareaRef.current.value.
+    // After id changes, that value belongs to the new conversation — firing it would write
+    // new conversation content under the old conversation's draft key.
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
     if (id) {
       setActiveConversationId(id);
       setUIActiveId(id);
@@ -420,6 +431,19 @@ export function Chat() {
 
   const timeAgo = useTimeAgo(lastMessageTime);
 
+  // Merge stable conversation messages with live streaming text for display.
+  // conversation.messages is stable during streaming (not updated per chunk).
+  // streamingText changes per chunk; merging here keeps Sidebar untouched.
+  const conversationMessages = useMemo(() => {
+    if (!conversation) return [];
+    if (!streamingText) return conversation.messages;
+    const messages = conversation.messages.slice();
+    const last = messages[messages.length - 1];
+    if (last?.role !== 'assistant') return conversation.messages;
+    messages[messages.length - 1] = { ...last, content: last.content + streamingText };
+    return messages;
+  }, [conversation?.messages, streamingText]);
+
   // Wrap messages into groups for VirtualizedMessageList.
   // Strip swarm debug prefix from first user message display —
   // the prefix was prepended server-side for the CLI but should not
@@ -427,14 +451,14 @@ export function Chat() {
   const messageGroups = useMemo((): MessageGroup[] => {
     if (!conversation) return [];
     const prefix = conversation.swarmDebugPrefix;
-    return conversation.messages.map((msg, i) => {
+    return conversationMessages.map((msg, i) => {
       if (i === 0 && msg.role === 'user' && prefix && msg.content.startsWith(prefix)) {
         const stripped = msg.content.slice(prefix.length).replace(/^\n\n/, '');
         return { type: 'single' as const, messages: [{ ...msg, content: stripped }] };
       }
       return { type: 'single' as const, messages: [msg] };
     });
-  }, [conversation?.messages, conversation?.swarmDebugPrefix]);
+  }, [conversationMessages, conversation?.swarmDebugPrefix]);
 
   const unifiedSubAgents = useMemo(() => {
     if (!conversation) return [];
@@ -686,6 +710,7 @@ export function Chat() {
             />
           )}
           <VirtualizedMessageList
+            key={id}
             messageGroups={messageGroups}
             isRunning={isStreaming}
             lastMessageRef={lastMessageRef}
