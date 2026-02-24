@@ -200,7 +200,9 @@ export async function loadAllConversations(
   // avoids doubling peak memory by holding two copies of every parsed conversation.
   const conversations = onProgress ? null : new Map<string, Conversation>();
   const mtimes = new Map<string, number>();
-  const parseTimes: number[] = [];
+  // Running accumulators for parse timing — avoids allocating a 1500-element array
+  // just to compute summary stats that are immediately discarded after logging.
+  let parseTimeMin = Infinity, parseTimeMax = 0, parseTimeSum = 0, parseTimeCount = 0;
   let batchBuffer: Conversation[] = [];
   let filesProcessed = 0;
   let conversationCount = 0;
@@ -210,7 +212,11 @@ export async function loadAllConversations(
   await forEachWithConcurrency(files, CONCURRENCY, async (file) => {
     const result = await parseOneFile(file);
 
-    parseTimes.push(result.parseTimeMs);
+    const t = result.parseTimeMs;
+    if (t < parseTimeMin) parseTimeMin = t;
+    if (t > parseTimeMax) parseTimeMax = t;
+    parseTimeSum += t;
+    parseTimeCount++;
 
     if (result.mtimeMs > 0) {
       mtimes.set(result.filePath, result.mtimeMs);
@@ -237,15 +243,10 @@ export async function loadAllConversations(
   const parseTimeMs = performance.now() - parseStart;
 
   // Log timing summary
-  if (parseTimes.length > 0) {
-    const sorted = [...parseTimes].sort((a, b) => a - b);
-    const min = sorted[0];
-    const max = sorted[sorted.length - 1];
-    const avg = parseTimes.reduce((a, b) => a + b, 0) / parseTimes.length;
-    const median = sorted[Math.floor(sorted.length / 2)];
-    const p95 = sorted[Math.floor(sorted.length * 0.95)];
+  if (parseTimeCount > 0) {
+    const avg = parseTimeSum / parseTimeCount;
     console.log(
-      `Parse timing (${parseTimes.length} files): min=${min.toFixed(1)}ms, avg=${avg.toFixed(1)}ms, median=${median.toFixed(1)}ms, p95=${p95.toFixed(1)}ms, max=${max.toFixed(1)}ms`
+      `Parse timing (${parseTimeCount} files): min=${parseTimeMin.toFixed(1)}ms, avg=${avg.toFixed(1)}ms, max=${parseTimeMax.toFixed(1)}ms`
     );
   }
 
@@ -280,7 +281,10 @@ export async function pollForChanges(
   activeIds: Set<string>
 ): Promise<PollResult> {
   const updated = new Map<string, Conversation>();
-  const mtimes = new Map(prevMtimes);
+  // Start fresh — only populate with currently-discovered files.
+  // Any path absent from this poll's discovery is deleted on disk and falls out naturally,
+  // preventing the map from accumulating dead paths forever.
+  const mtimes = new Map<string, number>();
 
   for (const adapter of diskAdapters) {
     let paths: string[];
@@ -313,15 +317,16 @@ export async function pollForChanges(
           currentMtime = stat.mtimeMs;
         }
 
+        // Always record the current mtime for every discovered file.
+        // This is how deleted files get pruned: if a file isn't discovered, it's never set.
+        mtimes.set(filePath, currentMtime);
+
         const prevMtime = prevMtimes.get(filePath);
 
         // Skip if file mtime unchanged
         if (prevMtime !== undefined && currentMtime <= prevMtime) {
           continue;
         }
-
-        // File is new or changed — update mtime index
-        mtimes.set(filePath, currentMtime);
 
         // Fast skip for active sessions — in-memory state is authoritative
         // while a process is running; let the next poll pick up the final state.
