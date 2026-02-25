@@ -119,6 +119,11 @@ const STARTUP_INITIAL_LOAD_LIMIT = readPositiveIntEnv('CWV_STARTUP_INITIAL_LOAD_
 const STARTUP_PARSE_CONCURRENCY = readPositiveIntEnv('CWV_STARTUP_PARSE_CONCURRENCY', 16);
 const STARTUP_LOAD_BATCH_SIZE = readPositiveIntEnv('CWV_STARTUP_BATCH_SIZE', 100);
 const STARTUP_PROGRESS_FILE_STEP = readPositiveIntEnv('CWV_STARTUP_LOG_EVERY_FILES', 500);
+const HOT_RELOAD_DRAIN_MS = readPositiveIntEnv('CWV_HOT_RELOAD_DRAIN_MS', 15 * 60_000);
+const HOT_RELOAD_FORCE_EXIT_GRACE_MS = readPositiveIntEnv(
+  'CWV_HOT_RELOAD_FORCE_EXIT_GRACE_MS',
+  3_000
+);
 
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -480,7 +485,6 @@ class Conversation extends EventEmitter {
             break;
           }
           case 'turn.started': {
-            this._sawStdoutEventThisRun = true;
             this._ensureAssistantMessage();
             break;
           }
@@ -497,7 +501,7 @@ class Conversation extends EventEmitter {
     });
 
     void turn.completed
-      .then(({ exitCode, sessionId }) => {
+      .then(({ exitCode, sessionId, reason }) => {
         if (sessionId && sessionId !== this.sessionId) {
           const oldSessionId = this.sessionId;
           this.sessionId = sessionId;
@@ -506,51 +510,57 @@ class Conversation extends EventEmitter {
         }
 
       const durationMs = Date.now() - this._processStartTime;
-      console.log(`[${this.id}] Process closed with code ${exitCode} after ${durationMs}ms`);
+      console.log(
+        `[${this.id}] Process closed with code ${exitCode} (reason=${reason}) after ${durationMs}ms`
+      );
 
       // resetProcess() handles its own cleanup. If _isResetting, the kill was
       // intentional (loop context clear) and the loop engine will immediately
       // call sendMessage() and spawn the next iteration. Skip all cleanup here.
       if (this._isResetting) return;
 
-      // Surface non-zero exit or silent zero-exit failures as system messages.
-      if (exitCode !== null && exitCode !== 0) {
-        const details = stderrSnippet(this._stderrBuffer);
-        const errorMsg = details
-          ? `Process exited with code ${exitCode}: ${details}`
-          : `Process exited with code ${exitCode}`;
-        console.error(`[${this.id}] ${errorMsg}`);
-        this.messages.push({ role: 'system', content: errorMsg, timestamp: new Date() });
+      const emitSystemMessage = (content: string): void => {
+        this.messages.push({ role: 'system', content, timestamp: new Date() });
         broadcastToAll({
           type: 'message',
           conversationId: this.id,
           role: 'system',
-          content: errorMsg,
+          content,
         });
+      };
+
+      const details = stderrSnippet(this._stderrBuffer);
+      // Use executeCommand completion reason first; it carries protocol-level failures
+      // that can otherwise look like successful exits.
+      if (reason === 'killed') {
+        const killedMsg = details
+          ? `Process interrupted before completion: ${details}`
+          : 'Process interrupted before completion';
+        console.error(`[${this.id}] ${killedMsg}`);
+        emitSystemMessage(killedMsg);
+      } else if (reason === 'error') {
+        const errorMsg =
+          exitCode !== null && exitCode !== 0
+            ? details
+              ? `Process exited with code ${exitCode}: ${details}`
+              : `Process exited with code ${exitCode}`
+            : details
+              ? `Provider exited before completing the turn: ${details}`
+              : 'Provider exited before completing the turn';
+        console.error(`[${this.id}] ${errorMsg}`);
+        emitSystemMessage(errorMsg);
       } else if (exitCode === 0 && !this._sawStdoutEventThisRun) {
-        // Some providers (OpenCode) can fail with exit code 0 but write error to stderr.
-        const details = stderrSnippet(this._stderrBuffer);
-        if (details) {
-          const content = `Provider reported an error without response output: ${details}`;
-          this.messages.push({ role: 'system', content, timestamp: new Date() });
-          broadcastToAll({
-            type: 'message',
-            conversationId: this.id,
-            role: 'system',
-            content,
-          });
-        }
-      } else {
+        // Silent zero-exit without any streamed output is treated as provider failure.
+        const content = details
+          ? `Provider reported an error without response output: ${details}`
+          : 'Provider exited without response output';
+        console.error(`[${this.id}] ${content}`);
+        emitSystemMessage(content);
+      } else if (reason !== 'out_of_tokens') {
         // Successful completion - add a system message with duration
         const durationSec = (durationMs / 1000).toFixed(1);
         const successMsg = `Process completed successfully in ${durationSec}s`;
-        this.messages.push({ role: 'system', content: successMsg, timestamp: new Date() });
-        broadcastToAll({
-          type: 'message',
-          conversationId: this.id,
-          role: 'system',
-          content: successMsg,
-        });
+        emitSystemMessage(successMsg);
       }
 
       // INVARIANT: dead process can't stream. Clear both atomically.
@@ -1246,8 +1256,7 @@ wss.on('connection', (ws: WebSocket) => {
             convToDelete.stop();
             conversations.delete(data.conversationId);
             // Evict session IDs so the orphan-detection guard doesn't accumulate forever
-            knownSessionIds.delete(convToDelete.sessionId);
-            knownSessionIds.delete(convToDelete.id);
+            unregisterConversationAliases(convToDelete.id);
             clearExternalRunningStatus(convToDelete.sessionId, convToDelete.id);
             clearLocalCompletionSuppression(convToDelete.sessionId, convToDelete.id);
             ws.send(
@@ -3455,12 +3464,51 @@ app.get('*', (_req: Request, res: Response) => {
 
 // Signal Handlers — split behavior for intentional shutdown vs hot-reload.
 //
-// SIGINT (Ctrl-C): Intentional shutdown. Kill all child processes and clear PID file.
-// SIGTERM (tsx watch, kill, pm2, Docker stop): Hot-reload. Leave detached children
-//   alive — the restarted server re-adopts them via the file poller + PID tracker.
+// SIGINT (Ctrl-C): Intentional shutdown. Kill all child processes immediately.
+// SIGTERM (tsx watch, kill, pm2, Docker stop): Defer restart while active turns
+//   are running so long tasks don't get cut off mid-flight.
 //
-// Children are spawned with detached:true + unref(), so they survive SIGTERM naturally.
-// We just need to NOT kill them on SIGTERM and let Node exit.
+// If the drain timeout is reached, active turns are interrupted with a system
+// message and shutdown proceeds after a short grace period.
+
+function getActiveConversationRuns(): Conversation[] {
+  const active: Conversation[] = [];
+  for (const conversation of conversations.values()) {
+    if (conversation.hasActiveProcess()) {
+      active.push(conversation);
+    }
+  }
+  return active;
+}
+
+function interruptActiveConversationsForShutdown(reason: string): void {
+  for (const conversation of getActiveConversationRuns()) {
+    const content = `Server is restarting (${reason}); interrupted current turn.`;
+    conversation.messages.push({ role: 'system', content, timestamp: new Date() });
+    broadcastToAll({
+      type: 'message',
+      conversationId: conversation.id,
+      role: 'system',
+      content,
+    });
+    conversation.stop();
+  }
+}
+
+let sigtermDrainInterval: NodeJS.Timeout | null = null;
+let sigtermForceTimeout: NodeJS.Timeout | null = null;
+let sigtermDraining = false;
+
+function clearSigtermDrainTimers(): void {
+  if (sigtermDrainInterval) {
+    clearInterval(sigtermDrainInterval);
+    sigtermDrainInterval = null;
+  }
+  if (sigtermForceTimeout) {
+    clearTimeout(sigtermForceTimeout);
+    sigtermForceTimeout = null;
+  }
+}
 
 process.on('SIGINT', () => {
   console.log('SIGINT — killing child processes and shutting down...');
@@ -3473,10 +3521,48 @@ process.on('SIGINT', () => {
 });
 
 process.on('SIGTERM', () => {
-  console.log('SIGTERM — detaching child processes for hot-reload...');
-  // Don't kill children — they're detached and will keep running.
-  // PID file is left intact so the restarted server can re-adopt them.
-  process.exit();
+  const activeRuns = getActiveConversationRuns();
+  if (activeRuns.length === 0) {
+    console.log('SIGTERM — no active turns, exiting for restart');
+    process.exit();
+    return;
+  }
+
+  if (sigtermDraining) {
+    console.warn(
+      `SIGTERM received again with ${activeRuns.length} active turn(s); forcing shutdown now`
+    );
+    clearSigtermDrainTimers();
+    interruptActiveConversationsForShutdown('forced restart');
+    setTimeout(() => process.exit(), HOT_RELOAD_FORCE_EXIT_GRACE_MS);
+    return;
+  }
+
+  sigtermDraining = true;
+  console.warn(
+    `SIGTERM deferred: waiting for ${activeRuns.length} active turn(s) to finish (timeout ${Math.round(HOT_RELOAD_DRAIN_MS / 1000)}s)`
+  );
+
+  sigtermDrainInterval = setInterval(() => {
+    const remaining = getActiveConversationRuns().length;
+    if (remaining === 0) {
+      clearSigtermDrainTimers();
+      console.log('SIGTERM — active turns drained, exiting for restart');
+      process.exit();
+    }
+  }, 500);
+
+  sigtermForceTimeout = setTimeout(() => {
+    const remaining = getActiveConversationRuns().length;
+    if (remaining > 0) {
+      console.warn(
+        `SIGTERM drain timeout reached with ${remaining} active turn(s); interrupting and exiting`
+      );
+      interruptActiveConversationsForShutdown('hot-reload timeout');
+    }
+    clearSigtermDrainTimers();
+    setTimeout(() => process.exit(), HOT_RELOAD_FORCE_EXIT_GRACE_MS);
+  }, HOT_RELOAD_DRAIN_MS);
 });
 
 const PORT = process.env.PORT || 3000;
@@ -3625,11 +3711,23 @@ async function loadExistingConversations(): Promise<void> {
 function findConversationBySessionId(sessionId: string): Conversation | undefined {
   const direct = conversations.get(sessionId);
   if (direct) {
+    registerSessionAlias(sessionId, direct.id);
     return direct;
+  }
+
+  const mappedConversationId = sessionAliasToConversationId.get(sessionId);
+  if (mappedConversationId) {
+    const mappedConversation = conversations.get(mappedConversationId);
+    if (mappedConversation) {
+      registerSessionAlias(sessionId, mappedConversation.id);
+      return mappedConversation;
+    }
+    unregisterSessionAlias(sessionId);
   }
 
   for (const conversation of conversations.values()) {
     if (conversation.sessionId === sessionId) {
+      registerSessionAlias(sessionId, conversation.id);
       return conversation;
     }
   }
@@ -3802,7 +3900,10 @@ function startFilePolling(): void {
           if (reconciled) {
             const oldSessionId = reconciled.sessionId;
             reconciled.sessionId = sessionId;
-            knownSessionIds.add(sessionId);
+            if (oldSessionId !== sessionId) {
+              unregisterSessionAlias(oldSessionId, { keepKnown: true });
+            }
+            registerSessionAlias(sessionId, reconciled.id);
             existing = reconciled;
             console.log(
               `[Poll] Reconciled OpenCode session ${sessionId.substring(0, 8)} with conversation ${reconciled.id.substring(0, 8)} (old session ${oldSessionId.substring(0, 8)})`
@@ -3810,7 +3911,8 @@ function startFilePolling(): void {
           }
         }
 
-        if (existing && !existing.isRunning) {
+        if (existing && !existing.hasActiveProcess()) {
+          registerSessionAlias(sessionId, existing.id);
           // Update existing conversation in-place (preserve process handles).
           // Preserve server-injected system messages (error reports, exit info) that
           // exist only in memory — disk files don't contain these. Without this,
