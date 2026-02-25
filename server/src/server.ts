@@ -124,6 +124,9 @@ const HOT_RELOAD_FORCE_EXIT_GRACE_MS = readPositiveIntEnv(
   'CWV_HOT_RELOAD_FORCE_EXIT_GRACE_MS',
   3_000
 );
+const TURN_IDLE_TIMEOUT_MS = readPositiveIntEnv('CWV_TURN_IDLE_TIMEOUT_MS', 10 * 60_000);
+const TURN_MAX_RUNTIME_MS = readPositiveIntEnv('CWV_TURN_MAX_RUNTIME_MS', 60 * 60_000);
+const TURN_TIMEOUT_KILL_GRACE_MS = readPositiveIntEnv('CWV_TURN_TIMEOUT_KILL_GRACE_MS', 5_000);
 
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -335,6 +338,11 @@ class Conversation extends EventEmitter {
   private _isResetting: boolean;
   // Start time of the current CLI process run (for duration tracking).
   private _processStartTime = 0;
+  // Last provider event timestamp for idle-hang detection.
+  private _lastTurnEventAt = 0;
+  // Per-turn watchdog timers.
+  private _turnIdleTimer: NodeJS.Timeout | null = null;
+  private _turnMaxTimer: NodeJS.Timeout | null = null;
 
   constructor(
     id: string,
@@ -435,10 +443,12 @@ class Conversation extends EventEmitter {
     this.process = turn.child;
     this.isRunning = true;
     this._hasStartedSession = true; // Mark session as started for next message
+    this._startTurnWatchdogs();
     this.broadcastStatus();
 
     const consumeEvents = async (): Promise<void> => {
       for await (const event of turn.events) {
+        this._noteTurnActivity();
         switch (event.type) {
           case 'session.started': {
             if (event.sessionId !== this.sessionId) {
@@ -502,6 +512,7 @@ class Conversation extends EventEmitter {
 
     void turn.completed
       .then(({ exitCode, sessionId, reason }) => {
+        this._clearTurnWatchdogs();
         if (sessionId && sessionId !== this.sessionId) {
           const oldSessionId = this.sessionId;
           this.sessionId = sessionId;
@@ -509,85 +520,86 @@ class Conversation extends EventEmitter {
           registerSessionAlias(sessionId, this.id);
         }
 
-      const durationMs = Date.now() - this._processStartTime;
-      console.log(
-        `[${this.id}] Process closed with code ${exitCode} (reason=${reason}) after ${durationMs}ms`
-      );
+        const durationMs = Date.now() - this._processStartTime;
+        console.log(
+          `[${this.id}] Process closed with code ${exitCode} (reason=${reason}) after ${durationMs}ms`
+        );
 
-      // resetProcess() handles its own cleanup. If _isResetting, the kill was
-      // intentional (loop context clear) and the loop engine will immediately
-      // call sendMessage() and spawn the next iteration. Skip all cleanup here.
-      if (this._isResetting) return;
+        // resetProcess() handles its own cleanup. If _isResetting, the kill was
+        // intentional (loop context clear) and the loop engine will immediately
+        // call sendMessage() and spawn the next iteration. Skip all cleanup here.
+        if (this._isResetting) return;
 
-      const emitSystemMessage = (content: string): void => {
-        this.messages.push({ role: 'system', content, timestamp: new Date() });
-        broadcastToAll({
-          type: 'message',
-          conversationId: this.id,
-          role: 'system',
-          content,
-        });
-      };
+        const emitSystemMessage = (content: string): void => {
+          this.messages.push({ role: 'system', content, timestamp: new Date() });
+          broadcastToAll({
+            type: 'message',
+            conversationId: this.id,
+            role: 'system',
+            content,
+          });
+        };
 
-      const details = stderrSnippet(this._stderrBuffer);
-      // Use executeCommand completion reason first; it carries protocol-level failures
-      // that can otherwise look like successful exits.
-      if (reason === 'killed') {
-        const killedMsg = details
-          ? `Process interrupted before completion: ${details}`
-          : 'Process interrupted before completion';
-        console.error(`[${this.id}] ${killedMsg}`);
-        emitSystemMessage(killedMsg);
-      } else if (reason === 'error') {
-        const errorMsg =
-          exitCode !== null && exitCode !== 0
-            ? details
-              ? `Process exited with code ${exitCode}: ${details}`
-              : `Process exited with code ${exitCode}`
-            : details
-              ? `Provider exited before completing the turn: ${details}`
-              : 'Provider exited before completing the turn';
-        console.error(`[${this.id}] ${errorMsg}`);
-        emitSystemMessage(errorMsg);
-      } else if (exitCode === 0 && !this._sawStdoutEventThisRun) {
-        // Silent zero-exit without any streamed output is treated as provider failure.
-        const content = details
-          ? `Provider reported an error without response output: ${details}`
-          : 'Provider exited without response output';
-        console.error(`[${this.id}] ${content}`);
-        emitSystemMessage(content);
-      } else if (reason !== 'out_of_tokens') {
-        // Successful completion - add a system message with duration
-        const durationSec = (durationMs / 1000).toFixed(1);
-        const successMsg = `Process completed successfully in ${durationSec}s`;
-        emitSystemMessage(successMsg);
-      }
+        const details = stderrSnippet(this._stderrBuffer);
+        // Use executeCommand completion reason first; it carries protocol-level failures
+        // that can otherwise look like successful exits.
+        if (reason === 'killed') {
+          const killedMsg = details
+            ? `Process interrupted before completion: ${details}`
+            : 'Process interrupted before completion';
+          console.error(`[${this.id}] ${killedMsg}`);
+          emitSystemMessage(killedMsg);
+        } else if (reason === 'error') {
+          const errorMsg =
+            exitCode !== null && exitCode !== 0
+              ? details
+                ? `Process exited with code ${exitCode}: ${details}`
+                : `Process exited with code ${exitCode}`
+              : details
+                ? `Provider exited before completing the turn: ${details}`
+                : 'Provider exited before completing the turn';
+          console.error(`[${this.id}] ${errorMsg}`);
+          emitSystemMessage(errorMsg);
+        } else if (exitCode === 0 && !this._sawStdoutEventThisRun) {
+          // Silent zero-exit without any streamed output is treated as provider failure.
+          const content = details
+            ? `Provider reported an error without response output: ${details}`
+            : 'Provider exited without response output';
+          console.error(`[${this.id}] ${content}`);
+          emitSystemMessage(content);
+        } else if (reason !== 'out_of_tokens') {
+          // Successful completion - add a system message with duration
+          const durationSec = (durationMs / 1000).toFixed(1);
+          const successMsg = `Process completed successfully in ${durationSec}s`;
+          emitSystemMessage(successMsg);
+        }
 
-      // INVARIANT: dead process can't stream. Clear both atomically.
-      // This is the safety net for crash/kill/OOM — all paths that skip message_complete.
-      this.isStreaming = false;
-      this.isRunning = false;
-      this.process = null;
-      // Clear pending task tools — message_complete handles the normal path, but
-      // kills/crashes skip it, leaving stale entries that accumulate across runs.
-      this._pendingTaskTools.clear();
-      // Suppress external-running detection for trailing disk writes from this
-      // just-finished local run. Also clear any stale external flag immediately.
-      clearExternalRunningStatus(this.id, this.sessionId);
-      markLocalCompletionSuppression(this.id, this.sessionId);
-      this.broadcastStatus();
-      // Dequeue the "sending" message (completed or crashed) and process next.
-      // This is the SINGLE code path for dequeue — not split between
-      // message_complete and close. Handles both success and crash.
-      if (this.queue.length > 0 && this.queue[0].status === 'sending') {
-        this.queue.shift();
-        this.broadcastQueue();
-      }
-      // WS message ordering guarantees clients see status:false before the
-      // next spawn's status:true. No delay needed.
-      this.processQueue();
+        // INVARIANT: dead process can't stream. Clear both atomically.
+        // This is the safety net for crash/kill/OOM — all paths that skip message_complete.
+        this.isStreaming = false;
+        this.isRunning = false;
+        this.process = null;
+        // Clear pending task tools — message_complete handles the normal path, but
+        // kills/crashes skip it, leaving stale entries that accumulate across runs.
+        this._pendingTaskTools.clear();
+        // Suppress external-running detection for trailing disk writes from this
+        // just-finished local run. Also clear any stale external flag immediately.
+        clearExternalRunningStatus(this.id, this.sessionId);
+        markLocalCompletionSuppression(this.id, this.sessionId);
+        this.broadcastStatus();
+        // Dequeue the "sending" message (completed or crashed) and process next.
+        // This is the SINGLE code path for dequeue — not split between
+        // message_complete and close. Handles both success and crash.
+        if (this.queue.length > 0 && this.queue[0].status === 'sending') {
+          this.queue.shift();
+          this.broadcastQueue();
+        }
+        // WS message ordering guarantees clients see status:false before the
+        // next spawn's status:true. No delay needed.
+        this.processQueue();
       })
       .catch((err: unknown) => {
+        this._clearTurnWatchdogs();
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[${this.id}] Process completion error: ${message}`);
         this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(message) });
@@ -850,6 +862,7 @@ class Conversation extends EventEmitter {
   }
 
   stop(): void {
+    this._clearTurnWatchdogs();
     if (!this.process) return;
 
     const proc = this.process;
@@ -875,6 +888,7 @@ class Conversation extends EventEmitter {
   // Sets _isResetting so the close handler is a no-op — we handle cleanup here
   // because the loop engine immediately spawns the next iteration.
   resetProcess(): void {
+    this._clearTurnWatchdogs();
     if (this.process) {
       this._isResetting = true;
       this.process.kill();
@@ -893,6 +907,68 @@ class Conversation extends EventEmitter {
     console.log(
       `[${this.id}] Reset session: ${oldSessionId.substring(0, 8)}... -> ${this.sessionId.substring(0, 8)}...`
     );
+  }
+
+  private _startTurnWatchdogs(): void {
+    this._clearTurnWatchdogs();
+    this._lastTurnEventAt = Date.now();
+    this._refreshIdleWatchdog();
+    this._turnMaxTimer = setTimeout(() => {
+      this._handleTurnTimeout('max');
+    }, TURN_MAX_RUNTIME_MS);
+  }
+
+  private _noteTurnActivity(): void {
+    if (!this.isRunning) return;
+    this._lastTurnEventAt = Date.now();
+    this._refreshIdleWatchdog();
+  }
+
+  private _refreshIdleWatchdog(): void {
+    if (this._turnIdleTimer) {
+      clearTimeout(this._turnIdleTimer);
+      this._turnIdleTimer = null;
+    }
+    if (!this.isRunning) return;
+    this._turnIdleTimer = setTimeout(() => {
+      this._handleTurnTimeout('idle');
+    }, TURN_IDLE_TIMEOUT_MS);
+  }
+
+  private _clearTurnWatchdogs(): void {
+    if (this._turnIdleTimer) {
+      clearTimeout(this._turnIdleTimer);
+      this._turnIdleTimer = null;
+    }
+    if (this._turnMaxTimer) {
+      clearTimeout(this._turnMaxTimer);
+      this._turnMaxTimer = null;
+    }
+  }
+
+  private _handleTurnTimeout(kind: 'idle' | 'max'): void {
+    if (!this.process || !this.isRunning) return;
+    const now = Date.now();
+    const elapsedSec = Math.round((now - this._processStartTime) / 1000);
+    const idleSec = Math.round((now - this._lastTurnEventAt) / 1000);
+    const message =
+      kind === 'idle'
+        ? `Turn stalled: no provider events for ${idleSec}s (timed out)`
+        : `Turn exceeded max runtime after ${elapsedSec}s (timed out)`;
+
+    console.error(`[${this.id}] ${message}`);
+    this._clearTurnWatchdogs();
+    this.handleOutput({ type: 'error', message });
+
+    const proc = this.process;
+    proc.kill('SIGTERM');
+    const killTimer = setTimeout(() => {
+      if (proc.exitCode === null && !proc.killed) {
+        console.warn(`[${this.id}] Timeout kill escalation: sending SIGKILL`);
+        proc.kill('SIGKILL');
+      }
+    }, TURN_TIMEOUT_KILL_GRACE_MS);
+    proc.once('close', () => clearTimeout(killTimer));
   }
 
   broadcastChunk(data: ChunkData | MessageCompleteData): void {
