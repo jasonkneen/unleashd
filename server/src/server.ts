@@ -2131,6 +2131,229 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
   };
 }
 
+const SWARM_CONTEXT_COMMAND_TIMEOUT_MS = 8_000;
+const SWARM_CONTEXT_MAX_OUTPUT_CHARS = 8_000;
+const SWARM_CONTEXT_MAX_DOC_CHARS = 3_000;
+const SWARM_CONTEXT_MAX_DOC_FILES = 6;
+
+function clip(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n...<truncated>`;
+}
+
+function runCommandCapture(command: string, cwd: string): string {
+  try {
+    return execSync(command, {
+      cwd,
+      timeout: SWARM_CONTEXT_COMMAND_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    }).trim();
+  } catch (error) {
+    const e = error as {
+      stdout?: string | Buffer;
+      stderr?: string | Buffer;
+      message?: string;
+    };
+    const stdout = typeof e.stdout === 'string' ? e.stdout : e.stdout?.toString('utf-8') ?? '';
+    const stderr = typeof e.stderr === 'string' ? e.stderr : e.stderr?.toString('utf-8') ?? '';
+    const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
+    return combined || e.message || `Command failed: ${command}`;
+  }
+}
+
+function findDocCandidates(projectRoot: string): string[] {
+  const candidates = [
+    'README.md',
+    'AGENTS.md',
+    'CLAUDE.md',
+    'docs/agent_client_spec.md',
+    'docs/README.md',
+    'docs/SWARM_GUIDE.md',
+    'docs/OOMPA.md',
+  ];
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const rel of candidates) {
+    const abs = path.join(projectRoot, rel);
+    if (!fs.existsSync(abs)) continue;
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    result.push(abs);
+  }
+
+  const docsDir = path.join(projectRoot, 'docs');
+  if (fs.existsSync(docsDir)) {
+    try {
+      const files = fs
+        .readdirSync(docsDir)
+        .filter((f) => f.toLowerCase().endsWith('.md'))
+        .sort((a, b) => a.localeCompare(b));
+      for (const file of files) {
+        const abs = path.join(docsDir, file);
+        if (seen.has(abs)) continue;
+        seen.add(abs);
+        result.push(abs);
+      }
+    } catch {
+      // Ignore docs directory read failures
+    }
+  }
+
+  return result.slice(0, SWARM_CONTEXT_MAX_DOC_FILES);
+}
+
+function listAvailableConfigFiles(projectRoot: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  const addPath = (absPath: string) => {
+    if (!absPath.toLowerCase().endsWith('.json')) return;
+    if (seen.has(absPath)) return;
+    seen.add(absPath);
+    result.push(absPath);
+  };
+
+  try {
+    for (const file of fs.readdirSync(projectRoot)) {
+      if (!file.toLowerCase().startsWith('oompa')) continue;
+      addPath(path.join(projectRoot, file));
+    }
+  } catch {
+    // Ignore root listing failures
+  }
+
+  const oompaDir = path.join(projectRoot, 'oompa');
+  if (fs.existsSync(oompaDir)) {
+    try {
+      for (const file of fs.readdirSync(oompaDir)) {
+        if (!file.toLowerCase().startsWith('oompa')) continue;
+        addPath(path.join(oompaDir, file));
+      }
+    } catch {
+      // Ignore oompa/ listing failures
+    }
+  }
+
+  return result.sort((a, b) => a.localeCompare(b));
+}
+
+app.get('/api/oompa-swarm-context', (req: Request, res: Response) => {
+  const dir = req.query.dir as string;
+  if (!dir || !dir.startsWith('/')) {
+    res.status(400).json({ error: 'Absolute directory path required' });
+    return;
+  }
+
+  const projectRoot = path.resolve(dir);
+  if (!fs.existsSync(projectRoot)) {
+    res.status(404).json({ error: 'Directory does not exist' });
+    return;
+  }
+
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(projectRoot);
+  } catch (error) {
+    res.status(500).json({ error: `Failed to stat directory: ${(error as Error).message}` });
+    return;
+  }
+
+  if (!stats.isDirectory()) {
+    res.status(400).json({ error: 'Path must be a directory' });
+    return;
+  }
+
+  const availableConfigs = listAvailableConfigFiles(projectRoot);
+  const configPath = path.join(projectRoot, 'oompa.json');
+  let oompaConfigSummary = 'No oompa.json found';
+  if (fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      const workers = Array.isArray(config.workers)
+        ? (config.workers as Array<Record<string, unknown>>)
+        : [];
+      const reviewer = config.reviewer && typeof config.reviewer === 'object';
+      const planner = config.planner && typeof config.planner === 'object';
+      const workerSummary =
+        workers.length === 0
+          ? 'workers=0'
+          : `workers=${workers.length} (${workers
+              .map((w, i) => {
+                const harness = typeof w.harness === 'string' ? w.harness : 'default';
+                const model = typeof w.model === 'string' ? w.model : 'default';
+                const count = typeof w.count === 'number' ? `x${w.count}` : '';
+                return `w${i}:${harness}:${model}${count}`;
+              })
+              .join(', ')})`;
+      oompaConfigSummary = `${workerSummary}; reviewer=${reviewer ? 'yes' : 'no'}; planner=${
+        planner ? 'yes' : 'no'
+      }`;
+    } catch (error) {
+      oompaConfigSummary = `Failed to parse oompa.json: ${(error as Error).message}`;
+    }
+  }
+
+  const oompaStatus = clip(runCommandCapture('oompa status', projectRoot), SWARM_CONTEXT_MAX_OUTPUT_CHARS);
+  const oompaInfo = clip(runCommandCapture('oompa info', projectRoot), SWARM_CONTEXT_MAX_OUTPUT_CHARS);
+  const docCandidates = findDocCandidates(projectRoot);
+  const docBlocks = docCandidates.map((absPath) => {
+    try {
+      const content = fs.readFileSync(absPath, 'utf-8');
+      const rel = path.relative(projectRoot, absPath) || path.basename(absPath);
+      return `### ${rel}\n${clip(content, SWARM_CONTEXT_MAX_DOC_CHARS)}`;
+    } catch (error) {
+      const rel = path.relative(projectRoot, absPath) || path.basename(absPath);
+      return `### ${rel}\nFailed to read file: ${(error as Error).message}`;
+    }
+  });
+
+  const lines: string[] = [
+    'You are helping create and run a NEW oompa swarm configuration.',
+    'Use this context before writing or editing swarm config files.',
+    '',
+    '## Project Context',
+    `- Project: ${projectRoot}`,
+    `- Generated At: ${new Date().toISOString()}`,
+    `- Primary Config: ${fs.existsSync(configPath) ? configPath : 'not found'}`,
+    `- Oompa Config Summary: ${oompaConfigSummary}`,
+    '',
+    '## Available Oompa Config Files',
+  ];
+
+  if (availableConfigs.length === 0) {
+    lines.push('- (none found)');
+  } else {
+    for (const cfg of availableConfigs) {
+      lines.push(`- ${cfg}`);
+    }
+  }
+
+  lines.push(
+    '',
+    '## Command Output: oompa status',
+    '```',
+    oompaStatus || '(no output)',
+    '```',
+    '',
+    '## Command Output: oompa info',
+    '```',
+    oompaInfo || '(no output)',
+    '```',
+    '',
+    '## Docs To Follow For Good Oompa Agents',
+    ...(docBlocks.length > 0
+      ? docBlocks.flatMap((block) => ['```markdown', block, '```'])
+      : ['No docs discovered (look for README.md, AGENTS.md, and docs/*.md).']),
+    '',
+    'When the user asks for a new swarm config, follow these docs and command outputs exactly.',
+    'Prefer editing or creating oompa config files and explain why each worker/planner/reviewer setting exists.'
+  );
+
+  res.json({ prefix: lines.join('\n') });
+});
+
 app.get('/api/git-log', (req: Request, res: Response) => {
   const dir = req.query.dir as string;
   if (!dir || !dir.startsWith('/')) {

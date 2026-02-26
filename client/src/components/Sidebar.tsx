@@ -202,6 +202,8 @@ export function Sidebar() {
   const [provider, setProvider] = useState<Provider>('claude');
   const [model, setModel] = useState<ModelId | undefined>(undefined);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -223,6 +225,7 @@ export function Sidebar() {
     const lastDir = latestConv?.workingDirectory ?? lastWorkingDirectory ?? defaultCwd ?? '/';
     setDirectory(lastDir);
     setHasPendingDefault(true);
+    setModalError(null);
     setShowPicker(true);
   }, [allConversations, lastWorkingDirectory, defaultCwd]);
 
@@ -255,20 +258,46 @@ export function Sidebar() {
     return () => window.removeEventListener('keydown', handleSearchShortcut);
   }, []);
 
-  const handleConfirm = () => {
-    if (directory.trim()) {
+  const navigateToCreatedConversation = useCallback(() => {
+    const newId = jotaiStore.get(activeConversationIdAtom);
+    if (newId) navigate(`/chat/${newId}`);
+  }, [navigate]);
+
+  const handleConfirm = useCallback(() => {
+    if (!directory.trim()) return;
+    setModalError(null);
+    setLastWorkingDirectory(directory);
+    createConversation(directory, provider, model);
+    setShowPicker(false);
+    navigateToCreatedConversation();
+  }, [directory, model, navigateToCreatedConversation, provider, setLastWorkingDirectory]);
+
+  const handleCreateNewSwarm = useCallback(async () => {
+    if (!directory.trim()) return;
+    setModalError(null);
+    setIsCreatingSwarm(true);
+    try {
+      const response = await fetch(`/api/oompa-swarm-context?dir=${encodeURIComponent(directory)}`);
+      const payload = (await response.json().catch(() => ({}))) as { prefix?: string; error?: string };
+      if (!response.ok || !payload.prefix) {
+        throw new Error(payload.error ?? `Failed to load swarm context (HTTP ${response.status})`);
+      }
+
       setLastWorkingDirectory(directory);
-      createConversation(directory, provider, model);
+      createConversation(directory, provider, model, payload.prefix);
       setShowPicker(false);
-      // createConversation inserts the stub synchronously and sets activeConversationId.
-      // Read it from the store to navigate immediately — no pendingNav dance needed.
-      const newId = jotaiStore.get(activeConversationIdAtom);
-      if (newId) navigate(`/chat/${newId}`);
+      navigateToCreatedConversation();
+    } catch (error) {
+      setModalError((error as Error).message);
+    } finally {
+      setIsCreatingSwarm(false);
     }
-  };
+  }, [directory, model, navigateToCreatedConversation, provider, setLastWorkingDirectory]);
 
   const handleCancel = () => {
+    if (isCreatingSwarm) return;
     setShowPicker(false);
+    setModalError(null);
   };
 
   const handleSelectConversation = (id: string) => {
@@ -405,19 +434,39 @@ export function Sidebar() {
                   type="button"
                   className="dir-action-btn dir-confirm-btn"
                   onClick={handleConfirm}
-                  disabled={wsStatus !== 'connected' || !isDirectoryValid}
+                  disabled={wsStatus !== 'connected' || !isDirectoryValid || isCreatingSwarm}
                   title={
                     wsStatus !== 'connected'
                       ? 'Server disconnected'
                       : !isDirectoryValid
                         ? 'Invalid directory'
-                        : 'Create conversation (Shift+Enter)'
+                        : isCreatingSwarm
+                          ? 'Creating swarm context...'
+                          : 'Create conversation (Shift+Enter)'
                   }
                 >
                   Create
                   <kbd className="btn-shortcut">⇧↵</kbd>
                 </button>
+                <button
+                  type="button"
+                  className="dir-action-btn dir-swarm-btn"
+                  onClick={() => {
+                    void handleCreateNewSwarm();
+                  }}
+                  disabled={wsStatus !== 'connected' || !isDirectoryValid || isCreatingSwarm}
+                  title={
+                    wsStatus !== 'connected'
+                      ? 'Server disconnected'
+                      : !isDirectoryValid
+                        ? 'Invalid directory'
+                        : 'Create conversation with swarm context prefix'
+                  }
+                >
+                  {isCreatingSwarm ? 'Preparing...' : 'New Swarm'}
+                </button>
               </div>
+              {modalError && <div className="new-conv-error">{modalError}</div>}
             </div>
           </div>
         )}
@@ -531,6 +580,7 @@ export function Sidebar() {
                             e.stopPropagation();
                             setDirectory(group.directory);
                             setHasPendingDefault(false);
+                            setModalError(null);
                             setShowPicker(true);
                           }}
                         >
