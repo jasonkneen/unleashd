@@ -1,0 +1,110 @@
+.inline-swarm-run {
+  background: color-mix(in srgb, var(--bg-panel) 40%, transparent);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: var(--font-mono);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.inline-swarm-run.running::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--yellow);
+  box-shadow: 0 0 8px var(--yellow);
+}
+
+.inline-swarm-run.completed::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--green);
+}
+
+.inline-swarm-run-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.inline-swarm-label {
+  font-weight: 700;
+  color: var(--yellow);
+  letter-spacing: 0.05em;
+}
+
+.inline-swarm-run.completed .inline-swarm-label {
+  color: var(--text-primary);
+}
+
+.inline-swarm-id {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.inline-swarm-status {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.inline-swarm-status.status-running {
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  color: var(--yellow);
+}
+
+.inline-swarm-status.status-stopped {
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color: var(--text-muted);
+}
+
+.inline-swarm-status.status-unknown {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.inline-swarm-run-stats {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.swarm-run-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.swarm-run-stat .stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.swarm-run-stat .stat-value.stat-success {
+  color: var(--green);
+}
+
+.swarm-run-stat .stat-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

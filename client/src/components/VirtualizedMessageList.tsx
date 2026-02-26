@@ -13,6 +13,7 @@ import {
   parseAskUserQuestion,
 } from './AskUserQuestion';
 import { FilePreview, getPreviewType } from './FilePreview';
+import { InlineSwarmRunWidget } from './InlineSwarmRunWidget';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
 
 // =============================================================================
@@ -118,7 +119,12 @@ function collapseToolLines(content: string): string {
   };
 
   for (const line of lines) {
-    if (TOOL_LINE_RE.test(line)) {
+    // Check if it's an oompa run token — if so, never collapse it.
+    // Reset lastIndex because OOMPA_RUN_RE has the global flag.
+    OOMPA_RUN_RE.lastIndex = 0;
+    const isOompaRun = OOMPA_RUN_RE.test(line);
+
+    if (!isOompaRun && TOOL_LINE_RE.test(line)) {
       toolRun.push(line);
     } else {
       flushRun();
@@ -331,24 +337,47 @@ interface MemoizedMessageProps {
  */
 type ContentSegment =
   | { type: 'text'; content: string }
-  | { type: 'ask_user_question'; json: string };
+  | { type: 'ask_user_question'; json: string }
+  | { type: 'oompa_run' };
 
-function splitAskUserSegments(content: string): ContentSegment[] {
+// Matches a single line starting with typical tool emoji and containing "oompa run"
+const OOMPA_RUN_RE = /^(?:📖|✍️|✏️|⚡|📂|🔍|🌐|📓|🔧|▶️|📦|🔀|📁|🔒|🗑️|❌)\s+.*?\boompa\s+run\b.*$/gm;
+
+function splitWidgets(content: string): ContentSegment[] {
   const segments: ContentSegment[] = [];
   let lastIndex = 0;
 
-  // Reset regex state (global flag means it's stateful)
-  ASK_USER_QUESTION_RE.lastIndex = 0;
+  // Find all matches for both patterns, then sort by index
+  const matches: Array<{ type: 'ask_user_question' | 'oompa_run'; index: number; length: number; match: RegExpExecArray }> = [];
 
+  ASK_USER_QUESTION_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = ASK_USER_QUESTION_RE.exec(content)) !== null) {
+    matches.push({ type: 'ask_user_question', index: match.index, length: match[0].length, match });
+  }
+
+  OOMPA_RUN_RE.lastIndex = 0;
+  while ((match = OOMPA_RUN_RE.exec(content)) !== null) {
+    matches.push({ type: 'oompa_run', index: match.index, length: match[0].length, match });
+  }
+
+  matches.sort((a, b) => a.index - b.index);
+
+  for (const m of matches) {
+    if (m.index < lastIndex) continue; // Skip overlaps
+
     // Text before the marker
-    if (match.index > lastIndex) {
-      segments.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+    if (m.index > lastIndex) {
+      segments.push({ type: 'text', content: content.slice(lastIndex, m.index) });
     }
-    // The marker itself
-    segments.push({ type: 'ask_user_question', json: match[1] });
-    lastIndex = match.index + match[0].length;
+
+    if (m.type === 'ask_user_question') {
+      segments.push({ type: 'ask_user_question', json: m.match[1] });
+    } else if (m.type === 'oompa_run') {
+      segments.push({ type: 'oompa_run' });
+    }
+
+    lastIndex = m.index + m.length;
   }
 
   // Remaining text after last marker
@@ -374,8 +403,8 @@ const MemoizedMessage = memo(
     }, [msg.content, msg.role]);
 
     // Split content into text + AskUserQuestion widget segments
-    const segments = useMemo(() => splitAskUserSegments(displayContent), [displayContent]);
-    const hasAskWidget = segments.some((s) => s.type === 'ask_user_question');
+    const segments = useMemo(() => splitWidgets(displayContent), [displayContent]);
+    const hasWidget = segments.some((s) => s.type !== 'text');
 
     // Memoize markdown components keyed on workingDirectory so react-markdown
     // gets a stable reference and doesn't re-mount its component tree.
@@ -388,8 +417,8 @@ const MemoizedMessage = memo(
       <div className={className} ref={forwardedRef}>
         {msg.role !== 'system' && <div className={`message-role ${msg.role}`}>{msg.role}</div>}
         <div className="message-content">
-          {hasAskWidget ? (
-            // Mixed content: interleave Markdown and AskUserQuestion widgets
+          {hasWidget ? (
+            // Mixed content: interleave Markdown and interactive widgets
             segments.map((seg, i) => {
               if (seg.type === 'text') {
                 const trimmed = seg.content.trim();
@@ -404,6 +433,9 @@ const MemoizedMessage = memo(
                     {trimmed}
                   </Markdown>
                 );
+              }
+              if (seg.type === 'oompa_run') {
+                return <InlineSwarmRunWidget key={i} workingDirectory={workingDirectory} />;
               }
               // AskUserQuestion widget
               try {
@@ -459,7 +491,7 @@ interface VirtualizedMessageListProps {
   scrollToBottomRef?: React.MutableRefObject<(() => void) | null>;
   /** Conversation working directory — used to resolve relative file paths in previews. */
   workingDirectory: string;
-  swarmDebugPrefix?: string;
+  swarmDebugPrefix?: string | null;
   swarmId?: string | null;
 }
 

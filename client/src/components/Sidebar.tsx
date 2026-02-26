@@ -196,7 +196,6 @@ export function Sidebar() {
   const [showSearch, setShowSearch] = useState(false);
   const [searchFilterDir, setSearchFilterDir] = useState<string | undefined>(undefined);
   const [showPicker, setShowPicker] = useState(false);
-  const [pickerMode, setPickerMode] = useState<'chat' | 'swarm'>('chat');
   const [directory, setDirectory] = useState('');
   const [hasPendingDefault, setHasPendingDefault] = useState(false);
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
@@ -219,20 +218,22 @@ export function Sidebar() {
       });
   }, [provider]);
 
-  const handleNewConversation = useCallback((mode: 'chat' | 'swarm' = 'chat') => {
-    // Default to the most recently active conversation's working directory,
-    // then uiStore fallback, then server cwd.
-    const latestConv = allConversations[0];
-    const lastDir = latestConv?.workingDirectory ?? lastWorkingDirectory ?? defaultCwd ?? '/';
-    setDirectory(lastDir);
-    setHasPendingDefault(true);
-    setModalError(null);
-    setPickerMode(mode);
-    setShowPicker(true);
-  }, [allConversations, lastWorkingDirectory, defaultCwd]);
+  const handleNewConversation = useCallback(
+    () => {
+      // Default to the most recently active conversation's working directory,
+      // then uiStore fallback, then server cwd.
+      const latestConv = allConversations[0];
+      const lastDir = latestConv?.workingDirectory ?? lastWorkingDirectory ?? defaultCwd ?? '/';
+      setDirectory(lastDir);
+      setHasPendingDefault(true);
+      setModalError(null);
+      setShowPicker(true);
+    },
+    [allConversations, lastWorkingDirectory, defaultCwd]
+  );
 
   const handleOpenNewSwarmFlow = useCallback(() => {
-    handleNewConversation('swarm');
+    handleNewConversation();
   }, [handleNewConversation]);
 
   // Shift+Space global shortcut to open "New Conversation" dialog.
@@ -284,7 +285,10 @@ export function Sidebar() {
     setIsCreatingSwarm(true);
     try {
       const response = await fetch(`/api/oompa-swarm-context?dir=${encodeURIComponent(directory)}`);
-      const payload = (await response.json().catch(() => ({}))) as { prefix?: string; error?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        prefix?: string;
+        error?: string;
+      };
       if (!response.ok || !payload.prefix) {
         throw new Error(payload.error ?? `Failed to load swarm context (HTTP ${response.status})`);
       }
@@ -350,7 +354,13 @@ export function Sidebar() {
                 }}
                 title="Search conversations (Cmd+K)"
               >
-                <svg className="nav-search-icon" width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <svg
+                  className="nav-search-icon"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                >
                   <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
                   <line
                     x1="11"
@@ -514,8 +524,16 @@ export function Sidebar() {
       </div>
 
       <div className="conversations-list">
-        {(topLevelConversations.length > 0) && (
-          <div className="sidebar-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        {topLevelConversations.length > 0 && (
+          <div
+            className="sidebar-section-header"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '8px',
+            }}
+          >
             <span>{sidebarViewMode === 'list' ? 'All Conversations' : 'Recent Projects'}</span>
             <div className="view-mode-toggle">
               <button
@@ -525,10 +543,26 @@ export function Sidebar() {
                 title="Grouped by folder"
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <rect x="1" y="1" width="12" height="3" rx="1" fill="currentColor" opacity="0.5" />
+                  <rect
+                    x="1"
+                    y="1"
+                    width="12"
+                    height="3"
+                    rx="1"
+                    fill="currentColor"
+                    opacity="0.5"
+                  />
                   <rect x="3" y="5.5" width="10" height="2" rx="0.5" fill="currentColor" />
                   <rect x="3" y="8.5" width="10" height="2" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="11.5" width="12" height="1.5" rx="0.5" fill="currentColor" opacity="0.5" />
+                  <rect
+                    x="1"
+                    y="11.5"
+                    width="12"
+                    height="1.5"
+                    rx="0.5"
+                    fill="currentColor"
+                    opacity="0.5"
+                  />
                 </svg>
               </button>
               <button
