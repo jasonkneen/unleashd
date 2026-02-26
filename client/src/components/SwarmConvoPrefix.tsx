@@ -16,6 +16,9 @@ function parseStatsFromPrefix(prefix: string): {
   errors: string | null;
   started: string | null;
   runsDir: string | null;
+  generatedAt: string | null;
+  primaryConfig: string | null;
+  oompaConfigSummary: string | null;
 } {
   const get = (label: string): string | null => {
     const match = prefix.match(new RegExp(`^- ${label}:\\s*(.+)$`, 'm'));
@@ -31,6 +34,9 @@ function parseStatsFromPrefix(prefix: string): {
     errors: get('Errors'),
     started: get('Started'),
     runsDir: runsMatch?.[1]?.trim() ?? null,
+    generatedAt: get('Generated At'),
+    primaryConfig: get('Primary Config'),
+    oompaConfigSummary: get('Oompa Config Summary'),
   };
 }
 
@@ -53,12 +59,27 @@ function parseWorkerTable(prefix: string): {
   return { headers, rows };
 }
 
+/** Parse available config files from prefix text. */
+function parseAvailableConfigs(prefix: string): string[] {
+  const sectionMatch = prefix.match(/## Available Oompa Config Files\n([\s\S]*?)(?=\n##|\n\n|$)/);
+  if (!sectionMatch) return [];
+
+  return sectionMatch[1]
+    .split('\n')
+    .map((line) => line.trim().replace(/^- /, ''))
+    .filter((line) => line.length > 0 && line !== '(none found)');
+}
+
 export function SwarmConvoPrefix({ prefix, swarmId }: SwarmConvoPrefixProps) {
   const [expanded, setExpanded] = useState(true);
 
   const stats = useMemo(() => parseStatsFromPrefix(prefix), [prefix]);
   const workerTable = useMemo(() => parseWorkerTable(prefix), [prefix]);
-  const label = swarmId ?? 'debug';
+  const availableConfigs = useMemo(() => parseAvailableConfigs(prefix), [prefix]);
+
+  const isSetup = prefix.includes('You are helping create and run a NEW oompa swarm configuration');
+  const label = isSetup ? 'Setup' : (swarmId ?? 'debug');
+  const title = isSetup ? 'SWARM SETUP INFORMATION' : 'SWARM DEBUG';
 
   // Build a compact stats summary for the collapsed state
   const statChips: Array<{ label: string; value: string; kind: string }> = [];
@@ -78,7 +99,7 @@ export function SwarmConvoPrefix({ prefix, swarmId }: SwarmConvoPrefixProps) {
         aria-expanded={expanded}
       >
         <span className="swarm-prefix-indicator">{expanded ? '\u25BC' : '\u25B6'}</span>
-        <span className="swarm-prefix-label">SWARM DEBUG</span>
+        <span className="swarm-prefix-label">{title}</span>
         <span className="swarm-prefix-id">{label}</span>
         {statChips.length > 0 && (
           <span className="swarm-prefix-stats">
@@ -99,6 +120,45 @@ export function SwarmConvoPrefix({ prefix, swarmId }: SwarmConvoPrefixProps) {
               <div className="swarm-prefix-row">
                 <span className="swarm-prefix-key">Project</span>
                 <code className="swarm-prefix-val">{stats.project}</code>
+              </div>
+            )}
+            {stats.generatedAt && (
+              <div className="swarm-prefix-row">
+                <span className="swarm-prefix-key">Generated At</span>
+                <span className="swarm-prefix-val">{stats.generatedAt}</span>
+              </div>
+            )}
+            {stats.primaryConfig && (
+              <div className="swarm-prefix-row">
+                <span className="swarm-prefix-key">Primary Config</span>
+                <code className="swarm-prefix-val">{stats.primaryConfig}</code>
+              </div>
+            )}
+            {stats.oompaConfigSummary && (
+              <div className="swarm-prefix-row">
+                <span className="swarm-prefix-key">Summary</span>
+                <span className="swarm-prefix-val">{stats.oompaConfigSummary}</span>
+              </div>
+            )}
+            {availableConfigs.length > 0 && (
+              <div className="swarm-prefix-row" style={{ alignItems: 'flex-start' }}>
+                <span className="swarm-prefix-key" style={{ marginTop: '2px' }}>
+                  Available Configs
+                </span>
+                <div
+                  className="swarm-prefix-val"
+                  style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}
+                >
+                  {availableConfigs.map((cfg) => (
+                    <span
+                      key={cfg}
+                      className="swarm-stat-chip chip-neutral"
+                      style={{ margin: 0, padding: '2px 6px', fontSize: '10px' }}
+                    >
+                      {cfg}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
             {stats.started && (

@@ -39,7 +39,26 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.nav-section-header--clickable {
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.nav-section-header--clickable:hover,
+.nav-section-header--clickable:focus-visible {
+  background: color-mix(in srgb, var(--bg-panel) 58%, transparent);
+  border-color: var(--border-default);
+  outline: none;
+}
+
+.nav-section-header--swarms:hover,
+.nav-section-header--swarms:focus-visible {
+  border-color: var(--border-default);
 }
 
 /* + button — sharp, monospace, compact */
@@ -62,10 +81,32 @@
   transition: all 0.1s;
 }
 
+.nav-create-btn--search {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+
 .nav-create-btn:hover {
   background: var(--accent-primary);
   color: var(--text-on-accent);
   border-color: var(--accent-primary);
+}
+
+.nav-create-btn.nav-create-btn--search:hover {
+  background: color-mix(in srgb, var(--cyan) 16%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 55%, var(--border-subtle));
+}
+
+.nav-search-icon {
+  display: block;
+  color: var(--cyan-bright);
+}
+
+.nav-search-icon circle,
+.nav-search-icon line {
+  stroke: var(--cyan-bright);
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
 }
 
 .nav-create-btn--swarm:hover {
@@ -81,12 +122,11 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-primary);
-  background: none;
-  border: none;
   padding: 0;
   cursor: pointer;
   transition: color 0.15s, text-shadow 0.15s;
   white-space: nowrap;
+  pointer-events: none;
 }
 
 .nav-section-label:hover {

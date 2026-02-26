@@ -13,6 +13,7 @@ import {
   parseAskUserQuestion,
 } from './AskUserQuestion';
 import { FilePreview, getPreviewType } from './FilePreview';
+import { SwarmConvoPrefix } from './SwarmConvoPrefix';
 
 // =============================================================================
 // remarkBreaks — inline remark plugin (replaces the `remark-breaks` npm package)
@@ -458,6 +459,8 @@ interface VirtualizedMessageListProps {
   scrollToBottomRef?: React.MutableRefObject<(() => void) | null>;
   /** Conversation working directory — used to resolve relative file paths in previews. */
   workingDirectory: string;
+  swarmDebugPrefix?: string;
+  swarmId?: string | null;
 }
 
 // Estimate height based on content — rough approximation before measurement
@@ -485,17 +488,23 @@ export function VirtualizedMessageList({
   totalMessageCount,
   scrollToBottomRef,
   workingDirectory,
+  swarmDebugPrefix,
+  swarmId,
 }: VirtualizedMessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const stickyBottomRef = useRef(true);
   // Track conversation ID to detect switches
   const prevConversationIdRef = useRef<string | null>(null);
 
+  const totalItems = messageGroups.length + (swarmDebugPrefix ? 1 : 0);
+
   const virtualizer = useVirtualizer({
-    count: messageGroups.length,
+    count: totalItems,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
-      return estimateGroupSize(messageGroups[index]);
+      if (swarmDebugPrefix && index === 0) return 80; // Estimate for SwarmConvoPrefix
+      const groupIndex = swarmDebugPrefix ? index - 1 : index;
+      return estimateGroupSize(messageGroups[groupIndex]);
     },
     overscan: 3,
     measureElement: (element) => {
@@ -509,22 +518,22 @@ export function VirtualizedMessageList({
     const isNewConversation = prevConversationIdRef.current !== conversationId;
     prevConversationIdRef.current = conversationId;
 
-    if (isNewConversation && messageGroups.length > 0) {
+    if (isNewConversation && totalItems > 0) {
       // Instant scroll to bottom on conversation switch
-      virtualizer.scrollToIndex(messageGroups.length - 1, { align: 'end' });
+      virtualizer.scrollToIndex(totalItems - 1, { align: 'end' });
       stickyBottomRef.current = true;
     }
-  }, [conversationId, messageGroups.length, virtualizer]);
+  }, [conversationId, totalItems, virtualizer]);
 
   // Auto-scroll during streaming when sticky-bottom is true
   useEffect(() => {
-    if (stickyBottomRef.current && messageGroups.length > 0) {
-      virtualizer.scrollToIndex(messageGroups.length - 1, {
+    if (stickyBottomRef.current && totalItems > 0) {
+      virtualizer.scrollToIndex(totalItems - 1, {
         align: 'end',
         behavior: isRunning ? 'auto' : 'smooth',
       });
     }
-  }, [messageGroups.length, isRunning, virtualizer]);
+  }, [totalItems, isRunning, virtualizer]);
 
   // Track scroll position for sticky-bottom mode
   const handleScroll = useCallback(() => {
@@ -584,7 +593,7 @@ export function VirtualizedMessageList({
       onScroll={handleScroll}
       style={{ overflowY: 'auto' }}
     >
-      {messageGroups.length === 0 ? null : (
+      {totalItems === 0 ? null : (
         <div
           className="virtual-list-inner"
           style={{
@@ -594,8 +603,30 @@ export function VirtualizedMessageList({
           }}
         >
           {items.map((virtualItem) => {
-            const group = messageGroups[virtualItem.index];
-            const isLastGroup = virtualItem.index === messageGroups.length - 1;
+            if (swarmDebugPrefix && virtualItem.index === 0) {
+              return (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <div style={{ paddingBottom: '24px' }}>
+                    <SwarmConvoPrefix prefix={swarmDebugPrefix} swarmId={swarmId ?? null} />
+                  </div>
+                </div>
+              );
+            }
+
+            const groupIndex = swarmDebugPrefix ? virtualItem.index - 1 : virtualItem.index;
+            const group = messageGroups[groupIndex];
+            const isLastGroup = groupIndex === messageGroups.length - 1;
 
             return (
               <div

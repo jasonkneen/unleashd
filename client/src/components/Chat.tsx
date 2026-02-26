@@ -580,17 +580,16 @@ export function Chat() {
         />
       )}
 
-      {conversation.swarmDebugPrefix && (
-        <div style={{ paddingBottom: conversation.messages.length === 0 ? '16px' : 0 }}>
-          <SwarmConvoPrefix
-            prefix={conversation.swarmDebugPrefix}
-            swarmId={conversation.swarmId ?? null}
-          />
-        </div>
-      )}
-
       {conversation.messages.length === 0 ? (
         <div className="messages-container">
+          {conversation.swarmDebugPrefix && (
+            <div style={{ paddingBottom: '24px' }}>
+              <SwarmConvoPrefix
+                prefix={conversation.swarmDebugPrefix}
+                swarmId={conversation.swarmId ?? null}
+              />
+            </div>
+          )}
           <div className="empty-state">
             {confirmed
               ? 'Send a message to start the conversation.'
@@ -610,6 +609,8 @@ export function Chat() {
             totalMessageCount={conversation.messages.length}
             scrollToBottomRef={scrollToBottomRef}
             workingDirectory={conversation.workingDirectory}
+            swarmDebugPrefix={conversation.swarmDebugPrefix}
+            swarmId={conversation.swarmId ?? null}
           />
           {isStreaming && (
             <div className="typing-indicator-overlay">

@@ -1052,6 +1052,13 @@ export function inferProviderFromModel(model: string): Provider {
 const HIDE_TEST_RE = /^\s*(?:"|')?\s*\[_HIDE_TEST_\]\s*/;
 
 /**
+ * AI Writing Tool tag regex. If the first user message starts with this tag,
+ * the conversation is completely hidden from claude-web-view (isHidden=true).
+ * All jobs spawned by the ai-writing-tool app are prefixed with this tag.
+ */
+const AI_WRITING_TOOL_RE = /^\s*(?:"|')?\s*\[ai-writing-tool\]\s*/;
+
+/**
  * Oompa worker tag regex. If the first user message starts with this tag,
  * the conversation is classified as a worker (hidden from main UI).
  * Accepts optional leading whitespace/quote from wrapped prompt payloads.
@@ -1107,6 +1114,14 @@ export function extractWorkerMetadata(messages: Message[]): WorkerMetadata {
   if (hideMatch) {
     metadata.isHidden = true;
     firstUserMsg.content = firstUserMsg.content.slice(hideMatch[0].length);
+    return metadata;
+  }
+
+  // [ai-writing-tool] — hidden from ALL views (jobs spawned by the ai-writing-tool app).
+  const aiWritingToolMatch = firstUserMsg.content.match(AI_WRITING_TOOL_RE);
+  if (aiWritingToolMatch) {
+    metadata.isHidden = true;
+    firstUserMsg.content = firstUserMsg.content.slice(aiWritingToolMatch[0].length);
     return metadata;
   }
 

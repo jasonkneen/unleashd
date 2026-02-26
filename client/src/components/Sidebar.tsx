@@ -196,6 +196,7 @@ export function Sidebar() {
   const [showSearch, setShowSearch] = useState(false);
   const [searchFilterDir, setSearchFilterDir] = useState<string | undefined>(undefined);
   const [showPicker, setShowPicker] = useState(false);
+  const [pickerMode, setPickerMode] = useState<'chat' | 'swarm'>('chat');
   const [directory, setDirectory] = useState('');
   const [hasPendingDefault, setHasPendingDefault] = useState(false);
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
@@ -218,7 +219,7 @@ export function Sidebar() {
       });
   }, [provider]);
 
-  const handleNewConversation = useCallback(() => {
+  const handleNewConversation = useCallback((mode: 'chat' | 'swarm' = 'chat') => {
     // Default to the most recently active conversation's working directory,
     // then uiStore fallback, then server cwd.
     const latestConv = allConversations[0];
@@ -226,8 +227,13 @@ export function Sidebar() {
     setDirectory(lastDir);
     setHasPendingDefault(true);
     setModalError(null);
+    setPickerMode(mode);
     setShowPicker(true);
   }, [allConversations, lastWorkingDirectory, defaultCwd]);
+
+  const handleOpenNewSwarmFlow = useCallback(() => {
+    handleNewConversation('swarm');
+  }, [handleNewConversation]);
 
   // Shift+Space global shortcut to open "New Conversation" dialog.
   // Skipped when focus is in an input/textarea so it doesn't hijack typing.
@@ -317,21 +323,34 @@ export function Sidebar() {
       <div className="sidebar-header">
         {/* ── Conversations Section ── */}
         <div className="nav-section">
-          <div className="nav-section-header" style={{ justifyContent: 'space-between' }}>
-            <button type="button" className="nav-section-label" onClick={() => navigate('/')}>
-              Conversations
-            </button>
+          <div
+            className="nav-section-header nav-section-header--clickable nav-section-header--conversations"
+            style={{ justifyContent: 'space-between' }}
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate('/')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                navigate('/');
+              }
+            }}
+            title="Open conversations"
+          >
+            <span className="nav-section-label">Conversations</span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 type="button"
-                className="nav-create-btn"
-                onClick={() => {
+                className="nav-create-btn nav-create-btn--search"
+                onClick={(event) => {
+                  // Keep header click from firing.
+                  event.stopPropagation();
                   setSearchFilterDir(undefined);
                   setShowSearch(true);
                 }}
                 title="Search conversations (Cmd+K)"
               >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <svg className="nav-search-icon" width="12" height="12" viewBox="0 0 16 16" fill="none">
                   <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
                   <line
                     x1="11"
@@ -347,7 +366,10 @@ export function Sidebar() {
               <button
                 type="button"
                 className="nav-create-btn"
-                onClick={handleNewConversation}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleNewConversation();
+                }}
                 title="New conversation (Shift+Space)"
               >
                 +
@@ -359,19 +381,29 @@ export function Sidebar() {
         {/* ── Swarms Section ── */}
         {hasWorkers && (
           <div className="nav-section">
-            <div className="nav-section-header" style={{ justifyContent: 'space-between' }}>
-              <button
-                type="button"
-                className="nav-section-label"
-                onClick={() => navigate('/workers')}
-              >
-                Swarms
-              </button>
+            <div
+              className="nav-section-header nav-section-header--clickable nav-section-header--swarms"
+              style={{ justifyContent: 'space-between' }}
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate('/workers')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  navigate('/workers');
+                }
+              }}
+              title="Open swarm dashboard"
+            >
+              <span className="nav-section-label">Swarms</span>
               <button
                 type="button"
                 className="nav-create-btn nav-create-btn--swarm"
-                onClick={() => navigate('/workers')}
-                title="View swarms"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleOpenNewSwarmFlow();
+                }}
+                title="Create new swarm"
               >
                 +
               </button>
