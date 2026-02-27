@@ -2,7 +2,7 @@ import type { Conversation } from '@claude-web-view/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { allConversationsAtom } from '../atoms/conversations';
+import { workersByProjectAtom } from '../atoms/conversations';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
@@ -27,22 +27,29 @@ interface SwarmProject {
 }
 
 export function SwarmDashboard() {
-  const allConversations = useAtomValue(allConversationsAtom);
+  // Subscribe to workersByProjectAtom — only re-renders when worker conversations
+  // change, not on every structural event across all conversations.
+  const rawWorkersByProject = useAtomValue(workersByProjectAtom);
   const navigate = useNavigate();
   const promotedWorkers = useUIStore((s) => s.promotedWorkers);
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
+
+  // Re-group by project root (workersByProject keys on raw workingDirectory;
+  // we need getProjectRoot to strip worktree suffixes) and exclude promoted workers.
   const workerConversationsByProject = useMemo(() => {
     const groups = new Map<string, Conversation[]>();
 
-    for (const conv of allConversations) {
-      if (!conv.isWorker || promotedSet.has(conv.id)) continue;
-      const root = getProjectRoot(conv.workingDirectory);
-      if (!groups.has(root)) groups.set(root, []);
-      groups.get(root)!.push(conv);
+    for (const workers of rawWorkersByProject.values()) {
+      for (const conv of workers) {
+        if (promotedSet.has(conv.id)) continue;
+        const root = getProjectRoot(conv.workingDirectory);
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root)!.push(conv);
+      }
     }
 
     return groups;
-  }, [allConversations, promotedSet]);
+  }, [rawWorkersByProject, promotedSet]);
   const runtimeProjectRoots = useMemo(
     () => Array.from(workerConversationsByProject.keys()).sort(),
     [workerConversationsByProject]

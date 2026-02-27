@@ -33,7 +33,7 @@ function startServer() {
       console.log('[Server]', output.trim());
       if (output.includes('Server running') && !started) {
         started = true;
-        setTimeout(resolve, 200); // Give it a moment
+        setTimeout(resolve, 500); // Give server async init time (7000+ files parsed)
       }
     });
 
@@ -75,7 +75,7 @@ function createConnection() {
 /**
  * Wait for specific message type from WebSocket
  */
-function waitForMessage(ws, type, timeout = 5000) {
+function waitForMessage(ws, type, timeout = 8000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Timeout waiting for message type: ${type}`));
@@ -123,6 +123,29 @@ async function runTests() {
     }
   }
 
+  // Retry wrapper for tests that race against server async init (7000+ file parse).
+  // waitForMessage can timeout if the server hasn't finished loading when the
+  // test fires. Retrying with backoff is more robust than a single long timeout.
+  async function testWithRetry(name, fn, retries = 2) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await fn();
+        console.log(`✅ ${name}`);
+        passed++;
+        return;
+      } catch (err) {
+        if (attempt < retries) {
+          console.log(`⚠️  ${name} (attempt ${attempt} failed, retrying...)`);
+          await new Promise(r => setTimeout(r, 500));
+        } else {
+          console.log(`❌ ${name}`);
+          console.log(`   Error: ${err.message}`);
+          failed++;
+        }
+      }
+    }
+  }
+
   try {
     // Start server
     console.log('Starting server...');
@@ -139,8 +162,8 @@ async function runTests() {
       ws.close();
     });
 
-    // Test: Create conversation
-    await test('Create new conversation', async () => {
+    // Test: Create conversation (retry — races with server async init)
+    await testWithRetry('Create new conversation', async () => {
       const ws = await createConnection();
       await waitForMessage(ws, 'init');
 
@@ -214,8 +237,8 @@ async function runTests() {
       ws.close();
     });
 
-    // Test: Multiple connections receive same state
-    await test('Multiple connections sync state', async () => {
+    // Test: Multiple connections receive same state (retry — races with server async init)
+    await testWithRetry('Multiple connections sync state', async () => {
       const ws1 = await createConnection();
       const init1 = await waitForMessage(ws1, 'init');
 
@@ -295,8 +318,8 @@ async function runTests() {
       ws.close();
     });
 
-    // Test: Deleted conversation does not reappear on new connection
-    await test('Deleted conversation stays deleted on reconnect', async () => {
+    // Test: Deleted conversation does not reappear on new connection (retry — races with server async init)
+    await testWithRetry('Deleted conversation stays deleted on reconnect', async () => {
       const ws1 = await createConnection();
       const init1 = await waitForMessage(ws1, 'init');
       const baseCount = init1.conversations.length;

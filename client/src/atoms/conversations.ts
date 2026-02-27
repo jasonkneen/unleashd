@@ -87,3 +87,46 @@ export const allConversationIdsAtom = atom((get) => get(allConversationsAtom).ma
 
 // Total count — cheaper than subscribing to allConversationsAtom for existence checks
 export const conversationCountAtom = atom((get) => get(conversationsAtom).size);
+
+// =============================================================================
+// Worker / Swarm Derived Atoms
+//
+// These atoms only read worker conversations from conversationsAtom. Because the
+// Map uses structural sharing (non-worker updates don't change worker entries),
+// these atoms produce the same result when only non-worker conversations change,
+// so swarm components skip re-render on unrelated conversation events.
+// =============================================================================
+
+// Workers grouped by project directory (workingDirectory stripped to project root).
+// Used by SwarmDashboard and SwarmAnalytics to build per-project views without
+// subscribing to allConversationsAtom (which sorts ALL conversations on every change).
+export const workersByProjectAtom = atom((get) => {
+  const convs = get(conversationsAtom);
+  const groups = new Map<string, Conversation[]>();
+  for (const conv of convs.values()) {
+    if (!conv.isWorker) continue;
+    const root = conv.workingDirectory ?? 'unknown';
+    let group = groups.get(root);
+    if (!group) {
+      group = [];
+      groups.set(root, group);
+    }
+    group.push(conv);
+  }
+  return groups;
+});
+
+// Just the project roots that have workers (for project picker dropdowns).
+export const workerProjectRootsAtom = atom((get) => {
+  return Array.from(get(workersByProjectAtom).keys()).sort();
+});
+
+// All worker IDs — stable list for per-item subscriptions on worker list views.
+export const workerIdsAtom = atom((get) => {
+  const convs = get(conversationsAtom);
+  const ids: string[] = [];
+  for (const conv of convs.values()) {
+    if (conv.isWorker) ids.push(conv.id);
+  }
+  return ids;
+});

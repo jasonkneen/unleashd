@@ -1429,6 +1429,19 @@ wss.on('connection', (ws: WebSocket) => {
             model,
             swarmDebugPrefix,
           });
+
+          // If no model specified by client, resolve the provider's isDefault model
+          // so the CLI receives the same model the UI shows pre-selected in the dropdown.
+          if (!conv.model) {
+            const providerInfo = providers[conv.provider];
+            if (providerInfo) {
+              const defaultModel = providerInfo.listModels().find((m) => m.isDefault);
+              if (defaultModel) {
+                conv.model = defaultModel.id as ModelId;
+              }
+            }
+          }
+
           conversations.set(id, conv);
 
           // No need to start - we spawn per message now

@@ -10,7 +10,7 @@ import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
-import { allConversationsAtom, conversationAtomFamily } from '../atoms/conversations';
+import { conversationAtomFamily, workersByProjectAtom } from '../atoms/conversations';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectName, getProjectRoot } from '../utils/swarmUtils';
@@ -597,7 +597,9 @@ export function SwarmDetail() {
   const projectRoot = searchParams.get('project') ?? '';
   const navigate = useNavigate();
 
-  const allConversations = useAtomValue(allConversationsAtom);
+  // Subscribe to workersByProjectAtom — only re-renders when worker conversations
+  // change, not on every structural event across all conversations.
+  const rawWorkersByProject = useAtomValue(workersByProjectAtom);
   const promotedWorkers = useUIStore((s) => s.promotedWorkers);
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
   const runtimeSnapshots = useSwarmRuntimeSnapshots(projectRoot ? [projectRoot] : []);
@@ -666,18 +668,21 @@ export function SwarmDetail() {
 
   // Filter workers belonging to this project, build exec groups with paired reviews/fixes.
   // Reviews/fixes are matched to exec workers by time proximity within the same swarmId.
+  // Uses workersByProjectAtom (pre-filtered to isWorker) so we skip non-worker conversations.
   const { execGroups, allWorkers, workCount, reviewCount, fixCount } = useMemo(() => {
     const execs: Conversation[] = [];
     const reviewsAndFixes: Conversation[] = [];
 
-    for (const conv of allConversations) {
-      if (!conv.isWorker || promotedSet.has(conv.id)) continue;
-      if (getProjectRoot(conv.workingDirectory) !== projectRoot) continue;
+    for (const workers of rawWorkersByProject.values()) {
+      for (const conv of workers) {
+        if (promotedSet.has(conv.id)) continue;
+        if (getProjectRoot(conv.workingDirectory) !== projectRoot) continue;
 
-      if (conv.workerRole === 'review' || conv.workerRole === 'fix') {
-        reviewsAndFixes.push(conv);
-      } else {
-        execs.push(conv);
+        if (conv.workerRole === 'review' || conv.workerRole === 'fix') {
+          reviewsAndFixes.push(conv);
+        } else {
+          execs.push(conv);
+        }
       }
     }
 
@@ -731,7 +736,7 @@ export function SwarmDetail() {
       reviewCount: reviewsAndFixes.filter((r) => r.workerRole === 'review').length,
       fixCount: reviewsAndFixes.filter((r) => r.workerRole === 'fix').length,
     };
-  }, [allConversations, promotedSet, projectRoot, isWorkerRunningLive]);
+  }, [rawWorkersByProject, promotedSet, projectRoot, isWorkerRunningLive]);
 
   // Selected exec group — click a worker to show task log (left) + review (right)
   const [selectedGroupIdx, setSelectedGroupIdx] = useState<number>(0);
@@ -750,18 +755,16 @@ export function SwarmDetail() {
   const taskPaneId = selectedGroup?.exec.id ?? null;
   // Show the most recent review for this exec group
   const reviewPaneId = selectedGroup?.reviews[0]?.id ?? null;
+  // Derive running state from the exec group directly — no need to scan all conversations.
   const taskPaneRunning = useMemo(() => {
-    if (!taskPaneId) return false;
-    const taskConv = allConversations.find((c) => c.id === taskPaneId);
-    if (!taskConv) return false;
-    return isWorkerRunningLive(taskConv);
-  }, [allConversations, taskPaneId, isWorkerRunningLive]);
+    if (!selectedGroup) return false;
+    return isWorkerRunningLive(selectedGroup.exec);
+  }, [selectedGroup, isWorkerRunningLive]);
   const reviewPaneRunning = useMemo(() => {
-    if (!reviewPaneId) return false;
-    const reviewConv = allConversations.find((c) => c.id === reviewPaneId);
+    const reviewConv = selectedGroup?.reviews[0];
     if (!reviewConv) return false;
     return isWorkerRunningLive(reviewConv);
-  }, [allConversations, reviewPaneId, isWorkerRunningLive]);
+  }, [selectedGroup, isWorkerRunningLive]);
 
   // Computed stats
   const workerVisibility = useMemo(

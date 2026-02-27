@@ -7,7 +7,7 @@ import type {
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { allConversationsAtom } from '../atoms/conversations';
+import { workersByProjectAtom } from '../atoms/conversations';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
 import { getProjectName, getProjectRoot } from '../utils/swarmUtils';
@@ -519,7 +519,9 @@ function StatsPanel({ runData }: StatsPanelProps) {
 
 export function SwarmAnalytics() {
   const navigate = useNavigate();
-  const allConversations = useAtomValue(allConversationsAtom);
+  // Subscribe to workersByProjectAtom — only re-renders when worker conversations
+  // change, not on every structural event across all conversations.
+  const rawWorkersByProject = useAtomValue(workersByProjectAtom);
   const promotedWorkers = useUIStore((s) => s.promotedWorkers);
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
 
@@ -536,15 +538,17 @@ export function SwarmAnalytics() {
   // in a loop because selectedSwarmId was in the dep array.
   const hasAutoSelected = useRef(false);
 
-  // Group workers by project
+  // Group workers by project root (strip worktree suffixes), exclude promoted.
   const projects = useMemo((): SwarmProject[] => {
     const groups = new Map<string, Conversation[]>();
 
-    for (const conv of allConversations) {
-      if (!conv.isWorker || promotedSet.has(conv.id)) continue;
-      const root = getProjectRoot(conv.workingDirectory);
-      if (!groups.has(root)) groups.set(root, []);
-      groups.get(root)!.push(conv);
+    for (const workers of rawWorkersByProject.values()) {
+      for (const conv of workers) {
+        if (promotedSet.has(conv.id)) continue;
+        const root = getProjectRoot(conv.workingDirectory);
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root)!.push(conv);
+      }
     }
 
     return Array.from(groups.entries())
@@ -563,7 +567,7 @@ export function SwarmAnalytics() {
         };
       })
       .sort((a, b) => b.workers.length - a.workers.length);
-  }, [allConversations, promotedSet]);
+  }, [rawWorkersByProject, promotedSet]);
 
   // Reset auto-selection flag when project changes
   useEffect(() => {
