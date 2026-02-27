@@ -235,6 +235,98 @@ async function runTests() {
       ws2.close();
     });
 
+    // Test: Upload rejects path traversal in conversationId
+    await test('Upload rejects path traversal in conversationId', async () => {
+      const http = require('node:http');
+      const boundary = '----TestBoundary' + Date.now();
+      const body = [
+        `--${boundary}`,
+        'Content-Disposition: form-data; name="conversationId"',
+        '',
+        '../../etc',
+        `--${boundary}`,
+        'Content-Disposition: form-data; name="files"; filename="test.txt"',
+        'Content-Type: text/plain',
+        '',
+        'hello',
+        `--${boundary}--`,
+      ].join('\r\n');
+
+      const result = await new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: 'localhost',
+            port: PORT,
+            path: '/api/upload',
+            method: 'POST',
+            headers: {
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              'Content-Length': Buffer.byteLength(body),
+            },
+          },
+          (res) => {
+            let data = '';
+            res.on('data', (chunk) => (data += chunk));
+            res.on('end', () => resolve({ status: res.statusCode, body: data }));
+          }
+        );
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+      });
+
+      if (result.status < 400) {
+        throw new Error(`Expected 4xx, got ${result.status}`);
+      }
+    });
+
+    // Test: Malformed WS message returns error (not crash)
+    await test('Malformed WS message returns error', async () => {
+      const ws = await createConnection();
+      await waitForMessage(ws, 'init');
+
+      // Send a message missing required fields
+      send(ws, { type: 'send_message' }); // missing conversationId and content
+      // Server should not crash — verify by sending a valid message after
+      send(ws, { type: 'new_conversation' });
+      const msg = await waitForMessage(ws, 'conversation_created');
+      if (!msg.conversation.id) throw new Error('Server crashed after malformed message');
+
+      ws.close();
+    });
+
+    // Test: Deleted conversation does not reappear on new connection
+    await test('Deleted conversation stays deleted on reconnect', async () => {
+      const ws1 = await createConnection();
+      const init1 = await waitForMessage(ws1, 'init');
+      const baseCount = init1.conversations.length;
+
+      // Create then delete
+      send(ws1, { type: 'new_conversation' });
+      const created = await waitForMessage(ws1, 'conversation_created');
+      const convId = created.conversation.id;
+
+      send(ws1, { type: 'delete_conversation', conversationId: convId });
+      await waitForMessage(ws1, 'conversation_deleted');
+      ws1.close();
+
+      // Reconnect and verify it's gone
+      const ws2 = await createConnection();
+      const init2 = await waitForMessage(ws2, 'init');
+
+      const found = init2.conversations.find((c) => c.id === convId);
+      if (found) {
+        throw new Error('Deleted conversation reappeared in init');
+      }
+      if (init2.conversations.length !== baseCount) {
+        throw new Error(
+          `Expected ${baseCount} conversations, got ${init2.conversations.length}`
+        );
+      }
+
+      ws2.close();
+    });
+
     console.log(`\n${'='.repeat(40)}`);
     console.log(`Results: ${passed} passed, ${failed} failed`);
     console.log(`${'='.repeat(40)}\n`);
