@@ -37,6 +37,7 @@ import {
   isJsonlToolUseBlock,
   isJsonlUserEntry,
 } from '@claude-web-view/shared';
+import { formatToolResult, formatToolUse } from './tool-format';
 
 /** Canonicalize a directory path: resolve `.`/`..` and strip trailing slashes
  *  so "/foo/bar/" and "/foo/bar" group as the same project. Always returns absolute path. */
@@ -488,10 +489,11 @@ function extractOpenCodeContent(
     if (role === 'assistant' && part.type === 'tool') {
       const toolName = part.tool ?? 'tool';
       const status = part.toolStatus;
+      const formattedTool = formatToolUse(toolName);
       if (status && status !== 'completed' && status !== 'done') {
-        toolParts.push(`[Tool: ${toolName} (${status})]`);
+        toolParts.push(`${formattedTool} (${status})`);
       } else {
-        toolParts.push(`[Tool: ${toolName}]`);
+        toolParts.push(formattedTool);
       }
       continue;
     }
@@ -789,13 +791,7 @@ function extractAssistantContent(entry: JsonlAssistantEntry): string {
       textParts.push((block as JsonlTextBlock).text);
     } else if (isJsonlToolUseBlock(block)) {
       const toolBlock = block as JsonlToolUseBlock;
-      // AskUserQuestion: embed structured marker so client renders interactive widget.
-      // See client/src/components/AskUserQuestion.tsx for the renderer.
-      if (toolBlock.name === 'AskUserQuestion' && toolBlock.input) {
-        textParts.push(`<!--ask_user_question:${JSON.stringify(toolBlock.input)}-->`);
-      } else {
-        textParts.push(`[Tool: ${toolBlock.name}]`);
-      }
+      textParts.push(formatToolUse(toolBlock.name, toolBlock.input));
     }
     // Skip thinking blocks - internal reasoning
   }
@@ -1267,8 +1263,7 @@ export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSe
         const call = tc as Record<string, unknown>;
         const name = (call.name as string) ?? 'tool';
         const args = call.args as Record<string, unknown> | undefined;
-        const argSummary = args?.command ?? args?.file_path ?? args?.path ?? '';
-        parts.push(`[Tool: ${name}${argSummary ? ` ${argSummary}` : ''}]`);
+        parts.push(formatToolUse(name, args));
       }
 
       const fullContent = parts.join('\n').trim();
