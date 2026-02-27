@@ -79,7 +79,7 @@
 
 /* Project path display */
 .project-path {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 14px;
   color: var(--cyan-bright);
   font-weight: 500;
@@ -168,7 +168,7 @@
 .gallery-card-id {
   font-size: 13px;
   color: var(--text-secondary);
-  font-family: monospace;
+  font-family: var(--font-mono);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -265,7 +265,7 @@
 .gallery-card-dir {
   font-size: 11px;
   color: var(--text-muted);
-  font-family: monospace;
+  font-family: var(--font-mono);
   margin-bottom: 8px;
 }
 

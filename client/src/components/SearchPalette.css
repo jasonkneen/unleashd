@@ -6,7 +6,7 @@
 .search-palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: color-mix(in srgb, var(--bg-darkest) 50%, transparent);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -22,7 +22,7 @@
   max-width: 640px;
   max-height: 480px;
   overflow: hidden;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 20px 40px color-mix(in srgb, var(--bg-darkest) 40%, transparent);
   display: flex;
   flex-direction: column;
 }
@@ -92,7 +92,7 @@
 
 .search-result-folder {
   font-size: 11px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   color: var(--text-secondary);
 }

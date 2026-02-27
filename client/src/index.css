@@ -179,10 +179,23 @@
   --code-string: var(--green);
 
   /* =========================================
+     DERIVED: Semantic accent mappings (cont.)
+     ========================================= */
+  --accent-primary-glow: var(--violet-glow);
+
+  /* =========================================
+     DERIVED: Elevated surface
+     Used by tooltips, floating panels, popovers.
+     ========================================= */
+  --bg-elevated: var(--bg-raised-5);
+
+  /* =========================================
      TYPOGRAPHY
      ========================================= */
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  --font-mono: "Monaco", "Menlo", "Consolas", "Liberation Mono", monospace;
+
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
   font-weight: 400;
 
   color-scheme: dark;
@@ -203,6 +216,18 @@ a {
 
 a:hover {
   color: var(--cyan-bright);
+}
+
+/* Monospace restriction: only code, pre, and explicitly technical elements.
+   Prevents monospace bleed into prose content (paragraphs, headings, lists). */
+code,
+pre,
+kbd,
+samp,
+.filepath-pill,
+.cli-context,
+.raw-json {
+  font-family: var(--font-mono);
 }
 
 body {

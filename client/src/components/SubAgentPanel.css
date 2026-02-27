@@ -10,7 +10,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   margin: 0 24px 16px 24px;
-  font-family: "Monaco", "Menlo", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   overflow: hidden;
 }
@@ -116,21 +116,21 @@
   color: var(--text-muted);
   flex-shrink: 0;
   width: 20px;
-  font-family: "Monaco", "Menlo", monospace;
+  font-family: var(--font-mono);
 }
 
 .tree-connector-sub {
   color: var(--text-muted);
   flex-shrink: 0;
   width: 20px;
-  font-family: "Monaco", "Menlo", monospace;
+  font-family: var(--font-mono);
 }
 
 .action-connector {
   color: var(--text-muted);
   flex-shrink: 0;
   margin-right: 4px;
-  font-family: "Monaco", "Menlo", monospace;
+  font-family: var(--font-mono);
 }
 
 /* Status indicator for each agent */

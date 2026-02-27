@@ -21,7 +21,7 @@
 .file-preview-link {
   color: var(--cyan);
   text-decoration: underline;
-  font-family: "Monaco", "Menlo", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
 }
 
@@ -41,7 +41,7 @@
   border: 1px solid var(--border-emphasis);
   border-radius: 8px;
   padding: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg-darkest) 50%, transparent);
   z-index: 2100;
   pointer-events: none;
 }
@@ -65,7 +65,7 @@
 .file-preview-path {
   font-size: 11px;
   color: var(--text-muted);
-  font-family: "Monaco", "Menlo", "Consolas", monospace;
+  font-family: var(--font-mono);
   max-width: 60vw;
   overflow: hidden;
   text-overflow: ellipsis;

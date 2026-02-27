@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: color-mix(in srgb, var(--bg-darkest) 50%, transparent);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -20,7 +20,7 @@
   max-width: 600px;
   max-height: 400px;
   overflow: hidden;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 20px 40px color-mix(in srgb, var(--bg-darkest) 40%, transparent);
 }
 
 .prompt-palette-input {

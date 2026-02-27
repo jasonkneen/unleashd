@@ -235,7 +235,7 @@
   font-size: 11px;
   line-height: 1.4;
   overflow-x: auto;
-  font-family: "Menlo", "Monaco", "Courier New", monospace;
+  font-family: var(--font-mono);
 }
 
 /* ─── Section groups (accent families, bg, text, etc.) ─── */
@@ -365,7 +365,7 @@
 .semantic-accent {
   font-size: 10px;
   color: var(--text-muted);
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 /* ─── AI input section ─── */

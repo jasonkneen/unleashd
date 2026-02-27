@@ -8,7 +8,7 @@
   flex-direction: column;
   gap: 12px;
   font-family: var(--font-mono);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--bg-darkest) 10%, transparent);
   position: relative;
   overflow: hidden;
 }

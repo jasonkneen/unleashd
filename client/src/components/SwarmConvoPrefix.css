@@ -56,7 +56,7 @@
 }
 
 .swarm-prefix-id {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-emphasis);
   font-weight: 600;
@@ -145,7 +145,7 @@
 }
 
 code.swarm-prefix-val {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--cyan);
 }
@@ -221,7 +221,7 @@ code.swarm-prefix-val {
 }
 
 .swarm-prefix-table .worker-id-cell {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -278,7 +278,7 @@ code.swarm-prefix-val {
   background: var(--bg-base);
   border-radius: 4px;
   font-size: 11px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   line-height: 1.5;
   color: var(--text-secondary);
   white-space: pre-wrap;
