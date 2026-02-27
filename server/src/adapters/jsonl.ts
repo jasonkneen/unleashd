@@ -184,13 +184,16 @@ export async function getOpenCodeSessionMetadataIndex(
 }
 
 /**
- * Decode a project directory name back to the original path
+ * Decode a project directory name back to the original path.
  * Claude Code encodes paths by replacing '/' with '-'
  * e.g., "-Users-nick-project" -> "/Users/nick/project"
+ *
+ * Claude Code encodes '/Users/foo/my-project' as '-Users-foo-my-project'.
+ * Decoding is lossy: real hyphens in directory names are indistinguishable
+ * from encoded path separators. This only affects old sessions that lack
+ * an explicit `cwd` entry (modern Claude Code includes one).
  */
 export function decodeProjectPath(encodedName: string): string {
-  // The encoded name starts with '-' and replaces '/' with '-'
-  // e.g., "-Users-nick-project" -> "/Users/nick/project"
   if (encodedName.startsWith('-')) {
     return encodedName.replace(/-/g, '/');
   }
@@ -241,9 +244,9 @@ export async function parseJsonlFile(filePath: string): Promise<JsonlSession> {
           }
         }
 
-        // Track timestamps
+        // Track timestamps (parseTimestamp guards against NaN / invalid dates)
         if (entry.timestamp) {
-          const timestamp = new Date(entry.timestamp);
+          const timestamp = parseTimestamp(entry.timestamp) ?? new Date();
           if (!createdAt || timestamp < createdAt) {
             createdAt = timestamp;
           }
@@ -764,7 +767,16 @@ function extractUserContent(entry: JsonlUserEntry): string {
     for (const block of content) {
       if ('type' in block && block.type === 'tool_result' && 'content' in block) {
         // Include a short indicator for tool results
-        const toolContent = block.content as string;
+        // Claude API allows tool_result content to be a string OR an array of content blocks.
+        const rawContent = block.content;
+        const toolContent = typeof rawContent === 'string'
+          ? rawContent
+          : Array.isArray(rawContent)
+            ? (rawContent as Array<{type?: string; text?: string}>)
+                .filter(b => b.type === 'text')
+                .map(b => b.text ?? '')
+                .join('')
+            : String(rawContent);
         if (toolContent.length > 200) {
           textParts.push(`[Tool result: ${toolContent.substring(0, 200)}...]`);
         } else {
@@ -773,7 +785,10 @@ function extractUserContent(entry: JsonlUserEntry): string {
       }
     }
 
-    return textParts.join('\n') || '[Tool interaction]';
+    // Return empty string when no useful text was extracted — the caller
+    // filters on `if (content && ...)` so this correctly suppresses
+    // tool-only interaction entries from the visible message stream.
+    return textParts.join('\n') || '';
   }
 
   return '';
@@ -814,7 +829,7 @@ export function extractMessagesFromEntries(entries: JsonlEntry[]): Message[] {
         messages.push({
           role: 'user',
           content,
-          timestamp: new Date(entry.timestamp),
+          timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
         });
       }
     } else if (isJsonlAssistantEntry(entry)) {
@@ -823,7 +838,7 @@ export function extractMessagesFromEntries(entries: JsonlEntry[]): Message[] {
         messages.push({
           role: 'assistant',
           content,
-          timestamp: new Date(entry.timestamp),
+          timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
         });
       }
     }
@@ -891,7 +906,7 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
           messages.push({
             role: 'user',
             content,
-            timestamp: new Date(entry.timestamp),
+            timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
           });
         }
       } else if (isCodexAgentMessageEvent(entry)) {
@@ -900,7 +915,7 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
           messages.push({
             role: 'assistant',
             content,
-            timestamp: new Date(entry.timestamp),
+            timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
           });
         }
       }
@@ -926,7 +941,7 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
     messages.push({
       role,
       content,
-      timestamp: new Date(entry.timestamp),
+      timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
     });
   }
 
@@ -961,7 +976,7 @@ export function extractSubAgentsFromEntries(entries: JsonlEntry[]): SubAgent[] {
     }
 
     const content = entry.message.content;
-    const timestamp = new Date(entry.timestamp);
+    const timestamp = parseTimestamp(entry.timestamp) ?? new Date();
 
     // Scan all content blocks in this assistant message
     for (const block of content) {
@@ -1078,7 +1093,8 @@ const OOMPA_RE = /^\s*(?:"|')?\s*\[oompa(?::([^:\]]+)(?::([^\]]+))?)?\]/;
  */
 function inferWorkerRole(content: string): 'work' | 'review' | 'fix' {
   if (content.startsWith('The reviewer found issues')) return 'fix';
-  if (content.includes('VERDICT: APPROVED') && content.includes('VERDICT: NEEDS_CHANGES'))
+  // A review prompt may contain only one verdict example, so use OR (not AND).
+  if (content.includes('VERDICT: APPROVED') || content.includes('VERDICT: NEEDS_CHANGES'))
     return 'review';
   return 'work';
 }
@@ -1215,12 +1231,29 @@ async function readGeminiProjectRoot(sessionFilePath: string): Promise<string> {
  *   gemini: { type: "gemini", content: "...", toolCalls?: [...], model?: "..." }
  */
 export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSession> {
-  const raw = await fs.promises.readFile(filePath, 'utf-8');
-  const data = JSON.parse(raw) as Record<string, unknown>;
+  let data: Record<string, unknown>;
+  try {
+    const raw = await fs.promises.readFile(filePath, 'utf-8');
+    data = JSON.parse(raw) as Record<string, unknown>;
+    if (!data || typeof data !== 'object') throw new Error('Not an object');
+  } catch {
+    // Malformed/partial JSON — return empty session (caller filters on messages.length)
+    const sessionId = path.basename(filePath, '.json');
+    return {
+      sessionId,
+      filePath,
+      workingDirectory: '',
+      model: 'unknown',
+      createdAt: new Date(),
+      modifiedAt: new Date(),
+      messages: [],
+    };
+  }
 
   const sessionId = (data.sessionId as string) ?? path.basename(filePath, '.json');
-  const startTime = data.startTime ? new Date(data.startTime as string) : new Date();
-  const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated as string) : startTime;
+  // Use parseTimestamp for consistent validation (matches all other parsers in this file).
+  const startTime = parseTimestamp(data.startTime) ?? new Date();
+  const lastUpdated = parseTimestamp(data.lastUpdated) ?? startTime;
   const workingDirectory = await readGeminiProjectRoot(filePath);
 
   const rawMessages = Array.isArray(data.messages) ? data.messages : [];

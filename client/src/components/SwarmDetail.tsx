@@ -93,7 +93,9 @@ function extractVerdict(conv: Conversation): 'approved' | 'needs-changes' | 'rej
     if (msg.content.includes('VERDICT: NEEDS_CHANGES')) return 'needs-changes';
     if (msg.content.includes('VERDICT: REJECTED')) return 'rejected';
   }
-  return conv.isRunning ? 'pending' : 'pending';
+  // No verdict string found in any assistant message.
+  // Could be still running, or finished without printing VERDICT.
+  return 'pending';
 }
 
 /** Build the invisible system-prefix for a swarm debug conversation.
@@ -319,30 +321,34 @@ function OompaConfigPanel({ projectRoot }: { projectRoot: string }) {
       .catch((e: Error) => setError(e.message));
   }, [projectRoot]);
 
+  // Move fetch outside setState updater — StrictMode double-fires updater callbacks,
+  // which would duplicate the fetch. Instead, read current state and branch outside.
   const togglePrompt = useCallback(
     (promptPath: string) => {
-      setExpandedPrompts((prev) => {
-        const next = new Map(prev);
-        if (next.has(promptPath)) {
+      if (expandedPrompts.has(promptPath)) {
+        setExpandedPrompts((prev) => {
+          const next = new Map(prev);
           next.delete(promptPath);
           return next;
-        }
-        const absolutePath = promptPath.startsWith('/')
-          ? promptPath
-          : `${projectRoot}/${promptPath}`;
-        fetch(`/api/read-file?path=${encodeURIComponent(absolutePath)}`)
-          .then((res) => res.json())
-          .then((data: { content: string }) => {
-            setExpandedPrompts((p) => new Map(p).set(promptPath, data.content));
-          })
-          .catch(() => {
-            setExpandedPrompts((p) => new Map(p).set(promptPath, '(failed to load)'));
-          });
-        next.set(promptPath, 'Loading...');
-        return next;
-      });
+        });
+        return;
+      }
+
+      setExpandedPrompts((prev) => new Map(prev).set(promptPath, 'Loading...'));
+
+      const absolutePath = promptPath.startsWith('/')
+        ? promptPath
+        : `${projectRoot}/${promptPath}`;
+      fetch(`/api/read-file?path=${encodeURIComponent(absolutePath)}`)
+        .then((res) => res.json())
+        .then((data: { content: string }) =>
+          setExpandedPrompts((p) => new Map(p).set(promptPath, data.content))
+        )
+        .catch(() =>
+          setExpandedPrompts((p) => new Map(p).set(promptPath, '(failed to load)'))
+        );
     },
-    [projectRoot]
+    [projectRoot, expandedPrompts]
   );
 
   return (
@@ -626,6 +632,10 @@ export function SwarmDetail() {
   // Tab state
   const [activeTab, setActiveTab] = useState<SwarmTab>('runs');
 
+  // Inline confirmation for destructive stop/kill actions (replaces window.confirm/alert)
+  const [confirmAction, setConfirmAction] = useState<'stop' | 'kill' | null>(null);
+  const [signalError, setSignalError] = useState<string | null>(null);
+
   // Swarm debug conversation: create a new Claude conversation pre-seeded with swarm context
   const handleStartDebugConversation = useCallback(async () => {
     const swarmId = runtimeSnapshot?.run?.swarmId ?? null;
@@ -810,7 +820,7 @@ export function SwarmDetail() {
               {displayRunning > 0 ? `${displayRunning} running` : 'All idle'}
             </span>
           </div>
-          {displayRunning > 0 && (
+          {displayRunning > 0 && confirmAction === null && (
             <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
               <button
                 style={{
@@ -826,13 +836,8 @@ export function SwarmDetail() {
                 title="Stop swarm gracefully (finish current cycle)"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (confirm('Stop swarm? Workers will finish their current cycle and exit.')) {
-                    sendSwarmSignal(projectRoot, 'stop')
-                      .then((r) => {
-                        if (!r.ok) alert(`Stop failed: ${r.message}`);
-                      })
-                      .catch((err: Error) => alert(`Stop failed: ${err.message}`));
-                  }
+                  setSignalError(null);
+                  setConfirmAction('stop');
                 }}
               >
                 Stop
@@ -851,20 +856,69 @@ export function SwarmDetail() {
                 title="Kill swarm immediately (SIGKILL)"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (
-                    confirm('Kill swarm immediately? This will forcibly terminate all workers.')
-                  ) {
-                    sendSwarmSignal(projectRoot, 'kill')
-                      .then((r) => {
-                        if (!r.ok) alert(`Kill failed: ${r.message}`);
-                      })
-                      .catch((err: Error) => alert(`Kill failed: ${err.message}`));
-                  }
+                  setSignalError(null);
+                  setConfirmAction('kill');
                 }}
               >
                 Kill
               </button>
             </div>
+          )}
+          {confirmAction !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '8px', fontSize: '12px' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                {confirmAction === 'stop'
+                  ? 'Stop swarm? Workers will finish their current cycle.'
+                  : 'Kill swarm immediately? This will forcibly terminate all workers.'}
+              </span>
+              <button
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: `1px solid ${confirmAction === 'kill' ? 'var(--red, #dc322f)' : 'var(--yellow, #b58900)'}`,
+                  background: confirmAction === 'kill' ? 'var(--red, #dc322f)' : 'var(--yellow, #b58900)',
+                  color: 'var(--bg-card)',
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const action = confirmAction;
+                  setConfirmAction(null);
+                  sendSwarmSignal(projectRoot, action)
+                    .then((r) => {
+                      if (!r.ok) setSignalError(`${action} failed: ${r.message}`);
+                    })
+                    .catch((err: Error) => setSignalError(`${action} failed: ${err.message}`));
+                }}
+              >
+                Confirm
+              </button>
+              <button
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text-secondary)',
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConfirmAction(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {signalError && (
+            <span style={{ fontSize: '11px', color: 'var(--red, #dc322f)', marginLeft: '8px' }}>
+              {signalError}
+            </span>
           )}
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             {runtimeTotalWorkers} workers &middot; {allWorkers.length} sessions ({workCount} exec,{' '}

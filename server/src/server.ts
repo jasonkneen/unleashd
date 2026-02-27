@@ -22,6 +22,7 @@ import type {
   ServerMessage,
   SubAgent,
 } from '@claude-web-view/shared';
+import { safeParseClientMessage } from '@claude-web-view/shared';
 import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -59,6 +60,9 @@ const localCompletionSuppressUntil = new Map<string, number>();
 // All sessionIds belonging to known conversations (including rotated ones from resetProcess).
 // Prevents the file poller from importing an orphaned JSONL as a duplicate conversation.
 const knownSessionIds = new Set<string>();
+// Session IDs of deliberately deleted conversations. Prevents the file poller
+// from re-importing orphaned JSONL files that still exist on disk.
+const deletedSessionIds = new Set<string>();
 // Provider session IDs can differ from UI conversation IDs (notably Gemini).
 // This alias map resolves provider-session identity back to canonical conversation IDs.
 const sessionAliasToConversationId = new Map<string, string>();
@@ -271,14 +275,14 @@ function normalizeProviderErrorMessage(message: string): string {
  */
 // STATE MACHINE
 // =============
-// Server-side (authoritative):
-//   isRunning   — turn is active (spawn → true, turn.complete/close → false)
+// Server-side (authoritative, broadcast to clients via 'status' events):
+//   isRunning   — process is alive (spawn → true, turn.complete/close → false)
+//   isStreaming  — assistant is producing content (first text_delta → true, message_complete/close → false)
+//                  INVARIANT: !isRunning → !isStreaming (enforced in close handler)
 //   queue[]     — server-owned FIFO (pending → sending → removed on close)
 //
 // Client-side (derived, NOT in this class):
-//   confirmed   — server has confirmed this conversation exists
-//   isStreaming  — assistant is producing content (message → true, message_complete → false)
-//   isRunning    — mirrors server's isRunning via 'status' broadcasts (single source)
+//   confirmed   — server has confirmed this conversation exists (optimistic stub = false)
 //
 // Broadcast sequence on normal completion:
 //   1. message_complete  → client stops streaming indicator
@@ -291,6 +295,21 @@ function normalizeProviderErrorMessage(message: string): string {
 //   delete_conversation WS → stop() + delete → close
 //   resetProcess (loop) → kill → _isResetting skips close handler
 //   SIGINT (Ctrl-C) → SIGKILL all children
+interface ConversationOptions {
+  id: string;
+  workingDirectory?: string | null;
+  provider?: ProviderName;
+  existingSessionId?: string;
+  model?: ModelId;
+  isWorker?: boolean;
+  swarmId?: string | null;
+  workerId?: string | null;
+  workerRole?: 'work' | 'review' | 'fix' | null;
+  parentConversationId?: string | null;
+  modelName?: string | null;
+  swarmDebugPrefix?: string | null;
+}
+
 class Conversation extends EventEmitter {
   id: string; // UI conversation ID (persists across resets)
   sessionId: string; // Provider CLI session ID (can be reset for fresh context)
@@ -337,6 +356,11 @@ class Conversation extends EventEmitter {
   // When true, close handler is a no-op — resetProcess() handles its own cleanup.
   // Prevents duplicate broadcasts and spurious dequeue during loop context resets.
   private _isResetting: boolean;
+  // Sticky flag set alongside _isResetting in resetProcess(). Unlike _isResetting
+  // (which is cleared in the close handler), this stays true until the *next*
+  // spawnForMessage() call. Prevents ghost errors when the consumeEvents iterator
+  // rejects after the close handler has already cleared _isResetting.
+  private _wasResetDuringThisRun: boolean;
   // Start time of the current CLI process run (for duration tracking).
   private _processStartTime = 0;
   // Last provider event timestamp for idle-hang detection.
@@ -346,31 +370,29 @@ class Conversation extends EventEmitter {
   private _turnMaxTimer: NodeJS.Timeout | null = null;
   // Track last known swarm run ID to detect newly launched swarms.
   private _lastSwarmRunId: string | null = null;
+  // Throttle _pollForNewSwarms() — synchronous fs I/O called from _noteTurnActivity().
+  private _lastSwarmPollAt = 0;
+  // When true, message_complete already performed state cleanup (isStreaming/isRunning/broadcast).
+  // The close handler checks this to skip redundant work on normal completion, while still
+  // running full cleanup on crash/kill/error paths where message_complete never fired.
+  private _turnCompletedCleanly = false;
 
-  constructor(
-    id: string,
-    workingDirectory: string | null = null,
-    provider: ProviderName = 'claude',
-    /** Optional: set session ID when loading from JSONL (defaults to new UUID) */
-    existingSessionId?: string,
-    /** Optional: provider-specific model identifier (e.g. 'opus', 'gpt-5.3-codex-high') */
-    model?: ModelId,
-    /** Optional: true if this is an oompa worker conversation */
-    isWorker = false,
-    /** Optional: swarm ID from [oompa:<swarmId>:...] tag */
-    swarmId: string | null = null,
-    /** Optional: worker ID from [oompa:...:<workerId>] tag */
-    workerId: string | null = null,
-    /** Optional: worker role inferred from first message content */
-    workerRole: 'work' | 'review' | 'fix' | null = null,
-    /** Optional: parent conversation id for provider-native sub-agent sessions */
-    parentConversationId: string | null = null,
-    /** Optional: full model name from CLI */
-    modelName: string | null = null,
-    /** Optional: debug prefix for swarm conversations */
-    swarmDebugPrefix: string | null = null
-  ) {
+  constructor(opts: ConversationOptions) {
     super();
+    const {
+      id,
+      workingDirectory = null,
+      provider = 'claude',
+      existingSessionId,
+      model,
+      isWorker = false,
+      swarmId = null,
+      workerId = null,
+      workerRole = null,
+      parentConversationId = null,
+      modelName = null,
+      swarmDebugPrefix = null,
+    } = opts;
     this.id = id;
     // sessionId defaults to id so JSONL filename matches Map key (no poller mismatch).
     // Only differs from id after resetProcess() rotates it for fresh CLI context.
@@ -400,6 +422,7 @@ class Conversation extends EventEmitter {
     this._stderrBuffer = '';
     this._sawStdoutEventThisRun = false;
     this._isResetting = false;
+    this._wasResetDuringThisRun = false;
     this._lastSwarmRunId = null;
   }
 
@@ -431,6 +454,8 @@ class Conversation extends EventEmitter {
     // Reset per-run buffers
     this._stderrBuffer = '';
     this._sawStdoutEventThisRun = false;
+    this._turnCompletedCleanly = false;
+    this._wasResetDuringThisRun = false;
     this._processStartTime = Date.now();
 
     const turn = executeCommand({
@@ -514,6 +539,10 @@ class Conversation extends EventEmitter {
     };
 
     void consumeEvents().catch((err: unknown) => {
+      // Intentional kill from resetProcess(). _isResetting is live during async
+      // close; _wasResetDuringThisRun is sticky and catches late rejections that
+      // arrive after the close handler has already cleared _isResetting.
+      if (this._isResetting || this._wasResetDuringThisRun) return;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[${this.id}] Event stream error: ${message}`);
       this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(message) });
@@ -537,7 +566,29 @@ class Conversation extends EventEmitter {
         // resetProcess() handles its own cleanup. If _isResetting, the kill was
         // intentional (loop context clear) and the loop engine will immediately
         // call sendMessage() and spawn the next iteration. Skip all cleanup here.
-        if (this._isResetting) return;
+        // NOTE: _isResetting is cleared HERE (not in resetProcess) because
+        // process.kill() triggers this close handler asynchronously via the
+        // turn.completed promise. Clearing it synchronously in resetProcess()
+        // races: by the time this .then() fires, the flag is already false.
+        if (this._isResetting) {
+          this._isResetting = false;
+          return;
+        }
+
+        // message_complete already handled state cleanup and broadcast.
+        // Just null the process ref, dequeue, and continue.
+        if (this._turnCompletedCleanly) {
+          this.process = null;
+          this._pendingTaskTools.clear();
+          clearExternalRunningStatus(this.id, this.sessionId);
+          markLocalCompletionSuppression(this.id, this.sessionId);
+          if (this.queue.length > 0 && this.queue[0].status === 'sending') {
+            this.queue.shift();
+            this.broadcastQueue();
+          }
+          this.processQueue();
+          return;
+        }
 
         const emitSystemMessage = (content: string): void => {
           this.messages.push({ role: 'system', content, timestamp: new Date() });
@@ -661,7 +712,6 @@ class Conversation extends EventEmitter {
         break;
 
       case 'text_delta': {
-        this._sawStdoutEventThisRun = true;
         this._ensureAssistantMessage();
         
         // Accumulate content server-side too (for debugging)
@@ -683,7 +733,6 @@ class Conversation extends EventEmitter {
       }
 
       case 'tool_use': {
-        this._sawStdoutEventThisRun = true;
         this._ensureAssistantMessage();
         // Check if this is a Task tool (sub-agent spawn)
         if (event.name === 'Task') {
@@ -762,6 +811,9 @@ class Conversation extends EventEmitter {
       }
 
       case 'message_complete': {
+        // Clear watchdog timers immediately — the turn completed normally.
+        // Without this they dangle until process close, risking a spurious timeout.
+        this._clearTurnWatchdogs();
         // Mark all running sub-agents as complete
         const completedAt = new Date();
         for (const agent of this.subAgents) {
@@ -793,7 +845,7 @@ class Conversation extends EventEmitter {
         this.broadcastChunk({
           type: 'message_complete',
           conversationId: this.id,
-          reason: (event as any).reason,
+          reason: event.reason,
         });
 
         // turn.complete means the assistant has finished this turn from the
@@ -809,6 +861,10 @@ class Conversation extends EventEmitter {
           type: 'conversations_updated',
           conversations: [this.toJSON()],
         });
+
+        // Signal to the close handler that cleanup already happened.
+        // Close handler will skip redundant state changes and broadcasts.
+        this._turnCompletedCleanly = true;
 
         break;
       }
@@ -900,18 +956,24 @@ class Conversation extends EventEmitter {
 
   // Reset process for fresh context (used in loop with clearContext).
   // Generates new CLI session ID while keeping conversation ID for UI continuity.
-  // Sets _isResetting so the close handler is a no-op — we handle cleanup here
+  // Sets _isResetting so the close handler skips cleanup — we handle it here
   // because the loop engine immediately spawns the next iteration.
+  // _isResetting stays true until the async close handler (.then on turn.completed)
+  // fires and clears it. Clearing it synchronously here would race: the .then()
+  // callback runs on the next microtask, after this function returns, so it would
+  // see _isResetting=false and run full cleanup (duplicate broadcasts + spurious dequeue).
   resetProcess(): void {
     this._clearTurnWatchdogs();
     if (this.process) {
       this._isResetting = true;
+      this._wasResetDuringThisRun = true;
       this.process.kill();
       this.process = null;
       this.isStreaming = false;
       this.isRunning = false;
       this.broadcastStatus();
-      this._isResetting = false;
+      // DO NOT clear _isResetting here — the close handler clears it when it
+      // fires and sees the flag. See the guard in turn.completed.then().
     }
     // Generate new session ID for fresh context
     const oldSessionId = this.sessionId;
@@ -956,6 +1018,12 @@ class Conversation extends EventEmitter {
    * the local runs directory for a new ID compared to what we saw previously.
    */
   private _pollForNewSwarms(): void {
+    // Throttle: _noteTurnActivity() fires on every text_delta/tool_use (100+ per response).
+    // Avoid synchronous fs I/O (readdirSync, statSync, readFileSync) on every event.
+    const now = Date.now();
+    if (now - this._lastSwarmPollAt < 5_000) return;
+    this._lastSwarmPollAt = now;
+
     const snapshot = readLatestOompaRuntime(this.workingDirectory);
     if (!snapshot.available || !snapshot.run) return;
 
@@ -1015,6 +1083,15 @@ class Conversation extends EventEmitter {
     console.error(`[${this.id}] ${message}`);
     this._clearTurnWatchdogs();
     this.handleOutput({ type: 'error', message });
+    // Clear busy state now so processQueue() sees isRunning=false and can dequeue.
+    // Without this, the close handler's fast path (_turnCompletedCleanly) skips
+    // state reset, leaving isRunning=true and stalling the queue permanently.
+    this.isStreaming = false;
+    this.isRunning = false;
+    this.broadcastStatus();
+    // Mark turn as cleanly completed so the close handler (triggered by SIGTERM
+    // below) takes the fast path and doesn't emit a duplicate system message.
+    this._turnCompletedCleanly = true;
 
     const proc = this.process;
     proc.kill('SIGTERM');
@@ -1259,7 +1336,19 @@ wss.on('connection', (ws: WebSocket) => {
 
   ws.on('message', (message: Buffer | string) => {
     try {
-      const data = JSON.parse(message.toString()) as ClientMessageData;
+      const parsed = JSON.parse(message.toString());
+      const result = safeParseClientMessage(parsed);
+      if (!result.success) {
+        console.error('[WS] Invalid client message:', result.error.message);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            message: `Invalid message: ${result.error.issues.map((i) => i.message).join(', ')}`,
+          })
+        );
+        return;
+      }
+      const data = result.data;
       if (data.type === 'queue_message') {
         console.log(
           `[WS] Received queue_message conversationId=${data.conversationId}, contentLen=${data.content.length}, preview="${formatLogPreview(data.content)}"`
@@ -1333,20 +1422,13 @@ wss.on('connection', (ws: WebSocket) => {
             return;
           }
 
-          const conv = new Conversation(
+          const conv = new Conversation({
             id,
-            workingDir,
+            workingDirectory: workingDir,
             provider,
-            undefined,
             model,
-            false,
-            null,
-            null,
-            null,
-            null,
-            null,
-            swarmDebugPrefix
-          );
+            swarmDebugPrefix,
+          });
           conversations.set(id, conv);
 
           // No need to start - we spawn per message now
@@ -1388,6 +1470,12 @@ wss.on('connection', (ws: WebSocket) => {
           if (convToDelete) {
             convToDelete.stop();
             conversations.delete(data.conversationId);
+            // Tombstone all session IDs (current + rotated) so the poller never
+            // re-imports the orphaned JSONL files that still exist on disk.
+            deletedSessionIds.add(convToDelete.sessionId);
+            for (const [sid, cid] of sessionAliasToConversationId) {
+              if (cid === convToDelete.id) deletedSessionIds.add(sid);
+            }
             // Evict session IDs so the orphan-detection guard doesn't accumulate forever
             unregisterConversationAliases(convToDelete.id);
             clearExternalRunningStatus(convToDelete.sessionId, convToDelete.id);
@@ -1520,6 +1608,12 @@ const uploadStorage = multer.diskStorage({
       return;
     }
     const dir = path.join(UPLOADS_DIR, conversationId);
+    // Guard against path traversal — conversationId must not escape UPLOADS_DIR
+    const resolved = path.resolve(dir);
+    if (!resolved.startsWith(path.resolve(UPLOADS_DIR) + path.sep)) {
+      cb(new Error('Invalid conversationId'), '');
+      return;
+    }
     fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
@@ -1855,6 +1949,12 @@ app.get('/api/files', (req: Request, res: Response) => {
   const resolved = path.resolve(filePath);
   if (resolved !== path.normalize(filePath)) {
     res.status(400).json({ error: 'Path traversal rejected' });
+    return;
+  }
+
+  // Security: only serve files under known conversation directories or the uploads dir
+  if (!isUnderKnownProject(resolved) && !resolved.startsWith(UPLOADS_DIR + path.sep)) {
+    res.status(403).json({ error: 'Path not under any known project' });
     return;
   }
 
@@ -2291,6 +2391,11 @@ app.get('/api/oompa-swarm-context', (req: Request, res: Response) => {
   }
 
   const projectRoot = path.resolve(dir);
+  // Security: restrict to directories associated with known conversations
+  if (!isUnderKnownProject(projectRoot)) {
+    res.status(403).json({ error: 'Directory not associated with any conversation' });
+    return;
+  }
   if (!fs.existsSync(projectRoot)) {
     res.status(404).json({ error: 'Directory does not exist' });
     return;
@@ -2871,7 +2976,15 @@ app.get('/api/swarm-reviews', (req: Request, res: Response) => {
     return;
   }
 
-  const reviewsDir = path.join(resolved, 'runs', swarmId, 'reviews');
+  // Prevent path traversal — swarmId must not escape runsDir (mirrors /api/swarm-signal)
+  const runsDir = path.join(resolved, 'runs');
+  const swarmRunDir = path.resolve(runsDir, swarmId);
+  if (!swarmRunDir.startsWith(runsDir + path.sep)) {
+    res.status(400).json({ error: 'Invalid swarmId' });
+    return;
+  }
+
+  const reviewsDir = path.join(swarmRunDir, 'reviews');
   if (!fs.existsSync(reviewsDir)) {
     res.json({ reviews: [] });
     return;
@@ -2882,9 +2995,14 @@ app.get('/api/swarm-reviews', (req: Request, res: Response) => {
     .filter((f) => f.endsWith('.json'))
     .sort();
 
-  const reviews: OompaReviewLog[] = files.map((f) => {
-    const content = fs.readFileSync(path.join(reviewsDir, f), 'utf-8');
-    return JSON.parse(content) as OompaReviewLog;
+  // Per-file try/catch so one bad file doesn't crash the whole endpoint
+  const reviews: OompaReviewLog[] = files.flatMap((f) => {
+    try {
+      const content = fs.readFileSync(path.join(reviewsDir, f), 'utf-8');
+      return [JSON.parse(content) as OompaReviewLog];
+    } catch {
+      return [];
+    }
   });
 
   res.json({ reviews });
@@ -3222,7 +3340,9 @@ Requirements:
       // Update cache immediately
       paletteCache[key] = palette;
 
-      // Fire-and-forget disk write (error logged but doesn't fail the request)
+      // Fire-and-forget disk write. On failure, roll back cache entry so a
+      // restart doesn't silently lose the palette (the client still has it for
+      // this session, but won't survive a server restart without the file).
       void (async () => {
         try {
           await fs.promises.mkdir(PALETTES_DIR, { recursive: true });
@@ -3231,6 +3351,7 @@ Requirements:
           console.log(`[generate-palette] Saved palette to ${filePath}`);
         } catch (writeErr) {
           console.error(`[generate-palette] Failed to save palette file:`, writeErr);
+          delete paletteCache[key];
         }
       })();
 
@@ -3514,6 +3635,11 @@ app.get('/api/usage', async (_req: Request, res: Response) => {
     res.json(cached.data);
     return;
   }
+
+  // Response cache expired (or missing) — clear per-file caches so entries for
+  // deleted files don't accumulate unboundedly across requests.
+  usageFileCache.clear();
+  openCodeUsageCache.clear();
 
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
@@ -3980,19 +4106,18 @@ function killProcessOnPort(port: number): boolean {
  */
 function hydrateConversation(convData: ConversationData): Conversation {
   const sessionId = convData.id;
-  const conversation = new Conversation(
-    sessionId,
-    convData.workingDirectory,
-    convData.provider,
-    sessionId, // existingSessionId - marks session as started
-    undefined, // model
-    convData.isWorker, // oompa worker flag from JSONL detection
-    convData.swarmId ?? null,
-    convData.workerId ?? null,
-    convData.workerRole ?? null,
-    resolveParentConversationId(convData.parentConversationId ?? null),
-    convData.modelName ?? null
-  );
+  const conversation = new Conversation({
+    id: sessionId,
+    workingDirectory: convData.workingDirectory,
+    provider: convData.provider,
+    existingSessionId: sessionId,
+    isWorker: convData.isWorker,
+    swarmId: convData.swarmId ?? null,
+    workerId: convData.workerId ?? null,
+    workerRole: convData.workerRole ?? null,
+    parentConversationId: resolveParentConversationId(convData.parentConversationId ?? null),
+    modelName: convData.modelName ?? null,
+  });
   conversation.messages = convData.messages;
   conversation.createdAt = convData.createdAt;
   conversation.subAgents = convData.subAgents;
@@ -4011,9 +4136,10 @@ async function loadExistingConversations(): Promise<void> {
   console.log('Loading conversations from persisted session files...');
 
   try {
-    const limit = 500;
     const { mtimes } = await loadAllConversations({
-      limit,
+      limit: STARTUP_INITIAL_LOAD_LIMIT,
+      concurrency: STARTUP_PARSE_CONCURRENCY,
+      batchSize: STARTUP_LOAD_BATCH_SIZE,
       onProgress: (batch, progress) => {
         // Hydrate each batch into server-side Conversation instances
         const broadcastBatch: ConversationData[] = [];
@@ -4031,9 +4157,11 @@ async function loadExistingConversations(): Promise<void> {
           });
         }
 
-        console.log(
-          `Loaded ${progress.loaded}/${progress.total} files (${conversations.size} conversations)...`
-        );
+        if (progress.loaded % STARTUP_PROGRESS_FILE_STEP === 0 || progress.loaded === progress.total) {
+          console.log(
+            `[startup] Parsed ${progress.loaded}/${progress.total} files (${conversations.size} conversations)...`
+          );
+        }
       },
     });
 
@@ -4168,6 +4296,22 @@ function resolveParentConversationId(parentSessionId: string | null | undefined)
 }
 
 /**
+ * Prevent unbounded growth of deletedSessionIds and knownSessionIds.
+ * deletedSessionIds: hard cap — worst case a very old deleted JSONL gets re-imported once.
+ * knownSessionIds: evict entries that have no active conversation or alias mapping.
+ */
+function pruneSessionSets(): void {
+  if (deletedSessionIds.size > 10000) {
+    deletedSessionIds.clear();
+  }
+  for (const sid of knownSessionIds) {
+    if (!conversations.has(sid) && !sessionAliasToConversationId.has(sid)) {
+      knownSessionIds.delete(sid);
+    }
+  }
+}
+
+/**
  * Poll persisted session files every 5s for external changes (e.g., user ran
  * `claude`, `codex`, or `opencode` in terminal).
  * Only re-parses files with newer mtimes. Skips running conversations (launched by us).
@@ -4299,8 +4443,8 @@ function startFilePolling(): void {
             json.isRunning = true;
           }
           changedForBroadcast.push(json);
-        } else if (!existing && !knownSessionIds.has(sessionId)) {
-          // New conversation (not an orphaned JSONL from resetProcess) — create fresh instance
+        } else if (!existing && !knownSessionIds.has(sessionId) && !deletedSessionIds.has(sessionId)) {
+          // New conversation (not an orphaned JSONL from resetProcess or a deleted one) — create fresh instance
           const conversation = hydrateConversation(convData);
           conversations.set(sessionId, conversation);
           const json = conversation.toJSON();
@@ -4317,6 +4461,9 @@ function startFilePolling(): void {
           conversations: changedForBroadcast,
         });
       }
+
+      // Evict stale entries from session tracking sets to prevent unbounded growth
+      pruneSessionSets();
     } catch (error) {
       console.error('[Poll] Error during file polling:', error);
     }

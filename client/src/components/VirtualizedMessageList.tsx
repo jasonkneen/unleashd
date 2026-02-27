@@ -120,8 +120,6 @@ function collapseToolLines(content: string): string {
 
   for (const line of lines) {
     // Check if it's an oompa run token — if so, never collapse it.
-    // Reset lastIndex because OOMPA_RUN_RE has the global flag.
-    OOMPA_RUN_RE.lastIndex = 0;
     const isOompaRun = OOMPA_RUN_RE.test(line);
 
     if (!isOompaRun && TOOL_LINE_RE.test(line)) {
@@ -341,7 +339,10 @@ type ContentSegment =
   | { type: 'oompa_run' };
 
 // Matches a single line starting with typical tool emoji and containing "oompa run"
-const OOMPA_RUN_RE = /^(?:📖|✍️|✏️|⚡|📂|🔍|🌐|📓|🔧|▶️|📦|🔀|📁|🔒|🗑️|❌)\s+.*?\boompa\s+run\b.*$/gm;
+// Module-level regex without `g` flag — safe for `.test()` calls in collapseToolLines.
+// splitWidgets creates a local copy with `g` for multi-match `.exec()` loops,
+// avoiding stale `lastIndex` state on the shared singleton under concurrent rendering.
+const OOMPA_RUN_RE = /^(?:📖|✍️|✏️|⚡|📂|🔍|🌐|📓|🔧|▶️|📦|🔀|📁|🔒|🗑️|❌)\s+.*?\boompa\s+run\b.*$/m;
 
 function splitWidgets(content: string): ContentSegment[] {
   const segments: ContentSegment[] = [];
@@ -350,14 +351,19 @@ function splitWidgets(content: string): ContentSegment[] {
   // Find all matches for both patterns, then sort by index
   const matches: Array<{ type: 'ask_user_question' | 'oompa_run'; index: number; length: number; match: RegExpExecArray }> = [];
 
-  ASK_USER_QUESTION_RE.lastIndex = 0;
+  // Create a fresh regex with `g` flag for multi-match .exec() loop —
+  // avoids stale lastIndex on the module-level ASK_USER_QUESTION_RE singleton
+  // (same pattern as OOMPA_RUN_RE below).
+  const askUserRe = new RegExp(ASK_USER_QUESTION_RE.source, ASK_USER_QUESTION_RE.flags + 'g');
   let match: RegExpExecArray | null;
-  while ((match = ASK_USER_QUESTION_RE.exec(content)) !== null) {
+  while ((match = askUserRe.exec(content)) !== null) {
     matches.push({ type: 'ask_user_question', index: match.index, length: match[0].length, match });
   }
 
-  OOMPA_RUN_RE.lastIndex = 0;
-  while ((match = OOMPA_RUN_RE.exec(content)) !== null) {
+  // Create a fresh regex with `g` flag for multi-match .exec() loop —
+  // avoids stale lastIndex on the module-level OOMPA_RUN_RE singleton.
+  const oompaRunGlobal = new RegExp(OOMPA_RUN_RE.source, 'gm');
+  while ((match = oompaRunGlobal.exec(content)) !== null) {
     matches.push({ type: 'oompa_run', index: match.index, length: match[0].length, match });
   }
 
@@ -600,11 +606,15 @@ export function VirtualizedMessageList({
   }, [conversationId, totalMessageCount, markMessagesSeen, lastMessageRef]);
 
   // Expose scrollToBottom function via ref
+  // NOTE: Must use totalItems (not messageGroups.length) because when swarmDebugPrefix
+  // is present, the virtualizer has messageGroups.length + 1 items. Using
+  // messageGroups.length - 1 would scroll to the second-to-last item, missing the
+  // final message group.
   useEffect(() => {
     if (scrollToBottomRef) {
       scrollToBottomRef.current = () => {
-        if (messageGroups.length > 0) {
-          virtualizer.scrollToIndex(messageGroups.length - 1, { align: 'end', behavior: 'smooth' });
+        if (totalItems > 0) {
+          virtualizer.scrollToIndex(totalItems - 1, { align: 'end', behavior: 'smooth' });
           stickyBottomRef.current = true;
         }
       };
@@ -614,7 +624,7 @@ export function VirtualizedMessageList({
         scrollToBottomRef.current = null;
       }
     };
-  }, [scrollToBottomRef, messageGroups.length, virtualizer]);
+  }, [scrollToBottomRef, totalItems, virtualizer]);
 
   const items = virtualizer.getVirtualItems();
 
@@ -726,6 +736,7 @@ const VirtualizedGroup = memo(
   (prev, next) => {
     if (prev.group !== next.group) return false;
     if (prev.isLastGroup !== next.isLastGroup) return false;
+    if (prev.workingDirectory !== next.workingDirectory) return false;
     return true;
   }
 );

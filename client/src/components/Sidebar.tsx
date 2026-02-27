@@ -14,7 +14,7 @@ import { jotaiStore } from '../atoms/store';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
-import { getProjectRoot } from '../utils/swarmUtils';
+import { getProjectRoot, isWorktreeDirectory } from '../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getConversationLastActivity, getMinutesElapsed } from '../utils/time';
 import { PathAutocomplete } from './PathAutocomplete';
@@ -75,6 +75,8 @@ export function Sidebar() {
   }, []);
 
   const promotedSet = useMemo(() => new Set(promotedWorkers), [promotedWorkers]);
+  // O(1) lookup instead of O(n) Array.includes — avoids O(n*m) in visibleConversations filter
+  const doneSet = useMemo(() => new Set(doneConversations), [doneConversations]);
 
   // allConversations is already sorted newest-first by allConversationsAtom
   const workerConversationsByProject = useMemo(() => {
@@ -102,11 +104,11 @@ export function Sidebar() {
     () =>
       allConversations.filter(
         (conv) =>
-          !doneConversations.includes(conv.id) &&
+          !doneSet.has(conv.id) &&
           // Hide workers unless promoted to main view
           !(conv.isWorker && !promotedSet.has(conv.id))
       ),
-    [allConversations, doneConversations, promotedSet]
+    [allConversations, doneSet, promotedSet]
   );
 
   const conversationIds = useMemo(
@@ -188,7 +190,10 @@ export function Sidebar() {
   const recentDirectories = useMemo(() => {
     const dirs = new Set<string>();
     for (const conv of allConversations) {
-      dirs.add(normalizeFolderDirectory(conv.workingDirectory));
+      const dir = normalizeFolderDirectory(conv.workingDirectory);
+      if (!isWorktreeDirectory(dir)) {
+        dirs.add(dir);
+      }
     }
     return Array.from(dirs);
   }, [allConversations]);

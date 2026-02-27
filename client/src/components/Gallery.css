@@ -32,6 +32,13 @@
 
 /* Project header - sticky, clickable to collapse/expand */
 .project-header {
+  /* Reset native button styles */
+  appearance: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
   position: sticky;
   top: 0;
   z-index: 10;

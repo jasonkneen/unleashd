@@ -117,7 +117,7 @@ export function Chat() {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [modelPickerOpen]);
+  }, [modelPickerOpen, providerPickerOpen]);
 
   const { savePrompt } = useSavedPrompts();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -178,40 +178,44 @@ export function Chat() {
       if (!id || acceptedFiles.length === 0) return;
 
       setIsUploading(true);
-      const formData = new FormData();
-      formData.append('conversationId', id);
-      for (const file of acceptedFiles) {
-        formData.append('files', file);
-      }
+      try {
+        const formData = new FormData();
+        formData.append('conversationId', id);
+        for (const file of acceptedFiles) {
+          formData.append('files', file);
+        }
 
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
 
-      if (!response.ok) {
-        const error = await response.json();
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(`Upload failed: ${error.error}`);
+        }
+
+        const result = (await response.json()) as {
+          files: Array<{
+            originalName: string;
+            absolutePath: string;
+            mimeType: string;
+            size: number;
+          }>;
+        };
+        const withPreviews: PendingFile[] = result.files.map((uploaded, i) => ({
+          ...uploaded,
+          previewUrl: acceptedFiles[i].type.startsWith('image/')
+            ? URL.createObjectURL(acceptedFiles[i])
+            : null,
+        }));
+
+        setPendingFiles((prev) => [...prev, ...withPreviews]);
+      } catch (err) {
+        console.error('File upload failed:', err);
+      } finally {
         setIsUploading(false);
-        throw new Error(`Upload failed: ${error.error}`);
       }
-
-      const result = (await response.json()) as {
-        files: Array<{
-          originalName: string;
-          absolutePath: string;
-          mimeType: string;
-          size: number;
-        }>;
-      };
-      const withPreviews: PendingFile[] = result.files.map((uploaded, i) => ({
-        ...uploaded,
-        previewUrl: acceptedFiles[i].type.startsWith('image/')
-          ? URL.createObjectURL(acceptedFiles[i])
-          : null,
-      }));
-
-      setPendingFiles((prev) => [...prev, ...withPreviews]);
-      setIsUploading(false);
     },
     [id]
   );
@@ -227,13 +231,20 @@ export function Chat() {
     noKeyboard: true,
   });
 
+  // Track current pendingFiles via ref so unmount cleanup sees the latest value
+  // without re-running the effect on every addition.
+  const pendingFilesRef = useRef(pendingFiles);
+  pendingFilesRef.current = pendingFiles;
+
+  // Revoke object URLs only on unmount — not on every pendingFiles change.
+  // Per-file revocation happens explicitly in the remove handler and clearInput.
   useEffect(() => {
     return () => {
-      for (const file of pendingFiles) {
+      for (const file of pendingFilesRef.current) {
         if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
       }
     };
-  }, [pendingFiles]);
+  }, []);
 
   const setUIActiveId = useUIStore((s) => s.setActiveConversationId);
   const markMessagesSeen = useUIStore((s) => s.markMessagesSeen);
@@ -345,7 +356,7 @@ export function Chat() {
     if (last?.role !== 'assistant') return conversation.messages;
     messages[messages.length - 1] = { ...last, content: last.content + streamingText };
     return messages;
-  }, [conversation?.messages, streamingText]);
+  }, [conversation, streamingText]);
 
   const messageGroups = useMemo((): MessageGroup[] => {
     if (!conversation) return [];
@@ -689,11 +700,14 @@ export function Chat() {
                 <button
                   type="button"
                   className="pending-file-remove"
-                  onClick={() =>
+                  onClick={() => {
+                    // Revoke the removed file's object URL immediately so it
+                    // doesn't leak — the unmount-only effect won't cover it.
+                    if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
                     setPendingFiles((prev) =>
                       prev.filter((f) => f.absolutePath !== file.absolutePath)
-                    )
-                  }
+                    );
+                  }}
                   title="Remove file"
                 >
                   &times;

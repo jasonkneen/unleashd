@@ -83,6 +83,7 @@ interface PendingConversation {
   provider: Provider;
   model?: ModelId;
   createdAt: string;
+  swarmDebugPrefix?: string;
 }
 
 function normalizeWorkingDirectory(input: string): string {
@@ -120,7 +121,15 @@ function normalizeWorkingDirectory(input: string): string {
 function loadPendingConversations(): PendingConversation[] {
   const raw = localStorage.getItem(PENDING_CONVERSATIONS_KEY);
   if (!raw) return [];
-  return JSON.parse(raw) as PendingConversation[];
+  try {
+    return JSON.parse(raw) as PendingConversation[];
+  } catch {
+    // Corrupt localStorage data — clear it so the bad entry doesn't block every
+    // subsequent init cycle.
+    console.warn('[PendingConversations] Corrupt localStorage data — clearing');
+    localStorage.removeItem(PENDING_CONVERSATIONS_KEY);
+    return [];
+  }
 }
 
 function savePendingConversation(conv: PendingConversation): void {
@@ -210,6 +219,7 @@ export function createConversation(
     provider,
     model,
     createdAt: stub.createdAt.toISOString(),
+    swarmDebugPrefix,
   });
   send({
     type: 'new_conversation',
@@ -336,6 +346,7 @@ export function handleMessage(data: ServerMessage): void {
             workerRole: null,
             parentConversationId: null,
             modelName: null,
+            swarmDebugPrefix: pc.swarmDebugPrefix ?? null,
           };
           serverState.set(pc.id, stub);
           const normalizedWorkingDirectory = normalizeWorkingDirectory(pc.workingDirectory);
@@ -346,6 +357,7 @@ export function handleMessage(data: ServerMessage): void {
               workingDirectory: normalizedWorkingDirectory,
               provider: pc.provider,
               model: pc.model,
+              swarmDebugPrefix: pc.swarmDebugPrefix,
             });
           }, 0);
         }
@@ -457,6 +469,12 @@ export function handleMessage(data: ServerMessage): void {
       const conv = conversations.get(data.conversationId);
       if (!conv) break;
 
+      // Flush any pending chunks before clearing streaming state,
+      // otherwise a pending rAF could re-add the entry we're about to delete.
+      if (!data.isStreaming) {
+        flushChunkBuffer();
+      }
+
       const streamingContent = jotaiStore.get(streamingContentAtom);
 
       jotaiStore.set(
@@ -501,7 +519,14 @@ export function handleMessage(data: ServerMessage): void {
         conversationsAtom,
         produce(jotaiStore.get(conversationsAtom), (draft) => {
           for (const conv of data.conversations) {
-            draft.set(conv.id, conv);
+            // Preserve client-only swarmDebugPrefix — the disk poller doesn't
+            // persist it, so the server sends null. Without this merge the
+            // prefix vanishes after every poll cycle.
+            const existing = draft.get(conv.id);
+            draft.set(conv.id, {
+              ...conv,
+              swarmDebugPrefix: conv.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
+            });
           }
         })
       );
@@ -580,6 +605,13 @@ export function handleMessage(data: ServerMessage): void {
           agent.currentAction = 'Done';
         })
       );
+      break;
+    }
+
+    default: {
+      // Exhaustive check: warn on unknown message types so new server
+      // events don't silently disappear during development.
+      console.warn(`[WS] Unhandled message type: ${(data as Record<string, unknown>).type}`);
       break;
     }
   }

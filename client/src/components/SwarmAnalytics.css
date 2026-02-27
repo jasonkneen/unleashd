@@ -644,6 +644,16 @@
   }
 }
 
+/* Timeline disclaimer for estimated timing */
+.timeline-disclaimer {
+  margin-top: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: right;
+}
+
 /* Timeline empty state */
 .timeline-empty {
   padding: 40px;

@@ -375,6 +375,10 @@ export async function pollForChanges(
         } else if (adapter.provider === 'opencode') {
           const sessionIdHint = path.basename(filePath);
           if (activeIds.has(sessionIdHint)) continue;
+        } else if (adapter.provider === 'gemini') {
+          // Gemini session files are named session-{ts}-{uuid}.json
+          const sessionId = path.basename(filePath, '.json');
+          if (activeIds.has(sessionId)) continue;
         }
 
         // Re-parse the changed session

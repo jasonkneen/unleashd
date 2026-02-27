@@ -130,8 +130,8 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
   } | null>(null);
 
   // Build timeline data from run summary and reviews
-  const { timelines, timeRange } = useMemo(() => {
-    if (!runData.summary) return { timelines: [], timeRange: { start: 0, end: 0, duration: 0 } };
+  const { timelines, timeRange, isEstimated } = useMemo(() => {
+    if (!runData.summary) return { timelines: [], timeRange: { start: 0, end: 0, duration: 0 }, isEstimated: false };
 
     const summary = runData.summary;
     const reviews = runData.reviews || [];
@@ -168,6 +168,10 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
       workerReviews.get(review.iteration)!.push(review);
     }
 
+    // Track whether timing is estimated (no per-iteration timestamps available).
+    // Currently all iteration timing is distributed evenly across the run duration.
+    let isEstimated = false;
+
     // Create iteration spans for each worker
     for (const worker of summary.workers) {
       const timeline = workerMap.get(worker.id);
@@ -180,7 +184,9 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
         const iterationReviews = workerReviews?.get(i) || [];
         const latestReview = iterationReviews[iterationReviews.length - 1];
 
-        // Estimate timing (distribute iterations across the time range)
+        // Estimate timing (distribute iterations evenly across the time range).
+        // Per-iteration timestamps are not available from the run data.
+        isEstimated = true;
         const iterDuration = duration / iterations;
         const iterStart = startTime + (i - 1) * iterDuration;
         const iterEnd = i <= worker.completed ? iterStart + iterDuration * 0.9 : null;
@@ -215,6 +221,7 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
         end: endTime || Date.now(),
         duration: endTime - startTime || 60000,
       },
+      isEstimated,
     };
   }, [runData]);
 
@@ -396,6 +403,12 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
           )}
         </div>
       )}
+
+      {isEstimated && (
+        <div className="timeline-disclaimer">
+          Timing estimated — per-iteration timestamps not available
+        </div>
+      )}
     </div>
   );
 }
@@ -518,6 +531,11 @@ export function SwarmAnalytics() {
   const [runsData, setRunsData] = useState<Map<string, RunData>>(new Map());
   const [loading, setLoading] = useState(true);
 
+  // Track whether we've auto-selected the first swarm run for this project.
+  // Without this, auto-selection of setSelectedSwarmId triggers the fetch effect
+  // in a loop because selectedSwarmId was in the dep array.
+  const hasAutoSelected = useRef(false);
+
   // Group workers by project
   const projects = useMemo((): SwarmProject[] => {
     const groups = new Map<string, Conversation[]>();
@@ -547,7 +565,15 @@ export function SwarmAnalytics() {
       .sort((a, b) => b.workers.length - a.workers.length);
   }, [allConversations, promotedSet]);
 
-  // Fetch runs data when project is selected
+  // Reset auto-selection flag when project changes
+  useEffect(() => {
+    hasAutoSelected.current = false;
+  }, [selectedProject]);
+
+  // Fetch runs data when project is selected.
+  // selectedSwarmId is intentionally excluded from deps — including it caused
+  // a re-fetch loop because the auto-selection below sets selectedSwarmId,
+  // which would re-trigger this effect.
   useEffect(() => {
     if (!selectedProject) {
       setLoading(false);
@@ -594,14 +620,15 @@ export function SwarmAnalytics() {
           setRunsData(runsMap);
           setLoading(false);
 
-          // Auto-select first run if none selected
-          if (!selectedSwarmId && data.runs.length > 0) {
+          // Auto-select first run once per project selection
+          if (!hasAutoSelected.current && data.runs.length > 0) {
+            hasAutoSelected.current = true;
             setSelectedSwarmId(data.runs[0].swarmId);
           }
         }
       )
       .catch(() => setLoading(false));
-  }, [selectedProject, selectedSwarmId]);
+  }, [selectedProject]);
 
   // Auto-select first project
   useEffect(() => {

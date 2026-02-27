@@ -7,6 +7,7 @@ import { useFolderFilter } from '../hooks/useFolderFilter';
 import { useUrlFolderSelection } from '../hooks/useUrlFolderSelection';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
+import { isWorktreeDirectory } from '../utils/swarmUtils';
 import { formatTimeAgo, getLastMessageTime } from '../utils/time';
 import { FolderFilter } from './FolderFilter';
 import './Gallery.css';
@@ -120,7 +121,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
 
   // Filter temp directories and sort folders by most recent conversation (not alphabetical)
   const folders = useMemo(() => {
-    const nonTemp = allFolders.filter((folder) => !isTempDirectory(folder));
+    const nonTemp = allFolders.filter((folder) => !isTempDirectory(folder) && !isWorktreeDirectory(folder));
 
     // Build a map of folder -> most recent conversation date
     const folderRecency = new Map<string, number>();
@@ -309,7 +310,11 @@ export function Gallery({ filter }: GalleryProps = {}) {
 
             return (
               <div key={group.directory} className="project-section">
-                <div className="project-header" onClick={() => toggleCollapsed(group.directory)}>
+                <button
+                  type="button"
+                  className="project-header"
+                  onClick={() => toggleCollapsed(group.directory)}
+                >
                   <div className="project-header-left">
                     <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
                       &#9660;
@@ -319,7 +324,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
                   <span className="project-count">
                     {totalCount} conversation{totalCount !== 1 ? 's' : ''}
                   </span>
-                </div>
+                </button>
 
                 {!isCollapsed && (
                   <>
@@ -443,7 +448,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
 
                 return (
                   <div key={group.directory} className="project-section temp-project">
-                    <div
+                    <button
+                      type="button"
                       className="project-header"
                       onClick={() => toggleCollapsed(group.directory)}
                     >
@@ -456,7 +462,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
                       <span className="project-count">
                         {totalCount} conversation{totalCount !== 1 ? 's' : ''}
                       </span>
-                    </div>
+                    </button>
 
                     {!isCollapsed && (
                       <>
@@ -714,7 +720,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
 
                 return (
                   <div key={group.directory} className="project-section done-project">
-                    <div
+                    <button
+                      type="button"
                       className="project-header"
                       onClick={() => toggleCollapsed(group.directory)}
                     >
@@ -727,7 +734,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
                       <span className="project-count">
                         {totalCount} conversation{totalCount !== 1 ? 's' : ''}
                       </span>
-                    </div>
+                    </button>
 
                     {!isCollapsed && (
                       <>

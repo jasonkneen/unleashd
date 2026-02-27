@@ -263,18 +263,16 @@ export function PathAutocomplete({
 
   const handleCreateFolder = async () => {
     const trimmed = value.trim();
+    if (!trimmed) return;
     try {
       const response = await fetch('/api/mkdir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: trimmed }),
       });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error ?? 'Failed to create directory');
-      }
-      const data = (await response.json()) as { path: string };
-      // Select the newly created directory
+      // Read body once — response.json() consumes the stream; calling it twice throws.
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? 'Failed to create directory');
       handleSelectPath(data.path);
     } catch (err) {
       console.error('Failed to create folder:', err);

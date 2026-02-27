@@ -15,6 +15,21 @@
  */
 
 /**
+ * Detect if a working directory is a git worktree (not a real project root).
+ * Covers:
+ *   - Oompa worktrees:       ~/git/project/.wu5-i3
+ *   - Worker directories:    ~/git/project/.workers/worker-0
+ *   - Claude Code worktrees: ~/git/project/.claude/worktrees/some-branch
+ */
+export function isWorktreeDirectory(workingDirectory: string): boolean {
+  return (
+    /\/\.w[^/]+-i\d+$/.test(workingDirectory) ||
+    /\/\.workers\/worker-\d+$/.test(workingDirectory) ||
+    workingDirectory.includes('/.claude/worktrees/')
+  );
+}
+
+/**
  * Strip worktree subfolder to get the project root directory.
  * Handles both oompa's `.w<id>-i<iter>` pattern and the `.workers/worker-N` pattern.
  */

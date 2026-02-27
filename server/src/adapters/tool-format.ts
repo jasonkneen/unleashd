@@ -45,7 +45,7 @@ export function formatToolUse(name: string, input?: any): string {
 
   // Remove newlines from summary to keep it a single line
   if (argSummary) {
-    argSummary = argSummary.split('\\n')[0].substring(0, 100);
+    argSummary = argSummary.split('\n')[0].substring(0, 100);
   }
 
   return `${emoji} ${name}${argSummary ? ` ${argSummary}` : ''}`;

@@ -30,7 +30,10 @@ interface AskUserQuestionInput {
 
 // Regex to detect the marker in message content.
 // Used by VirtualizedMessageList to split content around these markers.
-export const ASK_USER_QUESTION_RE = /<!--ask_user_question:(.*?)-->/gs;
+// NOTE: No `g` flag — module-level regexes with `g` are stateful singletons
+// (lastIndex persists across calls) and race under concurrent React rendering.
+// Consumers that need multi-match .exec() loops must create a local copy with `g`.
+export const ASK_USER_QUESTION_RE = /<!--ask_user_question:(.*?)-->/s;
 
 /**
  * Parse marker string into structured data.
