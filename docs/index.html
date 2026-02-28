@@ -127,7 +127,7 @@
         <p class="subtitle">The local, git-worktree multi-agent swarm orchestrator for Codex, Claude, and Opencode.</p>
         
         <div class="install-box">
-            <span id="install-cmd">npx orchestral</span>
+            <span id="install-cmd">npx orchestral-ade</span>
             <button class="copy-btn" onclick="copyCmd()">Copy</button>
         </div>
 
@@ -164,7 +164,7 @@
 
     <script>
         function copyCmd() {
-            navigator.clipboard.writeText("npx orchestral").then(() => {
+            navigator.clipboard.writeText("npx orchestral-ade").then(() => {
                 const btn = document.querySelector('.copy-btn');
                 btn.textContent = 'Copied!';
                 setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
