@@ -2,8 +2,8 @@ name: Publish to npm
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 jobs:
   publish:
@@ -27,6 +27,16 @@ jobs:
 
       - run: pnpm build
 
-      - run: npm publish --access public
+      - name: Check version and publish
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PUBLISHED_VERSION=$(npm view $PACKAGE_NAME version 2>/dev/null || echo "none")
+          if [ "$PACKAGE_VERSION" != "$PUBLISHED_VERSION" ]; then
+            echo "Publishing $PACKAGE_NAME@$PACKAGE_VERSION"
+            npm publish --access public --provenance
+          else
+            echo "Version $PACKAGE_VERSION already published. Skipping."
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
