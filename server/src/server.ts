@@ -4527,6 +4527,9 @@ async function startServer(): Promise<void> {
   // Start listening FIRST so the Vite proxy can connect immediately.
   server.listen(portNumber, () => {
     console.log(`Server running on http://localhost:${portNumber}`);
+    const startUrl = `http://localhost:${portNumber}`;
+    const startCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    require('child_process').exec(`${startCmd} ${startUrl}`);
   });
 
   // Unblock WebSocket handlers immediately — clients get an init with whatever
