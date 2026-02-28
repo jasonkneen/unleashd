@@ -38,7 +38,7 @@
 /* Project card — each project with workers gets one of these */
 .swarm-project-card {
   background: var(--bg-card);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 20px 24px;
   border: 1px solid var(--border-subtle);
   border-left: 4px solid transparent;
@@ -99,7 +99,7 @@
 }
 
 .swarm-stat-value.running {
-  color: var(--cyan);
+  color: var(--ai);
 }
 
 .swarm-stat-value.idle {
@@ -127,10 +127,10 @@
 
 .swarm-open-btn {
   padding: 8px 18px;
-  background: color-mix(in srgb, var(--violet) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--violet) 40%, transparent);
-  border-radius: 6px;
-  color: var(--violet-bright);
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  border-radius: 2px;
+  color: var(--primary-bright);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -139,14 +139,14 @@
 }
 
 .swarm-open-btn:hover {
-  background: color-mix(in srgb, var(--violet) 25%, transparent);
-  border-color: var(--violet);
-  color: var(--violet-bright);
+  background: color-mix(in srgb, var(--primary) 25%, transparent);
+  border-color: var(--primary);
+  color: var(--primary-bright);
 }
 
 /* Running pulse on project cards with active workers */
 .swarm-project-card.has-running {
-  border-left-color: var(--cyan);
+  border-left-color: var(--ai);
 }
 
 .swarm-project-card.has-running .swarm-project-name::after {
@@ -155,7 +155,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--cyan);
+  background: var(--ai);
   margin-left: 10px;
   animation: pulse 1.5s infinite;
   vertical-align: middle;

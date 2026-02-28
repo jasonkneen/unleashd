@@ -29,7 +29,7 @@
   color: var(--text-secondary);
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 2px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -64,7 +64,7 @@
   color: var(--text-primary);
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 2px;
   min-width: 200px;
   cursor: pointer;
 }
@@ -92,7 +92,7 @@
   width: 32px;
   height: 32px;
   border: 3px solid var(--border-subtle);
-  border-top-color: var(--cyan);
+  border-top-color: var(--ai);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 16px;
@@ -118,7 +118,7 @@
   padding: 12px 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
 }
 
 .selector-label {
@@ -143,7 +143,7 @@
   color: var(--text-secondary);
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 2px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -153,9 +153,9 @@
 }
 
 .run-tab.active {
-  background: var(--cyan);
+  background: var(--ai);
   color: var(--bg-page);
-  border-color: var(--cyan);
+  border-color: var(--ai);
 }
 
 .run-id {
@@ -192,7 +192,7 @@
   padding: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
   text-align: center;
 }
 
@@ -205,11 +205,11 @@
 }
 
 .stat-value.merged {
-  color: var(--green);
+  color: var(--success);
 }
 
 .stat-value.rejected {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .stat-label {
@@ -248,15 +248,15 @@
 }
 
 .worker-count.running {
-  color: var(--cyan);
+  color: var(--ai);
 }
 
 .worker-count.completed {
-  color: var(--green);
+  color: var(--success);
 }
 
 .worker-count.error {
-  color: var(--red);
+  color: var(--danger);
 }
 
 /* Timeline section */
@@ -265,7 +265,7 @@
   padding: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
 }
 
 .timeline-section h3 {
@@ -438,7 +438,7 @@
   z-index: 1000;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 12px;
   box-shadow: 0 4px 20px color-mix(in srgb, var(--bg-darkest) 30%, transparent);
   min-width: 250px;
@@ -493,7 +493,7 @@
 }
 
 .tooltip-value.merged {
-  color: var(--green);
+  color: var(--success);
 }
 
 .tooltip-status,
@@ -506,37 +506,37 @@
 }
 
 .tooltip-status.status-running {
-  background: var(--cyan);
+  background: var(--ai);
   color: var(--bg-page);
 }
 
 .tooltip-status.status-completed {
-  background: var(--green);
+  background: var(--success);
   color: var(--bg-page);
 }
 
 .tooltip-status.status-error {
-  background: var(--red);
+  background: var(--danger);
   color: var(--text-on-accent);
 }
 
 .tooltip-status.status-pending {
-  background: var(--yellow);
+  background: var(--warning);
   color: var(--bg-page);
 }
 
 .tooltip-verdict.verdict-approved {
-  background: var(--green);
+  background: var(--success);
   color: var(--bg-page);
 }
 
 .tooltip-verdict.verdict-rejected {
-  background: var(--red);
+  background: var(--danger);
   color: var(--text-on-accent);
 }
 
 .tooltip-verdict.verdict-needs-changes {
-  background: var(--orange);
+  background: var(--queue);
   color: var(--bg-page);
 }
 
@@ -562,7 +562,7 @@
   padding: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
 }
 
 .timeline-legend h4 {
@@ -605,15 +605,15 @@
 }
 
 .legend-badge.approved {
-  background: var(--green);
+  background: var(--success);
 }
 
 .legend-badge.rejected {
-  background: var(--red);
+  background: var(--danger);
 }
 
 .legend-badge.needs-changes {
-  background: var(--orange);
+  background: var(--queue);
 }
 
 .legend-divider {

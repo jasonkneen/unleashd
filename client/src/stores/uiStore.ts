@@ -177,7 +177,7 @@ export const useUIStore = create<UIState>()(
       },
     }),
     {
-      name: 'claude-web-view-ui',
+      name: 'orchestral-ui',
       version: 4,
       // Persist only state, not actions
       partialize: (state) => ({

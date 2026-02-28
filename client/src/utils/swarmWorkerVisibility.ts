@@ -1,5 +1,5 @@
-import type { Conversation } from '@claude-web-view/shared';
-import type { OompaRuntimeSnapshot } from '@claude-web-view/shared';
+import type { Conversation } from '@orchestral/shared';
+import type { OompaRuntimeSnapshot } from '@orchestral/shared';
 
 export interface WorkerVisibilitySummary {
   sessionCount: number;

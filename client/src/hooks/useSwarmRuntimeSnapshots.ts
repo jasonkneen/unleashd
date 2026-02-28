@@ -1,4 +1,4 @@
-import type { OompaRuntimeSnapshot } from '@claude-web-view/shared';
+import type { OompaRuntimeSnapshot } from '@orchestral/shared';
 import { useEffect, useMemo, useState } from 'react';
 
 interface UseSwarmRuntimeSnapshotsOptions {

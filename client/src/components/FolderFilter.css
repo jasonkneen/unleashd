@@ -28,7 +28,7 @@
   padding: 4px 10px;
   background: var(--bg-content);
   border: 1px solid var(--border-default);
-  border-radius: 6px;
+  border-radius: 2px;
   color: var(--text-primary);
   font-size: 12px;
   outline: none;
@@ -40,7 +40,7 @@
 }
 
 .folder-search:focus {
-  border-color: var(--cyan);
+  border-color: var(--ai);
 }
 
 .folder-filter-chips {
@@ -76,13 +76,13 @@
 }
 
 .folder-chip.selected {
-  background: var(--cyan-glow);
-  border-color: var(--cyan);
-  color: var(--cyan-bright);
+  background: var(--ai-glow);
+  border-color: var(--ai);
+  color: var(--ai-bright);
 }
 
 .folder-chip.selected:hover {
-  background: color-mix(in srgb, var(--cyan) 35%, transparent);
+  background: color-mix(in srgb, var(--ai) 35%, transparent);
 }
 
 /* "N older folders..." and "show less" button */
@@ -95,8 +95,8 @@
 
 .folder-chip-more:hover {
   background: var(--bg-hover);
-  border-color: var(--yellow);
-  color: var(--yellow-bright);
+  border-color: var(--warning);
+  color: var(--warning-bright);
   font-style: italic;
 }
 
@@ -114,14 +114,14 @@
 
 .folder-filter-clear:hover {
   background: var(--bg-hover);
-  border-color: var(--orange);
-  color: var(--orange-bright);
+  border-color: var(--queue);
+  color: var(--queue-bright);
 }
 
 /* Fuzzy match highlighting */
 .fuzzy-highlight {
   background: transparent;
-  color: var(--cyan-bright);
+  color: var(--ai-bright);
   font-weight: 700;
 }
 
@@ -153,7 +153,7 @@
   padding: 4px 10px;
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 2px;
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
@@ -163,7 +163,7 @@
 
 .conversation-result:hover {
   background: var(--bg-hover);
-  border-color: var(--cyan);
+  border-color: var(--ai);
   color: var(--text-primary);
 }
 

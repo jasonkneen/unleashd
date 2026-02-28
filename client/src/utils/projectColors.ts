@@ -1,18 +1,18 @@
-// Project accent colors derived from the current palette's 8 accent CSS variables.
+// Project accent colors derived from the current palette's 8 semantic intent CSS variables.
 // Color is determined by hashing the workingDirectory so all conversations
 // in the same project share one consistent accent color.
 //
-// These read from --pal-* at call time, so they adapt when the user switches themes.
+// These read from --theme-* at call time, so they adapt when the user switches themes.
 
 const ACCENT_VARS = [
-  '--pal-blue',
-  '--pal-cyan',
-  '--pal-green',
-  '--pal-yellow',
-  '--pal-orange',
-  '--pal-red',
-  '--pal-magenta',
-  '--pal-violet',
+  '--theme-user',
+  '--theme-ai',
+  '--theme-success',
+  '--theme-warning',
+  '--theme-queue',
+  '--theme-danger',
+  '--theme-meta',
+  '--theme-primary',
 ] as const;
 
 /**

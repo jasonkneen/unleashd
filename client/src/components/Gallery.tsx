@@ -1,4 +1,4 @@
-import type { Conversation, Message } from '@claude-web-view/shared';
+import type { Conversation, Message } from '@orchestral/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';

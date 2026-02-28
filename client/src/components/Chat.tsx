@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { ModelId, ModelInfo } from '@claude-web-view/shared';
-import { PROVIDER_OPTIONS } from '@claude-web-view/shared';
+import type { ModelId, ModelInfo } from '@orchestral/shared';
+import { PROVIDER_OPTIONS } from '@orchestral/shared';
 import { useDropzone } from 'react-dropzone';
 import {
   cancelQueuedMessage,

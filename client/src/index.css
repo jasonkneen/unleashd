@@ -1,71 +1,73 @@
 /* =============================================================================
    Color System — Two-Layer Architecture
 
-   Layer 1: PALETTE TOKENS (--pal-*)
-     16 base values set by applyPalette() in JS. Default: Solarized Dark.
+   Layer 1: THEME TOKENS (--theme-*)
+     14 base values set by applyPalette() in JS. Default: Solarized Dark.
      These are the ONLY values that change when switching themes.
-     8 base tones (base03–base1) + 8 accent colors.
+     6 structural tones + 8 semantic intent colors.
 
    Layer 2: DERIVED + SEMANTIC TOKENS
      60+ tokens computed by the browser via color-mix().
-     Components reference ONLY these tokens, never --pal-* directly.
+     Components reference ONLY these tokens, never --theme-* directly.
 
-   To add a new palette: provide 16 hex values → CSS derives everything else.
+   To add a new palette: provide 14 hex values → CSS derives everything else.
+
+   Semantic intent names decouple theme tokens from literal colors, so a
+   monochromatic or analogous palette doesn't need to supply "blue" or "magenta".
    ============================================================================= */
 
 :root {
   /* =========================================
-     PALETTE TOKENS — set by applyPalette().
+     THEME TOKENS — set by applyPalette().
      Default: Solarized Dark.
      ========================================= */
 
-  /* Base tones */
-  --pal-base03: #002b36; /* Darkest background */
-  --pal-base02: #073642; /* Surface / raised background */
-  --pal-base01: #586e75; /* Muted text, comments */
-  --pal-base00: #657b83; /* Secondary text */
-  --pal-base0: #839496; /* Primary body text */
-  --pal-base1: #93a1a1; /* Emphasized text */
-  --pal-base2: #eee8d5; /* Light background (reserved for light theme) */
-  --pal-base3: #fdf6e3; /* Light highlight (reserved for light theme) */
+  /* Structural tones */
+  --theme-bg-canvas: #002b36;   /* Darkest background */
+  --theme-bg-surface: #073642;  /* Surface / raised background */
+  --theme-text-muted: #586e75;  /* Muted text, comments */
+  --theme-text-subtle: #657b83; /* Secondary text */
+  --theme-text-body: #839496;   /* Primary body text */
+  --theme-text-bright: #93a1a1; /* Emphasized text */
 
-  /* Accent colors */
-  --pal-yellow: #b58900;
-  --pal-orange: #cb4b16;
-  --pal-red: #dc322f;
-  --pal-magenta: #d33682;
-  --pal-violet: #6c71c4;
-  --pal-blue: #268bd2;
-  --pal-cyan: #2aa198;
-  --pal-green: #859900;
+  /* Semantic intent colors */
+  --theme-primary: #6c71c4;  /* Send button, focus glows */
+  --theme-user: #268bd2;     /* User messages, active nav */
+  --theme-ai: #2aa198;       /* Assistant messages */
+  --theme-success: #859900;  /* Completed states */
+  --theme-warning: #b58900;  /* Warnings, system alerts */
+  --theme-queue: #cb4b16;    /* Queued, inline code, pending */
+  --theme-danger: #dc322f;   /* Errors, interrupt */
+  --theme-meta: #d33682;     /* AI model badges, special */
 
   /* =========================================
      DERIVED: Background elevation scale
-     9 levels derived from --pal-base03 and --pal-base02.
+     9 levels derived from --theme-bg-canvas and --theme-bg-surface.
      Each step increases perceived lightness.
      ========================================= */
-  --bg-darkest: color-mix(in oklch, var(--pal-base03) 70%, black);
-  --bg-base: color-mix(in oklch, var(--pal-base03) 85%, black);
-  --bg-raised-1: var(--pal-base03);
-  --bg-raised-2: color-mix(in oklch, var(--pal-base03) 85%, var(--pal-base02));
-  --bg-raised-3: var(--pal-base02);
-  --bg-raised-4: color-mix(in oklch, var(--pal-base02) 80%, var(--pal-base01));
-  --bg-raised-5: color-mix(in oklch, var(--pal-base02) 65%, var(--pal-base01));
-  --bg-raised-6: color-mix(in oklch, var(--pal-base02) 50%, var(--pal-base01));
-  --bg-highlight: color-mix(in oklch, var(--pal-base02) 35%, var(--pal-base01));
+  --bg-darkest: color-mix(in oklch, var(--theme-bg-canvas) 70%, black);
+  --bg-base: color-mix(in oklch, var(--theme-bg-canvas) 85%, black);
+  --bg-raised-1: var(--theme-bg-canvas);
+  --bg-raised-2: color-mix(in oklch, var(--theme-bg-canvas) 85%, var(--theme-bg-surface));
+  --bg-raised-3: var(--theme-bg-surface);
+  --bg-raised-4: color-mix(in oklch, var(--theme-bg-surface) 80%, var(--theme-text-muted));
+  --bg-raised-5: color-mix(in oklch, var(--theme-bg-surface) 65%, var(--theme-text-muted));
+  --bg-raised-6: color-mix(in oklch, var(--theme-bg-surface) 50%, var(--theme-text-muted));
+  --bg-highlight: color-mix(in oklch, var(--theme-bg-surface) 35%, var(--theme-text-muted));
 
   /* =========================================
      DERIVED: Semantic backgrounds
      Named aliases for the elevation scale.
      ========================================= */
   --bg-page: var(--bg-base);
-  --bg-sidebar: color-mix(in oklch, var(--pal-base03) 92%, black);
+  --bg-sidebar: color-mix(in oklch, var(--theme-bg-canvas) 92%, black);
   --bg-content: var(--bg-raised-1);
   --bg-card: var(--bg-raised-2);
   --bg-panel: var(--bg-raised-3);
   --bg-hover: var(--bg-raised-4);
   --bg-active: var(--bg-raised-5);
   --bg-popup: var(--bg-raised-6);
+  --bg-selected: var(--theme-bg-surface);
 
   /* Legacy mappings for compatibility */
   --bg-primary: var(--bg-base);
@@ -74,93 +76,93 @@
 
   /* =========================================
      DERIVED: Border scale (4 intensities)
-     All derived from --pal-base1 at varying alpha.
+     All derived from --theme-text-bright at varying alpha.
      ========================================= */
-  --border-subtle: color-mix(in srgb, var(--pal-base1) 10%, transparent);
-  --border-default: color-mix(in srgb, var(--pal-base1) 18%, transparent);
-  --border-emphasis: color-mix(in srgb, var(--pal-base1) 28%, transparent);
-  --border-strong: color-mix(in srgb, var(--pal-base1) 42%, transparent);
+  --border-subtle: color-mix(in srgb, var(--theme-text-bright) 10%, transparent);
+  --border-default: color-mix(in srgb, var(--theme-text-bright) 18%, transparent);
+  --border-emphasis: color-mix(in srgb, var(--theme-text-bright) 28%, transparent);
+  --border-strong: color-mix(in srgb, var(--theme-text-bright) 42%, transparent);
   --border-color: var(--bg-panel);
 
   /* =========================================
      DERIVED: Text scale
-     Mapped from palette base tones.
+     Mapped from theme structural tones.
      ========================================= */
-  --text-muted: var(--pal-base01);
-  --text-secondary: var(--pal-base00);
-  --text-primary: var(--pal-base0);
-  --text-emphasis: var(--pal-base1);
-  --text-bright: color-mix(in oklch, var(--pal-base1) 70%, white);
-  --text-on-accent: color-mix(in oklch, var(--pal-base03) 90%, black);
+  --text-muted: var(--theme-text-muted);
+  --text-secondary: var(--theme-text-subtle);
+  --text-primary: var(--theme-text-body);
+  --text-emphasis: var(--theme-text-bright);
+  --text-bright: color-mix(in oklch, var(--theme-text-bright) 70%, white);
+  --text-on-accent: color-mix(in oklch, var(--theme-bg-canvas) 90%, black);
 
   /* =========================================
      DERIVED: Accent color families
      Each has 4 variants: base, dim, bright, glow.
-     dim   = 65% of accent mixed toward black (oklch)
+     dim   = 35% of accent mixed toward canvas (oklch) — context-aware for light/dark
      bright = 75% of accent mixed toward white (oklch)
      glow  = 22% of accent over transparent (srgb)
      ========================================= */
 
-  /* Blue */
-  --blue: var(--pal-blue);
-  --blue-dim: color-mix(in oklch, var(--pal-blue) 65%, black);
-  --blue-bright: color-mix(in oklch, var(--pal-blue) 75%, white);
-  --blue-glow: color-mix(in srgb, var(--pal-blue) 22%, transparent);
+  /* User (messages, active nav) */
+  --user: var(--theme-user);
+  --user-dim: color-mix(in oklch, var(--theme-user) 35%, var(--theme-bg-canvas));
+  --user-bright: color-mix(in oklch, var(--theme-user) 75%, white);
+  --user-glow: color-mix(in srgb, var(--theme-user) 22%, transparent);
 
-  /* Cyan */
-  --cyan: var(--pal-cyan);
-  --cyan-dim: color-mix(in oklch, var(--pal-cyan) 65%, black);
-  --cyan-bright: color-mix(in oklch, var(--pal-cyan) 75%, white);
-  --cyan-glow: color-mix(in srgb, var(--pal-cyan) 22%, transparent);
+  /* AI (assistant messages) */
+  --ai: var(--theme-ai);
+  --ai-dim: color-mix(in oklch, var(--theme-ai) 35%, var(--theme-bg-canvas));
+  --ai-bright: color-mix(in oklch, var(--theme-ai) 75%, white);
+  --ai-glow: color-mix(in srgb, var(--theme-ai) 22%, transparent);
 
-  /* Violet */
-  --violet: var(--pal-violet);
-  --violet-dim: color-mix(in oklch, var(--pal-violet) 65%, black);
-  --violet-bright: color-mix(in oklch, var(--pal-violet) 75%, white);
-  --violet-glow: color-mix(in srgb, var(--pal-violet) 22%, transparent);
+  /* Primary (send button, focus glows) */
+  --primary: var(--theme-primary);
+  --primary-dim: color-mix(in oklch, var(--theme-primary) 35%, var(--theme-bg-canvas));
+  --primary-bright: color-mix(in oklch, var(--theme-primary) 75%, white);
+  --primary-glow: color-mix(in srgb, var(--theme-primary) 22%, transparent);
 
-  /* Green */
-  --green: var(--pal-green);
-  --green-dim: color-mix(in oklch, var(--pal-green) 65%, black);
-  --green-bright: color-mix(in oklch, var(--pal-green) 75%, white);
-  --green-glow: color-mix(in srgb, var(--pal-green) 22%, transparent);
+  /* Success (completed states) */
+  --success: var(--theme-success);
+  --success-dim: color-mix(in oklch, var(--theme-success) 35%, var(--theme-bg-canvas));
+  --success-bright: color-mix(in oklch, var(--theme-success) 75%, white);
+  --success-glow: color-mix(in srgb, var(--theme-success) 22%, transparent);
 
-  /* Yellow */
-  --yellow: var(--pal-yellow);
-  --yellow-dim: color-mix(in oklch, var(--pal-yellow) 65%, black);
-  --yellow-bright: color-mix(in oklch, var(--pal-yellow) 75%, white);
-  --yellow-glow: color-mix(in srgb, var(--pal-yellow) 22%, transparent);
+  /* Warning (system alerts) */
+  --warning: var(--theme-warning);
+  --warning-dim: color-mix(in oklch, var(--theme-warning) 35%, var(--theme-bg-canvas));
+  --warning-bright: color-mix(in oklch, var(--theme-warning) 75%, white);
+  --warning-glow: color-mix(in srgb, var(--theme-warning) 22%, transparent);
 
-  /* Orange */
-  --orange: var(--pal-orange);
-  --orange-dim: color-mix(in oklch, var(--pal-orange) 65%, black);
-  --orange-bright: color-mix(in oklch, var(--pal-orange) 75%, white);
-  --orange-glow: color-mix(in srgb, var(--pal-orange) 22%, transparent);
+  /* Queue (queued, inline code, pending) */
+  --queue: var(--theme-queue);
+  --queue-dim: color-mix(in oklch, var(--theme-queue) 35%, var(--theme-bg-canvas));
+  --queue-bright: color-mix(in oklch, var(--theme-queue) 75%, white);
+  --queue-glow: color-mix(in srgb, var(--theme-queue) 22%, transparent);
 
-  /* Red */
-  --red: var(--pal-red);
-  --red-dim: color-mix(in oklch, var(--pal-red) 65%, black);
-  --red-bright: color-mix(in oklch, var(--pal-red) 75%, white);
-  --red-glow: color-mix(in srgb, var(--pal-red) 22%, transparent);
+  /* Danger (errors, interrupt) */
+  --danger: var(--theme-danger);
+  --danger-dim: color-mix(in oklch, var(--theme-danger) 35%, var(--theme-bg-canvas));
+  --danger-bright: color-mix(in oklch, var(--theme-danger) 75%, white);
+  --danger-glow: color-mix(in srgb, var(--theme-danger) 22%, transparent);
 
-  /* Magenta */
-  --magenta: var(--pal-magenta);
-  --magenta-dim: color-mix(in oklch, var(--pal-magenta) 65%, black);
-  --magenta-bright: color-mix(in oklch, var(--pal-magenta) 75%, white);
-  --magenta-glow: color-mix(in srgb, var(--pal-magenta) 22%, transparent);
+  /* Meta (AI model badges, special) */
+  --meta: var(--theme-meta);
+  --meta-dim: color-mix(in oklch, var(--theme-meta) 35%, var(--theme-bg-canvas));
+  --meta-bright: color-mix(in oklch, var(--theme-meta) 75%, white);
+  --meta-glow: color-mix(in srgb, var(--theme-meta) 22%, transparent);
 
   /* =========================================
      DERIVED: Semantic accent mappings
      Named roles pointing to accent families.
      ========================================= */
-  --accent-primary: var(--violet);
-  --accent-primary-hover: var(--violet-bright);
-  --accent-user: var(--blue);
-  --accent-assistant: var(--cyan);
-  --accent-success: var(--cyan);
-  --accent-warning: var(--yellow);
-  --accent-error: var(--red);
-  --accent-queue: var(--orange);
+  --accent-primary: var(--primary);
+  --accent-primary-hover: var(--primary-bright);
+  --accent-user: var(--user);
+  --accent-assistant: var(--ai);
+  --accent-success: var(--ai);
+  --accent-warning: var(--warning);
+  --accent-error: var(--danger);
+  --accent-queue: var(--queue);
 
   /* =========================================
      DERIVED: Message backgrounds
@@ -175,13 +177,13 @@
      CODE STYLING
      ========================================= */
   --code-bg: var(--bg-base);
-  --code-text: var(--cyan);
-  --code-string: var(--green);
+  --code-text: var(--ai);
+  --code-string: var(--success);
 
   /* =========================================
      DERIVED: Semantic accent mappings (cont.)
      ========================================= */
-  --accent-primary-glow: var(--violet-glow);
+  --accent-primary-glow: var(--primary-glow);
 
   /* =========================================
      DERIVED: Elevated surface
@@ -210,12 +212,12 @@
 
 a {
   font-weight: 500;
-  color: var(--blue);
+  color: var(--user);
   text-decoration: inherit;
 }
 
 a:hover {
-  color: var(--cyan-bright);
+  color: var(--ai-bright);
 }
 
 /* Monospace restriction: only code, pre, and explicitly technical elements.

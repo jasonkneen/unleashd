@@ -15,9 +15,9 @@
   align-items: center;
   gap: 8px;
   padding: 6px 14px;
-  border: 1px solid var(--violet-dim);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--violet) 8%, var(--bg-card));
+  border: 1px solid var(--primary-dim);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg-card));
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
@@ -27,12 +27,12 @@
 }
 
 .swarm-prefix-token:hover {
-  background: color-mix(in srgb, var(--violet) 14%, var(--bg-card));
-  border-color: var(--violet);
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-card));
+  border-color: var(--primary);
 }
 
 .swarm-prefix-token.expanded {
-  border-radius: 6px 6px 0 0;
+  border-radius: 2px 2px 0 0;
   border-bottom-color: transparent;
 }
 
@@ -48,10 +48,10 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  color: var(--violet);
+  color: var(--primary);
   padding: 1px 6px;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--violet) 15%, transparent);
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
   flex-shrink: 0;
 }
 
@@ -76,23 +76,23 @@
 }
 
 .swarm-stat-chip.chip-neutral {
-  background: color-mix(in srgb, var(--cyan) 12%, transparent);
-  color: var(--cyan);
+  background: color-mix(in srgb, var(--ai) 12%, transparent);
+  color: var(--ai);
 }
 
 .swarm-stat-chip.chip-success {
-  background: color-mix(in srgb, var(--green) 15%, transparent);
-  color: var(--green-bright);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success-bright);
 }
 
 .swarm-stat-chip.chip-warning {
-  background: color-mix(in srgb, var(--orange) 15%, transparent);
-  color: var(--orange);
+  background: color-mix(in srgb, var(--queue) 15%, transparent);
+  color: var(--queue);
 }
 
 .swarm-stat-chip.chip-error {
-  background: color-mix(in srgb, var(--red) 15%, transparent);
-  color: var(--red);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
 }
 
 .swarm-prefix-time {
@@ -105,9 +105,9 @@
 /* ---------- Expanded content card ---------- */
 
 .swarm-prefix-content {
-  border: 1px solid var(--violet-dim);
+  border: 1px solid var(--primary-dim);
   border-top: none;
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 2px 2px;
   background: var(--bg-card);
   padding: 12px 16px;
   display: flex;
@@ -147,7 +147,7 @@
 code.swarm-prefix-val {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--cyan);
+  color: var(--ai);
 }
 
 /* Stats grid */
@@ -156,7 +156,7 @@ code.swarm-prefix-val {
   gap: 16px;
   padding: 10px 12px;
   background: var(--bg-elevated);
-  border-radius: 6px;
+  border-radius: 2px;
 }
 
 .swarm-prefix-stat {
@@ -174,15 +174,15 @@ code.swarm-prefix-val {
 }
 
 .swarm-prefix-stat-value.stat-success {
-  color: var(--green-bright);
+  color: var(--success-bright);
 }
 
 .swarm-prefix-stat-value.stat-warning {
-  color: var(--orange);
+  color: var(--queue);
 }
 
 .swarm-prefix-stat-value.stat-error {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .swarm-prefix-stat-label {
@@ -235,23 +235,23 @@ code.swarm-prefix-val {
 
 .swarm-prefix-status.status-completed,
 .swarm-prefix-status.status-done {
-  background: color-mix(in srgb, var(--green) 15%, transparent);
-  color: var(--green-bright);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success-bright);
 }
 
 .swarm-prefix-status.status-running {
-  background: color-mix(in srgb, var(--cyan) 15%, transparent);
-  color: var(--cyan);
+  background: color-mix(in srgb, var(--ai) 15%, transparent);
+  color: var(--ai);
 }
 
 .swarm-prefix-status.status-error {
-  background: color-mix(in srgb, var(--red) 15%, transparent);
-  color: var(--red);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
 }
 
 .swarm-prefix-status.status-exhausted {
-  background: color-mix(in srgb, var(--yellow) 15%, transparent);
-  color: var(--yellow-bright);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  color: var(--warning-bright);
 }
 
 /* Raw prefix collapsible */

@@ -1,7 +1,7 @@
 # Incident Analysis: Truncated Turns, Split Threads, and Multi-UUID Identity Drift
 
 Date: 2026-02-25 (CST)
-Repository: `claude-web-view`
+Repository: `orchestral`
 Audience: incoming engineering agent / incident owner
 
 ## 1) Executive Summary
@@ -46,7 +46,7 @@ IDs reported by user and verified:
 2. `019c9368` -> present in `~/.codex/sessions/2026/02/25/...` (multiple files).
 3. `019c93b9` -> present in `~/.codex/sessions/2026/02/25/...` (single file).
 4. `019c93d3` -> present in `~/.codex/sessions/2026/02/25/...` (single file).
-5. `d97e2064` -> not found in persisted sources searched (`~/.codex/sessions`, `~/.claude-web-view`, `~/.agent-viewer`).
+5. `d97e2064` -> not found in persisted sources searched (`~/.codex/sessions`, `~/.orchestral`, `~/.agent-viewer`).
 
 Interpretation:
 
@@ -97,9 +97,9 @@ Interpretation:
 
 Current state:
 
-1. Conversation runtime has both `id` and `sessionId` server-side ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):294-296).
-2. Shared `ConversationSchema` exposes `id` only, not `sessionId` ([shared/src/index.ts](/Users/nicholasbardy/git/claude-web-view/shared/src/index.ts):292-336).
-3. `toJSON()` serializes `id` but not `sessionId` ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):1077-1098).
+1. Conversation runtime has both `id` and `sessionId` server-side ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):294-296).
+2. Shared `ConversationSchema` exposes `id` only, not `sessionId` ([shared/src/index.ts](/Users/nicholasbardy/git/orchestral/shared/src/index.ts):292-336).
+3. `toJSON()` serializes `id` but not `sessionId` ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):1077-1098).
 
 Impact:
 
@@ -108,9 +108,9 @@ Impact:
 
 ### 4.2 Disk Hydration Re-Keys by Provider Session ID
 
-Disk path conversion sets `id = session.sessionId` ([server/src/adapters/disk-adapter.ts](/Users/nicholasbardy/git/claude-web-view/server/src/adapters/disk-adapter.ts):86-109).
+Disk path conversion sets `id = session.sessionId` ([server/src/adapters/disk-adapter.ts](/Users/nicholasbardy/git/orchestral/server/src/adapters/disk-adapter.ts):86-109).
 
-`hydrateConversation()` then uses that `id` as canonical conversation id ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):3701-3719).
+`hydrateConversation()` then uses that `id` as canonical conversation id ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):3701-3719).
 
 Impact:
 
@@ -119,7 +119,7 @@ Impact:
 
 ### 4.3 Client `init` Handler Merges Instead of Reconciles
 
-`init` currently does `new Map(existing)` then overlays server conversations ([client/src/atoms/actions.ts](/Users/nicholasbardy/git/claude-web-view/client/src/atoms/actions.ts):309-314).
+`init` currently does `new Map(existing)` then overlays server conversations ([client/src/atoms/actions.ts](/Users/nicholasbardy/git/orchestral/client/src/atoms/actions.ts):309-314).
 
 It does not remove stale existing keys that are absent from server snapshot.
 
@@ -132,9 +132,9 @@ Impact:
 
 Adapters ingest from global stores:
 
-1. Codex: `~/.codex/sessions/YYYY/MM/DD/*.jsonl` ([server/src/adapters/registry.ts](/Users/nicholasbardy/git/claude-web-view/server/src/adapters/registry.ts):72-79).
-2. Loader discovers/parses all adapters ([server/src/adapters/loader.ts](/Users/nicholasbardy/git/claude-web-view/server/src/adapters/loader.ts):42-89, 179-292).
-3. Startup hydration and ongoing poll import these into runtime conversation map ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):3730-3785, 3895-4041).
+1. Codex: `~/.codex/sessions/YYYY/MM/DD/*.jsonl` ([server/src/adapters/registry.ts](/Users/nicholasbardy/git/orchestral/server/src/adapters/registry.ts):72-79).
+2. Loader discovers/parses all adapters ([server/src/adapters/loader.ts](/Users/nicholasbardy/git/orchestral/server/src/adapters/loader.ts):42-89, 179-292).
+3. Startup hydration and ongoing poll import these into runtime conversation map ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):3730-3785, 3895-4041).
 
 Impact:
 
@@ -142,7 +142,7 @@ Impact:
 
 ### 4.5 Parent/Child Thread Visibility Is Best-Effort
 
-Top-level filtering hides children only if parent ID is present in the current set ([client/src/components/Sidebar.tsx](/Users/nicholasbardy/git/claude-web-view/client/src/components/Sidebar.tsx):117-123).
+Top-level filtering hides children only if parent ID is present in the current set ([client/src/components/Sidebar.tsx](/Users/nicholasbardy/git/orchestral/client/src/components/Sidebar.tsx):117-123).
 
 Impact:
 
@@ -150,7 +150,7 @@ Impact:
 
 ### 4.6 Startup Load Limit Behavior
 
-`loadExistingConversations()` hardcodes `const limit = 500` ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):3734), even though env knobs exist (`CWV_STARTUP_INITIAL_LOAD_LIMIT` etc., [server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):118-121).
+`loadExistingConversations()` hardcodes `const limit = 500` ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):3734), even though env knobs exist (`CWV_STARTUP_INITIAL_LOAD_LIMIT` etc., [server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):118-121).
 
 Impact:
 
@@ -165,15 +165,15 @@ Committed in this repo:
 
 Relevant runtime knobs now present:
 
-1. `CWV_TURN_IDLE_TIMEOUT_MS` ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):127)
-2. `CWV_TURN_MAX_RUNTIME_MS` ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):128)
-3. `CWV_TURN_TIMEOUT_KILL_GRACE_MS` ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):129)
+1. `CWV_TURN_IDLE_TIMEOUT_MS` ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):127)
+2. `CWV_TURN_MAX_RUNTIME_MS` ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):128)
+3. `CWV_TURN_TIMEOUT_KILL_GRACE_MS` ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):129)
 
-Hot-reload SIGTERM drain behavior lives in signal handler block ([server/src/server.ts](/Users/nicholasbardy/git/claude-web-view/server/src/server.ts):3541-3642).
+Hot-reload SIGTERM drain behavior lives in signal handler block ([server/src/server.ts](/Users/nicholasbardy/git/orchestral/server/src/server.ts):3541-3642).
 
 Validation previously run and passing:
 
-1. `pnpm --filter @claude-web-view/server typecheck`
+1. `pnpm --filter @orchestral/server typecheck`
 2. `pnpm test`
 
 ## 6) Ranked Root-Cause Hypotheses
@@ -202,9 +202,9 @@ This pair is consistent with one logical conversation surfacing under two identi
 
 That pattern aligns with current architecture:
 
-1. client-generated IDs at creation ([client/src/atoms/actions.ts](/Users/nicholasbardy/git/claude-web-view/client/src/atoms/actions.ts):175)
-2. disk hydration keyed by provider session ID ([server/src/adapters/disk-adapter.ts](/Users/nicholasbardy/git/claude-web-view/server/src/adapters/disk-adapter.ts):93)
-3. `init` merge retaining stale local map entries ([client/src/atoms/actions.ts](/Users/nicholasbardy/git/claude-web-view/client/src/atoms/actions.ts):309-314)
+1. client-generated IDs at creation ([client/src/atoms/actions.ts](/Users/nicholasbardy/git/orchestral/client/src/atoms/actions.ts):175)
+2. disk hydration keyed by provider session ID ([server/src/adapters/disk-adapter.ts](/Users/nicholasbardy/git/orchestral/server/src/adapters/disk-adapter.ts):93)
+3. `init` merge retaining stale local map entries ([client/src/atoms/actions.ts](/Users/nicholasbardy/git/orchestral/client/src/atoms/actions.ts):309-314)
 
 ## 8) System Redesign Direction (Recommended)
 
@@ -270,7 +270,7 @@ That pattern aligns with current architecture:
 
 ## 11) Linked Package Risk Note (`@nbardy/agent-cli`)
 
-This server uses a local linked package ([server/package.json](/Users/nicholasbardy/git/claude-web-view/server/package.json):13):
+This server uses a local linked package ([server/package.json](/Users/nicholasbardy/git/orchestral/server/package.json):13):
 
 - `"@nbardy/agent-cli": "link:../../agent-cli-tool"`
 

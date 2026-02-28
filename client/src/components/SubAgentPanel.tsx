@@ -1,4 +1,4 @@
-import type { SubAgent } from '@claude-web-view/shared';
+import type { SubAgent } from '@orchestral/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './SubAgentPanel.css';

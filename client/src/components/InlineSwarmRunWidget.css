@@ -1,7 +1,7 @@
 .inline-swarm-run {
   background: color-mix(in srgb, var(--bg-panel) 40%, transparent);
   border: 1px solid var(--border-default);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 12px 16px;
   margin: 12px 0;
   display: flex;
@@ -20,8 +20,8 @@
   left: 0;
   width: 4px;
   height: 100%;
-  background: var(--yellow);
-  box-shadow: 0 0 8px var(--yellow);
+  background: var(--warning);
+  box-shadow: 0 0 8px var(--warning);
 }
 
 .inline-swarm-run.completed::before {
@@ -31,7 +31,7 @@
   left: 0;
   width: 4px;
   height: 100%;
-  background: var(--green);
+  background: var(--success);
 }
 
 .inline-swarm-run-header {
@@ -43,7 +43,7 @@
 
 .inline-swarm-label {
   font-weight: 700;
-  color: var(--yellow);
+  color: var(--warning);
   letter-spacing: 0.05em;
 }
 
@@ -66,8 +66,8 @@
 }
 
 .inline-swarm-status.status-running {
-  background: color-mix(in srgb, var(--yellow) 15%, transparent);
-  color: var(--yellow);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  color: var(--warning);
 }
 
 .inline-swarm-status.status-stopped {
@@ -99,7 +99,7 @@
 }
 
 .swarm-run-stat .stat-value.stat-success {
-  color: var(--green);
+  color: var(--success);
 }
 
 .swarm-run-stat .stat-label {

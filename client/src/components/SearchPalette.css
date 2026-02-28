@@ -109,13 +109,13 @@
 }
 
 .search-result-role--user {
-  background: color-mix(in srgb, var(--blue) 20%, transparent);
-  color: var(--blue-bright);
+  background: color-mix(in srgb, var(--user) 20%, transparent);
+  color: var(--user-bright);
 }
 
 .search-result-role--assistant {
-  background: color-mix(in srgb, var(--violet) 20%, transparent);
-  color: var(--violet-bright);
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+  color: var(--primary-bright);
 }
 
 .search-result-time {
@@ -137,8 +137,8 @@
 
 /* Highlighted match text */
 .search-highlight {
-  background: color-mix(in srgb, var(--yellow) 35%, transparent);
-  color: var(--yellow-bright);
+  background: color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--warning-bright);
   border-radius: 2px;
   padding: 0 1px;
 }

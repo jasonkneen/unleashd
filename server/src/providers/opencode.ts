@@ -1,4 +1,4 @@
-import type { ModelInfo } from '@claude-web-view/shared';
+import type { ModelInfo } from '@orchestral/shared';
 import type { Provider } from './index';
 
 const opencodeProvider: Provider = {

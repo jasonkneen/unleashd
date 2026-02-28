@@ -1,5 +1,5 @@
 {
-  "name": "@claude-web-view/client",
+  "name": "@orchestral/client",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@claude-web-view/shared": "workspace:*",
+    "@orchestral/shared": "workspace:*",
     "@tanstack/react-virtual": "^3.13.18",
     "esbuild": "^0.27.3",
     "highlight.js": "^11.11.1",

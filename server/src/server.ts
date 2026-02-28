@@ -21,8 +21,8 @@ import type {
   QueuedMessage,
   ServerMessage,
   SubAgent,
-} from '@claude-web-view/shared';
-import { safeParseClientMessage } from '@claude-web-view/shared';
+} from '@orchestral/shared';
+import { safeParseClientMessage } from '@orchestral/shared';
 import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';

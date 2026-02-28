@@ -252,7 +252,7 @@ case 'chunk':
 1. Check browser console for IntersectionObserver errors
 2. Verify `lastMessageRef` is attached to last message element in Chat.tsx
 3. Check if CSS `overflow: hidden` or `visibility: hidden` blocks observer
-4. Inspect localStorage: `JSON.parse(localStorage.getItem('claude-web-view-ui')).lastSeenMessageIndex`
+4. Inspect localStorage: `JSON.parse(localStorage.getItem('orchestral-ui')).lastSeenMessageIndex`
 
 **Quick fix** (reset seen state for one conversation):
 ```typescript
@@ -261,8 +261,8 @@ useUIStore.getState().markMessagesSeen(conversationId, messages.length - 1);
 
 **Nuclear option** (reset all seen state):
 ```typescript
-localStorage.setItem('claude-web-view-ui', JSON.stringify({
-  ...JSON.parse(localStorage.getItem('claude-web-view-ui')),
+localStorage.setItem('orchestral-ui', JSON.stringify({
+  ...JSON.parse(localStorage.getItem('orchestral-ui')),
   lastSeenMessageIndex: {}
 }));
 ```

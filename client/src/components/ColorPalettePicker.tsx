@@ -81,14 +81,6 @@ function oklchToRgb(L: number, C: number, H: number): [number, number, number] {
   return [delinearize(r), delinearize(g), delinearize(bVal)];
 }
 
-/** Simulate color-mix(in oklch, color P%, black) */
-function mixBlackOklch(hex: string, pct: number): string {
-  const [r, g, b] = hexToRgb(hex);
-  const [L, C, H] = rgbToOklch(r, g, b);
-  const [rr, gg, bb] = oklchToRgb(L * (pct / 100), C * (pct / 100), H);
-  return rgbToHex(rr, gg, bb);
-}
-
 /** Simulate color-mix(in oklch, color P%, white) */
 function mixWhiteOklch(hex: string, pct: number): string {
   const [r, g, b] = hexToRgb(hex);
@@ -120,11 +112,28 @@ function mixTwoOklch(hexA: string, hexB: string, pctA: number): string {
   return rgbToHex(r, g, b);
 }
 
+/**
+ * Simulate color-mix(in oklch, accent P%, canvas) — dim variant.
+ * Mixes toward the canvas background instead of black, so dim variants
+ * are context-aware across light/dark themes.
+ */
+function mixCanvasOklch(hex: string, canvas: string, pct: number): string {
+  return mixTwoOklch(hex, canvas, pct);
+}
+
+/** Simulate color-mix(in oklch, color P%, black) — used for bg elevation */
+function mixBlackOklch(hex: string, pct: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  const [L, C, H] = rgbToOklch(r, g, b);
+  const [rr, gg, bb] = oklchToRgb(L * (pct / 100), C * (pct / 100), H);
+  return rgbToHex(rr, gg, bb);
+}
+
 // ─── Derived token computation from a Palette16 ─────────────────────────────
 // Mirrors index.css :root derivations exactly.
 
 interface DerivedTokens {
-  // Accent families: 8 colors × 4 variants
+  // Accent families: 8 intents × 4 variants
   accents: Record<string, { dim: string; base: string; bright: string; glow: string }>;
   // Background elevation ramp
   bg: { label: string; color: string }[];
@@ -139,32 +148,32 @@ interface DerivedTokens {
 }
 
 const ACCENT_KEYS = [
-  'blue',
-  'cyan',
-  'violet',
-  'green',
-  'yellow',
-  'orange',
-  'red',
-  'magenta',
+  'user',
+  'ai',
+  'primary',
+  'success',
+  'warning',
+  'queue',
+  'danger',
+  'meta',
 ] as const;
 
 const SEMANTIC_MAP: { label: string; key: (typeof ACCENT_KEYS)[number] }[] = [
-  { label: 'Primary', key: 'violet' },
-  { label: 'User', key: 'blue' },
-  { label: 'Assistant', key: 'cyan' },
-  { label: 'Success', key: 'cyan' },
-  { label: 'Warning', key: 'yellow' },
-  { label: 'Error', key: 'red' },
-  { label: 'Queue', key: 'orange' },
-  { label: 'Loop', key: 'magenta' },
+  { label: 'Primary', key: 'primary' },
+  { label: 'User', key: 'user' },
+  { label: 'Assistant', key: 'ai' },
+  { label: 'Success', key: 'ai' },
+  { label: 'Warning', key: 'warning' },
+  { label: 'Error', key: 'danger' },
+  { label: 'Queue', key: 'queue' },
+  { label: 'Meta', key: 'meta' },
 ];
 
 function derivePalette(p: Palette16): DerivedTokens {
   const accents: DerivedTokens['accents'] = {};
   for (const key of ACCENT_KEYS) {
     accents[key] = {
-      dim: mixBlackOklch(p[key], 65),
+      dim: mixCanvasOklch(p[key], p.bgCanvas, 35),
       base: p[key],
       bright: mixWhiteOklch(p[key], 75),
       glow: mixTransparentSrgb(p[key], 22),
@@ -172,30 +181,30 @@ function derivePalette(p: Palette16): DerivedTokens {
   }
 
   const bg: DerivedTokens['bg'] = [
-    { label: 'Darkest', color: mixBlackOklch(p.base03, 70) },
-    { label: 'Base', color: mixBlackOklch(p.base03, 85) },
-    { label: 'Content', color: p.base03 },
-    { label: 'Card', color: mixTwoOklch(p.base03, p.base02, 85) },
-    { label: 'Panel', color: p.base02 },
-    { label: 'Hover', color: mixTwoOklch(p.base02, p.base01, 80) },
-    { label: 'Active', color: mixTwoOklch(p.base02, p.base01, 65) },
-    { label: 'Popup', color: mixTwoOklch(p.base02, p.base01, 50) },
-    { label: 'Highlight', color: mixTwoOklch(p.base02, p.base01, 35) },
+    { label: 'Darkest', color: mixBlackOklch(p.bgCanvas, 70) },
+    { label: 'Base', color: mixBlackOklch(p.bgCanvas, 85) },
+    { label: 'Content', color: p.bgCanvas },
+    { label: 'Card', color: mixTwoOklch(p.bgCanvas, p.bgSurface, 85) },
+    { label: 'Panel', color: p.bgSurface },
+    { label: 'Hover', color: mixTwoOklch(p.bgSurface, p.textMuted, 80) },
+    { label: 'Active', color: mixTwoOklch(p.bgSurface, p.textMuted, 65) },
+    { label: 'Popup', color: mixTwoOklch(p.bgSurface, p.textMuted, 50) },
+    { label: 'Highlight', color: mixTwoOklch(p.bgSurface, p.textMuted, 35) },
   ];
 
   const text: DerivedTokens['text'] = [
-    { label: 'Muted', color: p.base01 },
-    { label: 'Secondary', color: p.base00 },
-    { label: 'Primary', color: p.base0 },
-    { label: 'Emphasis', color: p.base1 },
-    { label: 'Bright', color: mixWhiteOklch(p.base1, 70) },
+    { label: 'Muted', color: p.textMuted },
+    { label: 'Secondary', color: p.textSubtle },
+    { label: 'Primary', color: p.textBody },
+    { label: 'Emphasis', color: p.textBright },
+    { label: 'Bright', color: mixWhiteOklch(p.textBright, 70) },
   ];
 
   const borders: DerivedTokens['borders'] = [
-    { label: 'Subtle (10%)', color: mixTransparentSrgb(p.base1, 10) },
-    { label: 'Default (18%)', color: mixTransparentSrgb(p.base1, 18) },
-    { label: 'Emphasis (28%)', color: mixTransparentSrgb(p.base1, 28) },
-    { label: 'Strong (42%)', color: mixTransparentSrgb(p.base1, 42) },
+    { label: 'Subtle (10%)', color: mixTransparentSrgb(p.textBright, 10) },
+    { label: 'Default (18%)', color: mixTransparentSrgb(p.textBright, 18) },
+    { label: 'Emphasis (28%)', color: mixTransparentSrgb(p.textBright, 28) },
+    { label: 'Strong (42%)', color: mixTransparentSrgb(p.textBright, 42) },
   ];
 
   const semantic: DerivedTokens['semantic'] = SEMANTIC_MAP.map(({ label, key }) => ({
@@ -204,12 +213,12 @@ function derivePalette(p: Palette16): DerivedTokens {
     accent: key,
   }));
 
-  // Message tints: 8% accent mixed into base03
+  // Message tints: 8% accent mixed into bgCanvas
   const messages: DerivedTokens['messages'] = [
-    { label: 'User', color: mixTwoOklch(p.blue, p.base03, 8) },
-    { label: 'Assistant', color: mixTwoOklch(p.cyan, p.base03, 8) },
-    { label: 'System', color: mixTwoOklch(p.yellow, p.base03, 8) },
-    { label: 'Error', color: mixTwoOklch(p.red, p.base03, 8) },
+    { label: 'User', color: mixTwoOklch(p.user, p.bgCanvas, 8) },
+    { label: 'Assistant', color: mixTwoOklch(p.ai, p.bgCanvas, 8) },
+    { label: 'System', color: mixTwoOklch(p.warning, p.bgCanvas, 8) },
+    { label: 'Error', color: mixTwoOklch(p.danger, p.bgCanvas, 8) },
   ];
 
   return { accents, bg, text, borders, semantic, messages };
@@ -284,51 +293,51 @@ function ChatPreview({ palette, derived }: { palette: Palette16; derived: Derive
   return (
     <div
       className="chat-preview"
-      style={{ backgroundColor: palette.base03, borderColor: palette.base02 }}
+      style={{ backgroundColor: palette.bgCanvas, borderColor: palette.bgSurface }}
     >
-      <div className="preview-header" style={{ borderColor: palette.base02 }}>
-        <span style={{ color: palette.base0 }}>Chat Preview</span>
+      <div className="preview-header" style={{ borderColor: palette.bgSurface }}>
+        <span style={{ color: palette.textBody }}>Chat Preview</span>
         <span
           className="preview-badge"
-          style={{ backgroundColor: palette.violet, color: palette.base03 }}
+          style={{ backgroundColor: palette.primary, color: palette.bgCanvas }}
         >
           claude
         </span>
       </div>
       <div className="preview-messages">
         <div className="preview-message user">
-          <span className="preview-role" style={{ color: palette.blue }}>
+          <span className="preview-role" style={{ color: palette.user }}>
             user
           </span>
           <div
             className="preview-content"
             style={{
-              background: `linear-gradient(135deg, ${derived.messages[0].color} 0%, ${mixTransparentSrgb(palette.blue, 8)} 100%)`,
-              color: palette.base0,
-              borderLeft: `3px solid ${palette.blue}`,
+              background: `linear-gradient(135deg, ${derived.messages[0].color} 0%, ${mixTransparentSrgb(palette.user, 8)} 100%)`,
+              color: palette.textBody,
+              borderLeft: `3px solid ${palette.user}`,
             }}
           >
             How do I implement a binary search?
           </div>
         </div>
         <div className="preview-message assistant">
-          <span className="preview-role" style={{ color: palette.cyan }}>
+          <span className="preview-role" style={{ color: palette.ai }}>
             assistant
           </span>
           <div
             className="preview-content"
             style={{
-              background: `linear-gradient(135deg, ${derived.messages[1].color} 0%, ${mixTransparentSrgb(palette.cyan, 8)} 100%)`,
-              color: palette.base0,
-              borderLeft: `3px solid ${palette.cyan}`,
+              background: `linear-gradient(135deg, ${derived.messages[1].color} 0%, ${mixTransparentSrgb(palette.ai, 8)} 100%)`,
+              color: palette.textBody,
+              borderLeft: `3px solid ${palette.ai}`,
             }}
           >
             Here's a binary search implementation:
             <pre
               style={{
-                backgroundColor: palette.base03,
-                borderColor: palette.base02,
-                color: palette.base01,
+                backgroundColor: palette.bgCanvas,
+                borderColor: palette.bgSurface,
+                color: palette.textMuted,
               }}
             >
               {`function binarySearch(arr, target) {
@@ -526,13 +535,13 @@ export function ColorPalettePicker({ onClose }: Props) {
                 {/* Text scale */}
                 <div className="section-group">
                   <h3 className="section-title">Text Scale</h3>
-                  <ColorRamp items={derived.text} bgColor={currentPalette.base03} />
+                  <ColorRamp items={derived.text} bgColor={currentPalette.bgCanvas} />
                 </div>
 
                 {/* Borders */}
                 <div className="section-group">
                   <h3 className="section-title">Border Scale</h3>
-                  <ColorRamp items={derived.borders} bgColor={currentPalette.base03} />
+                  <ColorRamp items={derived.borders} bgColor={currentPalette.bgCanvas} />
                 </div>
 
                 {/* Semantic roles */}

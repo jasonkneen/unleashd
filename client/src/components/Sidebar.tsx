@@ -1,5 +1,5 @@
-import { PROVIDER_OPTIONS } from '@claude-web-view/shared';
-import type { Conversation, ModelId, ModelInfo, Provider } from '@claude-web-view/shared';
+import { PROVIDER_OPTIONS } from '@orchestral/shared';
+import type { Conversation, ModelId, ModelInfo, Provider } from '@orchestral/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -100,15 +100,16 @@ export function Sidebar() {
   );
   const runtimeSnapshots = useSwarmRuntimeSnapshots(workerProjectRoots);
 
+  // Done conversations stay in the list for stable sort order — filtered at render time.
+  // This prevents group/item order thrashing when marking conversations done.
   const visibleConversations = useMemo(
     () =>
       allConversations.filter(
         (conv) =>
-          !doneSet.has(conv.id) &&
           // Hide workers unless promoted to main view
           !(conv.isWorker && !promotedSet.has(conv.id))
       ),
-    [allConversations, doneSet, promotedSet]
+    [allConversations, promotedSet]
   );
 
   const conversationIds = useMemo(
@@ -600,7 +601,7 @@ export function Sidebar() {
           </div>
         )}
         {sidebarViewMode === 'list' ? (
-          topLevelConversations.map((conv) => (
+          topLevelConversations.filter((conv) => !doneSet.has(conv.id)).map((conv) => (
             <ConversationItem
               key={conv.id}
               conv={conv}
@@ -619,6 +620,8 @@ export function Sidebar() {
                   const isCollapsed = collapsedSet.has(group.directory);
                   const dirDisplay = group.directory.replace(/^\/Users\/[^/]+/, '~');
                   const projectColor = getProjectColor(group.directory);
+                  // Filter done at render time — group position stays stable
+                  const activeConvs = group.conversations.filter((c) => !doneSet.has(c.id));
 
                   return (
                     <div key={group.directory} className="folder-group">
@@ -677,19 +680,25 @@ export function Sidebar() {
                         >
                           +
                         </button>
-                        <span className="folder-group-count">{group.conversations.length}</span>
+                        <span className="folder-group-count">{activeConvs.length || ''}</span>
                       </div>
                       {!isCollapsed &&
-                        group.conversations.map((conv) => (
-                          <ConversationItem
-                            key={conv.id}
-                            conv={conv}
-                            isActive={conv.id === activeConversationId}
-                            hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
-                            showFolderBadge={false}
-                            onSelect={handleSelectConversation}
-                            onDone={handleDone}
-                          />
+                        (activeConvs.length > 0 ? (
+                          activeConvs.map((conv) => (
+                            <ConversationItem
+                              key={conv.id}
+                              conv={conv}
+                              isActive={conv.id === activeConversationId}
+                              hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
+                              showFolderBadge={false}
+                              onSelect={handleSelectConversation}
+                              onDone={handleDone}
+                            />
+                          ))
+                        ) : (
+                          <div className="folder-group-all-done">
+                            All conversations marked done
+                          </div>
                         ))}
                     </div>
                   );
@@ -697,20 +706,22 @@ export function Sidebar() {
               </div>
             )}
 
-            {olderConversations.length > 0 && (
+            {olderConversations.some((c) => !doneSet.has(c.id)) && (
               <div className="sidebar-section">
                 <div className="sidebar-section-header">Older</div>
-                {olderConversations.map((conv) => (
-                  <ConversationItem
-                    key={conv.id}
-                    conv={conv}
-                    isActive={conv.id === activeConversationId}
-                    hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
-                    showFolderBadge
-                    onSelect={handleSelectConversation}
-                    onDone={handleDone}
-                  />
-                ))}
+                {olderConversations
+                  .filter((conv) => !doneSet.has(conv.id))
+                  .map((conv) => (
+                    <ConversationItem
+                      key={conv.id}
+                      conv={conv}
+                      isActive={conv.id === activeConversationId}
+                      hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
+                      showFolderBadge
+                      onSelect={handleSelectConversation}
+                      onDone={handleDone}
+                    />
+                  ))}
               </div>
             )}
           </>
@@ -756,14 +767,12 @@ function ConversationItem({
     <div
       className={`conversation-item ${isActive ? 'active' : ''}`}
       onClick={() => onSelect(conv.id)}
-      style={{ borderLeftColor: projectColor }}
     >
       <div className={`conversation-header ${showFolderBadge ? '' : 'no-badge'}`}>
         {showFolderBadge && (
           <span
             className="folder-badge"
             style={{
-              background: `color-mix(in srgb, ${projectColor} 25%, transparent)`,
               color: projectColor,
             }}
             title={dirDisplay}

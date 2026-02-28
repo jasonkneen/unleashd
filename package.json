@@ -1,14 +1,14 @@
 {
-  "name": "claude-web-view",
+  "name": "orchestral",
   "version": "1.0.0",
-  "private": true,
+  "private": false,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"pnpm dev:server\" \"pnpm dev:client\"",
-    "dev:server": "pnpm --filter @claude-web-view/server dev",
-    "dev:client": "pnpm --filter @claude-web-view/client dev",
-    "build": "pnpm --filter @claude-web-view/shared build && pnpm --filter @claude-web-view/client build",
-    "start": "pnpm --filter @claude-web-view/server start",
+    "dev:server": "pnpm --filter @orchestral/server dev",
+    "dev:client": "pnpm --filter @orchestral/client dev",
+    "build": "pnpm --filter @orchestral/shared build && pnpm --filter @orchestral/client build",
+    "start": "pnpm --filter @orchestral/server start",
     "test": "node test/api.test.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
@@ -19,5 +19,24 @@
     "concurrently": "^9.1.2",
     "json-schema-to-typescript": "^15.0.4",
     "ws": "^8.14.2"
+  },
+  "bin": {
+    "orchestral": "./bin/orchestral.js"
+  },
+  "files": [
+    "bin",
+    "server/dist",
+    "client/dist",
+    "shared/dist",
+    "server/package.json",
+    "client/package.json",
+    "shared/package.json"
+  ],
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^2.0.2",
+    "uuid": "^13.0.0",
+    "ws": "^8.14.2",
+    "@nbardy/agent-cli": "^0.1.0"
   }
 }

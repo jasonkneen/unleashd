@@ -83,7 +83,7 @@
   width: 20px;
   height: 20px;
   border: none;
-  background: color-mix(in srgb, var(--red) 25%, transparent);
+  background: color-mix(in srgb, var(--danger) 25%, transparent);
   color: var(--accent-error);
   border-radius: 4px;
   cursor: pointer;

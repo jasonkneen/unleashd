@@ -1,4 +1,4 @@
-import type { Provider as ProviderName } from '@claude-web-view/shared';
+import type { Provider as ProviderName } from '@orchestral/shared';
 
 const CLAUDE_MODEL_IDS = new Set(['opus', 'sonnet', 'haiku']);
 const CODEX_MODEL_IDS = new Set([

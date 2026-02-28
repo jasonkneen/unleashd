@@ -1,4 +1,4 @@
-import type { ServerMessage } from '@claude-web-view/shared';
+import type { ServerMessage } from '@orchestral/shared';
 import { Provider, useAtomValue } from 'jotai';
 import { useEffect, useRef } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';

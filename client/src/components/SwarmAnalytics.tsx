@@ -3,7 +3,7 @@ import type {
   SwarmReviewLog,
   SwarmRunLog,
   SwarmRunSummary,
-} from '@claude-web-view/shared';
+} from '@orchestral/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -73,13 +73,13 @@ function shortWorkerId(id: string): string {
 function getStatusColor(status: string): string {
   switch (status) {
     case 'running':
-      return 'var(--cyan)';
+      return 'var(--ai)';
     case 'completed':
-      return 'var(--green)';
+      return 'var(--success)';
     case 'error':
-      return 'var(--red)';
+      return 'var(--danger)';
     case 'pending':
-      return 'var(--yellow)';
+      return 'var(--warning)';
     default:
       return 'var(--text-muted)';
   }
@@ -88,11 +88,11 @@ function getStatusColor(status: string): string {
 function getVerdictColor(verdict: string | null): string {
   switch (verdict) {
     case 'approved':
-      return 'var(--green)';
+      return 'var(--success)';
     case 'rejected':
-      return 'var(--red)';
+      return 'var(--danger)';
     case 'needs-changes':
-      return 'var(--orange)';
+      return 'var(--queue)';
     default:
       return 'transparent';
   }
@@ -468,7 +468,7 @@ function StatsPanel({ runData }: StatsPanelProps) {
           <div className="stat-bar">
             <div
               className="stat-bar-fill"
-              style={{ width: `${completionRate}%`, backgroundColor: 'var(--green)' }}
+              style={{ width: `${completionRate}%`, backgroundColor: 'var(--success)' }}
             />
           </div>
         </div>
@@ -745,19 +745,19 @@ export function SwarmAnalytics() {
               <h4>Legend</h4>
               <div className="legend-items">
                 <div className="legend-item">
-                  <span className="legend-color" style={{ backgroundColor: 'var(--cyan)' }} />
+                  <span className="legend-color" style={{ backgroundColor: 'var(--ai)' }} />
                   <span>Running</span>
                 </div>
                 <div className="legend-item">
-                  <span className="legend-color" style={{ backgroundColor: 'var(--green)' }} />
+                  <span className="legend-color" style={{ backgroundColor: 'var(--success)' }} />
                   <span>Completed</span>
                 </div>
                 <div className="legend-item">
-                  <span className="legend-color" style={{ backgroundColor: 'var(--red)' }} />
+                  <span className="legend-color" style={{ backgroundColor: 'var(--danger)' }} />
                   <span>Error</span>
                 </div>
                 <div className="legend-item">
-                  <span className="legend-color" style={{ backgroundColor: 'var(--yellow)' }} />
+                  <span className="legend-color" style={{ backgroundColor: 'var(--warning)' }} />
                   <span>Pending</span>
                 </div>
                 <div className="legend-divider" />

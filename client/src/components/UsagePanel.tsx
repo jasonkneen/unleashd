@@ -1,4 +1,4 @@
-import { PROVIDER_OPTIONS, type Provider, getProviderMetadata } from '@claude-web-view/shared';
+import { PROVIDER_OPTIONS, type Provider, getProviderMetadata } from '@orchestral/shared';
 import { useEffect, useState } from 'react';
 import './UsagePanel.css';
 
@@ -69,9 +69,9 @@ function formatResetTime(timestamp: number | null): string {
 }
 
 function barColor(percent: number): string {
-  if (percent >= 80) return 'var(--red)';
-  if (percent >= 50) return 'var(--yellow)';
-  return 'var(--cyan)';
+  if (percent >= 80) return 'var(--danger)';
+  if (percent >= 50) return 'var(--warning)';
+  return 'var(--ai)';
 }
 
 function RateLimitGauge({ rl }: { rl: RateLimit }) {

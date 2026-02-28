@@ -5,7 +5,7 @@ import type {
   SwarmReviewLog,
   SwarmRun,
   SwarmRunSummary,
-} from '@claude-web-view/shared';
+} from '@orchestral/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -272,6 +272,7 @@ function WorkerChatPane({
 function GitLogPanel({ projectRoot }: { projectRoot: string }) {
   const [commits, setCommits] = useState<GitLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
     fetch(`/api/git-log?dir=${encodeURIComponent(projectRoot)}`)
@@ -284,20 +285,25 @@ function GitLogPanel({ projectRoot }: { projectRoot: string }) {
   }, [projectRoot]);
 
   return (
-    <div className="swarm-bottom-panel">
-      <div className="swarm-panel-header">Recent Commits</div>
-      <div className="swarm-panel-content">
-        {loading && <div className="panel-loading">Loading commits...</div>}
-        {!loading && commits.length === 0 && <div className="panel-empty">No commits found</div>}
-        {commits.map((c) => (
-          <div key={c.hash} className="git-log-entry">
-            <code className="git-hash">{c.hash.substring(0, 7)}</code>
-            <span className="git-message">{c.message}</span>
-            <span className="git-author">{c.author}</span>
-            <span className="git-date">{formatTimeAgo(new Date(c.date))}</span>
-          </div>
-        ))}
-      </div>
+    <div className={`swarm-bottom-panel ${isCollapsed ? 'collapsed' : ''}`}>
+      <button className="swarm-panel-header swarm-panel-toggle" onClick={() => setIsCollapsed((c) => !c)}>
+        <span className="panel-toggle-icon">{isCollapsed ? '▶' : '▼'}</span>
+        Recent Commits
+      </button>
+      {!isCollapsed && (
+        <div className="swarm-panel-content">
+          {loading && <div className="panel-loading">Loading commits...</div>}
+          {!loading && commits.length === 0 && <div className="panel-empty">No commits found</div>}
+          {commits.map((c) => (
+            <div key={c.hash} className="git-log-entry">
+              <code className="git-hash">{c.hash.substring(0, 7)}</code>
+              <span className="git-message">{c.message}</span>
+              <span className="git-author">{c.author}</span>
+              <span className="git-date">{formatTimeAgo(new Date(c.date))}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -310,6 +316,7 @@ function OompaConfigPanel({ projectRoot }: { projectRoot: string }) {
   const [config, setConfig] = useState<OompaConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedPrompts, setExpandedPrompts] = useState<Map<string, string>>(new Map());
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
     fetch(`/api/oompa-config?dir=${encodeURIComponent(projectRoot)}`)
@@ -352,46 +359,51 @@ function OompaConfigPanel({ projectRoot }: { projectRoot: string }) {
   );
 
   return (
-    <div className="swarm-bottom-panel">
-      <div className="swarm-panel-header">Swarm Config</div>
-      <div className="swarm-panel-content">
-        {error && <div className="panel-error">No oompa config found</div>}
-        {!config && !error && <div className="panel-loading">Loading config...</div>}
-        {config && (
-          <div className="config-summary">
-            {config.workers.map((w, i) => {
-              const prompts = Array.isArray(w.prompt) ? w.prompt : w.prompt ? [w.prompt] : [];
-              return (
-                <div key={i}>
-                  <div className="config-worker-row">
-                    <span className="config-model-badge">{w.model}</span>
-                    <span className="config-count">
-                      x{w.count ?? 1} &middot; {w.iterations ?? '?'} iterations
-                      {w.can_plan === false && ' (executor)'}
-                    </span>
-                  </div>
-                  {prompts.map((p, pIdx) => (
-                    <div key={`${i}-${pIdx}`}>
-                      <span className="config-prompt-path" onClick={() => togglePrompt(p)}>
-                        {expandedPrompts.has(p) ? '▼' : '▶'} {p}
+    <div className={`swarm-bottom-panel ${isCollapsed ? 'collapsed' : ''}`}>
+      <button className="swarm-panel-header swarm-panel-toggle" onClick={() => setIsCollapsed((c) => !c)}>
+        <span className="panel-toggle-icon">{isCollapsed ? '▶' : '▼'}</span>
+        Swarm Config
+      </button>
+      {!isCollapsed && (
+        <div className="swarm-panel-content">
+          {error && <div className="panel-error">No oompa config found</div>}
+          {!config && !error && <div className="panel-loading">Loading config...</div>}
+          {config && (
+            <div className="config-summary">
+              {config.workers.map((w, i) => {
+                const prompts = Array.isArray(w.prompt) ? w.prompt : w.prompt ? [w.prompt] : [];
+                return (
+                  <div key={i}>
+                    <div className="config-worker-row">
+                      <span className="config-model-badge">{w.model}</span>
+                      <span className="config-count">
+                        x{w.count ?? 1} &middot; {w.iterations ?? '?'} iterations
+                        {w.can_plan === false && ' (executor)'}
                       </span>
-                      {expandedPrompts.has(p) && (
-                        <div className="config-prompt-content">{expandedPrompts.get(p)}</div>
-                      )}
                     </div>
-                  ))}
+                    {prompts.map((p, pIdx) => (
+                      <div key={`${i}-${pIdx}`}>
+                        <span className="config-prompt-path" onClick={() => togglePrompt(p)}>
+                          {expandedPrompts.has(p) ? '▼' : '▶'} {p}
+                        </span>
+                        {expandedPrompts.has(p) && (
+                          <div className="config-prompt-content">{expandedPrompts.get(p)}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+              {config.reviewer && (
+                <div className="config-worker-row">
+                  <span className="config-model-badge">{config.reviewer.model}</span>
+                  <span className="config-count">reviewer</span>
                 </div>
-              );
-            })}
-            {config.reviewer && (
-              <div className="config-worker-row">
-                <span className="config-model-badge">{config.reviewer.model}</span>
-                <span className="config-count">reviewer</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -524,13 +536,13 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
             </thead>
             <tbody>
               {summary.workers.map((w) => (
-                <tr key={w.id}>
+                <tr key={w.id} data-status={w.status}>
                   <td className="worker-id-cell">{w.id}</td>
                   <td>
                     {w.harness}:{w.model ?? 'default'}
                   </td>
                   <td>
-                    <span className={`worker-status-badge status-${w.status}`}>{w.status}</span>
+                    <span className={`worker-status-dot status-${w.status}`} title={w.status} />
                   </td>
                   <td>
                     {w.completed}/{w.iterations}
@@ -792,7 +804,7 @@ export function SwarmDetail() {
       <div className="swarm-detail">
         <div className="swarm-detail-header">
           <button className="back-to-gallery-btn" onClick={() => navigate('/workers')}>
-            &#8592; Swarm Dashboard
+            &#8592; Swarm Projects Overview
           </button>
           <h2>No project selected</h2>
         </div>
@@ -805,10 +817,12 @@ export function SwarmDetail() {
       {/* Header */}
       <div className="swarm-detail-header">
         <button className="back-to-gallery-btn" onClick={() => navigate('/workers')}>
-          &#8592; Swarm Dashboard
+          &#8592; Swarm Projects Overview
         </button>
-        <h2>{projectName}</h2>
-        <span className="swarm-detail-path">{displayPath}</span>
+        <div className="swarm-detail-title-block">
+          <h2>{projectName}</h2>
+          <span className="swarm-detail-path">{displayPath}</span>
+        </div>
         <div className="swarm-detail-header-stats">
           <button
             className="swarm-debug-btn"
@@ -832,9 +846,9 @@ export function SwarmDetail() {
                   fontSize: '11px',
                   fontWeight: 500,
                   cursor: 'pointer',
-                  border: '1px solid var(--yellow, #b58900)',
+                  border: '1px solid var(--warning, #b58900)',
                   background: 'var(--bg-card)',
-                  color: 'var(--yellow, #b58900)',
+                  color: 'var(--warning, #b58900)',
                 }}
                 title="Stop swarm gracefully (finish current cycle)"
                 onClick={(e) => {
@@ -852,9 +866,9 @@ export function SwarmDetail() {
                   fontSize: '11px',
                   fontWeight: 500,
                   cursor: 'pointer',
-                  border: '1px solid var(--red, #dc322f)',
+                  border: '1px solid var(--danger, #dc322f)',
                   background: 'var(--bg-card)',
-                  color: 'var(--red, #dc322f)',
+                  color: 'var(--danger, #dc322f)',
                 }}
                 title="Kill swarm immediately (SIGKILL)"
                 onClick={(e) => {
@@ -881,8 +895,8 @@ export function SwarmDetail() {
                   fontSize: '11px',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  border: `1px solid ${confirmAction === 'kill' ? 'var(--red, #dc322f)' : 'var(--yellow, #b58900)'}`,
-                  background: confirmAction === 'kill' ? 'var(--red, #dc322f)' : 'var(--yellow, #b58900)',
+                  border: `1px solid ${confirmAction === 'kill' ? 'var(--danger, #dc322f)' : 'var(--warning, #b58900)'}`,
+                  background: confirmAction === 'kill' ? 'var(--danger, #dc322f)' : 'var(--warning, #b58900)',
                   color: 'var(--bg-card)',
                 }}
                 onClick={(e) => {
@@ -919,19 +933,17 @@ export function SwarmDetail() {
             </div>
           )}
           {signalError && (
-            <span style={{ fontSize: '11px', color: 'var(--red, #dc322f)', marginLeft: '8px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--danger, #dc322f)', marginLeft: '8px' }}>
               {signalError}
             </span>
           )}
-          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {runtimeTotalWorkers} workers &middot; {allWorkers.length} sessions ({workCount} exec,{' '}
-            {reviewCount} review, {fixCount} fix)
-          </span>
-          {earliestCreated && (
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              Started {formatTimeAgo(earliestCreated)}
-            </span>
-          )}
+          <div className="swarm-info-btn-wrap">
+            <button className="swarm-info-btn" aria-label="Project stats">ⓘ</button>
+            <div className="swarm-info-tooltip">
+              <span>{runtimeTotalWorkers} workers · {allWorkers.length} sessions ({workCount} exec, {reviewCount} review, {fixCount} fix)</span>
+              {earliestCreated && <span>Started {formatTimeAgo(earliestCreated)}</span>}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -941,13 +953,13 @@ export function SwarmDetail() {
           className={`swarm-tab ${activeTab === 'workers' ? 'active' : ''}`}
           onClick={() => setActiveTab('workers')}
         >
-          Sessions ({allWorkers.length})
+          Workers ({allWorkers.length})
         </button>
         <button
           className={`swarm-tab ${activeTab === 'runs' ? 'active' : ''}`}
           onClick={() => setActiveTab('runs')}
         >
-          Run History
+          Run Overview
         </button>
       </div>
 
@@ -956,7 +968,7 @@ export function SwarmDetail() {
         <div className="swarm-detail-body">
           {/* Worker Roster sidebar — exec workers with reviews nested below */}
           <div className="swarm-roster">
-            <div className="swarm-roster-header">Sessions ({allWorkers.length})</div>
+            <div className="swarm-roster-header">Workers ({allWorkers.length})</div>
             <div className="swarm-roster-list">
               {execGroups.map((group, groupIdx) => {
                 const w = group.exec;
@@ -981,6 +993,16 @@ export function SwarmDetail() {
                       <span className="role-badge role-work">{ROLE_LABELS.work}</span>
                       {model && <span className="roster-model">{model}</span>}
                       <span className="roster-worker-msgs">{w.messages.length}m</span>
+                      {(() => {
+                        const firstUser = w.messages.find((m) => m.role === 'user');
+                        if (!firstUser?.content) return null;
+                        const preview = firstUser.content.slice(0, 60);
+                        return (
+                          <span className="roster-worker-task" title={firstUser.content}>
+                            {preview}{firstUser.content.length > 60 ? '…' : ''}
+                          </span>
+                        );
+                      })()}
                       {group.reviews.length > 0 && (
                         <span className="roster-review-count">{group.reviews.length}r</span>
                       )}

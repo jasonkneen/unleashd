@@ -19,14 +19,14 @@
 }
 
 .file-preview-link {
-  color: var(--cyan);
+  color: var(--ai);
   text-decoration: underline;
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
 
 .file-preview-link:hover {
-  color: var(--cyan-bright);
+  color: var(--ai-bright);
 }
 
 /* Popup — rendered via Portal to document.body, positioned with inline fixed styles */
@@ -39,7 +39,7 @@
   gap: 8px;
   background: var(--bg-panel);
   border: 1px solid var(--border-emphasis);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 8px;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--bg-darkest) 50%, transparent);
   z-index: 2100;

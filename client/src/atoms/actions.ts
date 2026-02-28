@@ -5,7 +5,7 @@ import type {
   Provider,
   QueuedMessage,
   ServerMessage,
-} from '@claude-web-view/shared';
+} from '@orchestral/shared';
 import { enableMapSet, produce } from 'immer';
 import { DRAFT_KEY_PREFIX, PENDING_CONVERSATIONS_KEY, useUIStore } from '../stores/uiStore';
 import {
@@ -22,7 +22,7 @@ import { jotaiStore } from './store';
 enableMapSet();
 
 // Re-export for downstream consumers that previously imported from conversationStore
-export type { QueuedMessage } from '@claude-web-view/shared';
+export type { QueuedMessage } from '@orchestral/shared';
 
 // =============================================================================
 // Chunk Buffer

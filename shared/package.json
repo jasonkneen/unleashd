@@ -1,5 +1,5 @@
 {
-  "name": "@claude-web-view/shared",
+  "name": "@orchestral/shared",
   "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",

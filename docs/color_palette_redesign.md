@@ -21,7 +21,7 @@
 
 ### Variants Per Color: 4
 
-| Variant | Token Pattern | How It's Made | Example (blue) |
+| Variant | Token Pattern | How It's Made | Example (user) |
 |---------|--------------|---------------|----------------|
 | dim | `--{color}-dim` | Hand-picked hex | `#1a5f8f` |
 | base | `--{color}` | Solarized spec | `#268bd2` |
@@ -37,7 +37,7 @@ Single-hue ramp. Hue stays near 200° (Solarized base cyan-blue). Only lightness
 ```
 #00141a  L≈8%   darkest
 #001e28  L≈12%  base
-#002b36  L≈16%  raised-1 (= sol-base03)
+#002b36  L≈16%  raised-1 (= sol-bgCanvas)
 #04394a  L≈21%  raised-2
 #0a4759  L≈26%  raised-3
 #105568  L≈31%  raised-4
@@ -50,11 +50,11 @@ This is the best-designed part of the system. It's a controlled lightness ramp o
 
 ### Text Scale: 5 levels
 
-Drawn from Solarized base tones: base01, base00, base0, base1, plus one custom `#b4bfc0`.
+Drawn from Solarized base tones: textMuted, textSubtle, textBody, textBright, plus one custom `#b4bfc0`.
 
 ### Borders: 4 levels
 
-All rgba of sol-base1 `(147, 161, 161)` at varying alpha: 10%, 18%, 28%, 42%.
+All rgba of sol-textBright `(147, 161, 161)` at varying alpha: 10%, 18%, 28%, 42%.
 
 ### Message Backgrounds: 4
 
@@ -84,14 +84,14 @@ OKSolar replaces Solarized's accent hex values with perceptually-uniform equival
 
 OKSolar values:
 ```
-yellow    #ac8300   OKLCh(63.1%, 0.129, 86.4°)
-orange    #d56500   OKLCh(63.1%, 0.166, 50.4°)
-red       #f23749   OKLCh(63.1%, 0.221, 21.6°)
-magenta   #dd459d   OKLCh(63.1%, 0.205, 349.2°)
-violet    #7d80d1   OKLCh(63.1%, 0.121, 280.8°)
-blue      #2b90d8   OKLCh(63.1%, 0.141, 244.8°)
-cyan      #259d94   OKLCh(63.1%, 0.102, 187.2°)
-green     #819500   OKLCh(63.1%, 0.148, 118.8°)
+warning   #ac8300   OKLCh(63.1%, 0.129, 86.4°)
+queue     #d56500   OKLCh(63.1%, 0.166, 50.4°)
+danger    #f23749   OKLCh(63.1%, 0.221, 21.6°)
+meta      #dd459d   OKLCh(63.1%, 0.205, 349.2°)
+primary   #7d80d1   OKLCh(63.1%, 0.121, 280.8°)
+user      #2b90d8   OKLCh(63.1%, 0.141, 244.8°)
+ai        #259d94   OKLCh(63.1%, 0.102, 187.2°)
+success   #819500   OKLCh(63.1%, 0.148, 118.8°)
 ```
 
 Base tones also shift slightly. Background hue stays at 219.6° but lightness values are adjusted for better cross-mode consistency.
@@ -109,16 +109,16 @@ Modern CSS can do this natively. Define 8 base accents in oklch, derive everythi
 ```css
 :root {
   /* Source of truth: 8 accent hues in oklch */
-  --accent-blue: oklch(63.1% 0.141 244.8);
+  --accent-user: oklch(63.1% 0.141 244.8);
 
   /* Derived — formula, not magic numbers */
-  --blue:        var(--accent-blue);
-  --blue-dim:    oklch(from var(--accent-blue) calc(l - 0.12) calc(c * 0.8) h);
-  --blue-bright: oklch(from var(--accent-blue) calc(l + 0.10) calc(c * 1.1) h);
-  --blue-glow:   color-mix(in oklch, var(--accent-blue) 22%, transparent);
+  --user:        var(--accent-user);
+  --user-dim:    oklch(from var(--accent-user) calc(l - 0.12) calc(c * 0.8) h);
+  --user-bright: oklch(from var(--accent-user) calc(l + 0.10) calc(c * 1.1) h);
+  --user-glow:   color-mix(in oklch, var(--accent-user) 22%, transparent);
 
   /* Message bg tint: mix accent into background at 8% */
-  --bg-user-message: color-mix(in oklch, var(--accent-blue) 8%, var(--bg-content));
+  --bg-user-message: color-mix(in oklch, var(--accent-user) 8%, var(--bg-content));
 }
 ```
 
@@ -133,7 +133,7 @@ Modern CSS can do this natively. Define 8 base accents in oklch, derive everythi
 - `oklch(from ...)` (relative color syntax) is CSS Color Level 5. Safari 16.4+, Chrome 111+, Firefox 128+. No IE. No older browsers.
 - Can't compute at build time — if browser doesn't support it, you get raw fallbacks.
 - CSS can't loop. You'd still write 8 × 4 = 32 lines. Just with formulas instead of hex.
-- Debugging is harder. You can't "see" what `oklch(from var(--accent-blue) calc(l - 0.12) ...)` resolves to in the stylesheet — you have to inspect computed styles.
+- Debugging is harder. You can't "see" what `oklch(from var(--accent-user) calc(l - 0.12) ...)` resolves to in the stylesheet — you have to inspect computed styles.
 - Palette picker would need to set values in oklch format. The existing `ColorPalette` type stores hex strings.
 
 ---
@@ -208,8 +208,8 @@ Neither CSS runtime nor JS runtime. Define palettes in SCSS/Less, compile to sta
 ```scss
 // _oksolar-dark.scss
 $accents: (
-  blue:    (l: 63.1, c: 0.141, h: 244.8),
-  cyan:    (l: 63.1, c: 0.102, h: 187.2),
+  user:    (l: 63.1, c: 0.141, h: 244.8),
+  ai:      (l: 63.1, c: 0.102, h: 187.2),
   // ...
 );
 
@@ -244,39 +244,39 @@ Forget the 4-variant model (dim/base/bright/glow). Look at what actually works: 
 Apply the same pattern to every accent:
 
 ```
---blue-1:  (very dark, for message backgrounds)
---blue-2:  (dark, for subtle tints)
---blue-3:  (dim, for inactive/disabled)
---blue-4:  (base, the "normal" accent)
---blue-5:  (bright, for hover)
---blue-6:  (vivid, for active/focus)
---blue-7:  (light, for badges/text on dark bg)
---blue-8:  (pastel, for light-mode backgrounds)
---blue-9:  (near-white, for light-mode highlights)
+--user-1:  (very dark, for message backgrounds)
+--user-2:  (dark, for subtle tints)
+--user-3:  (dim, for inactive/disabled)
+--user-4:  (base, the "normal" accent)
+--user-5:  (bright, for hover)
+--user-6:  (vivid, for active/focus)
+--user-7:  (light, for badges/text on dark bg)
+--user-8:  (pastel, for light-mode backgrounds)
+--user-9:  (near-white, for light-mode highlights)
 ```
 
 That's 8 accents × 9 levels = 72 accent colors. Plus the 9-level bg scale. Plus borders, text, etc. Maybe ~100 total.
 
 **Strengths:**
-- Consistent scale across all accents. "Level 3" means the same thing whether it's blue-3 or red-3.
-- Message backgrounds (`--bg-user-message`) are just `--blue-1` or `--cyan-1`. No separate hand-picked tints.
+- Consistent scale across all accents. "Level 3" means the same thing whether it's user-3 or danger-3.
+- Message backgrounds (`--bg-user-message`) are just `--user-1` or `--ai-1`. No separate hand-picked tints.
 - The dim/bright/glow naming is arbitrary. A numbered scale has a clear ordering.
-- Scales compose: "I need a slightly lighter blue" → go up one level. No guessing hex values.
+- Scales compose: "I need a slightly lighter user color" → go up one level. No guessing hex values.
 - With oklch derivation, 72 colors = 8 base values + a formula. Not 72 hand-picked hexes.
 
 **Weaknesses:**
 - 72 accent variables is a lot. Most will never be used.
-- Naming: `--blue-4` means nothing to a new developer. `--blue-dim` at least says what it's for.
+- Naming: `--user-4` means nothing to a new developer. `--user-dim` at least says what it's for.
 - Over-engineering. We use exactly 4 variants per accent today (dim, base, bright, glow). Jumping to 9 is solving a problem we don't have.
-- The bg scale works because it maps to spatial metaphors (elevation, layering). Accent scales don't have that natural mapping. What does "blue level 6" mean in UI terms?
+- The bg scale works because it maps to spatial metaphors (elevation, layering). Accent scales don't have that natural mapping. What does "user level 6" mean in UI terms?
 
 **Counter-counter:** The 9 levels aren't all named. Only the ones we use get semantic aliases:
 ```css
---blue-tint:    var(--blue-1);  /* message backgrounds */
---blue-dim:     var(--blue-3);  /* disabled */
---blue:         var(--blue-4);  /* base */
---blue-bright:  var(--blue-6);  /* hover */
---blue-glow:    color-mix(in srgb, var(--blue-4) 22%, transparent);
+--user-tint:    var(--user-1);  /* message backgrounds */
+--user-dim:     var(--user-3);  /* disabled */
+--user:         var(--user-4);  /* base */
+--user-bright:  var(--user-6);  /* hover */
+--user-glow:    color-mix(in srgb, var(--user-4) 22%, transparent);
 ```
 The scale exists for interpolation. You don't name every point on a gradient.
 
@@ -299,24 +299,24 @@ interface ColorPalette {
     border: string;        // → --border-color
   };
   accents: {
-    blue: string;          // → --blue, then derive dim/bright/glow in JS
-    cyan: string;
-    violet: string;
-    green: string;
-    yellow: string;
-    orange: string;
-    red: string;
-    magenta: string;
+    user: string;          // → --user, then derive dim/bright/glow in JS
+    ai: string;
+    primary: string;
+    success: string;
+    warning: string;
+    queue: string;
+    danger: string;
+    meta: string;
   };
   semantic: {
-    user: string;          // accent name, e.g. "blue"
-    assistant: string;     // accent name, e.g. "cyan"
-    primary: string;       // accent name, e.g. "violet"
-    error: string;         // accent name, e.g. "red"
-    warning: string;       // accent name, e.g. "yellow"
-    queue: string;         // accent name, e.g. "orange"
-    loop: string;          // accent name, e.g. "magenta"
-    success: string;       // accent name, e.g. "cyan"
+    user: string;          // accent name, e.g. "user"
+    assistant: string;     // accent name, e.g. "ai"
+    primary: string;       // accent name, e.g. "primary"
+    error: string;         // accent name, e.g. "danger"
+    warning: string;       // accent name, e.g. "warning"
+    queue: string;         // accent name, e.g. "queue"
+    loop: string;          // accent name, e.g. "meta"
+    success: string;       // accent name, e.g. "ai"
   };
 }
 ```
@@ -348,20 +348,20 @@ const OKSOLAR: PaletteSource = {
   name: 'OKSolar Dark',
   bgHue: 219.6,
   bgChroma: 0.05,
-  bgLightness: [0.274, 0.321],  // base03, base02
+  bgLightness: [0.274, 0.321],  // bgCanvas, bgSurface
   textLightness: [0.535, 0.544, 0.718, 0.718],  // muted, secondary, primary, emphasis
   textChroma: [0.029, 0.017, 0.017, 0.030],
   textHue: [219.6, 219.6, 198, 198],
   accentLightness: 0.631,  // ALL accents at equal perceptual lightness
   accents: {
-    yellow:  { c: 0.129, h: 86.4 },
-    orange:  { c: 0.166, h: 50.4 },
-    red:     { c: 0.221, h: 21.6 },
-    magenta: { c: 0.205, h: 349.2 },
-    violet:  { c: 0.121, h: 280.8 },
-    blue:    { c: 0.141, h: 244.8 },
-    cyan:    { c: 0.102, h: 187.2 },
-    green:   { c: 0.148, h: 118.8 },
+    warning: { c: 0.129, h: 86.4 },
+    queue:   { c: 0.166, h: 50.4 },
+    danger:  { c: 0.221, h: 21.6 },
+    meta:    { c: 0.205, h: 349.2 },
+    primary: { c: 0.121, h: 280.8 },
+    user:    { c: 0.141, h: 244.8 },
+    ai:      { c: 0.102, h: 187.2 },
+    success: { c: 0.148, h: 118.8 },
   },
 };
 ```
@@ -404,7 +404,7 @@ The user mentioned the bg elevation scale and asked if we should extend this pat
 Level   Hex       OKLCh L    OKLCh C    OKLCh H
 darkest #00141a   0.145      0.028      219.6
 base    #001e28   0.184      0.037      219.6
-raised1 #002b36   0.226      0.047      219.6  (= sol-base03)
+raised1 #002b36   0.226      0.047      219.6  (= sol-bgCanvas)
 raised2 #04394a   0.268      0.052      214.8
 raised3 #0a4759   0.310      0.054      210.4
 raised4 #105568   0.352      0.055      207.5
@@ -462,16 +462,16 @@ Regardless of which position wins, adding OKSolar requires:
 1. The 8 accent hex values (listed above)
 2. The 8 base tone hex values:
    ```
-   base03: #002d38    base02: #093946
-   base01: #5b7279    base00: #657377
-   base0:  #98a8a8    base1:  #8faaab
-   base2:  #f1e9d2    base3:  #fbf7ef
+   bgCanvas:  #002d38    bgSurface:  #093946
+   textMuted: #5b7279    textSubtle: #657377
+   textBody:  #98a8a8    textBright: #8faaab
+   base2:     #f1e9d2    base3:      #fbf7ef
    ```
 3. Re-derived dim/bright/glow for each accent (4 × 8 = 32 values)
-4. Re-derived bg elevation scale (9 values, using base03 as the anchor)
+4. Re-derived bg elevation scale (9 values, using bgCanvas as the anchor)
 5. Re-derived message background tints (4 values)
 6. Re-derived text scale (5 values from the base tones)
-7. Re-derived border scale (4 values using base1 as the source)
+7. Re-derived border scale (4 values using textBright as the source)
 
 That's ~72 values to compute or hand-pick. Under the current system (hand-picked hex), that's 72 magic numbers. Under any derivation system, it's 16 base values + formulas.
 
@@ -493,7 +493,7 @@ This is the strongest argument for derivation: OKSolar is the second palette tha
 | Where does derivation happen? | **CSS** via `color-mix(in oklch, ...)` | Browser computes. No JS color math. No bundle dependency. |
 | Bg elevation scale? | **Derived from palette bg token** via `color-mix()` | No more 9 hand-picked hex values per palette. |
 | Message bg tints? | **Derived** `color-mix(in oklch, accent 8%, bg-content)` | Follows accent color when palette changes. |
-| Third-party palettes? | **Map into 16 slots** | Nord bg → base03/02 slots, Nord text → base0/1 slots, Nord accents → 8 accent slots. Lossy but practical. |
+| Third-party palettes? | **Map into 16 slots** | Nord bg → bgCanvas/bgSurface slots, Nord text → textBody/textBright slots, Nord accents → 8 accent slots. Lossy but practical. |
 | AI generation? | **Claude outputs 16 hex values** | Server validates, client applies. Derivation happens in CSS, not in Claude's output. |
 | OKSolar? | **Just another palette entry** | Same 16 slots, different hex values. |
 
@@ -502,23 +502,23 @@ This is the strongest argument for derivation: OKSolar is the second palette tha
 ```
 PALETTE TOKENS (16, set by JS)          DERIVED + SEMANTIC (60+, CSS computes)
 ─────────────────────────────           ────────────────────────────────────────
---pal-base03  (darkest bg)         ──>  --bg-darkest, --bg-base, --bg-content,
---pal-base02  (surface bg)              --bg-card, --bg-panel, --bg-hover, ...
---pal-base01  (muted text)         ──>  --text-muted
---pal-base00  (secondary text)     ──>  --text-secondary
---pal-base0   (body text)          ──>  --text-primary
---pal-base1   (emphasis text)      ──>  --text-emphasis, --text-on-accent
---pal-blue    (accent)             ──>  --blue, --blue-dim, --blue-bright, --blue-glow
---pal-cyan    ...                       --accent-user, --accent-assistant, ...
---pal-violet  ...                       --accent-primary, --accent-primary-hover
---pal-green   ...                       --bg-user-message, --bg-assistant-message, ...
---pal-yellow  ...                       --border-subtle, --border-default, ...
---pal-orange  ...
---pal-red     ...
---pal-magenta ...
+--theme-bg-canvas  (darkest bg)    ──>  --bg-darkest, --bg-base, --bg-content,
+--theme-bg-surface (surface bg)         --bg-card, --bg-panel, --bg-hover, ...
+--theme-text-muted (muted text)    ──>  --text-muted
+--theme-text-subtle(secondary text)──>  --text-secondary
+--theme-text-body  (body text)     ──>  --text-primary
+--theme-text-bright(emphasis text) ──>  --text-emphasis, --text-on-accent
+--theme-user   (accent)            ──>  --user, --user-dim, --user-bright, --user-glow
+--theme-ai     ...                      --accent-user, --accent-assistant, ...
+--theme-primary...                      --accent-primary, --accent-primary-hover
+--theme-success...                      --bg-user-message, --bg-assistant-message, ...
+--theme-warning...                      --border-subtle, --border-default, ...
+--theme-queue  ...
+--theme-danger ...
+--theme-meta   ...
 ```
 
-**Rule:** Component CSS references ONLY derived/semantic tokens. Never `--pal-*` directly.
+**Rule:** Component CSS references ONLY derived/semantic tokens. Never `--theme-*` directly.
 
 ### CSS Implementation
 
@@ -528,54 +528,54 @@ PALETTE TOKENS (16, set by JS)          DERIVED + SEMANTIC (60+, CSS computes)
      PALETTE TOKENS — the only values applyPalette() sets.
      Default: Solarized Dark. OKSolar, Nord, etc. override these.
      ═══════════════════════════════════════════════════ */
-  --pal-base03: #002b36;
-  --pal-base02: #073642;
-  --pal-base01: #586e75;
-  --pal-base00: #657b83;
-  --pal-base0:  #839496;
-  --pal-base1:  #93a1a1;
-  --pal-yellow:  #b58900;
-  --pal-orange:  #cb4b16;
-  --pal-red:     #dc322f;
-  --pal-magenta: #d33682;
-  --pal-violet:  #6c71c4;
-  --pal-blue:    #268bd2;
-  --pal-cyan:    #2aa198;
-  --pal-green:   #859900;
+  --theme-bg-canvas:  #002b36;
+  --theme-bg-surface: #073642;
+  --theme-text-muted: #586e75;
+  --theme-text-subtle:#657b83;
+  --theme-text-body:  #839496;
+  --theme-text-bright:#93a1a1;
+  --theme-warning:  #b58900;
+  --theme-queue:    #cb4b16;
+  --theme-danger:   #dc322f;
+  --theme-meta:     #d33682;
+  --theme-primary:  #6c71c4;
+  --theme-user:     #268bd2;
+  --theme-ai:       #2aa198;
+  --theme-success:  #859900;
 
   /* ═══════════════════════════════════════════════════
      DERIVED: Background elevation scale
      9 levels from palette bg, using color-mix lightening.
      Each step mixes more white into the base background.
      ═══════════════════════════════════════════════════ */
-  --bg-darkest:   color-mix(in oklch, var(--pal-base03) 70%, black);
-  --bg-base:      color-mix(in oklch, var(--pal-base03) 85%, black);
-  --bg-content:   var(--pal-base03);
-  --bg-card:      color-mix(in oklch, var(--pal-base03) 85%, var(--pal-base02));
-  --bg-sidebar:   color-mix(in oklch, var(--pal-base03) 92%, black);
-  --bg-panel:     var(--pal-base02);
-  --bg-hover:     color-mix(in oklch, var(--pal-base02) 80%, var(--pal-base01));
-  --bg-active:    color-mix(in oklch, var(--pal-base02) 65%, var(--pal-base01));
-  --bg-popup:     color-mix(in oklch, var(--pal-base02) 50%, var(--pal-base01));
-  --bg-highlight: color-mix(in oklch, var(--pal-base02) 35%, var(--pal-base01));
+  --bg-darkest:   color-mix(in oklch, var(--theme-bg-canvas) 70%, black);
+  --bg-base:      color-mix(in oklch, var(--theme-bg-canvas) 85%, black);
+  --bg-content:   var(--theme-bg-canvas);
+  --bg-card:      color-mix(in oklch, var(--theme-bg-canvas) 85%, var(--theme-bg-surface));
+  --bg-sidebar:   color-mix(in oklch, var(--theme-bg-canvas) 92%, black);
+  --bg-panel:     var(--theme-bg-surface);
+  --bg-hover:     color-mix(in oklch, var(--theme-bg-surface) 80%, var(--theme-text-muted));
+  --bg-active:    color-mix(in oklch, var(--theme-bg-surface) 65%, var(--theme-text-muted));
+  --bg-popup:     color-mix(in oklch, var(--theme-bg-surface) 50%, var(--theme-text-muted));
+  --bg-highlight: color-mix(in oklch, var(--theme-bg-surface) 35%, var(--theme-text-muted));
 
   /* ═══════════════════════════════════════════════════
      DERIVED: Text scale
      ═══════════════════════════════════════════════════ */
-  --text-muted:     var(--pal-base01);
-  --text-secondary: var(--pal-base00);
-  --text-primary:   var(--pal-base0);
-  --text-emphasis:  var(--pal-base1);
-  --text-bright:    color-mix(in oklch, var(--pal-base1) 70%, white);
-  --text-on-accent: color-mix(in oklch, var(--pal-base03) 90%, black);
+  --text-muted:     var(--theme-text-muted);
+  --text-secondary: var(--theme-text-subtle);
+  --text-primary:   var(--theme-text-body);
+  --text-emphasis:  var(--theme-text-bright);
+  --text-bright:    color-mix(in oklch, var(--theme-text-bright) 70%, white);
+  --text-on-accent: color-mix(in oklch, var(--theme-bg-canvas) 90%, black);
 
   /* ═══════════════════════════════════════════════════
-     DERIVED: Borders (from base1 at varying alpha)
+     DERIVED: Borders (from textBright at varying alpha)
      ═══════════════════════════════════════════════════ */
-  --border-subtle:   color-mix(in srgb, var(--pal-base1) 10%, transparent);
-  --border-default:  color-mix(in srgb, var(--pal-base1) 18%, transparent);
-  --border-emphasis: color-mix(in srgb, var(--pal-base1) 28%, transparent);
-  --border-strong:   color-mix(in srgb, var(--pal-base1) 42%, transparent);
+  --border-subtle:   color-mix(in srgb, var(--theme-text-bright) 10%, transparent);
+  --border-default:  color-mix(in srgb, var(--theme-text-bright) 18%, transparent);
+  --border-emphasis: color-mix(in srgb, var(--theme-text-bright) 28%, transparent);
+  --border-strong:   color-mix(in srgb, var(--theme-text-bright) 42%, transparent);
   --border-color:    var(--bg-panel);
 
   /* ═══════════════════════════════════════════════════
@@ -583,30 +583,30 @@ PALETTE TOKENS (16, set by JS)          DERIVED + SEMANTIC (60+, CSS computes)
      Formula: dim=65% toward black, bright=75% toward white,
      glow=22% alpha overlay.
      ═══════════════════════════════════════════════════ */
-  --blue:        var(--pal-blue);
-  --blue-dim:    color-mix(in oklch, var(--pal-blue) 65%, black);
-  --blue-bright: color-mix(in oklch, var(--pal-blue) 75%, white);
-  --blue-glow:   color-mix(in srgb, var(--pal-blue) 22%, transparent);
+  --user:        var(--theme-user);
+  --user-dim:    color-mix(in oklch, var(--theme-user) 65%, black);
+  --user-bright: color-mix(in oklch, var(--theme-user) 75%, white);
+  --user-glow:   color-mix(in srgb, var(--theme-user) 22%, transparent);
 
-  --cyan:        var(--pal-cyan);
-  --cyan-dim:    color-mix(in oklch, var(--pal-cyan) 65%, black);
-  --cyan-bright: color-mix(in oklch, var(--pal-cyan) 75%, white);
-  --cyan-glow:   color-mix(in srgb, var(--pal-cyan) 22%, transparent);
+  --ai:        var(--theme-ai);
+  --ai-dim:    color-mix(in oklch, var(--theme-ai) 65%, black);
+  --ai-bright: color-mix(in oklch, var(--theme-ai) 75%, white);
+  --ai-glow:   color-mix(in srgb, var(--theme-ai) 22%, transparent);
 
-  /* ... same pattern for violet, green, yellow, orange, red, magenta ... */
+  /* ... same pattern for primary, success, warning, queue, danger, meta ... */
 
   /* ═══════════════════════════════════════════════════
      DERIVED: Semantic accent mappings
      ═══════════════════════════════════════════════════ */
-  --accent-primary:       var(--violet);
-  --accent-primary-hover: var(--violet-bright);
-  --accent-user:          var(--blue);
-  --accent-assistant:     var(--cyan);
-  --accent-success:       var(--cyan);
-  --accent-warning:       var(--yellow);
-  --accent-error:         var(--red);
-  --accent-queue:         var(--orange);
-  --accent-loop:          var(--magenta);
+  --accent-primary:       var(--primary);
+  --accent-primary-hover: var(--primary-bright);
+  --accent-user:          var(--user);
+  --accent-assistant:     var(--ai);
+  --accent-success:       var(--ai);
+  --accent-warning:       var(--warning);
+  --accent-error:         var(--danger);
+  --accent-queue:         var(--queue);
+  --accent-loop:          var(--meta);
 
   /* ═══════════════════════════════════════════════════
      DERIVED: Message backgrounds — tint of accent into bg
@@ -625,32 +625,31 @@ PALETTE TOKENS (16, set by JS)          DERIVED + SEMANTIC (60+, CSS computes)
  * 16-token palette. The only source of truth for a theme.
  * CSS derives all other tokens (~60+) from these via color-mix().
  *
- * Naming follows Solarized convention (base03-base1 + 8 accents)
- * but any palette can map into these slots:
- *   base03 = darkest background
- *   base02 = surface/raised background
- *   base01 = muted text / comments
- *   base00 = secondary text
- *   base0  = primary text
- *   base1  = emphasized text
- *   8 accents = yellow, orange, red, magenta, violet, blue, cyan, green
+ * Naming follows semantic convention:
+ *   bgCanvas  = darkest background
+ *   bgSurface = surface/raised background
+ *   textMuted = muted text / comments
+ *   textSubtle= secondary text
+ *   textBody  = primary text
+ *   textBright= emphasized text
+ *   8 accents = warning, queue, danger, meta, primary, user, ai, success
  */
 interface Palette16 {
   name: string;
-  base03: string;  // darkest bg
-  base02: string;  // surface bg
-  base01: string;  // muted text
-  base00: string;  // secondary text
-  base0:  string;  // primary text
-  base1:  string;  // emphasis text
-  yellow:  string;
-  orange:  string;
-  red:     string;
-  magenta: string;
-  violet:  string;
-  blue:    string;
-  cyan:    string;
-  green:   string;
+  bgCanvas:  string;  // darkest bg
+  bgSurface: string;  // surface bg
+  textMuted: string;  // muted text
+  textSubtle:string;  // secondary text
+  textBody:  string;  // primary text
+  textBright:string;  // emphasis text
+  warning:  string;
+  queue:    string;
+  danger:   string;
+  meta:     string;
+  primary:  string;
+  user:     string;
+  ai:       string;
+  success:  string;
 }
 ```
 
@@ -660,43 +659,43 @@ interface Palette16 {
 const PALETTES: Record<string, Palette16> = {
   solarized: {
     name: 'Solarized Dark',
-    base03: '#002b36', base02: '#073642',
-    base01: '#586e75', base00: '#657b83',
-    base0:  '#839496', base1:  '#93a1a1',
-    yellow: '#b58900', orange: '#cb4b16',
-    red:    '#dc322f', magenta:'#d33682',
-    violet: '#6c71c4', blue:   '#268bd2',
-    cyan:   '#2aa198', green:  '#859900',
+    bgCanvas: '#002b36', bgSurface: '#073642',
+    textMuted: '#586e75', textSubtle: '#657b83',
+    textBody:  '#839496', textBright: '#93a1a1',
+    warning: '#b58900', queue:   '#cb4b16',
+    danger:  '#dc322f', meta:    '#d33682',
+    primary: '#6c71c4', user:    '#268bd2',
+    ai:      '#2aa198', success: '#859900',
   },
   oksolar: {
     name: 'OKSolar Dark',
-    base03: '#002d38', base02: '#093946',
-    base01: '#5b7279', base00: '#657377',
-    base0:  '#98a8a8', base1:  '#8faaab',
-    yellow: '#ac8300', orange: '#d56500',
-    red:    '#f23749', magenta:'#dd459d',
-    violet: '#7d80d1', blue:   '#2b90d8',
-    cyan:   '#259d94', green:  '#819500',
+    bgCanvas: '#002d38', bgSurface: '#093946',
+    textMuted: '#5b7279', textSubtle: '#657377',
+    textBody:  '#98a8a8', textBright: '#8faaab',
+    warning: '#ac8300', queue:   '#d56500',
+    danger:  '#f23749', meta:    '#dd459d',
+    primary: '#7d80d1', user:    '#2b90d8',
+    ai:      '#259d94', success: '#819500',
   },
   nord: {
     name: 'Nord',
-    base03: '#2e3440', base02: '#3b4252',
-    base01: '#d8dee9', base00: '#e5e9f0',  // Nord text is light
-    base0:  '#eceff4', base1:  '#eceff4',
-    yellow: '#ebcb8b', orange: '#d08770',
-    red:    '#bf616a', magenta:'#b48ead',
-    violet: '#b48ead', blue:   '#81a1c1',
-    cyan:   '#88c0d0', green:  '#a3be8c',
+    bgCanvas: '#2e3440', bgSurface: '#3b4252',
+    textMuted: '#d8dee9', textSubtle: '#e5e9f0',  // Nord text is light
+    textBody:  '#eceff4', textBright: '#eceff4',
+    warning: '#ebcb8b', queue:   '#d08770',
+    danger:  '#bf616a', meta:    '#b48ead',
+    primary: '#b48ead', user:    '#81a1c1',
+    ai:      '#88c0d0', success: '#a3be8c',
   },
   dracula: {
     name: 'Dracula',
-    base03: '#282a36', base02: '#44475a',
-    base01: '#6272a4', base00: '#f8f8f2',
-    base0:  '#f8f8f2', base1:  '#f8f8f2',
-    yellow: '#f1fa8c', orange: '#ffb86c',
-    red:    '#ff5555', magenta:'#ff79c6',
-    violet: '#bd93f9', blue:   '#8be9fd',
-    cyan:   '#8be9fd', green:  '#50fa7b',
+    bgCanvas: '#282a36', bgSurface: '#44475a',
+    textMuted: '#6272a4', textSubtle: '#f8f8f2',
+    textBody:  '#f8f8f2', textBright: '#f8f8f2',
+    warning: '#f1fa8c', queue:   '#ffb86c',
+    danger:  '#ff5555', meta:    '#ff79c6',
+    primary: '#bd93f9', user:    '#8be9fd',
+    ai:      '#8be9fd', success: '#50fa7b',
   },
   // ... monokai, gruvbox, tokyo, catppuccin mapped similarly
 };
@@ -708,20 +707,20 @@ const PALETTES: Record<string, Palette16> = {
 function applyPalette(palette: Palette16) {
   const root = document.documentElement;
   const entries: [string, string][] = [
-    ['--pal-base03', palette.base03],
-    ['--pal-base02', palette.base02],
-    ['--pal-base01', palette.base01],
-    ['--pal-base00', palette.base00],
-    ['--pal-base0',  palette.base0],
-    ['--pal-base1',  palette.base1],
-    ['--pal-yellow',  palette.yellow],
-    ['--pal-orange',  palette.orange],
-    ['--pal-red',     palette.red],
-    ['--pal-magenta', palette.magenta],
-    ['--pal-violet',  palette.violet],
-    ['--pal-blue',    palette.blue],
-    ['--pal-cyan',    palette.cyan],
-    ['--pal-green',   palette.green],
+    ['--theme-bg-canvas',  palette.bgCanvas],
+    ['--theme-bg-surface', palette.bgSurface],
+    ['--theme-text-muted', palette.textMuted],
+    ['--theme-text-subtle',palette.textSubtle],
+    ['--theme-text-body',  palette.textBody],
+    ['--theme-text-bright',palette.textBright],
+    ['--theme-warning',  palette.warning],
+    ['--theme-queue',    palette.queue],
+    ['--theme-danger',   palette.danger],
+    ['--theme-meta',     palette.meta],
+    ['--theme-primary',  palette.primary],
+    ['--theme-user',     palette.user],
+    ['--theme-ai',       palette.ai],
+    ['--theme-success',  palette.success],
   ];
   for (const [key, value] of entries) {
     root.style.setProperty(key, value);
@@ -748,15 +747,15 @@ function applyPalette(palette: Palette16) {
 ```
 Return ONLY a JSON object with exactly these 14 keys.
 All values must be valid #RRGGBB hex.
-base03 must be the darkest. base1 must be the lightest of the base tones.
+bgCanvas must be the darkest. textBright must be the lightest of the base tones.
 The 8 accent colors should be visually distinct from each other.
-Accent colors should have good contrast (WCAG AA) against base03 background.
+Accent colors should have good contrast (WCAG AA) against bgCanvas background.
 ```
 
 **Server validation before returning to client:**
 1. All 14 keys present, valid hex
-2. Monotonic luminance: base03 < base02 < base01 < base00 < base0 <= base1
-3. Min contrast ratio: each accent vs base03 >= 4.5:1 (WCAG AA)
+2. Monotonic luminance: bgCanvas < bgSurface < textMuted < textSubtle < textBody <= textBright
+3. Min contrast ratio: each accent vs bgCanvas >= 4.5:1 (WCAG AA)
 4. No duplicate colors
 5. Accent deltaE (in oklch) between any two accents >= 15 (perceptually distinct)
 
@@ -766,13 +765,13 @@ Accent colors should have good contrast (WCAG AA) against base03 background.
   "key": "custom_3",
   "palette": {
     "name": "Desert Sunset",
-    "base03": "#1a1008", "base02": "#2d2013",
-    "base01": "#7a6b55", "base00": "#8e7f69",
-    "base0":  "#a89880", "base1":  "#c4b69e",
-    "yellow": "#d4a030", "orange": "#c85a20",
-    "red":    "#b83030", "magenta":"#a04878",
-    "violet": "#7868a8", "blue":   "#4888b8",
-    "cyan":   "#389088", "green":  "#688830"
+    "bgCanvas": "#1a1008", "bgSurface": "#2d2013",
+    "textMuted": "#7a6b55", "textSubtle": "#8e7f69",
+    "textBody":  "#a89880", "textBright": "#c4b69e",
+    "warning": "#d4a030", "queue":   "#c85a20",
+    "danger":  "#b83030", "meta":    "#a04878",
+    "primary": "#7868a8", "user":    "#4888b8",
+    "ai":      "#389088", "success": "#688830"
   }
 }
 ```
@@ -784,18 +783,18 @@ Every hardcoded hex/rgba in component CSS must be replaced.
 | Current | Replacement |
 |---------|-------------|
 | `#fff` (button text) | `var(--text-on-accent)` |
-| `#c9302c` (darker red hover) | `var(--red-dim)` |
+| `#c9302c` (darker red hover) | `var(--danger-dim)` |
 | `#dc3545` (error text) | `var(--accent-error)` |
-| `rgba(203, 75, 22, 0.1)` | `color-mix(in srgb, var(--orange) 10%, transparent)` |
-| `rgba(42, 161, 152, 0.35)` | `color-mix(in srgb, var(--cyan) 35%, transparent)` |
-| `rgba(147, 161, 161, 0.3)` | `var(--border-emphasis)` or `color-mix(in srgb, var(--pal-base1) 30%, transparent)` |
+| `rgba(203, 75, 22, 0.1)` | `color-mix(in srgb, var(--queue) 10%, transparent)` |
+| `rgba(42, 161, 152, 0.35)` | `color-mix(in srgb, var(--ai) 35%, transparent)` |
+| `rgba(147, 161, 161, 0.3)` | `var(--border-emphasis)` or `color-mix(in srgb, var(--theme-text-bright) 30%, transparent)` |
 | `rgba(0, 0, 0, 0.2-0.6)` | `color-mix(in srgb, black N%, transparent)` — these are fine, black doesn't change with palette |
 | PromptPalette.css `#2a2a2a` etc. | `var(--bg-panel)`, `var(--bg-hover)`, `var(--text-primary)`, etc. |
 
 ### Implementation Steps
 
 **Step 1: Rename palette tokens in index.css**
-- `--sol-base03` → `--pal-base03`, `--sol-blue` → `--pal-blue`, etc.
+- `--sol-base03` → `--theme-bg-canvas`, `--sol-blue` → `--theme-user`, etc.
 - Find/replace across all CSS files
 
 **Step 2: Replace hand-picked accent families with color-mix()**
@@ -810,8 +809,8 @@ Every hardcoded hex/rgba in component CSS must be replaced.
 **Step 4: Derive message backgrounds from accents**
 - `--bg-user-message: color-mix(in oklch, var(--accent-user) 8%, var(--bg-content))`
 
-**Step 5: Derive borders from base1**
-- `--border-subtle: color-mix(in srgb, var(--pal-base1) 10%, transparent)`
+**Step 5: Derive borders from textBright**
+- `--border-subtle: color-mix(in srgb, var(--theme-text-bright) 10%, transparent)`
 
 **Step 6: Add --text-on-accent**
 
@@ -826,7 +825,7 @@ Every hardcoded hex/rgba in component CSS must be replaced.
 
 **Step 9: Update Palette16 type + applyPalette()**
 - Replace `ColorPalette` with `Palette16`
-- `applyPalette()` sets 14 `--pal-*` CSS variables
+- `applyPalette()` sets 14 `--theme-*` CSS variables
 - Map existing third-party palettes (Nord, Dracula, etc.) into Palette16 format
 
 **Step 10: Add OKSolar palette**
@@ -845,7 +844,7 @@ After implementation:
 3. Switch to OKSolar — entire UI re-themes, including:
    - Message backgrounds tint to match new accent colors
    - Dim/bright variants follow new accents
-   - Background elevation scale adjusts to new base03/base02
+   - Background elevation scale adjusts to new bgCanvas/bgSurface
 4. Switch to Nord — entire UI re-themes
 5. Switch back to Solarized — correct restoration
 6. AI-generate a palette — validates, applies, persists

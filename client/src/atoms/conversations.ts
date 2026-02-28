@@ -1,4 +1,4 @@
-import type { ClientMessage, Conversation } from '@claude-web-view/shared';
+import type { ClientMessage, Conversation } from '@orchestral/shared';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import { getConversationLastActivity } from '../utils/time';

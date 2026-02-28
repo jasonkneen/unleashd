@@ -11,7 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Conversation } from '@claude-web-view/shared';
+import type { Conversation } from '@orchestral/shared';
 import type { DiskAdapter, LoadProgressCallback, LoadResult, PollResult } from './disk-adapter';
 import { sessionToConversation } from './disk-adapter';
 import { extractCodexSessionIdFromFilename } from './jsonl';

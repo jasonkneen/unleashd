@@ -2,7 +2,7 @@
  * AskUserQuestion Widget
  *
  * Renders Claude's AskUserQuestion tool as interactive cards with selectable
- * options. Uses the project's semantic color tokens (never --pal-* directly).
+ * options. Uses the project's semantic color tokens (never --theme-* directly).
  * ============================================================================= */
 
 .ask-user-question {
@@ -15,7 +15,7 @@
 .ask-question-card {
   background: var(--bg-content);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 14px 16px;
 }
 
@@ -25,8 +25,8 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--cyan);
-  background: var(--cyan-dim);
+  color: var(--ai);
+  background: var(--ai-dim);
   padding: 2px 8px;
   border-radius: 4px;
   margin-bottom: 8px;
@@ -53,7 +53,7 @@
   padding: 10px 14px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 2px;
   cursor: pointer;
   text-align: left;
   font-family: inherit;
@@ -61,14 +61,14 @@
 }
 
 .ask-question-option:hover {
-  border-color: var(--cyan-dim);
-  background: color-mix(in srgb, var(--cyan) 5%, var(--bg-secondary));
+  border-color: var(--ai-dim);
+  background: color-mix(in srgb, var(--ai) 5%, var(--bg-secondary));
 }
 
 .ask-question-option.selected {
-  border-color: var(--cyan);
-  background: var(--cyan-dim);
-  box-shadow: 0 0 0 1px var(--cyan-glow);
+  border-color: var(--ai);
+  background: var(--ai-dim);
+  box-shadow: 0 0 0 1px var(--ai-glow);
 }
 
 .ask-question-option .option-label {
@@ -84,5 +84,5 @@
 }
 
 .ask-question-option.selected .option-label {
-  color: var(--cyan-bright);
+  color: var(--ai-bright);
 }

@@ -4,7 +4,7 @@
 
    Layout:
    ┌──────────────────────────────────────────────────────┐
-   │ Header: ← Swarm Dashboard    project_name            │
+   │ Header: ← Swarm Projects Overview  project_name      │
    ├────────┬─────────────────────────────────────────────┤
    │ Roster │ Left Chat Pane       │ Right Chat Pane       │
    │ 220px  │ flex: 1              │ flex: 1               │
@@ -38,8 +38,14 @@
   font-weight: 600;
 }
 
+.swarm-detail-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .swarm-detail-header .swarm-detail-path {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -49,6 +55,50 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* Info icon button + hover tooltip for verbose project stats */
+.swarm-info-btn-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.swarm-info-btn {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: default;
+  line-height: 1;
+}
+
+.swarm-info-btn:hover {
+  color: var(--text-secondary);
+}
+
+.swarm-info-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  z-index: 100;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  pointer-events: none;
+}
+
+.swarm-info-btn-wrap:hover .swarm-info-tooltip {
+  display: flex;
 }
 
 /* =============================================================================
@@ -95,6 +145,7 @@
 .roster-worker {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 14px;
   cursor: pointer;
@@ -108,14 +159,14 @@
 }
 
 .roster-worker.selected {
-  background: color-mix(in srgb, var(--cyan) 12%, transparent);
-  color: var(--cyan-bright);
-  border-left: 3px solid var(--cyan);
+  background: color-mix(in srgb, var(--ai) 12%, transparent);
+  color: var(--ai-bright);
+  border-left: 3px solid var(--ai);
   padding-left: 11px;
 }
 
 .roster-exec-group.selected {
-  background: color-mix(in srgb, var(--cyan) 6%, transparent);
+  background: color-mix(in srgb, var(--ai) 6%, transparent);
 }
 
 .roster-status-dot {
@@ -126,7 +177,7 @@
 }
 
 .roster-status-dot.running {
-  background: var(--cyan);
+  background: var(--ai);
   animation: pulse 1.5s infinite;
 }
 
@@ -212,11 +263,11 @@
 }
 
 .worker-pane-header.pane-cyan {
-  border-bottom-color: var(--cyan);
+  border-bottom-color: var(--ai);
 }
 
 .worker-pane-header.pane-magenta {
-  border-bottom-color: var(--magenta);
+  border-bottom-color: var(--meta);
 }
 
 .worker-pane-id {
@@ -240,22 +291,22 @@
 }
 
 .worker-pane-provider.provider-claude {
-  background: color-mix(in srgb, var(--violet) 20%, transparent);
-  color: var(--violet);
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+  color: var(--primary);
 }
 
 .worker-pane-provider.provider-codex {
-  background: color-mix(in srgb, var(--cyan) 20%, transparent);
-  color: var(--cyan);
+  background: color-mix(in srgb, var(--meta) 20%, transparent);
+  color: var(--meta);
 }
 
 .worker-pane-provider.provider-opencode {
-  background: color-mix(in srgb, var(--green) 20%, transparent);
-  color: var(--green);
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--success);
 }
 .worker-pane-provider.provider-gemini {
-  background: color-mix(in srgb, var(--green) 20%, transparent);
-  color: var(--blue-bright);
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--user-bright);
 }
 
 .worker-pane-messages {
@@ -277,13 +328,13 @@
 }
 
 .pane-label.cyan {
-  background: color-mix(in srgb, var(--cyan) 15%, transparent);
-  color: var(--cyan);
+  background: color-mix(in srgb, var(--ai) 15%, transparent);
+  color: var(--ai);
 }
 
 .pane-label.magenta {
-  background: color-mix(in srgb, var(--magenta) 15%, transparent);
-  color: var(--magenta);
+  background: color-mix(in srgb, var(--meta) 15%, transparent);
+  color: var(--meta);
 }
 
 /* =============================================================================
@@ -296,6 +347,12 @@
   height: 240px;
   flex-shrink: 0;
   overflow: hidden;
+  transition: height 0.2s ease;
+}
+
+/* Collapse the bottom panel container when both panels are collapsed */
+.swarm-bottom-panels:has(.swarm-bottom-panel.collapsed + .swarm-bottom-panel.collapsed) {
+  height: auto;
 }
 
 .swarm-bottom-panel {
@@ -323,6 +380,36 @@
   gap: 8px;
 }
 
+/* Clickable variant — used when panel has collapse toggle */
+.swarm-panel-toggle {
+  width: 100%;
+  text-align: left;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-radius: 0;
+}
+
+.swarm-panel-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.panel-toggle-icon {
+  font-size: 9px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Collapsed panel: hide content, shrink height */
+.swarm-bottom-panel.collapsed {
+  flex: 0 0 auto;
+  width: 50%;
+}
+
+.swarm-bottom-panel.collapsed .swarm-panel-header {
+  border-bottom: none;
+}
+
 .swarm-panel-content {
   flex: 1;
   overflow-y: auto;
@@ -346,7 +433,7 @@
 
 .git-hash {
   font-family: var(--font-mono);
-  color: var(--cyan);
+  color: var(--ai);
   flex-shrink: 0;
 }
 
@@ -393,8 +480,8 @@
   padding: 2px 8px;
   border-radius: 4px;
   font-weight: 600;
-  background: color-mix(in srgb, var(--violet) 15%, transparent);
-  color: var(--violet-bright);
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
+  color: var(--primary-bright);
 }
 
 .config-count {
@@ -405,13 +492,13 @@
 .config-prompt-path {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--cyan);
+  color: var(--ai);
   cursor: pointer;
   transition: color 0.15s;
 }
 
 .config-prompt-path:hover {
-  color: var(--cyan-bright);
+  color: var(--ai-bright);
   text-decoration: underline;
 }
 
@@ -419,8 +506,8 @@
   margin: 4px 0 8px 16px;
   padding: 8px 12px;
   background: var(--bg-panel);
-  border-radius: 6px;
-  border-left: 2px solid var(--cyan-dim);
+  border-radius: 2px;
+  border-left: 2px solid var(--ai-dim);
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-secondary);
@@ -460,18 +547,18 @@
 }
 
 .role-badge.role-work {
-  background: color-mix(in srgb, var(--cyan) 18%, transparent);
-  color: var(--cyan);
+  background: color-mix(in srgb, var(--ai) 18%, transparent);
+  color: var(--ai);
 }
 
 .role-badge.role-review {
-  background: color-mix(in srgb, var(--magenta) 18%, transparent);
-  color: var(--magenta);
+  background: color-mix(in srgb, var(--meta) 18%, transparent);
+  color: var(--meta);
 }
 
 .role-badge.role-fix {
-  background: color-mix(in srgb, var(--orange) 18%, transparent);
-  color: var(--orange);
+  background: color-mix(in srgb, var(--queue) 18%, transparent);
+  color: var(--queue);
 }
 
 /* Model name in roster */
@@ -480,6 +567,20 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
   flex-shrink: 0;
+}
+
+/* First-user-message task preview shown below worker ID in roster */
+.roster-worker-task {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+  margin-top: 2px;
+  flex-basis: 100%;
+  order: 10;
 }
 
 /* Exec group container — visual grouping of exec + its reviews */
@@ -498,8 +599,8 @@
   font-size: 9px;
   padding: 1px 4px;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--magenta) 15%, transparent);
-  color: var(--magenta);
+  background: color-mix(in srgb, var(--meta) 15%, transparent);
+  color: var(--meta);
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -513,19 +614,19 @@
 }
 
 .verdict-pip.verdict-approved {
-  background: var(--green);
+  background: var(--success);
 }
 
 .verdict-pip.verdict-needs-changes {
-  background: var(--orange);
+  background: var(--queue);
 }
 
 .verdict-pip.verdict-rejected {
-  background: var(--red);
+  background: var(--danger);
 }
 
 .verdict-pip.verdict-pending {
-  background: var(--cyan);
+  background: var(--ai);
   animation: pulse 1.5s infinite;
 }
 
@@ -560,7 +661,7 @@
 
 .swarm-tab.active {
   color: var(--text-emphasis);
-  border-bottom-color: var(--violet);
+  border-bottom-color: var(--primary);
 }
 
 /* Verdict badges */
@@ -574,23 +675,23 @@
 }
 
 .verdict-badge.verdict-approved {
-  background: color-mix(in srgb, var(--green) 20%, transparent);
-  color: var(--green-bright);
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--success-bright);
 }
 
 .verdict-badge.verdict-needs-changes {
-  background: color-mix(in srgb, var(--orange) 20%, transparent);
-  color: var(--orange);
+  background: color-mix(in srgb, var(--queue) 20%, transparent);
+  color: var(--queue);
 }
 
 .verdict-badge.verdict-rejected {
-  background: color-mix(in srgb, var(--red) 20%, transparent);
-  color: var(--red);
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  color: var(--danger);
 }
 
 .verdict-badge.verdict-pending {
-  background: color-mix(in srgb, var(--cyan) 15%, transparent);
-  color: var(--cyan);
+  background: color-mix(in srgb, var(--ai) 15%, transparent);
+  color: var(--ai);
 }
 
 .verdict-badge.verdict-unknown {
@@ -615,13 +716,25 @@
   gap: 16px;
 }
 
-/* Run selector — horizontal list of run badges */
+/* Run selector — single horizontal scrollable row */
 .runs-selector {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-subtle);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+.runs-selector::-webkit-scrollbar {
+  height: 4px;
+}
+
+.runs-selector::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 2px;
 }
 
 .run-selector-btn {
@@ -630,7 +743,7 @@
   gap: 6px;
   padding: 6px 12px;
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 2px;
   background: var(--bg-card);
   color: var(--text-secondary);
   font-size: 12px;
@@ -638,11 +751,11 @@
   transition: border-color 0.15s;
 }
 .run-selector-btn:hover {
-  border-color: var(--cyan);
+  border-color: var(--ai);
 }
 .run-selector-btn.active {
-  border-color: var(--cyan);
-  background: var(--cyan-dim);
+  border-color: var(--ai);
+  background: var(--ai-dim);
   color: var(--text-primary);
 }
 
@@ -664,15 +777,15 @@
   color: var(--text-muted);
 }
 .run-status-badge.has-completions {
-  background: var(--green-dim);
-  color: var(--green-bright);
+  background: var(--success-dim);
+  color: var(--success-bright);
 }
 
 /* Run summary card */
 .run-summary {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 16px;
 }
 
@@ -699,7 +812,7 @@
   margin-bottom: 16px;
   padding: 12px;
   background: var(--bg-elevated);
-  border-radius: 6px;
+  border-radius: 2px;
 }
 
 .run-stat {
@@ -746,30 +859,50 @@
   font-weight: 600;
   color: var(--text-primary);
 }
-.worker-status-badge {
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 600;
+
+/* Status column: color dot instead of text badge */
+.worker-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
-.worker-status-badge.status-exhausted {
-  background: var(--yellow-dim);
-  color: var(--yellow-bright);
+
+.worker-status-dot.status-running,
+.worker-status-dot.status-starting {
+  background: var(--success);
+  animation: pulse 1.5s infinite;
 }
-.worker-status-badge.status-done {
-  background: var(--green-dim);
-  color: var(--green-bright);
+
+.worker-status-dot.status-done,
+.worker-status-dot.status-completed {
+  background: var(--ai);
 }
-.worker-status-badge.status-error {
-  background: var(--red-dim);
-  color: var(--red-bright);
+
+.worker-status-dot.status-exhausted {
+  background: var(--warning);
+}
+
+.worker-status-dot.status-error {
+  background: var(--danger);
+}
+
+/* Row tint by status */
+.run-workers-table tr[data-status="running"],
+.run-workers-table tr[data-status="starting"] {
+  background: color-mix(in oklch, var(--success) 6%, transparent);
+}
+
+.run-workers-table tr[data-status="error"] {
+  background: color-mix(in oklch, var(--danger) 5%, transparent);
 }
 
 /* Review log entries */
 .run-reviews {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 16px;
 }
 .run-reviews h4 {
@@ -786,7 +919,7 @@
 
 .run-review-entry {
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 2px;
   overflow: hidden;
 }
 
@@ -852,13 +985,13 @@
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  border: 1px solid var(--violet);
+  border: 1px solid var(--primary);
   background: var(--bg-card);
-  color: var(--violet);
+  color: var(--primary);
   transition: background 0.15s, box-shadow 0.15s;
 }
 
 .swarm-debug-btn:hover {
-  background: var(--violet-dim);
-  box-shadow: 0 0 0 1px var(--violet-glow);
+  background: var(--primary-dim);
+  box-shadow: 0 0 0 1px var(--primary-glow);
 }

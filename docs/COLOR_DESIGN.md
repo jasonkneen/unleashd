@@ -93,34 +93,34 @@ Create tints/shades for each accent for richer interactions:
 
 ```
 BLUE FAMILY (primary actions)
---blue-dim:     #1a5f8f  Disabled states
---blue:         #268bd2  Default
---blue-bright:  #4ba3e3  Hover states
---blue-glow:    rgba(38, 139, 210, 0.25)  Backgrounds/glows
+--user-dim:     #1a5f8f  Disabled states
+--user:         #268bd2  Default
+--user-bright:  #4ba3e3  Hover states
+--user-glow:    rgba(38, 139, 210, 0.25)  Backgrounds/glows
 
 CYAN FAMILY (assistant, success)
---cyan-dim:     #1d7a73  Disabled
---cyan:         #2aa198  Default
---cyan-bright:  #4bbdb3  Hover
---cyan-glow:    rgba(42, 161, 152, 0.20)
+--ai-dim:     #1d7a73  Disabled
+--ai:         #2aa198  Default
+--ai-bright:  #4bbdb3  Hover
+--ai-glow:    rgba(42, 161, 152, 0.20)
 
 VIOLET FAMILY (Claude badge, accents)
---violet-dim:   #565ba3  Disabled
---violet:       #6c71c4  Default
---violet-bright:#8a8fd8  Hover
---violet-glow:  rgba(108, 113, 196, 0.20)
+--primary-dim:   #565ba3  Disabled
+--primary:       #6c71c4  Default
+--primary-bright:#8a8fd8  Hover
+--primary-glow:  rgba(108, 113, 196, 0.20)
 
 ORANGE FAMILY (warnings, temp items)
---orange-dim:   #a03d12  Disabled
---orange:       #cb4b16  Default
---orange-bright:#e86a3a  Hover
---orange-glow:  rgba(203, 75, 22, 0.20)
+--queue-dim:   #a03d12  Disabled
+--queue:       #cb4b16  Default
+--queue-bright:#e86a3a  Hover
+--queue-glow:  rgba(203, 75, 22, 0.20)
 
 MAGENTA FAMILY (loops, special states)
---magenta-dim:  #a82968  Disabled
---magenta:      #d33682  Default
---magenta-bright:#e85a9e Hover
---magenta-glow: rgba(211, 54, 130, 0.20)
+--meta-dim:  #a82968  Disabled
+--meta:      #d33682  Default
+--meta-bright:#e85a9e Hover
+--meta-glow: rgba(211, 54, 130, 0.20)
 ```
 
 ---
@@ -181,14 +181,14 @@ MAGENTA FAMILY (loops, special states)
 
 /* Folder path with subtle color */
 .project-path {
-  color: var(--sol-cyan);
-  text-shadow: 0 0 20px var(--cyan-glow);
+  color: var(--ai);
+  text-shadow: 0 0 20px var(--ai-glow);
 }
 
 /* Count badge with accent */
 .project-count {
-  background: var(--violet-glow);
-  color: var(--violet-bright);
+  background: var(--primary-glow);
+  color: var(--primary-bright);
   border: 1px solid rgba(108, 113, 196, 0.3);
 }
 ```
@@ -235,8 +235,8 @@ MAGENTA FAMILY (loops, special states)
     var(--bg-user-message) 0%,
     rgba(38, 139, 210, 0.08) 100%
   );
-  border-left: 3px solid var(--sol-blue);
-  box-shadow: inset 3px 0 12px -3px var(--blue-glow);
+  border-left: 3px solid var(--user);
+  box-shadow: inset 3px 0 12px -3px var(--user-glow);
 }
 
 .message.assistant .message-content {
@@ -244,8 +244,8 @@ MAGENTA FAMILY (loops, special states)
     var(--bg-assistant-message) 0%,
     rgba(42, 161, 152, 0.08) 100%
   );
-  border-left: 3px solid var(--sol-cyan);
-  box-shadow: inset 3px 0 12px -3px var(--cyan-glow);
+  border-left: 3px solid var(--ai);
+  box-shadow: inset 3px 0 12px -3px var(--ai-glow);
 }
 ```
 
@@ -260,12 +260,12 @@ MAGENTA FAMILY (loops, special states)
   /* =========================================
      SOLARIZED BASE (unchanged)
      ========================================= */
-  --sol-base03: #002b36;
-  --sol-base02: #073642;
-  --sol-base01: #586e75;
-  --sol-base00: #657b83;
-  --sol-base0:  #839496;
-  --sol-base1:  #93a1a1;
+  --theme-bg-canvas: #002b36;
+  --theme-bg-surface: #073642;
+  --theme-text-muted: #586e75;
+  --theme-text-subtle: #657b83;
+  --theme-text-body:  #839496;
+  --theme-text-bright:  #93a1a1;
 
   /* =========================================
      EXTENDED BACKGROUND SCALE (NEW)
@@ -303,62 +303,62 @@ MAGENTA FAMILY (loops, special states)
   /* =========================================
      TEXT COLORS (refined)
      ========================================= */
-  --text-muted:    var(--sol-base01);  /* #586e75 */
-  --text-secondary:var(--sol-base00);  /* #657b83 */
-  --text-primary:  var(--sol-base0);   /* #839496 */
-  --text-emphasis: var(--sol-base1);   /* #93a1a1 */
+  --text-muted:    var(--theme-text-muted);  /* #586e75 */
+  --text-secondary:var(--theme-text-subtle);  /* #657b83 */
+  --text-primary:  var(--theme-text-body);   /* #839496 */
+  --text-emphasis: var(--theme-text-bright);   /* #93a1a1 */
   --text-bright:   #b4bfc0;            /* Even brighter for headings */
 
   /* =========================================
      ACCENT FAMILIES (NEW)
      ========================================= */
   /* Blue */
-  --blue-dim:      #1a5f8f;
-  --blue:          #268bd2;
-  --blue-bright:   #4ba3e3;
-  --blue-glow:     rgba(38, 139, 210, 0.25);
+  --user-dim:      #1a5f8f;
+  --user:          #268bd2;
+  --user-bright:   #4ba3e3;
+  --user-glow:     rgba(38, 139, 210, 0.25);
 
   /* Cyan */
-  --cyan-dim:      #1d7a73;
-  --cyan:          #2aa198;
-  --cyan-bright:   #4bbdb3;
-  --cyan-glow:     rgba(42, 161, 152, 0.20);
+  --ai-dim:      #1d7a73;
+  --ai:          #2aa198;
+  --ai-bright:   #4bbdb3;
+  --ai-glow:     rgba(42, 161, 152, 0.20);
 
   /* Violet */
-  --violet-dim:    #565ba3;
-  --violet:        #6c71c4;
-  --violet-bright: #8a8fd8;
-  --violet-glow:   rgba(108, 113, 196, 0.20);
+  --primary-dim:    #565ba3;
+  --primary:        #6c71c4;
+  --primary-bright: #8a8fd8;
+  --primary-glow:   rgba(108, 113, 196, 0.20);
 
   /* Green */
-  --green-dim:     #6a7a00;
-  --green:         #859900;
-  --green-bright:  #a5bb30;
-  --green-glow:    rgba(133, 153, 0, 0.20);
+  --success-dim:     #6a7a00;
+  --success:         #859900;
+  --success-bright:  #a5bb30;
+  --success-glow:    rgba(133, 153, 0, 0.20);
 
   /* Yellow */
-  --yellow-dim:    #8f6c00;
-  --yellow:        #b58900;
-  --yellow-bright: #d4a530;
-  --yellow-glow:   rgba(181, 137, 0, 0.20);
+  --warning-dim:    #8f6c00;
+  --warning:        #b58900;
+  --warning-bright: #d4a530;
+  --warning-glow:   rgba(181, 137, 0, 0.20);
 
   /* Orange */
-  --orange-dim:    #a03d12;
-  --orange:        #cb4b16;
-  --orange-bright: #e86a3a;
-  --orange-glow:   rgba(203, 75, 22, 0.20);
+  --queue-dim:    #a03d12;
+  --queue:        #cb4b16;
+  --queue-bright: #e86a3a;
+  --queue-glow:   rgba(203, 75, 22, 0.20);
 
   /* Red */
-  --red-dim:       #b02825;
-  --red:           #dc322f;
-  --red-bright:    #e85a57;
-  --red-glow:      rgba(220, 50, 47, 0.20);
+  --danger-dim:       #b02825;
+  --danger:           #dc322f;
+  --danger-bright:    #e85a57;
+  --danger-glow:      rgba(220, 50, 47, 0.20);
 
   /* Magenta */
-  --magenta-dim:   #a82968;
-  --magenta:       #d33682;
-  --magenta-bright:#e85a9e;
-  --magenta-glow:  rgba(211, 54, 130, 0.20);
+  --meta-dim:   #a82968;
+  --meta:       #d33682;
+  --meta-bright:#e85a9e;
+  --meta-glow:  rgba(211, 54, 130, 0.20);
 
   /* =========================================
      MESSAGE BACKGROUNDS (refined)
