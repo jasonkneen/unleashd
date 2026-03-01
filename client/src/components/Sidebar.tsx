@@ -1,5 +1,5 @@
-import { PROVIDER_OPTIONS } from '@orchestral/shared';
-import type { Conversation, ModelId, ModelInfo, Provider } from '@orchestral/shared';
+import { PROVIDER_OPTIONS } from '@unleashd/shared';
+import type { Conversation, ModelId, ModelInfo, Provider } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';

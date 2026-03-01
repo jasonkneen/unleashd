@@ -323,7 +323,7 @@ const hasUnseen = hasUnseenMessages(conv.id, conv.messages.length);
 ### Where State Lives (Reference for Future Devs)
 
 **localStorage keys** (via zustand-persist):
-- `orchestral-ui` → uiStore state (includes `lastSeenMessageIndex`)
+- `unleashd-ui` → uiStore state (includes `lastSeenMessageIndex`)
 
 **Zustand stores**:
 - `conversationStore`: Conversation messages (in-memory, not persisted)

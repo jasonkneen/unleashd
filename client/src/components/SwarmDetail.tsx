@@ -5,7 +5,7 @@ import type {
   SwarmReviewLog,
   SwarmRun,
   SwarmRunSummary,
-} from '@orchestral/shared';
+} from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';

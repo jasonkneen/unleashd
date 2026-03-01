@@ -5,7 +5,7 @@
  * `@nbardy/agent-cli` (`executeCommand`).
  */
 
-import type { ModelInfo, Provider as ProviderName } from '@orchestral/shared';
+import type { ModelInfo, Provider as ProviderName } from '@unleashd/shared';
 import claudeProvider from './claude';
 import codexProvider from './codex';
 import geminiProvider from './gemini';

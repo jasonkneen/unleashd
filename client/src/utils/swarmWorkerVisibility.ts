@@ -1,5 +1,5 @@
-import type { Conversation } from '@orchestral/shared';
-import type { OompaRuntimeSnapshot } from '@orchestral/shared';
+import type { Conversation } from '@unleashd/shared';
+import type { OompaRuntimeSnapshot } from '@unleashd/shared';
 
 export interface WorkerVisibilitySummary {
   sessionCount: number;

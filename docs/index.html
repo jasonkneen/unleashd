@@ -123,16 +123,16 @@
 </head>
 <body>
     <header>
-        <h1>Orchestral</h1>
+        <h1>Unleashd</h1>
         <p class="subtitle">The local, git-worktree multi-agent swarm orchestrator for Codex, Claude, and Opencode.</p>
-        
+
         <div class="install-box">
-            <span id="install-cmd">npx orchestral-ade</span>
+            <span id="install-cmd">npx unleashd</span>
             <button class="copy-btn" onclick="copyCmd()">Copy</button>
         </div>
 
         <div class="buttons">
-            <a href="https://github.com/nbardy/orchestral" class="btn primary">View on GitHub</a>
+            <a href="https://github.com/nbardy/unleashd" class="btn primary">View on GitHub</a>
             <a href="https://github.com/nbardy/oompa" class="btn">Oompa Core Engine</a>
         </div>
     </header>
@@ -140,7 +140,7 @@
     <main>
         <div class="video-container">
             <!-- Placeholder for Demo Video -->
-            <video controls poster="https://via.placeholder.com/1280x720.png?text=Orchestral+Demo+Video">
+            <video controls poster="https://via.placeholder.com/1280x720.png?text=Unleashd+Demo+Video">
                 <source src="demo.mp4" type="video/mp4">
                 Your browser does not support the video tag.
             </video>
@@ -164,7 +164,7 @@
 
     <script>
         function copyCmd() {
-            navigator.clipboard.writeText("npx orchestral-ade").then(() => {
+            navigator.clipboard.writeText("npx unleashd").then(() => {
                 const btn = document.querySelector('.copy-btn');
                 btn.textContent = 'Copied!';
                 setTimeout(() => { btn.textContent = 'Copy'; }, 2000);

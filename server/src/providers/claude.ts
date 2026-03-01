@@ -1,4 +1,4 @@
-import type { ModelInfo } from '@orchestral/shared';
+import type { ModelInfo } from '@unleashd/shared';
 import type { Provider } from './index';
 
 const claudeProvider: Provider = {

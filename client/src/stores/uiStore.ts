@@ -1,14 +1,13 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import type { UIState } from '@unleashd/shared';
 
 // =============================================================================
-// UI Store — Single source of truth for all client-local persistent state.
+// UI Store — Pure in-memory state, synced to server
 //
-// Every localStorage key lives here (or is documented here if it must stay
-// external). Adding a new persisted value = add it to UIState + initialise it.
+// Preferences (activeConversationId, sidebar mode, done conversations, etc.)
+// are fetched from server on init and synced back on mutation.
 //
-// Migration: If the shape changes, bump the `version` and add a `migrate`
-// function to the persist config below.
+// In-flight crash-recovery state stays in localStorage (see external keys below).
 //
 // NEW Badge Feature (2026-02-02):
 // lastSeenMessageIndex tracks the last message index the user has viewed in
@@ -25,40 +24,18 @@ import { persist } from 'zustand/middleware';
 //                            Chat.tsx. Must bypass React render cycle.
 // pendingConversations     — Read/written inside actions.ts during
 //                            WebSocket init (non-React context).
+// pendingFiles:{conversationId} — Serialized array of files awaiting send (images only,
+//                            previewUrl omitted since it's an object URL).
 // ---------------------------------------------------------------------------
 export const DRAFT_KEY_PREFIX = 'draft:';
 export const PENDING_CONVERSATIONS_KEY = 'pendingConversations';
+export const PENDING_FILES_KEY_PREFIX = 'pendingFiles:';
 
 // ---------------------------------------------------------------------------
 // State shape
 // ---------------------------------------------------------------------------
 
-interface UIState {
-  // Active conversation — restored on page load
-  activeConversationId: string | null;
-
-  // Last working directory used in New Conversation dialog
-  lastWorkingDirectory: string | null;
-
-  // Gallery UI
-  galleryExpandedProjects: string[]; // Stored as array, used as Set at call sites
-  galleryCollapsedProjects: string[];
-  showTempSessions: boolean;
-  showDoneConversations: boolean;
-
-  // Conversations marked "done" — hidden from sidebar, toggleable in gallery
-  doneConversations: string[];
-
-  // Oompa worker overrides — workers promoted to main view by user action
-  promotedWorkers: string[];
-  showWorkerConversations: boolean;
-
-  // Seen message tracking — conversationId -> last seen message index
-  lastSeenMessageIndex: Record<string, number>;
-
-  // Sidebar view mode — 'grouped' groups recent (48h) by folder, 'list' is flat chronological
-  sidebarViewMode: 'grouped' | 'list';
-
+interface UIStoreState extends UIState {
   // Actions
   setActiveConversationId: (id: string | null) => void;
   setLastWorkingDirectory: (dir: string) => void;
@@ -80,107 +57,166 @@ interface UIState {
   hasUnseenMessages: (conversationId: string, totalMessages: number) => boolean;
 
   setSidebarViewMode: (mode: 'grouped' | 'list') => void;
+
+  // Server sync
+  hydrateFromServer: (state: UIState) => void;
+  syncToServer: () => void;
 }
 
 // ---------------------------------------------------------------------------
-// Store
+// Store — Pure in-memory, synced to server on mutation
 // ---------------------------------------------------------------------------
 
-export const useUIStore = create<UIState>()(
-  persist(
-    (set, get) => ({
-      // State
-      activeConversationId: null,
-      lastWorkingDirectory: null,
-      galleryExpandedProjects: [],
-      galleryCollapsedProjects: [],
-      showTempSessions: false,
-      showDoneConversations: false,
-      doneConversations: [],
-      promotedWorkers: [],
-      showWorkerConversations: false,
-      lastSeenMessageIndex: {},
-      sidebarViewMode: 'grouped',
+// Debounce timer for server sync — shared across all mutations
+let syncToServerTimer: ReturnType<typeof setTimeout> | null = null;
 
-      // Actions
-      setActiveConversationId: (id) => set({ activeConversationId: id }),
+export const useUIStore = create<UIStoreState>((set, get) => ({
+  // State — defaults match UIStateSchema
+  activeConversationId: null,
+  lastWorkingDirectory: null,
+  galleryExpandedProjects: [],
+  galleryCollapsedProjects: [],
+  showTempSessions: false,
+  showDoneConversations: false,
+  doneConversations: [],
+  promotedWorkers: [],
+  showWorkerConversations: false,
+  lastSeenMessageIndex: {},
+  sidebarViewMode: 'grouped',
 
-      setLastWorkingDirectory: (dir) => set({ lastWorkingDirectory: dir }),
+  // =========================================================================
+  // Actions — mutations
+  // =========================================================================
 
-      toggleGalleryExpanded: (dir) =>
-        set((s) => {
-          const current = new Set(s.galleryExpandedProjects);
-          if (current.has(dir)) {
-            current.delete(dir);
-          } else {
-            current.add(dir);
-          }
-          return { galleryExpandedProjects: Array.from(current) };
-        }),
+  setActiveConversationId: (id) => {
+    set({ activeConversationId: id });
+    get().syncToServer();
+  },
 
-      toggleGalleryCollapsed: (dir) =>
-        set((s) => {
-          const current = new Set(s.galleryCollapsedProjects);
-          if (current.has(dir)) {
-            current.delete(dir);
-          } else {
-            current.add(dir);
-          }
-          return { galleryCollapsedProjects: Array.from(current) };
-        }),
+  setLastWorkingDirectory: (dir) => {
+    set({ lastWorkingDirectory: dir });
+    get().syncToServer();
+  },
 
-      setShowTempSessions: (show) => set({ showTempSessions: show }),
+  toggleGalleryExpanded: (dir) => {
+    set((s) => {
+      const current = new Set(s.galleryExpandedProjects);
+      if (current.has(dir)) {
+        current.delete(dir);
+      } else {
+        current.add(dir);
+      }
+      return { galleryExpandedProjects: Array.from(current) };
+    });
+    get().syncToServer();
+  },
 
-      setShowDoneConversations: (show) => set({ showDoneConversations: show }),
+  toggleGalleryCollapsed: (dir) => {
+    set((s) => {
+      const current = new Set(s.galleryCollapsedProjects);
+      if (current.has(dir)) {
+        current.delete(dir);
+      } else {
+        current.add(dir);
+      }
+      return { galleryCollapsedProjects: Array.from(current) };
+    });
+    get().syncToServer();
+  },
 
-      markDone: (conversationId) =>
-        set((s) => {
-          if (s.doneConversations.includes(conversationId)) return s;
-          return { doneConversations: [...s.doneConversations, conversationId] };
-        }),
+  setShowTempSessions: (show) => {
+    set({ showTempSessions: show });
+    get().syncToServer();
+  },
 
-      unmarkDone: (conversationId) =>
-        set((s) => ({
-          doneConversations: s.doneConversations.filter((id) => id !== conversationId),
-        })),
+  setShowDoneConversations: (show) => {
+    set({ showDoneConversations: show });
+    get().syncToServer();
+  },
 
-      isDone: (conversationId) => get().doneConversations.includes(conversationId),
+  markDone: (conversationId) => {
+    set((s) => {
+      if (s.doneConversations.includes(conversationId)) return s;
+      return { doneConversations: [...s.doneConversations, conversationId] };
+    });
+    get().syncToServer();
+  },
 
-      promoteWorker: (conversationId) =>
-        set((s) => {
-          if (s.promotedWorkers.includes(conversationId)) return s;
-          return { promotedWorkers: [...s.promotedWorkers, conversationId] };
-        }),
+  unmarkDone: (conversationId) => {
+    set((s) => ({
+      doneConversations: s.doneConversations.filter((id) => id !== conversationId),
+    }));
+    get().syncToServer();
+  },
 
-      demoteToWorker: (conversationId) =>
-        set((s) => ({
-          promotedWorkers: s.promotedWorkers.filter((id) => id !== conversationId),
-        })),
+  isDone: (conversationId) => get().doneConversations.includes(conversationId),
 
-      setShowWorkerConversations: (show) => set({ showWorkerConversations: show }),
+  promoteWorker: (conversationId) => {
+    set((s) => {
+      if (s.promotedWorkers.includes(conversationId)) return s;
+      return { promotedWorkers: [...s.promotedWorkers, conversationId] };
+    });
+    get().syncToServer();
+  },
 
-      markMessagesSeen: (conversationId, messageIndex) =>
-        set((s) => ({
-          lastSeenMessageIndex: {
-            ...s.lastSeenMessageIndex,
-            [conversationId]: messageIndex,
-          },
-        })),
+  demoteToWorker: (conversationId) => {
+    set((s) => ({
+      promotedWorkers: s.promotedWorkers.filter((id) => id !== conversationId),
+    }));
+    get().syncToServer();
+  },
 
-      setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
+  setShowWorkerConversations: (show) => {
+    set({ showWorkerConversations: show });
+    get().syncToServer();
+  },
 
-      hasUnseenMessages: (conversationId, totalMessages) => {
-        if (totalMessages === 0) return false;
-        const lastSeen = get().lastSeenMessageIndex[conversationId];
-        if (lastSeen === undefined) return false;
-        return lastSeen < totalMessages - 1;
+  markMessagesSeen: (conversationId, messageIndex) => {
+    set((s) => ({
+      lastSeenMessageIndex: {
+        ...s.lastSeenMessageIndex,
+        [conversationId]: messageIndex,
       },
-    }),
-    {
-      name: 'orchestral-ui',
-      version: 4,
-      // Persist only state, not actions
-      partialize: (state) => ({
+    }));
+    get().syncToServer();
+  },
+
+  setSidebarViewMode: (mode) => {
+    set({ sidebarViewMode: mode });
+    get().syncToServer();
+  },
+
+  hasUnseenMessages: (conversationId, totalMessages) => {
+    if (totalMessages === 0) return false;
+    const lastSeen = get().lastSeenMessageIndex[conversationId];
+    if (lastSeen === undefined) return false;
+    return lastSeen < totalMessages - 1;
+  },
+
+  // =========================================================================
+  // Server sync
+  // =========================================================================
+
+  /**
+   * Apply server state into the store. Called on init message.
+   * Server is authoritative — directly merge server state over client state.
+   * This ensures null values (e.g., clearing activeConversationId) are preserved.
+   */
+  hydrateFromServer: (serverState) => {
+    set((s) => ({ ...s, ...serverState }));
+  },
+
+  /**
+   * Debounced sync to server. Collects all mutations and sends once every 500ms.
+   */
+  syncToServer: () => {
+    if (syncToServerTimer) {
+      clearTimeout(syncToServerTimer);
+    }
+    syncToServerTimer = setTimeout(() => {
+      syncToServerTimer = null;
+      const state = get();
+      const payload: UIState = {
         activeConversationId: state.activeConversationId,
         lastWorkingDirectory: state.lastWorkingDirectory,
         galleryExpandedProjects: state.galleryExpandedProjects,
@@ -192,33 +228,12 @@ export const useUIStore = create<UIState>()(
         showWorkerConversations: state.showWorkerConversations,
         lastSeenMessageIndex: state.lastSeenMessageIndex,
         sidebarViewMode: state.sidebarViewMode,
-      }),
-      migrate: (persistedState: any, version: number) => {
-        if (version === 1) {
-          return {
-            ...persistedState,
-            lastSeenMessageIndex: {},
-            promotedWorkers: [],
-            showWorkerConversations: false,
-            sidebarViewMode: 'grouped',
-          };
-        }
-        if (version === 2) {
-          return {
-            ...persistedState,
-            promotedWorkers: [],
-            showWorkerConversations: false,
-            sidebarViewMode: 'grouped',
-          };
-        }
-        if (version === 3) {
-          return {
-            ...persistedState,
-            sidebarViewMode: 'grouped',
-          };
-        }
-        return persistedState;
-      },
-    }
-  )
-);
+      };
+      fetch('/api/ui-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch((err) => console.warn('[UI State] Sync error:', err));
+    }, 500);
+  },
+}));

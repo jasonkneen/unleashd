@@ -3,7 +3,7 @@ import type {
   SwarmReviewLog,
   SwarmRunLog,
   SwarmRunSummary,
-} from '@orchestral/shared';
+} from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';

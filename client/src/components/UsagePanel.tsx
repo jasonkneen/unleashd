@@ -1,4 +1,4 @@
-import { PROVIDER_OPTIONS, type Provider, getProviderMetadata } from '@orchestral/shared';
+import { PROVIDER_OPTIONS, type Provider, getProviderMetadata } from '@unleashd/shared';
 import { useEffect, useState } from 'react';
 import './UsagePanel.css';
 

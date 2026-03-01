@@ -22,8 +22,9 @@ import type {
   QueuedMessage,
   ServerMessage,
   SubAgent,
-} from '@orchestral/shared';
-import { safeParseClientMessage } from '@orchestral/shared';
+  UIState,
+} from '@unleashd/shared';
+import { safeParseClientMessage } from '@unleashd/shared';
 import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -1332,6 +1333,7 @@ wss.on('connection', (ws: WebSocket) => {
           return json;
         }),
         defaultCwd: process.cwd(),
+        uiState: getUIState(),
       })
     );
   })();
@@ -1737,6 +1739,75 @@ app.get('/api/audit', (_req: Request, res: Response) => {
 
 app.get('/api/settings', (_req: Request, res: Response) => {
   res.json(getSettings());
+});
+
+// =============================================================================
+// UI State Cache — server-synced preferences from ~/.agent-viewer/ui-state.json
+// =============================================================================
+
+const UI_STATE_FILE = path.join(SETTINGS_DIR, 'ui-state.json');
+
+let uiStateCache: { [key: string]: unknown } = {};
+let uiStateSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Initialize UI state cache from disk. Called once at startup.
+ * File is optional — missing file defaults to empty object (schema provides defaults).
+ */
+async function initUIStateCache(): Promise<void> {
+  try {
+    const data = await fs.promises.readFile(UI_STATE_FILE, 'utf-8');
+    uiStateCache = JSON.parse(data);
+    console.log('UI state loaded from disk');
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      // File doesn't exist — start with empty object (schema provides defaults)
+      uiStateCache = {};
+      console.log('UI state file not found, using defaults');
+    } else {
+      console.warn(`Failed to load UI state: ${(e as Error).message}`);
+      uiStateCache = {};
+    }
+  }
+}
+
+/**
+ * Get UI state from cache. Returns object (or {} if cache not initialized).
+ */
+function getUIState(): { [key: string]: unknown } {
+  return uiStateCache;
+}
+
+/**
+ * Update UI state cache and write to disk asynchronously.
+ * Merges partial updates into the existing state.
+ */
+function setUIState(partial: { [key: string]: unknown }): void {
+  uiStateCache = { ...uiStateCache, ...partial };
+
+  // Fire-and-forget disk write with debounce
+  if (uiStateSyncTimer) {
+    clearTimeout(uiStateSyncTimer);
+  }
+  uiStateSyncTimer = setTimeout(async () => {
+    uiStateSyncTimer = null;
+    try {
+      await fs.promises.mkdir(SETTINGS_DIR, { recursive: true });
+      await fs.promises.writeFile(UI_STATE_FILE, JSON.stringify(uiStateCache, null, 2));
+    } catch (e) {
+      console.error('Error saving UI state to disk:', e);
+    }
+  }, 500);
+}
+
+app.get('/api/ui-state', (_req: Request, res: Response) => {
+  res.json(getUIState());
+});
+
+app.post('/api/ui-state', express.json(), (req: Request, res: Response) => {
+  setUIState(req.body);
+  res.json({ ok: true });
 });
 
 // Model list API — returns ModelInfo[] for the given provider.
@@ -4497,6 +4568,7 @@ async function startServer(): Promise<void> {
 
   // Initialize caches before opening the port
   await initSettingsCache();
+  await initUIStateCache();
   await initPaletteCache();
 
   const portNumber = typeof PORT === 'string' ? Number.parseInt(PORT, 10) : PORT;

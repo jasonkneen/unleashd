@@ -26,7 +26,7 @@ import type {
   Message,
   Provider,
   SubAgent,
-} from '@orchestral/shared';
+} from '@unleashd/shared';
 import {
   isCodexAgentMessageEvent,
   isCodexResponseMessage,
@@ -36,7 +36,7 @@ import {
   isJsonlTextBlock,
   isJsonlToolUseBlock,
   isJsonlUserEntry,
-} from '@orchestral/shared';
+} from '@unleashd/shared';
 import { formatToolResult, formatToolUse } from './tool-format';
 
 /** Canonicalize a directory path: resolve `.`/`..` and strip trailing slashes
@@ -1064,7 +1064,7 @@ const HIDE_TEST_RE = /^\s*(?:"|')?\s*\[_HIDE_TEST_\]\s*/;
 
 /**
  * AI Writing Tool tag regex. If the first user message starts with this tag,
- * the conversation is completely hidden from orchestral (isHidden=true).
+ * the conversation is completely hidden from unleashd (isHidden=true).
  * All jobs spawned by the ai-writing-tool app are prefixed with this tag.
  */
 const AI_WRITING_TOOL_RE = /^\s*(?:"|')?\s*\[ai-writing-tool\]\s*/;

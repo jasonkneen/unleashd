@@ -1,4 +1,4 @@
-import type { ClientMessage, Conversation } from '@orchestral/shared';
+import type { ClientMessage, Conversation } from '@unleashd/shared';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import { getConversationLastActivity } from '../utils/time';

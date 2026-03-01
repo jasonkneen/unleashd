@@ -1,4 +1,4 @@
-import type { Conversation } from '@orchestral/shared';
+import type { Conversation } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';

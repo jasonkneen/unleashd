@@ -1,14 +1,14 @@
 {
-  "name": "orchestral-ade",
+  "name": "unleashd",
   "version": "1.0.1",
   "private": false,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"pnpm dev:server\" \"pnpm dev:client\"",
-    "dev:server": "pnpm --filter @orchestral/server dev",
-    "dev:client": "pnpm --filter @orchestral/client dev",
-    "build": "pnpm --filter @orchestral/shared build && pnpm --filter @orchestral/client build",
-    "start": "pnpm --filter @orchestral/server start",
+    "dev:server": "pnpm --filter @unleashd/server dev",
+    "dev:client": "pnpm --filter @unleashd/client dev",
+    "build": "pnpm --filter @unleashd/shared build && pnpm --filter @unleashd/client build",
+    "start": "pnpm --filter @unleashd/server start",
     "test": "node test/api.test.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
@@ -21,7 +21,7 @@
     "ws": "^8.14.2"
   },
   "bin": {
-    "orchestral-ade": "./bin/orchestral.js"
+    "unleashd": "./bin/unleashd.js"
   },
   "files": [
     "bin",

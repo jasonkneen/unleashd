@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { ModelId, ModelInfo } from '@orchestral/shared';
-import { PROVIDER_OPTIONS } from '@orchestral/shared';
+import type { ModelId, ModelInfo } from '@unleashd/shared';
+import { PROVIDER_OPTIONS } from '@unleashd/shared';
 import { useDropzone } from 'react-dropzone';
 import {
   cancelQueuedMessage,
@@ -23,7 +23,7 @@ import {
   streamingAtomFamily,
 } from '../atoms/conversations';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
-import { DRAFT_KEY_PREFIX, useUIStore } from '../stores/uiStore';
+import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
 import { PromptPalette } from './PromptPalette';
@@ -147,6 +147,27 @@ export function Chat() {
     }
   }, [id]);
 
+  // Load pending files from localStorage on mount
+  useEffect(() => {
+    if (!id) return;
+    const key = `${PENDING_FILES_KEY_PREFIX}${id}`;
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Array<Omit<PendingFile, 'previewUrl'>>;
+        // Reconstruct pendingFiles: object URLs won't survive refresh, so previewUrl is null
+        const reconstructed: PendingFile[] = parsed.map((f) => ({
+          ...f,
+          previewUrl: null,
+        }));
+        setPendingFiles(reconstructed);
+      }
+    } catch (e) {
+      console.warn('[Chat] Failed to load pending files from localStorage:', e);
+      localStorage.removeItem(key);
+    }
+  }, [id]);
+
   const [hasInput, setHasInput] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -210,7 +231,13 @@ export function Chat() {
             : null,
         }));
 
-        setPendingFiles((prev) => [...prev, ...withPreviews]);
+        setPendingFiles((prev) => {
+          const next = [...prev, ...withPreviews];
+          // Save to localStorage (without previewUrl, which is an object URL)
+          const toStore = next.map(({ previewUrl, ...f }) => f);
+          localStorage.setItem(`${PENDING_FILES_KEY_PREFIX}${id}`, JSON.stringify(toStore));
+          return next;
+        });
       } catch (err) {
         console.error('File upload failed:', err);
       } finally {
@@ -298,7 +325,10 @@ export function Chat() {
       if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
     }
     setPendingFiles(EMPTY_PENDING);
-    if (id) localStorage.removeItem(`${DRAFT_KEY_PREFIX}${id}`);
+    if (id) {
+      localStorage.removeItem(`${DRAFT_KEY_PREFIX}${id}`);
+      localStorage.removeItem(`${PENDING_FILES_KEY_PREFIX}${id}`);
+    }
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
   };
 

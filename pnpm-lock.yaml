@@ -36,12 +36,12 @@ importers:
 
   client:
     dependencies:
-      '@orchestral/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@tanstack/react-virtual':
         specifier: ^3.13.18
         version: 3.13.18(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@unleashd/shared':
+        specifier: workspace:*
+        version: link:../shared
       esbuild:
         specifier: ^0.27.3
         version: 0.27.3
@@ -112,7 +112,7 @@ importers:
       '@nbardy/agent-cli':
         specifier: ^0.1.0
         version: 0.1.0
-      '@orchestral/shared':
+      '@unleashd/shared':
         specifier: workspace:*
         version: link:../shared
       express:

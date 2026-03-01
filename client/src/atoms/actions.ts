@@ -5,9 +5,9 @@ import type {
   Provider,
   QueuedMessage,
   ServerMessage,
-} from '@orchestral/shared';
+} from '@unleashd/shared';
 import { enableMapSet, produce } from 'immer';
-import { DRAFT_KEY_PREFIX, PENDING_CONVERSATIONS_KEY, useUIStore } from '../stores/uiStore';
+import { DRAFT_KEY_PREFIX, PENDING_CONVERSATIONS_KEY, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import {
   activeConversationIdAtom,
   conversationsAtom,
@@ -22,7 +22,7 @@ import { jotaiStore } from './store';
 enableMapSet();
 
 // Re-export for downstream consumers that previously imported from conversationStore
-export type { QueuedMessage } from '@orchestral/shared';
+export type { QueuedMessage } from '@unleashd/shared';
 
 // =============================================================================
 // Chunk Buffer
@@ -366,6 +366,11 @@ export function handleMessage(data: ServerMessage): void {
       jotaiStore.set(defaultCwdAtom, data.defaultCwd);
       jotaiStore.set(conversationsAtom, serverState);
 
+      // Apply server UI state preferences
+      if (data.uiState) {
+        useUIStore.getState().hydrateFromServer(data.uiState);
+      }
+
       // Drop stale streaming state from before this reconnect
       chunkBuffer.clear();
       jotaiStore.set(streamingContentAtom, new Map());
@@ -413,6 +418,7 @@ export function handleMessage(data: ServerMessage): void {
       }
       removePendingConversation(data.conversationId);
       localStorage.removeItem(`${DRAFT_KEY_PREFIX}${data.conversationId}`);
+      localStorage.removeItem(`${PENDING_FILES_KEY_PREFIX}${data.conversationId}`);
       useUIStore.setState((s) => {
         const { [data.conversationId]: _, ...rest } = s.lastSeenMessageIndex;
         return { lastSeenMessageIndex: rest };

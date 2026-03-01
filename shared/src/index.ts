@@ -534,6 +534,26 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
 // =============================================================================
+// UI State (server-synced preferences)
+// =============================================================================
+
+export const UIStateSchema = z.object({
+  activeConversationId: z.string().nullable().default(null),
+  lastWorkingDirectory: z.string().nullable().default(null),
+  galleryExpandedProjects: z.array(z.string()).default([]),
+  galleryCollapsedProjects: z.array(z.string()).default([]),
+  showTempSessions: z.boolean().default(false),
+  showDoneConversations: z.boolean().default(false),
+  doneConversations: z.array(z.string()).default([]),
+  promotedWorkers: z.array(z.string()).default([]),
+  showWorkerConversations: z.boolean().default(false),
+  lastSeenMessageIndex: z.record(z.string(), z.number()).default({}),
+  sidebarViewMode: z.enum(['grouped', 'list']).default('list'),
+});
+
+export type UIState = z.infer<typeof UIStateSchema>;
+
+// =============================================================================
 // Server → Client Messages
 // =============================================================================
 
@@ -543,6 +563,8 @@ export const InitMessageSchema = z.object({
   defaultCwd: z.string(),
   /** True if server is still loading conversations from disk. Client should wait for conversations_updated. */
   loading: z.boolean().optional(),
+  /** UI preferences synced from server (~/.agent-viewer/ui-state.json) */
+  uiState: UIStateSchema.optional(),
 });
 
 export type InitMessage = z.infer<typeof InitMessageSchema>;

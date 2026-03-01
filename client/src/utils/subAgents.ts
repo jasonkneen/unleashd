@@ -1,5 +1,5 @@
-import type { Conversation, SubAgent } from '@orchestral/shared';
-import { getProviderMetadata } from '@orchestral/shared';
+import type { Conversation, SubAgent } from '@unleashd/shared';
+import { getProviderMetadata } from '@unleashd/shared';
 import { getLastMessageTime } from './time';
 
 const OOMPA_TAG_RE = /^\[oompa(?::[^\]]+)?\]\s*/;

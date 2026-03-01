@@ -15,7 +15,7 @@
  * score higher, so exact substring matches rank above scattered matches.
  */
 
-import type { Conversation } from '@orchestral/shared';
+import type { Conversation } from '@unleashd/shared';
 import { useMemo, useState } from 'react';
 import { fuzzyMatch, highlightMatches } from '../utils/fuzzyMatch';
 import './FolderFilter.css';

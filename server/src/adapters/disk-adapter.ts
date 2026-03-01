@@ -11,7 +11,7 @@
  *   sessionToConversation(ParsedSession) → Conversation | null  (null = hidden)
  */
 
-import type { Conversation, Message, Provider, SubAgent } from '@orchestral/shared';
+import type { Conversation, Message, Provider, SubAgent } from '@unleashd/shared';
 import { extractWorkerMetadata } from './jsonl';
 
 // =============================================================================

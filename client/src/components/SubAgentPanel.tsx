@@ -1,4 +1,4 @@
-import type { SubAgent } from '@orchestral/shared';
+import type { SubAgent } from '@unleashd/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './SubAgentPanel.css';

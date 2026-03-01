@@ -1,5 +1,5 @@
 {
-  "name": "@orchestral/server",
+  "name": "@unleashd/server",
   "version": "1.0.0",
   "main": "dist/server.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@orchestral/shared": "workspace:*",
+    "@unleashd/shared": "workspace:*",
     "@nbardy/agent-cli": "^0.1.0",
     "express": "^4.18.2",
     "multer": "^2.0.2",

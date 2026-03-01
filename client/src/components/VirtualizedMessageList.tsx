@@ -1,4 +1,4 @@
-import type { Message } from '@orchestral/shared';
+import type { Message } from '@unleashd/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Break, Root, Text } from 'mdast';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
