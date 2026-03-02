@@ -809,6 +809,7 @@
 .run-summary-stats {
   display: flex;
   gap: 24px;
+  justify-content: space-between;
   margin-bottom: 16px;
   padding: 12px;
   background: var(--bg-elevated);
@@ -831,6 +832,73 @@
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.run-stat-tasks {
+  align-items: flex-start;
+}
+.run-stat-tasks-breakdown {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+.task-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.task-count {
+  font-size: 18px;
+  font-weight: 700;
+}
+.task-sublabel {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.task-pending { color: var(--warning); }
+.task-new { color: var(--text-secondary); }
+.task-completed { color: var(--success); }
+
+.run-stat-cycles {
+  align-items: flex-end;
+}
+.run-stat-cycles-progress {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 2px;
+}
+.cycles-done {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cycles-sep {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+.cycles-total {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.run-stat-cycles-breakdown {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.cycles-merges {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4a9e6a;
+}
+.cycles-rejected {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0504a;
 }
 
 /* Per-worker table */

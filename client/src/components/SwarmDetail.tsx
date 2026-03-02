@@ -134,7 +134,7 @@ function buildSwarmDebugPrefix(
       '',
       '## Run Summary',
       `- Completed: ${summary['total-completed']}`,
-      `- Total Iterations: ${summary['total-iterations']}`,
+      `- Total Cycles: ${summary['total-iterations']}`,
       `- Merges: ${totalMerges}`,
       `- Rejections: ${totalRej}`,
       `- Errors: ${totalErr}`
@@ -377,7 +377,7 @@ function OompaConfigPanel({ projectRoot }: { projectRoot: string }) {
                     <div className="config-worker-row">
                       <span className="config-model-badge">{w.model}</span>
                       <span className="config-count">
-                        x{w.count ?? 1} &middot; {w.iterations ?? '?'} iterations
+                        x{w.count ?? 1} &middot; {w.iterations ?? '?'} cycles
                         {w.can_plan === false && ' (executor)'}
                       </span>
                     </div>
@@ -492,31 +492,46 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
             )}
           </div>
           <div className="run-summary-stats">
-            <div className="run-stat">
-              <span className="run-stat-value">{summary['total-completed']}</span>
-              <span className="run-stat-label">Completed</span>
-            </div>
-            <div className="run-stat">
-              <span className="run-stat-value">{summary['total-iterations']}</span>
-              <span className="run-stat-label">Total Iters</span>
-            </div>
-            <div className="run-stat">
-              <span className="run-stat-value">
-                {summary.workers.reduce((s, w) => s + w.merges, 0)}
-              </span>
-              <span className="run-stat-label">Merges</span>
-            </div>
-            <div className="run-stat">
-              <span className="run-stat-value">
-                {summary.workers.reduce((s, w) => s + w.rejections, 0)}
-              </span>
-              <span className="run-stat-label">Rejections</span>
-            </div>
-            <div className="run-stat">
-              <span className="run-stat-value">
-                {summary.workers.reduce((s, w) => s + w.errors, 0)}
-              </span>
-              <span className="run-stat-label">Errors</span>
+            {(() => {
+              const runningCount = summary.workers.filter((w) => w.status === 'running').length;
+              const completed = summary['total-completed'];
+              const total = summary['total-iterations'];
+              const newTasks = Math.max(total - completed - runningCount, 0);
+              return (
+                <div className="run-stat run-stat-tasks">
+                  <span className="run-stat-label">Tasks</span>
+                  <div className="run-stat-tasks-breakdown">
+                    <div className="task-row">
+                      <span className="task-count task-pending">{runningCount}</span>
+                      <span className="task-sublabel">Pending</span>
+                    </div>
+                    <div className="task-row">
+                      <span className="task-count task-new">{newTasks}</span>
+                      <span className="task-sublabel">New</span>
+                    </div>
+                    <div className="task-row">
+                      <span className="task-count task-completed">{completed}</span>
+                      <span className="task-sublabel">Completed</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="run-stat run-stat-cycles">
+              <span className="run-stat-label">Cycles</span>
+              <div className="run-stat-cycles-progress">
+                <span className="cycles-done">{summary['total-completed']}</span>
+                <span className="cycles-sep">/</span>
+                <span className="cycles-total">{summary['total-iterations']}</span>
+              </div>
+              <div className="run-stat-cycles-breakdown">
+                <span className="cycles-merges">
+                  +{summary.workers.reduce((s, w) => s + w.merges, 0)} merged
+                </span>
+                <span className="cycles-rejected">
+                  -{summary.workers.reduce((s, w) => s + w.rejections, 0)} rejected
+                </span>
+              </div>
             </div>
           </div>
 
@@ -574,7 +589,7 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
                   >
                     <span className="run-review-worker">{r['worker-id']}</span>
                     <span className="run-review-iter">
-                      i{r.iteration} r{r.round}
+                      c{r.iteration} r{r.round}
                     </span>
                     <span className={`verdict-badge verdict-${r.verdict}`}>
                       {r.verdict.toUpperCase().replace('-', ' ')}
