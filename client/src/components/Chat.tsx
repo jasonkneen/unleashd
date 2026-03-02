@@ -407,14 +407,23 @@ export function Chat() {
   }, [conversation, childSessionConversations]);
 
   const handleCopyThread = useCallback(async () => {
-    const text = messageGroups
+    const modelDisplay = models.find((m) => m.id === conversation?.model)?.displayName ?? conversation?.modelName ?? conversation?.model ?? 'default';
+    const folderDisplay = conversation?.workingDirectory.replace(/^\/Users\/[^/]+/, '~') ?? '';
+    const header = [
+      `Conversation: ${conversation?.id ?? ''}`,
+      `Provider:     ${conversation?.provider ?? 'claude'}`,
+      `Model:        ${modelDisplay}`,
+      `Folder:       ${folderDisplay}`,
+      '---',
+    ].join('\n');
+    const messages = messageGroups
       .flatMap((g) => g.messages)
       .map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
       .join('\n\n');
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(`${header}\n\n${messages}`);
     setThreadCopied(true);
     setTimeout(() => setThreadCopied(false), 2000);
-  }, [messageGroups]);
+  }, [messageGroups, conversation, models]);
 
   if (!conversation) {
     return (

@@ -725,11 +725,12 @@ class Conversation extends EventEmitter {
         this.process = null;
         this._pendingTaskTools.clear();
         this.broadcastStatus();
-        if (this.queue.length > 0 && this.queue[0].status === 'sending') {
-          this.queue.shift();
+        if (this.queue.length > 0) {
+          const removed = this.queue.length;
+          this.queue = [];
+          console.warn(`[${this.id}] Cleared ${removed} pending message(s) due to process error to prevent retry loops.`);
           this.broadcastQueue();
         }
-        this.processQueue();
       });
   }
 
@@ -964,9 +965,11 @@ class Conversation extends EventEmitter {
 
     // Prepend swarm debug prefix on first message only.
     // UI sees clean content; CLI process gets the full context.
+    // Sentinel markers let disk-adapter.ts recover swarmDebugPrefix after server restart
+    // (the JSONL stores CLI content, not the clean UI message).
     let cliContent = content;
     if (this.swarmDebugPrefix !== null && this.messages.length === 0) {
-      cliContent = this.swarmDebugPrefix + '\n\n' + content;
+      cliContent = `<!-- unleashd:swarm-prefix -->\n${this.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${content}`;
     }
 
     // Add user message to history (clean content for UI)
@@ -2972,6 +2975,84 @@ app.get('/api/swarm-runs', async (req: Request, res: Response) => {
   });
 
   res.json({ runs });
+});
+
+// Count .edn files added in merge commits during a swarm run's time window.
+// Uses git log --merges with the run's started-at / finished-at to scope commits,
+// then --diff-filter=A --name-only to find added .edn files across those merges.
+app.get('/api/swarm-new-files', async (req: Request, res: Response) => {
+  const dir = req.query.dir as string;
+  const swarmId = req.query.swarmId as string;
+  if (!dir || !dir.startsWith('/') || !swarmId) {
+    res.status(400).json({ error: 'Absolute directory path and swarmId required' });
+    return;
+  }
+
+  const resolved = path.resolve(dir);
+  if (!isUnderKnownProject(resolved)) {
+    res.status(403).json({ error: 'Directory not associated with any conversation' });
+    return;
+  }
+
+  const runDir = path.join(resolved, 'runs', swarmId);
+
+  // Read start time from started.json or run.json (backward compat)
+  let startedAt: string | null = null;
+  for (const filename of ['started.json', 'run.json']) {
+    try {
+      const data = JSON.parse(
+        await fs.promises.readFile(path.join(runDir, filename), 'utf-8')
+      ) as Record<string, unknown>;
+      if (typeof data['started-at'] === 'string') {
+        startedAt = data['started-at'];
+        break;
+      }
+    } catch {
+      // try next file
+    }
+  }
+
+  if (!startedAt) {
+    res.json({ count: 0, files: [] });
+    return;
+  }
+
+  // Read finish time from summary.json or stopped.json (open-ended if still running)
+  let finishedAt: string | null = null;
+  for (const filename of ['summary.json', 'stopped.json']) {
+    try {
+      const data = JSON.parse(
+        await fs.promises.readFile(path.join(runDir, filename), 'utf-8')
+      ) as Record<string, unknown>;
+      const t = data['finished-at'] ?? data['stopped-at'];
+      if (typeof t === 'string') {
+        finishedAt = t;
+        break;
+      }
+    } catch {
+      // try next file
+    }
+  }
+
+  try {
+    // Sanitize ISO 8601 timestamps — only allow digits, T, :, Z, ., +, -
+    const safeStart = startedAt.replace(/[^0-9T:Z.+\-]/g, '');
+    const beforeFlag = finishedAt
+      ? `--before="${finishedAt.replace(/[^0-9T:Z.+\-]/g, '')}"`
+      : '';
+
+    const raw = execSync(
+      `git log --merges --after="${safeStart}" ${beforeFlag} --diff-filter=A --name-only --pretty=format: -- "*.edn"`,
+      { cwd: resolved, timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
+    )
+      .toString()
+      .trim();
+
+    const files = raw.split('\n').filter((l) => l.trim().length > 0);
+    res.json({ count: files.length, files });
+  } catch {
+    res.json({ count: 0, files: [] });
+  }
 });
 
 app.get('/api/swarm-runtime', (req: Request, res: Response) => {

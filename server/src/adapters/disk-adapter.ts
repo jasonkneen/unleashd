@@ -12,7 +12,7 @@
  */
 
 import type { Conversation, Message, Provider, SubAgent } from '@unleashd/shared';
-import { extractWorkerMetadata } from './jsonl';
+import { extractSwarmDebugPrefix, extractWorkerMetadata } from './jsonl';
 
 // =============================================================================
 // Normalized session output — all adapters produce this before conversion
@@ -84,8 +84,10 @@ export type LoadProgressCallback = (
  * geminiSessionToConversation functions that previously existed in jsonl.ts.
  */
 export function sessionToConversation(session: ParsedSession): Conversation | null {
-  // extractWorkerMetadata mutates messages (strips tags from first user message)
-  // so we pass the messages array directly.
+  // Both extractors mutate messages (strip markers from first user message).
+  // extractSwarmDebugPrefix runs first: its sentinel wraps the prefix block at the
+  // very top of the CLI message, before any oompa/hide tags.
+  const swarmDebugPrefix = extractSwarmDebugPrefix(session.messages);
   const worker = extractWorkerMetadata(session.messages);
   if (worker.isHidden) return null;
 
@@ -106,5 +108,6 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
     workerRole: worker.workerRole ?? null,
     parentConversationId: session.parentSessionId ?? null,
     modelName: session.model !== 'unknown' ? session.model : null,
+    swarmDebugPrefix: swarmDebugPrefix ?? null,
   };
 }

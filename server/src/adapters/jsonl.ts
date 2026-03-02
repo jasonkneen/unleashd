@@ -1153,6 +1153,25 @@ export function extractWorkerMetadata(messages: Message[]): WorkerMetadata {
   return metadata;
 }
 
+/**
+ * Sentinel regex for swarm debug prefix embedded in the first CLI message.
+ * server.ts wraps swarmDebugPrefix with these markers so it survives disk persistence.
+ * This extractor strips the sentinel block and returns the prefix text, allowing
+ * sessionToConversation() to restore swarmDebugPrefix after a server restart.
+ */
+const SWARM_DEBUG_PREFIX_RE =
+  /^<!-- unleashd:swarm-prefix -->\n([\s\S]*?)\n<!-- \/unleashd:swarm-prefix -->\n\n/;
+
+export function extractSwarmDebugPrefix(messages: Message[]): string | null {
+  const firstUserMsg = messages.find((m) => m.role === 'user');
+  if (!firstUserMsg) return null;
+  const match = firstUserMsg.content.match(SWARM_DEBUG_PREFIX_RE);
+  if (!match) return null;
+  // Strip the sentinel block; leave only the user's actual message content.
+  firstUserMsg.content = firstUserMsg.content.slice(match[0].length);
+  return match[1];
+}
+
 // jsonlSessionToConversation, codexSessionToConversation, openCodeSessionToConversation,
 // and geminiSessionToConversation have been removed.
 // They are replaced by the single sessionToConversation() function in disk-adapter.ts,

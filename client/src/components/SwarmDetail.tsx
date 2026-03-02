@@ -418,6 +418,7 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [expandedReview, setExpandedReview] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [newFilesCount, setNewFilesCount] = useState<number | null>(null);
 
   useEffect(() => {
     fetch(`/api/swarm-runs?dir=${encodeURIComponent(projectRoot)}`)
@@ -441,6 +442,18 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
       .then((res) => res.json())
       .then((data: { reviews: SwarmReviewLog[] }) => setReviews(data.reviews))
       .catch(() => setReviews([]));
+  }, [projectRoot, selectedRunId]);
+
+  // Fetch count of .edn files added in merge commits during this run's time window
+  useEffect(() => {
+    if (!selectedRunId) return;
+    setNewFilesCount(null);
+    fetch(
+      `/api/swarm-new-files?dir=${encodeURIComponent(projectRoot)}&swarmId=${encodeURIComponent(selectedRunId)}`
+    )
+      .then((res) => res.json())
+      .then((data: { count: number }) => setNewFilesCount(data.count))
+      .catch(() => setNewFilesCount(0));
   }, [projectRoot, selectedRunId]);
 
   if (loading) return <div className="empty-state">Loading run history...</div>;
@@ -495,8 +508,6 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
             {(() => {
               const runningCount = summary.workers.filter((w) => w.status === 'running').length;
               const completed = summary['total-completed'];
-              const total = summary['total-iterations'];
-              const newTasks = Math.max(total - completed - runningCount, 0);
               return (
                 <div className="run-stat run-stat-tasks">
                   <span className="run-stat-label">Tasks</span>
@@ -506,7 +517,9 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
                       <span className="task-sublabel">Pending</span>
                     </div>
                     <div className="task-row">
-                      <span className="task-count task-new">{newTasks}</span>
+                      <span className="task-count task-new">
+                        {newFilesCount !== null ? newFilesCount : '…'}
+                      </span>
                       <span className="task-sublabel">New</span>
                     </div>
                     <div className="task-row">
