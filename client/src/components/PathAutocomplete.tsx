@@ -38,10 +38,13 @@ interface Props {
 /** Check if a path looks like a valid new directory (absolute or ~/..., with a name after the last /). */
 function isCreatablePath(path: string): boolean {
   const trimmed = path.trim();
+  if (!trimmed) return false;
   if (!trimmed.startsWith('/') && !trimmed.startsWith('~')) return false;
-  // Must have a non-empty name after the last separator
-  const parts = trimmed.split('/').filter(Boolean);
-  return parts.length >= 1;
+  const normalized = trimmed.replace(/\/+$/, '');
+  if (!normalized || normalized === '/' || normalized === '~') return false;
+  const leaf = normalized.split('/').pop() ?? '';
+  if (!leaf || leaf === '.' || leaf === '..' || leaf === '~') return false;
+  return true;
 }
 
 /**
@@ -75,6 +78,8 @@ export function PathAutocomplete({
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const validationDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fsRequestIdRef = useRef(0);
+  const validationRequestIdRef = useRef(0);
 
   // Auto-focus and select all text on mount when autoFocus is true
   useEffect(() => {
@@ -111,25 +116,54 @@ export function PathAutocomplete({
   // Determine if the input looks like a filesystem path (starts with / or ~).
   // Non-path queries like "webviewe" skip the filesystem fetch entirely.
   const looksLikePath = value.startsWith('/') || value.startsWith('~');
+  const recentDirectorySet = useMemo(() => new Set(recentDirectories), [recentDirectories]);
 
-  // Combined suggestion count for keyboard navigation
-  const totalCount = fuzzyMatches.length + fsSuggestions.length;
+  // Pull recent directories out of filesystem suggestions (if any) and place them first.
+  const orderedFsSuggestions = useMemo(() => {
+    const recent: PathEntry[] = [];
+    const other: PathEntry[] = [];
+    const seen = new Set<string>(fuzzyMatches.map((match) => match.path));
+
+    for (const suggestion of fsSuggestions) {
+      if (seen.has(suggestion.path)) {
+        continue;
+      }
+      if (recentDirectorySet.has(suggestion.path)) {
+        recent.push(suggestion);
+      } else {
+        other.push(suggestion);
+      }
+    }
+
+    return [...recent, ...other];
+  }, [fuzzyMatches, fsSuggestions, recentDirectorySet]);
+
+  const shouldShowCreateOption = isCreatablePath(value) && !isValidPath && value.trim().length > 0;
+  const shouldShowNoMatchMessage = Boolean(value.trim() && fuzzyMatches.length === 0 && orderedFsSuggestions.length === 0 && !isLoading);
+  const createSuggestionIndex = fuzzyMatches.length + orderedFsSuggestions.length;
+  const totalCount = fuzzyMatches.length + orderedFsSuggestions.length + (shouldShowCreateOption ? 1 : 0);
 
   // Fetch filesystem suggestions from the server
   const fetchFsSuggestions = useCallback(async (path: string) => {
+    const requestId = ++fsRequestIdRef.current;
     setIsLoading(true);
+    const trimmed = path.trim();
     try {
-      const response = await fetch(`/api/paths?path=${encodeURIComponent(path)}`);
+      const response = await fetch(`/api/paths?path=${encodeURIComponent(trimmed)}`);
+      if (requestId !== fsRequestIdRef.current) return;
       if (response.ok) {
         const data = (await response.json()) as PathEntry[];
+        if (requestId !== fsRequestIdRef.current) return;
         setFsSuggestions(data);
         setSelectedIndex(0);
       } else {
         setFsSuggestions([]);
       }
     } catch {
+      if (requestId !== fsRequestIdRef.current) return;
       setFsSuggestions([]);
     } finally {
+      if (requestId !== fsRequestIdRef.current) return;
       setIsLoading(false);
     }
   }, []);
@@ -144,19 +178,21 @@ export function PathAutocomplete({
         return;
       }
 
-      // Must look like a valid path
-      if (!trimmed.startsWith('/') && !trimmed.startsWith('~')) {
-        setIsValidPath(false);
-        onValidationChange?.(false);
-        return;
-      }
-
+      const requestId = ++validationRequestIdRef.current;
       try {
         const response = await fetch(`/api/validate-path?path=${encodeURIComponent(trimmed)}`);
+        if (requestId !== validationRequestIdRef.current) return;
         const data = (await response.json()) as { valid: boolean; error?: string };
+        if (requestId !== validationRequestIdRef.current) return;
+        if (!response.ok) {
+          setIsValidPath(false);
+          onValidationChange?.(false);
+          return;
+        }
         setIsValidPath(data.valid);
         onValidationChange?.(data.valid);
       } catch {
+        if (requestId !== validationRequestIdRef.current) return;
         setIsValidPath(false);
         onValidationChange?.(false);
       }
@@ -193,6 +229,8 @@ export function PathAutocomplete({
 
     if (!isPath) {
       // Non-path query: clear filesystem suggestions, rely solely on fuzzy matches
+      fsRequestIdRef.current += 1;
+      setIsLoading(false);
       setFsSuggestions([]);
       return;
     }
@@ -270,9 +308,15 @@ export function PathAutocomplete({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: trimmed }),
       });
-      // Read body once — response.json() consumes the stream; calling it twice throws.
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? 'Failed to create directory');
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        path?: string;
+      };
+      if (!response.ok || !data.path) {
+        throw new Error(data.error ?? 'Failed to create directory');
+      }
+      setIsValidPath(true);
+      onValidationChange?.(true);
       handleSelectPath(data.path);
     } catch (err) {
       console.error('Failed to create folder:', err);
@@ -280,10 +324,20 @@ export function PathAutocomplete({
   };
 
   /** Resolve the selected index to a path from the combined list (fuzzy first, then fs). */
-  const getSelectedPath = (index: number): string | null => {
-    if (index < fuzzyMatches.length) return fuzzyMatches[index].path;
+  const getSelectedAction = (index: number): { type: 'path'; path: string } | { type: 'create' } | null => {
+    if (index < fuzzyMatches.length) {
+      return { type: 'path', path: fuzzyMatches[index].path };
+    }
+
     const fsIndex = index - fuzzyMatches.length;
-    if (fsIndex < fsSuggestions.length) return fsSuggestions[fsIndex].path;
+    if (fsIndex < orderedFsSuggestions.length) {
+      return { type: 'path', path: orderedFsSuggestions[fsIndex].path };
+    }
+
+    if (shouldShowCreateOption && index === createSuggestionIndex) {
+      return { type: 'create' };
+    }
+
     return null;
   };
 
@@ -296,12 +350,6 @@ export function PathAutocomplete({
     }
 
     if (!showSuggestions || totalCount === 0) {
-      // When no suggestions but "Create folder" is visible, Enter creates it
-      if (totalCount === 0 && e.key === 'Enter' && showSuggestions && isCreatablePath(value)) {
-        e.preventDefault();
-        handleCreateFolder();
-        return;
-      }
       if (e.key === 'Escape') {
         setShowSuggestions(false);
       }
@@ -319,8 +367,13 @@ export function PathAutocomplete({
         break;
       case 'Enter': {
         e.preventDefault();
-        const path = getSelectedPath(selectedIndex);
-        if (path) handleSelectPath(path);
+        const action = getSelectedAction(selectedIndex);
+        if (!action) return;
+        if (action.type === 'path') {
+          handleSelectPath(action.path);
+        } else {
+          handleCreateFolder();
+        }
         break;
       }
       case 'Escape':
@@ -328,15 +381,32 @@ export function PathAutocomplete({
         setShowSuggestions(false);
         break;
       case 'Tab': {
-        const path = getSelectedPath(selectedIndex);
-        if (path) {
+        const action = getSelectedAction(selectedIndex);
+        if (!action) return;
+        if (action.type === 'path') {
           e.preventDefault();
-          handleSelectPath(path);
+          handleSelectPath(action.path);
+        } else {
+          e.preventDefault();
+          handleCreateFolder();
         }
         break;
       }
     }
   };
+
+  useEffect(() => {
+    if (!showSuggestions || totalCount === 0) {
+      if (selectedIndex !== 0) {
+        setSelectedIndex(0);
+      }
+      return;
+    }
+
+    if (selectedIndex > totalCount - 1) {
+      setSelectedIndex(totalCount - 1);
+    }
+  }, [showSuggestions, totalCount, selectedIndex]);
 
   // Scroll selected item into view
   useEffect(() => {
@@ -363,11 +433,7 @@ export function PathAutocomplete({
         />
         {isLoading && <span className="path-loading-indicator" />}
       </div>
-      {!isValidPath && value.trim() && (
-        <div className="path-validation-error">Directory not found</div>
-      )}
-
-      {showSuggestions && totalCount > 0 && (
+      {showSuggestions && (totalCount > 0 || shouldShowNoMatchMessage) && (
         <div className="path-suggestions">
           {/* Recent directory fuzzy matches */}
           {fuzzyMatches.map((match, index) => {
@@ -406,12 +472,12 @@ export function PathAutocomplete({
           })}
 
           {/* Divider between sections when both have results */}
-          {fuzzyMatches.length > 0 && fsSuggestions.length > 0 && (
+          {fuzzyMatches.length > 0 && orderedFsSuggestions.length > 0 && (
             <div className="path-section-divider" />
           )}
 
           {/* Filesystem suggestions */}
-          {fsSuggestions.map((suggestion, fsIndex) => {
+          {orderedFsSuggestions.map((suggestion, fsIndex) => {
             const combinedIndex = fuzzyMatches.length + fsIndex;
             return (
               <div
@@ -439,14 +505,14 @@ export function PathAutocomplete({
               </div>
             );
           })}
-        </div>
-      )}
 
-      {showSuggestions && totalCount === 0 && !isLoading && value && (
-        <div className="path-suggestions">
-          {isCreatablePath(value) ? (
+          {shouldShowNoMatchMessage && <div className="path-no-results">No matching folder</div>}
+
+          {shouldShowCreateOption ? (
             <div
-              className="path-suggestion-item path-create-item selected"
+              className={`path-suggestion-item path-create-item ${
+                createSuggestionIndex === selectedIndex ? 'selected' : ''
+              }`}
               onClick={handleCreateFolder}
             >
               <span className="path-create-icon">
@@ -468,9 +534,8 @@ export function PathAutocomplete({
               <span className="path-suggestion-name">Create folder</span>
               <span className="path-suggestion-path">{value.trim()}</span>
             </div>
-          ) : (
-            <div className="path-no-results">No matching directories</div>
-          )}
+          ) : null}
+
         </div>
       )}
     </div>

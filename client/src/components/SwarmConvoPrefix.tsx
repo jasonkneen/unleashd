@@ -184,7 +184,7 @@ export function SwarmConvoPrefix({ prefix, swarmId }: SwarmConvoPrefixProps) {
               </div>
               <div className="swarm-prefix-stat">
                 <span className="swarm-prefix-stat-value">{stats.iterations}</span>
-                <span className="swarm-prefix-stat-label">Total Iters</span>
+                <span className="swarm-prefix-stat-label">Total Cycles</span>
               </div>
               <div className="swarm-prefix-stat">
                 <span className="swarm-prefix-stat-value stat-success">{stats.merges ?? '0'}</span>

@@ -11,6 +11,36 @@
   box-shadow: 0 4px 12px color-mix(in srgb, var(--bg-darkest) 10%, transparent);
   position: relative;
   overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.inline-swarm-run:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--bg-darkest) 15%, transparent);
+  border-color: var(--border-hover, color-mix(in srgb, var(--border-default) 80%, white));
+}
+
+.inline-swarm-run-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.inline-swarm-nav-arrow {
+  font-size: 16px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  transition: opacity 0.2s, transform 0.2s;
+  padding-left: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.inline-swarm-run:hover .inline-swarm-nav-arrow {
+  opacity: 1;
+  transform: translateX(4px);
 }
 
 .inline-swarm-run.running::before {
@@ -20,8 +50,8 @@
   left: 0;
   width: 4px;
   height: 100%;
-  background: var(--warning);
-  box-shadow: 0 0 8px var(--warning);
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
 }
 
 .inline-swarm-run.completed::before {
@@ -31,7 +61,7 @@
   left: 0;
   width: 4px;
   height: 100%;
-  background: var(--success);
+  background: var(--text-muted);
 }
 
 .inline-swarm-run-header {
@@ -43,7 +73,7 @@
 
 .inline-swarm-label {
   font-weight: 700;
-  color: var(--warning);
+  color: var(--success);
   letter-spacing: 0.05em;
 }
 
@@ -56,8 +86,14 @@
   font-size: 12px;
 }
 
-.inline-swarm-status {
+.inline-swarm-status-container {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-swarm-status {
   font-size: 11px;
   font-weight: 700;
   padding: 2px 6px;
@@ -66,8 +102,8 @@
 }
 
 .inline-swarm-status.status-running {
-  background: color-mix(in srgb, var(--warning) 15%, transparent);
-  color: var(--warning);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
 }
 
 .inline-swarm-status.status-stopped {

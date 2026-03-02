@@ -252,7 +252,7 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
   }, []);
 
   if (timelines.length === 0) {
-    return <div className="timeline-empty">No iteration data available</div>;
+    return <div className="timeline-empty">No cycle data available</div>;
   }
 
   return (
@@ -357,7 +357,7 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
         >
           <div className="tooltip-header">
             <span className="tooltip-worker">{shortWorkerId(tooltip.workerId)}</span>
-            <span className="tooltip-iteration">Iteration {tooltip.span.iteration}</span>
+            <span className="tooltip-iteration">Cycle {tooltip.span.iteration}</span>
           </div>
           <div className="tooltip-body">
             <div className="tooltip-row">
@@ -464,7 +464,7 @@ function StatsPanel({ runData }: StatsPanelProps) {
           <span className="stat-value">
             {stats.completedIterations}/{stats.totalIterations}
           </span>
-          <span className="stat-label">Iterations Done</span>
+          <span className="stat-label">Cycles Done</span>
           <div className="stat-bar">
             <div
               className="stat-bar-fill"
@@ -730,7 +730,7 @@ export function SwarmAnalytics() {
             {/* Timeline chart */}
             {selectedRun ? (
               <div className="timeline-section">
-                <h3>Worker Iteration Timeline</h3>
+                <h3>Worker Cycle Timeline</h3>
                 <TimelineChart runData={selectedRun} />
               </div>
             ) : runsData.size === 0 ? (

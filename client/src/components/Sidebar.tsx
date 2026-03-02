@@ -394,37 +394,35 @@ export function Sidebar() {
         </div>
 
         {/* ── Swarms Section ── */}
-        {hasWorkers && (
-          <div className="nav-section">
-            <div
-              className="nav-section-header nav-section-header--clickable nav-section-header--swarms"
-              style={{ justifyContent: 'space-between' }}
-              role="button"
-              tabIndex={0}
-              onClick={() => navigate('/workers')}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  navigate('/workers');
-                }
+        <div className="nav-section">
+          <div
+            className="nav-section-header nav-section-header--clickable nav-section-header--swarms"
+            style={{ justifyContent: 'space-between' }}
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate('/workers')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                navigate('/workers');
+              }
+            }}
+            title={hasWorkers ? 'Open swarm dashboard' : 'Open swarm dashboard (no workers yet)'}
+          >
+            <span className="nav-section-label">Swarms</span>
+            <button
+              type="button"
+              className="nav-create-btn nav-create-btn--swarm"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleOpenNewSwarmFlow();
               }}
-              title="Open swarm dashboard"
+              title="Create new swarm"
             >
-              <span className="nav-section-label">Swarms</span>
-              <button
-                type="button"
-                className="nav-create-btn nav-create-btn--swarm"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleOpenNewSwarmFlow();
-                }}
-                title="Create new swarm"
-              >
-                +
-              </button>
-            </div>
+              +
+            </button>
           </div>
-        )}
+        </div>
 
         {showPicker && (
           <div className="new-conv-overlay" onClick={handleCancel}>
