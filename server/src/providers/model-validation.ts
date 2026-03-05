@@ -1,15 +1,7 @@
-import type { Provider as ProviderName } from '@unleashd/shared';
+import { CODEX_MODEL_IDS, type Provider as ProviderName } from '@unleashd/shared';
 
 const CLAUDE_MODEL_IDS = new Set(['opus', 'sonnet', 'haiku']);
-const CODEX_MODEL_IDS = new Set([
-  'gpt-5.3-codex-medium',
-  'gpt-5.3-codex-high',
-  'gpt-5.3-codex-xhigh',
-  'gpt-5.3-codex-spark',
-  'gpt-5.3-codex-spark-medium',
-  'gpt-5.3-codex-spark-high',
-  'gpt-5.3-codex-spark-xhigh',
-]);
+const CODEX_MODEL_ID_SET = new Set<string>(CODEX_MODEL_IDS);
 const GEMINI_MODEL_IDS = new Set([
   'gemini-3.1-pro-preview',
   'gemini-2.5-pro',
@@ -31,7 +23,7 @@ export function isModelIdValidForProvider(provider: ProviderName, modelId?: stri
     case 'claude':
       return CLAUDE_MODEL_IDS.has(modelId);
     case 'codex':
-      return CODEX_MODEL_IDS.has(modelId);
+      return CODEX_MODEL_ID_SET.has(modelId);
     case 'gemini':
       return GEMINI_MODEL_IDS.has(modelId);
     case 'opencode':
@@ -46,7 +38,7 @@ export function modelValidationHint(provider: ProviderName): string {
     case 'claude':
       return "one of: 'opus', 'sonnet', 'haiku'";
     case 'codex':
-      return "one of: 'gpt-5.3-codex-{medium,high,xhigh}', 'gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-{medium,high,xhigh}'";
+      return `one of: ${CODEX_MODEL_IDS.map((modelId) => `'${modelId}'`).join(', ')}`;
     case 'gemini':
       return "one of: 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'";
     case 'opencode':

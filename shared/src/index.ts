@@ -153,8 +153,9 @@ export const getProviderMetadata = (provider: Provider): ProviderMetadata => ({
 // The server's Provider.modelToParams() decomposes them into CLI flags.
 //
 // Claude: aliases passed to `claude --model <alias>`
-// Codex: composite strings encoding model + effort level
-//   e.g. "gpt-5.3-codex-high" → `-m gpt-5.3-codex -c reasoning.effort=high`
+// Codex: standalone model strings like "gpt-4.5" plus composite strings that
+//   encode model + effort level, e.g. "gpt-5.3-codex-high"
+//   → `-m gpt-5.3-codex -c model_reasoning_effort=high`
 // OpenCode: path-style identifiers passed to `opencode run -m <id>`
 //   e.g. "opencode/big-pickle" or "opencode/gpt-5-nano"
 // We require at least one "/" segment to avoid collisions with Claude/Codex IDs.
@@ -171,16 +172,108 @@ export const GeminiModelSchema = z.enum([
 ]);
 export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 
-export const CodexModelSchema = z.enum([
-  'gpt-5.3-codex-medium',
-  'gpt-5.3-codex-high',
-  'gpt-5.3-codex-xhigh',
-  'gpt-5.3-codex-spark',
-  'gpt-5.3-codex-spark-medium',
-  'gpt-5.3-codex-spark-high',
-  'gpt-5.3-codex-spark-xhigh',
-]);
-export type CodexModel = z.infer<typeof CodexModelSchema>;
+export const CODEX_THINKING_OPTIONS = ['medium', 'high', 'xhigh'] as const;
+export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
+export const NO_CODEX_THINKING = 'none' as const;
+export type CodexThinkingMode = typeof NO_CODEX_THINKING | CodexThinkingOption;
+
+type CodexModelRegistryEntry = {
+  modelName: string;
+  displayName: string;
+  thinkingOptions: readonly CodexThinkingMode[];
+  defaultThinkingOption?: CodexThinkingMode;
+  isDefault?: boolean;
+  standaloneDisplayName?: string;
+};
+
+export const CODEX_MODEL_REGISTRY = [
+  {
+    modelName: 'gpt-4.5',
+    displayName: 'GPT-4.5',
+    thinkingOptions: [NO_CODEX_THINKING],
+    defaultThinkingOption: NO_CODEX_THINKING,
+    isDefault: true,
+  },
+  {
+    modelName: 'gpt-5.3-codex',
+    displayName: 'GPT-5.3 Codex',
+    thinkingOptions: ['high', 'medium', 'xhigh'],
+    defaultThinkingOption: 'high',
+  },
+  {
+    modelName: 'gpt-5.3-codex-spark',
+    displayName: 'GPT-5.3 Codex Spark',
+    standaloneDisplayName: 'GPT-5.3 Codex Spark (Ultra-Fast)',
+    thinkingOptions: [NO_CODEX_THINKING, 'high', 'medium', 'xhigh'],
+    defaultThinkingOption: NO_CODEX_THINKING,
+  },
+] as const satisfies ReadonlyArray<CodexModelRegistryEntry>;
+
+type CodexModelRegistryItem = (typeof CODEX_MODEL_REGISTRY)[number];
+type CodexModelIdForEntry<TEntry extends CodexModelRegistryItem> = TEntry extends unknown
+  ? TEntry['thinkingOptions'][number] extends infer TThinkingOption
+    ? TThinkingOption extends typeof NO_CODEX_THINKING
+      ? TEntry['modelName']
+      : TThinkingOption extends string
+        ? `${TEntry['modelName']}-${TThinkingOption}`
+        : never
+    : never
+  : never;
+
+export type CodexModel = CodexModelIdForEntry<CodexModelRegistryItem>;
+
+const CODEX_THINKING_DISPLAY_NAMES: Record<CodexThinkingOption, string> = {
+  medium: 'Medium Effort',
+  high: 'High Effort',
+  xhigh: 'Extra High Effort',
+};
+
+function toCodexModelId(modelName: string, thinkingOption: CodexThinkingMode): CodexModel {
+  return (
+    thinkingOption === NO_CODEX_THINKING ? modelName : `${modelName}-${thinkingOption}`
+  ) as CodexModel;
+}
+
+function formatCodexDisplayName(
+  entry: CodexModelRegistryEntry,
+  thinkingOption: CodexThinkingMode
+): string {
+  if (thinkingOption === NO_CODEX_THINKING) {
+    return entry.standaloneDisplayName ?? entry.displayName;
+  }
+
+  return `${entry.displayName} (${CODEX_THINKING_DISPLAY_NAMES[thinkingOption]})`;
+}
+
+export const CODEX_MODEL_INFOS = CODEX_MODEL_REGISTRY.flatMap((entry: CodexModelRegistryEntry) =>
+  entry.thinkingOptions.map((thinkingOption: CodexThinkingMode) => {
+    const defaultThinkingOption = entry.defaultThinkingOption ?? entry.thinkingOptions[0];
+    return {
+      id: toCodexModelId(entry.modelName, thinkingOption),
+      displayName: formatCodexDisplayName(entry, thinkingOption),
+      isDefault: Boolean(entry.isDefault && thinkingOption === defaultThinkingOption),
+    };
+  })
+) as ReadonlyArray<{
+  id: CodexModel;
+  displayName: string;
+  isDefault: boolean;
+}>;
+
+export const CODEX_MODEL_IDS = CODEX_MODEL_INFOS.map((model) => model.id) as readonly CodexModel[];
+const CODEX_MODEL_ID_SET = new Set<string>(CODEX_MODEL_IDS);
+const DEFAULT_CODEX_MODELS = CODEX_MODEL_INFOS.filter((model) => model.isDefault);
+if (DEFAULT_CODEX_MODELS.length !== 1) {
+  throw new Error(`Expected exactly one default Codex model, found ${DEFAULT_CODEX_MODELS.length}`);
+}
+
+export const DEFAULT_CODEX_MODEL_ID = DEFAULT_CODEX_MODELS[0].id;
+export const CodexModelSchema = z.custom<CodexModel>(
+  (value): value is CodexModel => typeof value === 'string' && CODEX_MODEL_ID_SET.has(value),
+  {
+    message: `Invalid Codex model identifier. Expected one of: ${CODEX_MODEL_IDS.join(', ')}`,
+  }
+);
 
 export type OpenCodeModel = `${string}/${string}`;
 

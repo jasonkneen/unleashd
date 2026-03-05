@@ -80,10 +80,10 @@ listModels() → [sonnet (default), opus, haiku]
 
 ### Codex
 ```
-listModels() → [gpt-5.3-codex-high (default), gpt-5.3-codex-medium, gpt-5.3-codex-xhigh, spark variants]
+listModels() → [gpt-4.5 (default), gpt-5.3-codex-high, gpt-5.3-codex-medium, gpt-5.3-codex-xhigh, spark variants]
 ```
 
-Codex uses composite model IDs that encode both model name and reasoning effort level. The harness decomposes these IDs by matching known effort suffixes.
+Codex model metadata is stored as `modelName + thinkingOptions`, then flattened into dropdown IDs. Standalone models like `gpt-4.5` pass straight through; effort variants are still decomposed by matching known effort suffixes.
 
 ### OpenCode
 ```

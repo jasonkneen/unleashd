@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCommand } from '@nbardy/agent-cli';
 import {
+  CODEX_MODEL_REGISTRY,
   CodexModelSchema,
+  DEFAULT_CODEX_MODEL_ID,
+  NO_CODEX_THINKING,
   ModelIdSchema,
   NewConversationMessageSchema,
   SetModelMessageSchema,
@@ -12,18 +15,28 @@ import codexProvider from '../src/providers/codex';
 import { isModelIdValidForProvider, modelValidationHint } from '../src/providers/model-validation';
 
 // =============================================================================
-// Schema validation: spark base + effort variants accepted
+// Schema validation: gpt-4.5 + spark base + effort variants accepted
 // =============================================================================
 
-test('CodexModelSchema accepts spark base and effort variants', () => {
+test('CODEX_MODEL_REGISTRY splits model names from thinking options', () => {
+  const gpt45 = CODEX_MODEL_REGISTRY.find((entry) => entry.modelName === 'gpt-4.5');
+  const spark = CODEX_MODEL_REGISTRY.find((entry) => entry.modelName === 'gpt-5.3-codex-spark');
+
+  assert.deepEqual(gpt45?.thinkingOptions, [NO_CODEX_THINKING]);
+  assert.deepEqual(spark?.thinkingOptions, [NO_CODEX_THINKING, 'high', 'medium', 'xhigh']);
+});
+
+test('CodexModelSchema accepts gpt-4.5, spark base, and effort variants', () => {
+  assert.equal(CodexModelSchema.safeParse('gpt-4.5').success, true);
   assert.equal(CodexModelSchema.safeParse('gpt-5.3-codex-spark').success, true);
   assert.equal(CodexModelSchema.safeParse('gpt-5.3-codex-spark-high').success, true);
   assert.equal(CodexModelSchema.safeParse('gpt-5.3-codex-spark-medium').success, true);
   assert.equal(CodexModelSchema.safeParse('gpt-5.3-codex-spark-xhigh').success, true);
 });
 
-test('ModelIdSchema accepts all spark variants', () => {
+test('ModelIdSchema accepts gpt-4.5 and all spark variants', () => {
   for (const id of [
+    'gpt-4.5',
     'gpt-5.3-codex-spark',
     'gpt-5.3-codex-spark-high',
     'gpt-5.3-codex-spark-medium',
@@ -33,8 +46,8 @@ test('ModelIdSchema accepts all spark variants', () => {
   }
 });
 
-test('NewConversationMessage accepts codex provider with spark models', () => {
-  for (const model of ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-high']) {
+test('NewConversationMessage accepts codex provider with gpt-4.5 and spark models', () => {
+  for (const model of ['gpt-4.5', 'gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-high']) {
     const result = NewConversationMessageSchema.safeParse({
       type: 'new_conversation',
       provider: 'codex',
@@ -44,8 +57,8 @@ test('NewConversationMessage accepts codex provider with spark models', () => {
   }
 });
 
-test('SetModelMessage accepts spark variants', () => {
-  for (const model of ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-medium']) {
+test('SetModelMessage accepts gpt-4.5 and spark variants', () => {
+  for (const model of ['gpt-4.5', 'gpt-5.3-codex-spark', 'gpt-5.3-codex-spark-medium']) {
     const result = SetModelMessageSchema.safeParse({
       type: 'set_model',
       conversationId: '550e8400-e29b-41d4-a716-446655440000',
@@ -59,8 +72,9 @@ test('SetModelMessage accepts spark variants', () => {
 // Model validation: server-side provider/model compatibility
 // =============================================================================
 
-test('isModelIdValidForProvider accepts spark variants for codex', () => {
+test('isModelIdValidForProvider accepts gpt-4.5 and spark variants for codex', () => {
   for (const id of [
+    'gpt-4.5',
     'gpt-5.3-codex-spark',
     'gpt-5.3-codex-spark-high',
     'gpt-5.3-codex-spark-medium',
@@ -76,21 +90,33 @@ test('isModelIdValidForProvider rejects spark for non-codex providers', () => {
   assert.equal(isModelIdValidForProvider('claude', 'gpt-5.3-codex-spark-high'), false);
 });
 
-test('modelValidationHint for codex mentions spark', () => {
+test('modelValidationHint for codex mentions gpt-4.5 and spark', () => {
   const hint = modelValidationHint('codex');
+  assert.ok(hint.includes('gpt-4.5'), `Hint should mention gpt-4.5: ${hint}`);
   assert.ok(hint.includes('spark'), `Hint should mention spark: ${hint}`);
 });
 
 // =============================================================================
-// Shared CLI builder: standalone spark vs spark+effort decomposition
+// Shared CLI builder: standalone base models vs spark+effort decomposition
 //
+// "gpt-4.5"                  → `-m gpt-4.5` (no effort)
 // "gpt-5.3-codex-spark"       → `-m gpt-5.3-codex-spark` (no effort)
-// "gpt-5.3-codex-spark-high"  → `-m gpt-5.3-codex-spark -c reasoning.effort=high`
+// "gpt-5.3-codex-spark-high"  → `-m gpt-5.3-codex-spark -c model_reasoning_effort=high`
 //
 // The effort-suffix logic strips the last segment matching a known effort level,
 // leaving "gpt-5.3-codex-spark" as the base model. This works because "spark"
 // is NOT a known effort level — only medium/high/xhigh are.
 // =============================================================================
+
+test('buildCommand: gpt-4.5 passes model directly, no effort', () => {
+  const spec = buildCommand('codex', {
+    model: 'gpt-4.5',
+    prompt: 'hello',
+  });
+  const mIdx = spec.argv.indexOf('-m');
+  assert.equal(spec.argv[mIdx + 1], 'gpt-4.5');
+  assert.ok(!spec.argv.includes('-c'));
+});
 
 test('buildCommand: bare spark passes model directly, no effort', () => {
   const spec = buildCommand('codex', {
@@ -111,7 +137,7 @@ test('buildCommand: spark-high decomposes to spark model + high effort', () => {
   assert.equal(spec.argv[mIdx + 1], 'gpt-5.3-codex-spark');
   assert.ok(spec.argv.includes('-c'));
   const cIdx = spec.argv.indexOf('-c');
-  assert.equal(spec.argv[cIdx + 1], 'reasoning.effort=high');
+  assert.equal(spec.argv[cIdx + 1], 'model_reasoning_effort=high');
 });
 
 test('buildCommand: spark-medium decomposes correctly', () => {
@@ -119,7 +145,7 @@ test('buildCommand: spark-medium decomposes correctly', () => {
     model: 'gpt-5.3-codex-spark-medium',
     prompt: 'hello',
   });
-  assert.ok(spec.argv.includes('reasoning.effort=medium'));
+  assert.ok(spec.argv.includes('model_reasoning_effort=medium'));
 });
 
 test('buildCommand: spark-xhigh decomposes correctly', () => {
@@ -127,22 +153,23 @@ test('buildCommand: spark-xhigh decomposes correctly', () => {
     model: 'gpt-5.3-codex-spark-xhigh',
     prompt: 'hello',
   });
-  assert.ok(spec.argv.includes('reasoning.effort=xhigh'));
+  assert.ok(spec.argv.includes('model_reasoning_effort=xhigh'));
 });
 
 test('buildCommand: existing codex effort models still decompose correctly', () => {
   const high = buildCommand('codex', { model: 'gpt-5.3-codex-high', prompt: 'hello' });
   const medium = buildCommand('codex', { model: 'gpt-5.3-codex-medium', prompt: 'hello' });
-  assert.ok(high.argv.includes('reasoning.effort=high'));
-  assert.ok(medium.argv.includes('reasoning.effort=medium'));
+  assert.ok(high.argv.includes('model_reasoning_effort=high'));
+  assert.ok(medium.argv.includes('model_reasoning_effort=medium'));
 });
 
 // =============================================================================
-// Provider: listModels includes spark with correct metadata
+// Provider: listModels includes gpt-4.5 + spark with correct metadata
 // =============================================================================
 
-test('listModels includes spark base and effort variants', () => {
+test('listModels includes gpt-4.5 and spark base/effort variants', () => {
   const models = codexProvider.listModels();
+  assert.ok(models.some((m) => m.id === DEFAULT_CODEX_MODEL_ID));
   const sparkIds = models.filter((m) => m.id.includes('spark')).map((m) => m.id);
   assert.deepEqual(sparkIds.sort(), [
     'gpt-5.3-codex-spark',
@@ -156,6 +183,13 @@ test('listModels still has exactly one default', () => {
   const models = codexProvider.listModels();
   const defaults = models.filter((m) => m.isDefault);
   assert.equal(defaults.length, 1);
+  assert.equal(defaults[0].id, DEFAULT_CODEX_MODEL_ID);
+});
+
+test('gpt-4.5 is the Codex default', () => {
+  const models = codexProvider.listModels();
+  const gpt45 = models.find((m) => m.id === 'gpt-4.5');
+  assert.equal(gpt45?.isDefault, true);
 });
 
 test('spark models are not the default', () => {
@@ -191,11 +225,12 @@ test('buildCommand: codex includes --skip-git-repo-check', () => {
 });
 
 // =============================================================================
-// Oompa: inferProviderFromModel identifies spark variants as codex
+// Oompa: inferProviderFromModel identifies gpt-4.5 + spark variants as codex
 // =============================================================================
 
-test('inferProviderFromModel: spark variants map to codex', () => {
+test('inferProviderFromModel: gpt-4.5 and spark variants map to codex', () => {
   for (const model of [
+    'gpt-4.5',
     'gpt-5.3-codex-spark',
     'gpt-5.3-codex-spark-high',
     'gpt-5.3-codex-spark-medium',
