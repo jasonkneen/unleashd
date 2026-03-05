@@ -872,10 +872,20 @@ class Conversation extends EventEmitter {
           if (!isCompletionOnlyToolUse(event.name, event.input, event.displayText)) {
             const formattedTool = formatToolUse(event.name, event.input, event.displayText);
             if (formattedTool) {
+              const currentMsg = this.messages[this.messages.length - 1];
+              const needsLeadingNewline =
+                !formattedTool.startsWith('<!--ask_user_question:') &&
+                currentMsg?.role === 'assistant' &&
+                currentMsg.content.length > 0 &&
+                !currentMsg.content.endsWith('\n');
               const chunkText =
                 formattedTool.startsWith('<!--ask_user_question:')
                   ? formattedTool
-                  : `${formattedTool}\n`;
+                  : `${needsLeadingNewline ? '\n' : ''}${formattedTool}\n`;
+              if (currentMsg?.role === 'assistant') {
+                // Keep server-side message text aligned with streamed chunks.
+                currentMsg.content += chunkText;
+              }
               this.broadcastChunk({
                 type: 'chunk',
                 conversationId: this.id,

@@ -120,7 +120,7 @@ function collapseToolLines(content: string): string {
 
   for (const line of lines) {
     // Keep oompa run widget trigger lines visible (not collapsed into summaries).
-    const isOompaRun = OOMPA_RUN_TOOL_LINE_RE.test(line);
+    const isOompaRun = OOMPA_RUN_TOOL_FRAGMENT_RE.test(line);
 
     if (!isOompaRun && TOOL_LINE_RE.test(line)) {
       toolRun.push(line);
@@ -338,13 +338,14 @@ type ContentSegment =
   | { type: 'ask_user_question'; json: string }
   | { type: 'oompa_run' };
 
-// Only treat normalized shell tool_use lines as run-widget triggers.
+// Only treat normalized shell tool_use fragments as run-widget triggers.
 // This avoids false positives from plain assistant prose containing `oompa run`.
 //
-// Expected line shape from server/src/adapters/tool-format.ts:
+// Expected fragment shape from server/src/adapters/tool-format.ts:
 //   ⚡ Bash|shell|run_shell_command oompa run|swarm :: <command...>
-const OOMPA_RUN_TOOL_LINE_RE =
-  /^⚡\s+(?:bash|shell|run_shell_command)\s+oompa\s+(?:run|swarm)\s+::.*$/i;
+// The marker may appear at line start (ideal) or inline during live streaming.
+const OOMPA_RUN_TOOL_FRAGMENT_RE =
+  /⚡\s+(?:bash|shell|run_shell_command)\s+oompa\s+(?:run|swarm)\s+::[^\n]*/i;
 
 function splitWidgets(content: string): ContentSegment[] {
   const segments: ContentSegment[] = [];
@@ -355,7 +356,7 @@ function splitWidgets(content: string): ContentSegment[] {
 
   // Create a fresh regex with `g` flag for multi-match .exec() loop —
   // avoids stale lastIndex on the module-level ASK_USER_QUESTION_RE singleton
-  // (same pattern as OOMPA_RUN_TOOL_LINE_RE below).
+  // (same pattern as OOMPA_RUN_TOOL_FRAGMENT_RE below).
   const askUserRe = new RegExp(ASK_USER_QUESTION_RE.source, ASK_USER_QUESTION_RE.flags + 'g');
   let match: RegExpExecArray | null;
   while ((match = askUserRe.exec(content)) !== null) {
@@ -363,8 +364,8 @@ function splitWidgets(content: string): ContentSegment[] {
   }
 
   // Create a fresh regex with `g` flag for multi-match .exec() loop —
-  // avoids stale lastIndex on the module-level OOMPA_RUN_TOOL_LINE_RE singleton.
-  const oompaRunGlobal = new RegExp(OOMPA_RUN_TOOL_LINE_RE.source, 'gim');
+  // avoids stale lastIndex on the module-level OOMPA_RUN_TOOL_FRAGMENT_RE singleton.
+  const oompaRunGlobal = new RegExp(OOMPA_RUN_TOOL_FRAGMENT_RE.source, 'gi');
   while ((match = oompaRunGlobal.exec(content)) !== null) {
     matches.push({ type: 'oompa_run', index: match.index, length: match[0].length, match });
   }

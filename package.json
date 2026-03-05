@@ -7,7 +7,7 @@
     "dev": "concurrently -n server,client -c blue,green \"pnpm dev:server\" \"pnpm dev:client\"",
     "dev:server": "pnpm --filter @unleashd/server dev",
     "dev:client": "pnpm --filter @unleashd/client dev",
-    "build": "pnpm --filter @unleashd/shared build && pnpm --filter @unleashd/client build",
+    "build": "pnpm --filter @unleashd/shared build && pnpm --filter @unleashd/server build && node tools/patch-server-dist-shared-imports.cjs && pnpm --filter @unleashd/client build",
     "start": "pnpm --filter @unleashd/server start",
     "test": "node test/api.test.js",
     "lint": "biome check .",
@@ -37,11 +37,7 @@
     "express": "^4.18.2",
     "multer": "^2.0.2",
     "uuid": "^13.0.0",
-    "ws": "^8.14.2"
-  },
-  "pnpm": {
-    "overrides": {
-      "@nbardy/agent-cli": "link:/Users/nicholasbardy/git/agent-cli-tool"
-    }
+    "ws": "^8.14.2",
+    "zod": "^3.24.0"
   }
 }
