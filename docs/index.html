@@ -83,24 +83,70 @@
             text-transform: uppercase;
         }
 
+        /* Glowing Title */
+        .title-container {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 0.2rem;
+        }
+        
         h1 {
-            font-size: clamp(3rem, 6vw, 4.5rem);
-            font-weight: 800;
-            letter-spacing: -0.02em;
+            font-size: clamp(4rem, 8vw, 6rem);
+            font-weight: 900;
+            letter-spacing: -0.03em;
             line-height: 1.1;
-            margin-bottom: 1rem;
-            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+            margin: 0;
+            color: #fff;
+            position: relative;
+            z-index: 2;
+        }
+        
+        .title-glow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            font-size: clamp(4rem, 8vw, 6rem);
+            font-weight: 900;
+            letter-spacing: -0.03em;
+            line-height: 1.1;
+            margin: 0;
+            color: transparent;
+            text-shadow: 0 0 25px rgba(96, 165, 250, 0.9), 0 0 50px rgba(167, 139, 250, 0.7), 0 0 100px rgba(244, 114, 182, 0.5);
+            z-index: 1;
+            filter: blur(8px);
+            opacity: 0.8;
+            pointer-events: none;
+        }
+
+        h2.tagline {
+            font-size: clamp(2.2rem, 5vw, 3.5rem);
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.02em;
+            background: linear-gradient(to right, #f59e0b, #ef4444, #ec4899, #8b5cf6);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             color: transparent;
+            line-height: 1.2;
         }
 
         p.subtitle {
-            font-size: clamp(1.125rem, 2vw, 1.35rem);
+            font-size: clamp(1.1rem, 2vw, 1.4rem);
+            color: #f8fafc;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            max-width: 800px;
+        }
+
+        p.details {
+            font-size: 1rem;
             color: var(--text-muted);
-            max-width: 650px;
-            margin: 0 auto 2.5rem auto;
+            max-width: 750px;
+            margin: 0 auto 1.25rem auto;
             font-weight: 400;
+            line-height: 1.6;
         }
 
         /* Install Box */
@@ -108,21 +154,22 @@
             background: rgba(15, 23, 42, 0.8);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            padding: 0.75rem 0.75rem 0.75rem 1.5rem;
+            padding: 0.5rem 0.5rem 0.5rem 1.5rem;
             border-radius: 12px;
             display: inline-flex;
             align-items: center;
             gap: 1rem;
             border: 1px solid var(--border-color);
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            margin-bottom: 2.5rem;
-            max-width: 100%;
+            margin: 2rem 0 3rem 0;
+            max-width: 600px;
+            width: 100%;
             text-align: left;
             transition: border-color 0.3s ease;
         }
 
         .install-box:hover {
-            border-color: rgba(59, 130, 246, 0.4);
+            border-color: rgba(249, 115, 22, 0.4);
         }
 
         .install-box code {
@@ -130,31 +177,29 @@
             font-size: 0.95rem;
             color: #e2e8f0;
             white-space: nowrap;
-            overflow-x: auto;
-            scrollbar-width: none; /* Firefox */
-        }
-        .install-box code::-webkit-scrollbar {
-            display: none; /* Chrome/Safari */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex-grow: 1;
         }
 
         .copy-btn {
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text-main);
-            border: 1px solid var(--border-color);
-            padding: 0.6rem 1.2rem;
+            background: rgba(249, 115, 22, 0.15); /* Orange background */
+            color: #f97316; /* Orange icon */
+            border: 1px solid rgba(249, 115, 22, 0.3);
+            width: 44px;
+            height: 44px;
             border-radius: 8px;
             cursor: pointer;
-            font-weight: 600;
-            font-size: 0.9rem;
-            transition: all 0.2s ease;
-            flex-shrink: 0;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all 0.2s ease;
+            padding: 0;
         }
 
         .copy-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(249, 115, 22, 0.25);
             transform: translateY(-1px);
         }
         
@@ -409,8 +454,8 @@
 
         @media (max-width: 768px) {
             h1 { font-size: 2.5rem; }
-            .install-box { flex-direction: column; align-items: stretch; text-align: center; padding: 1rem; }
-            .copy-btn { justify-content: center; }
+            h2.tagline { font-size: 1.8rem; }
+            .install-box { max-width: 100%; }
             .features { grid-template-columns: 1fr; }
             .agents-table th, .agents-table td { padding: 1rem; }
         }
@@ -419,14 +464,22 @@
 <body>
     <header class="hero">
         <div class="pill">v1.1.0 Available</div>
-        <h1>Unleashd</h1>
-        <p class="subtitle">A local, git-worktree multi-agent swarm orchestrator for Codex, Claude, Gemini, and OpenCode.</p>
+        <div class="title-container">
+            <h1>Unleashd</h1>
+            <div class="title-glow" aria-hidden="true">Unleashd</div>
+        </div>
+        <h2 class="tagline">Unleash the swarm!</h2>
+        
+        <p class="subtitle">Open Source Swarm first agent development environment</p>
+        
+        <p class="details">An open source cross agent development environment with swarms as first level primitives. This lets you bring your own max accounts, reduce costs, and manage agents and swarms across multiple providers. Supports Claude, Codex, OpenCode, and Gemini CLI, and lets you filter and search for chats across all platforms. And launch swarms that coordinate agents using all envs.</p>
+        
+        <p class="details">Keep your token costs down, utilize the best existing harnesses for each model AND run your oompa loompa swarms for autonomous swarm development, built on top of the oompa loompa.</p>
 
         <div class="install-box">
             <code id="install-cmd">git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start</code>
-            <button class="copy-btn" onclick="copyCmd()">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                Copy
+            <button class="copy-btn" onclick="copyCmd()" title="Copy install command" aria-label="Copy">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
         </div>
 
@@ -523,9 +576,8 @@
                 var btn = document.querySelector('.copy-btn');
                 var originalHtml = btn.innerHTML;
                 
-                // Change style to show success
                 btn.classList.add('copied');
-                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
+                btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
                 
                 setTimeout(function() { 
                     btn.classList.remove('copied');
