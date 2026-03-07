@@ -33,8 +33,8 @@ test('shared model schemas accept practical OpenCode ids', () => {
 
 test('shared model schema keeps claude/codex ids strict', () => {
   assert.equal(ModelIdSchema.safeParse('opus').success, true);
-  assert.equal(ModelIdSchema.safeParse('gpt-4.5').success, true);
-  assert.equal(ModelIdSchema.safeParse('gpt-5.3-codex-high').success, true);
+  assert.equal(ModelIdSchema.safeParse('gpt-5.4').success, true);
+  assert.equal(ModelIdSchema.safeParse('gpt-5.4-high').success, true);
 
   // Missing provider/model separator should still be rejected.
   assert.equal(ModelIdSchema.safeParse('openai').success, false);
@@ -45,8 +45,8 @@ test('server provider/model compatibility validation works per provider', () => 
   assert.equal(isModelIdValidForProvider('claude', 'opus'), true);
   assert.equal(isModelIdValidForProvider('claude', 'opencode/gpt-5'), false);
 
-  assert.equal(isModelIdValidForProvider('codex', 'gpt-4.5'), true);
-  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.3-codex-medium'), true);
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.4'), true);
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.4-medium'), true);
   assert.equal(isModelIdValidForProvider('codex', 'opencode/gpt-5'), false);
 
   assert.equal(isModelIdValidForProvider('opencode', 'opencode/gpt-5'), true);

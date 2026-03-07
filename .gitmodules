@@ -1,0 +1,3 @@
+[submodule "vendor/agent-cli-tool"]
+	path = vendor/agent-cli-tool
+	url = git@github.com:nbardy/nbardy-agent-cli.git

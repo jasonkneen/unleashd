@@ -1,4 +1,13 @@
-import { PROVIDER_OPTIONS } from '@unleashd/shared';
+import {
+  CODEX_BASE_MODEL_INFOS,
+  CODEX_MODEL_REGISTRY,
+  CODEX_THINKING_DISPLAY_NAMES,
+  CODEX_UNIFIED_THINKING_OPTIONS,
+  NO_CODEX_THINKING,
+  PROVIDER_OPTIONS,
+  toCodexModelId,
+  type CodexThinkingMode,
+} from '@unleashd/shared';
 import type { Conversation, ModelId, ModelInfo, Provider } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -23,6 +32,11 @@ import './Sidebar.css';
 
 const RECENT_CUTOFF_MS = 7 * 24 * 60 * 60 * 1000;
 const ROOT_PLACEHOLDER = '/';
+const DEFAULT_CODEX_ENTRY = CODEX_MODEL_REGISTRY.find((entry) => entry.isDefault) ?? CODEX_MODEL_REGISTRY[0];
+const DEFAULT_CODEX_THINKING_MODE =
+  DEFAULT_CODEX_ENTRY.defaultThinkingOption ??
+  DEFAULT_CODEX_ENTRY.thinkingOptions[0] ??
+  NO_CODEX_THINKING;
 
 interface FolderGroup {
   directory: string;
@@ -205,9 +219,12 @@ export function Sidebar() {
   const [directory, setDirectory] = useState('');
   const [hasPendingDefault, setHasPendingDefault] = useState(false);
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
-  const [provider, setProvider] = useState<Provider>('claude');
+  const [provider, setProvider] = useState<Provider>('codex');
   const [model, setModel] = useState<ModelId | undefined>(undefined);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [codexModelName, setCodexModelName] = useState<string>(DEFAULT_CODEX_ENTRY.modelName);
+  const [codexThinkingMode, setCodexThinkingMode] =
+    useState<CodexThinkingMode>(DEFAULT_CODEX_THINKING_MODE);
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -215,6 +232,14 @@ export function Sidebar() {
 
   // Fetch available models when provider changes
   useEffect(() => {
+    if (provider === 'codex') {
+      setModels([]);
+      setCodexModelName(DEFAULT_CODEX_ENTRY.modelName);
+      setCodexThinkingMode(DEFAULT_CODEX_THINKING_MODE);
+      setModel(toCodexModelId(DEFAULT_CODEX_ENTRY.modelName, DEFAULT_CODEX_THINKING_MODE));
+      return;
+    }
+
     fetch(`/api/models?provider=${provider}`)
       .then((res) => res.json())
       .then((data: ModelInfo[]) => {
@@ -223,6 +248,22 @@ export function Sidebar() {
         setModel(defaultModel?.id);
       });
   }, [provider]);
+
+  const handleCodexModelChange = useCallback(
+    (nextModelName: string) => {
+      setCodexModelName(nextModelName);
+      setModel(toCodexModelId(nextModelName, codexThinkingMode));
+    },
+    [codexThinkingMode]
+  );
+
+  const handleCodexThinkingModeChange = useCallback(
+    (nextThinkingMode: CodexThinkingMode) => {
+      setCodexThinkingMode(nextThinkingMode);
+      setModel(toCodexModelId(codexModelName, nextThinkingMode));
+    },
+    [codexModelName]
+  );
 
   const handleNewConversation = useCallback(() => {
     // Default to the most recently active conversation's working directory,
@@ -460,20 +501,62 @@ export function Sidebar() {
                 ))}
               </div>
               <label className="new-conv-label">Model</label>
-              <div className="model-selector">
-                {models.map((m) => (
-                  <label key={m.id} className={`model-option ${model === m.id ? 'selected' : ''}`}>
-                    <input
-                      type="radio"
-                      name="model"
-                      value={m.id}
-                      checked={model === m.id}
-                      onChange={() => setModel(m.id)}
-                    />
-                    {m.displayName}
-                  </label>
-                ))}
-              </div>
+              {provider === 'codex' ? (
+                <>
+                  <div className="model-selector">
+                    {CODEX_BASE_MODEL_INFOS.map((m) => (
+                      <label
+                        key={m.id}
+                        className={`model-option ${codexModelName === m.id ? 'selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="codex-model"
+                          value={m.id}
+                          checked={codexModelName === m.id}
+                          onChange={() => handleCodexModelChange(m.id)}
+                        />
+                        {m.displayName}
+                      </label>
+                    ))}
+                  </div>
+                  <label className="new-conv-label">Reasoning</label>
+                  <div className="model-selector">
+                    {CODEX_UNIFIED_THINKING_OPTIONS.map((thinkingMode) => (
+                      <label
+                        key={thinkingMode}
+                        className={`model-option ${codexThinkingMode === thinkingMode ? 'selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="codex-reasoning"
+                          value={thinkingMode}
+                          checked={codexThinkingMode === thinkingMode}
+                          onChange={() => handleCodexThinkingModeChange(thinkingMode)}
+                        />
+                        {thinkingMode === NO_CODEX_THINKING
+                          ? 'No Extra Reasoning'
+                          : CODEX_THINKING_DISPLAY_NAMES[thinkingMode]}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="model-selector">
+                  {models.map((m) => (
+                    <label key={m.id} className={`model-option ${model === m.id ? 'selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name="model"
+                        value={m.id}
+                        checked={model === m.id}
+                        onChange={() => setModel(m.id)}
+                      />
+                      {m.displayName}
+                    </label>
+                  ))}
+                </div>
+              )}
               <div className="directory-actions">
                 <button
                   type="button"

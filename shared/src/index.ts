@@ -153,9 +153,9 @@ export const getProviderMetadata = (provider: Provider): ProviderMetadata => ({
 // The server's Provider.modelToParams() decomposes them into CLI flags.
 //
 // Claude: aliases passed to `claude --model <alias>`
-// Codex: standalone model strings like "gpt-4.5" plus composite strings that
-//   encode model + effort level, e.g. "gpt-5.3-codex-high"
-//   → `-m gpt-5.3-codex -c model_reasoning_effort=high`
+// Codex: base model strings plus optional composite reasoning suffixes
+//   e.g. "gpt-5.4-high" → `-m gpt-5.4 -c model_reasoning_effort=high`
+//   e.g. "gpt-5.3-codex-spark-xhigh" → `-m gpt-5.3-codex-spark -c model_reasoning_effort=xhigh`
 // OpenCode: path-style identifiers passed to `opencode run -m <id>`
 //   e.g. "opencode/big-pickle" or "opencode/gpt-5-nano"
 // We require at least one "/" segment to avoid collisions with Claude/Codex IDs.
@@ -172,40 +172,37 @@ export const GeminiModelSchema = z.enum([
 ]);
 export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 
-export const CODEX_THINKING_OPTIONS = ['medium', 'high', 'xhigh'] as const;
+export const CODEX_THINKING_OPTIONS = ['high', 'medium', 'xhigh'] as const;
 export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
 export const NO_CODEX_THINKING = 'none' as const;
 export type CodexThinkingMode = typeof NO_CODEX_THINKING | CodexThinkingOption;
+export const CODEX_UNIFIED_THINKING_OPTIONS = [
+  NO_CODEX_THINKING,
+  ...CODEX_THINKING_OPTIONS,
+] as const;
 
-type CodexModelRegistryEntry = {
+export type CodexModelRegistryEntry = {
   modelName: string;
   displayName: string;
   thinkingOptions: readonly CodexThinkingMode[];
   defaultThinkingOption?: CodexThinkingMode;
   isDefault?: boolean;
-  standaloneDisplayName?: string;
 };
 
 export const CODEX_MODEL_REGISTRY = [
   {
-    modelName: 'gpt-4.5',
-    displayName: 'GPT-4.5',
-    thinkingOptions: [NO_CODEX_THINKING],
-    defaultThinkingOption: NO_CODEX_THINKING,
+    modelName: 'gpt-5.4',
+    displayName: 'GPT-5.4',
+    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
+    defaultThinkingOption: 'high',
     isDefault: true,
   },
   {
-    modelName: 'gpt-5.3-codex',
-    displayName: 'GPT-5.3 Codex',
-    thinkingOptions: ['high', 'medium', 'xhigh'],
-    defaultThinkingOption: 'high',
-  },
-  {
     modelName: 'gpt-5.3-codex-spark',
-    displayName: 'GPT-5.3 Codex Spark',
-    standaloneDisplayName: 'GPT-5.3 Codex Spark (Ultra-Fast)',
-    thinkingOptions: [NO_CODEX_THINKING, 'high', 'medium', 'xhigh'],
-    defaultThinkingOption: NO_CODEX_THINKING,
+    displayName: 'Codex Spark',
+    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
+    defaultThinkingOption: 'high',
+    isDefault: false,
   },
 ] as const satisfies ReadonlyArray<CodexModelRegistryEntry>;
 
@@ -222,13 +219,13 @@ type CodexModelIdForEntry<TEntry extends CodexModelRegistryItem> = TEntry extend
 
 export type CodexModel = CodexModelIdForEntry<CodexModelRegistryItem>;
 
-const CODEX_THINKING_DISPLAY_NAMES: Record<CodexThinkingOption, string> = {
+export const CODEX_THINKING_DISPLAY_NAMES: Record<CodexThinkingOption, string> = {
   medium: 'Medium Effort',
   high: 'High Effort',
   xhigh: 'Extra High Effort',
 };
 
-function toCodexModelId(modelName: string, thinkingOption: CodexThinkingMode): CodexModel {
+export function toCodexModelId(modelName: string, thinkingOption: CodexThinkingMode): CodexModel {
   return (
     thinkingOption === NO_CODEX_THINKING ? modelName : `${modelName}-${thinkingOption}`
   ) as CodexModel;
@@ -238,12 +235,16 @@ function formatCodexDisplayName(
   entry: CodexModelRegistryEntry,
   thinkingOption: CodexThinkingMode
 ): string {
-  if (thinkingOption === NO_CODEX_THINKING) {
-    return entry.standaloneDisplayName ?? entry.displayName;
-  }
+  if (thinkingOption === NO_CODEX_THINKING) return entry.displayName;
 
   return `${entry.displayName} (${CODEX_THINKING_DISPLAY_NAMES[thinkingOption]})`;
 }
+
+export const CODEX_BASE_MODEL_INFOS = CODEX_MODEL_REGISTRY.map((entry) => ({
+  id: entry.modelName,
+  displayName: entry.displayName,
+  isDefault: Boolean(entry.isDefault),
+}));
 
 export const CODEX_MODEL_INFOS = CODEX_MODEL_REGISTRY.flatMap((entry: CodexModelRegistryEntry) =>
   entry.thinkingOptions.map((thinkingOption: CodexThinkingMode) => {

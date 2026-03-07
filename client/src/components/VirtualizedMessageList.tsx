@@ -341,11 +341,13 @@ type ContentSegment =
 // Only treat normalized shell tool_use fragments as run-widget triggers.
 // This avoids false positives from plain assistant prose containing `oompa run`.
 //
-// Expected fragment shape from server/src/adapters/tool-format.ts:
-//   ⚡ Bash|shell|run_shell_command oompa run|swarm :: <command...>
-// The marker may appear at line start (ideal) or inline during live streaming.
+// Two patterns (OR'd):
+//   1. Canonical: ⚡ Bash oompa run|swarm :: <command...>
+//      (from formatToolUse when detectOompaSubcommand succeeds)
+//   2. Raw env-wrapped: ⚡ Bash env -u VAR [-u VAR]... oompa run|swarm <args>
+//      (fallback for old JSONLs or when canonical rewrite didn't run)
 const OOMPA_RUN_TOOL_FRAGMENT_RE =
-  /⚡\s+(?:bash|shell|run_shell_command)\s+oompa\s+(?:run|swarm)\s+::[^\n]*/i;
+  /⚡\s+(?:bash|shell|run_shell_command)\s+(?:oompa\s+(?:run|swarm)\s+::|(?:env\s+(?:-\w+\s+\S+\s+)*)?oompa\s+(?:run|swarm)\s)[^\n]*/i;
 
 function splitWidgets(content: string): ContentSegment[] {
   const segments: ContentSegment[] = [];
