@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orchestral - Multi-Agent Swarm Orchestrator</title>
+    <title>Unleashd - Multi-Agent Swarm Orchestrator</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -34,15 +34,21 @@
         }
         .install-box {
             background-color: #1e293b;
-            padding: 1rem 2rem;
+            padding: 1rem 1.5rem;
             border-radius: 8px;
             display: inline-flex;
             align-items: center;
             gap: 1rem;
             border: 1px solid #334155;
             font-family: monospace;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             margin-bottom: 2rem;
+            max-width: 90vw;
+            text-align: left;
+        }
+        .install-box code {
+            white-space: pre-wrap;
+            word-break: break-all;
         }
         .copy-btn {
             background: #38bdf8;
@@ -53,6 +59,7 @@
             cursor: pointer;
             font-weight: bold;
             transition: background 0.2s;
+            flex-shrink: 0;
         }
         .copy-btn:hover {
             background: #7dd3fc;
@@ -86,22 +93,15 @@
             margin: 4rem auto;
             padding: 0 1rem;
         }
-        .video-container {
-            position: relative;
-            padding-bottom: 56.25%;
-            height: 0;
-            overflow: hidden;
+        .screenshot {
             border-radius: 12px;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
             border: 1px solid #334155;
-            background: #000;
+            overflow: hidden;
         }
-        .video-container iframe, .video-container video {
-            position: absolute;
-            top: 0;
-            left: 0;
+        .screenshot img {
             width: 100%;
-            height: 100%;
+            display: block;
         }
         .features {
             display: grid;
@@ -119,37 +119,67 @@
             color: #38bdf8;
             margin-top: 0;
         }
+        .section-title {
+            text-align: center;
+            font-size: 2rem;
+            margin-top: 4rem;
+            margin-bottom: 1rem;
+        }
+        .agents-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 2rem;
+        }
+        .agents-table th,
+        .agents-table td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid #334155;
+        }
+        .agents-table th {
+            color: #38bdf8;
+            font-weight: 600;
+        }
+        .agents-table a {
+            color: #818cf8;
+            text-decoration: none;
+        }
+        .agents-table a:hover {
+            text-decoration: underline;
+        }
+        footer {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #64748b;
+            border-top: 1px solid #1e293b;
+        }
     </style>
 </head>
 <body>
     <header>
         <h1>Unleashd</h1>
-        <p class="subtitle">The local, git-worktree multi-agent swarm orchestrator for Codex, Claude, and Opencode.</p>
+        <p class="subtitle">A local, git-worktree multi-agent swarm orchestrator for Codex, Claude, Gemini, and OpenCode.</p>
 
         <div class="install-box">
-            <span id="install-cmd">npx unleashd</span>
+            <code id="install-cmd">git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start</code>
             <button class="copy-btn" onclick="copyCmd()">Copy</button>
         </div>
 
         <div class="buttons">
             <a href="https://github.com/nbardy/unleashd" class="btn primary">View on GitHub</a>
-            <a href="https://github.com/nbardy/oompa" class="btn">Oompa Core Engine</a>
+            <a href="https://github.com/nbardy/oompa_loompas" class="btn">Oompa Swarm Engine</a>
         </div>
     </header>
 
     <main>
-        <div class="video-container">
-            <!-- Placeholder for Demo Video -->
-            <video controls poster="https://via.placeholder.com/1280x720.png?text=Unleashd+Demo+Video">
-                <source src="demo.mp4" type="video/mp4">
-                Your browser does not support the video tag.
-            </video>
+        <div class="screenshot">
+            <img src="screenshots/gallery.png" alt="Unleashd UI showing multi-agent conversation management">
         </div>
 
         <div class="features">
             <div class="feature">
                 <h3>Visual Swarm Debugger</h3>
-                <p>Monitor your agents in real-time. See their prompts, logs, and state transitions via a clean Web UI.</p>
+                <p>Monitor your agents in real-time. See their prompts, tool calls, and state transitions via a clean Web UI.</p>
             </div>
             <div class="feature">
                 <h3>Git Worktrees</h3>
@@ -157,17 +187,60 @@
             </div>
             <div class="feature">
                 <h3>Multi-Model Support</h3>
-                <p>Easily route tasks between Claude, GPT, Gemini, and OpenCode instances within the same swarm.</p>
+                <p>Route tasks between Claude, Codex, Gemini, and OpenCode instances within the same swarm.</p>
             </div>
         </div>
+
+        <h2 class="section-title">Swarm Analytics</h2>
+        <div class="screenshot">
+            <img src="screenshots/swarm-analytics.png" alt="Unleashd swarm analytics dashboard">
+        </div>
+
+        <h2 class="section-title">Supported Agents</h2>
+        <table class="agents-table">
+            <thead>
+                <tr>
+                    <th>Agent</th>
+                    <th>Disk Read</th>
+                    <th>Live Spawn</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a></td>
+                    <td>Yes</td>
+                    <td>Yes</td>
+                </tr>
+                <tr>
+                    <td><a href="https://github.com/openai/codex">Codex</a></td>
+                    <td>Yes</td>
+                    <td>Yes</td>
+                </tr>
+                <tr>
+                    <td><a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a></td>
+                    <td>Yes</td>
+                    <td>Yes</td>
+                </tr>
+                <tr>
+                    <td><a href="https://github.com/opencode-ai/opencode">OpenCode</a></td>
+                    <td>Yes</td>
+                    <td>No (read-only)</td>
+                </tr>
+            </tbody>
+        </table>
     </main>
+
+    <footer>
+        Built by <a href="https://github.com/nbardy" style="color: #818cf8;">nbardy</a>
+    </footer>
 
     <script>
         function copyCmd() {
-            navigator.clipboard.writeText("npx unleashd").then(() => {
-                const btn = document.querySelector('.copy-btn');
+            var cmd = "git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start";
+            navigator.clipboard.writeText(cmd).then(function() {
+                var btn = document.querySelector('.copy-btn');
                 btn.textContent = 'Copied!';
-                setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+                setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
             });
         }
     </script>
