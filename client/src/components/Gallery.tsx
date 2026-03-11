@@ -159,7 +159,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
     // Group by working directory, separating done → worker → temp → real
     for (const conv of filtered) {
       const dir = conv.workingDirectory;
-      if (doneSet.has(conv.id)) {
+      if (doneSet.has(conv.sessionId ?? conv.id)) {
         if (!doneGroupsMap.has(dir)) doneGroupsMap.set(dir, []);
         doneGroupsMap.get(dir)!.push(conv);
       } else if (conv.isWorker && !promotedSet.has(conv.id)) {
@@ -770,7 +770,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
                                       className="undo-done-btn"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        unmarkDone(conv.id);
+                                        unmarkDone(conv.sessionId ?? conv.id);
                                       }}
                                     >
                                       Restore

@@ -358,10 +358,13 @@ export function Sidebar() {
     navigate(`/chat/${id}`);
   };
 
-  const handleDone = (id: string, e: React.MouseEvent) => {
+  const handleDone = (conv: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
-    markDone(id);
-    if (location.pathname.includes(id)) {
+    // Use sessionId when available — it's stable across server restarts.
+    // conv.id is a UUID in-session but becomes sessionId after the server reloads
+    // from disk, so sessionId is the consistent key for persisted done state.
+    markDone(conv.sessionId ?? conv.id);
+    if (location.pathname.includes(conv.id)) {
       navigate('/');
     }
   };
@@ -682,7 +685,7 @@ export function Sidebar() {
           </div>
         )}
         {sidebarViewMode === 'list' ? (
-          topLevelConversations.filter((conv) => !doneSet.has(conv.id)).map((conv) => (
+          topLevelConversations.filter((conv) => !doneSet.has(conv.sessionId ?? conv.id)).map((conv) => (
             <ConversationItem
               key={conv.id}
               conv={conv}
@@ -702,7 +705,7 @@ export function Sidebar() {
                   const dirDisplay = group.directory.replace(/^\/Users\/[^/]+/, '~');
                   const projectColor = getProjectColor(group.directory);
                   // Filter done at render time — group position stays stable
-                  const activeConvs = group.conversations.filter((c) => !doneSet.has(c.id));
+                  const activeConvs = group.conversations.filter((c) => !doneSet.has(c.sessionId ?? c.id));
 
                   return (
                     <div key={group.directory} className="folder-group">
@@ -787,11 +790,11 @@ export function Sidebar() {
               </div>
             )}
 
-            {olderConversations.some((c) => !doneSet.has(c.id)) && (
+            {olderConversations.some((c) => !doneSet.has(c.sessionId ?? c.id)) && (
               <div className="sidebar-section">
                 <div className="sidebar-section-header">Older</div>
                 {olderConversations
-                  .filter((conv) => !doneSet.has(conv.id))
+                  .filter((conv) => !doneSet.has(conv.sessionId ?? conv.id))
                   .map((conv) => (
                     <ConversationItem
                       key={conv.id}
@@ -829,7 +832,7 @@ function ConversationItem({
   hasUnseen: boolean;
   showFolderBadge: boolean;
   onSelect: (id: string) => void;
-  onDone: (id: string, e: React.MouseEvent) => void;
+  onDone: (conv: Conversation, e: React.MouseEvent) => void;
 }) {
   const workingDirectory = normalizeFolderDirectory(conv.workingDirectory);
   const projectColor = getProjectColor(workingDirectory);
@@ -872,7 +875,7 @@ function ConversationItem({
         </div>
       </div>
       <div className="conversation-preview">{preview}</div>
-      <button type="button" className="done-btn" onClick={(e) => onDone(conv.id, e)}>
+      <button type="button" className="done-btn" onClick={(e) => onDone(conv, e)}>
         Done
       </button>
     </div>

@@ -1482,7 +1482,7 @@ wss.on('connection', (ws: WebSocket) => {
           return json;
         }),
         defaultCwd: process.cwd(),
-        uiState: getUIState(),
+        uiState: getActiveUIState(),
       })
     );
   })();
@@ -1916,13 +1916,42 @@ async function initUIStateCache(): Promise<void> {
 /**
  * Get UI state from cache. Returns object (or {} if cache not initialized).
  */
-function getUIState(): { [key: string]: unknown } {
-  return uiStateCache;
+/**
+ * Return UI state filtered to only active conversations. Strips stale entries
+ * from lastSeenMessageIndex and doneConversations so the WS init payload stays
+ * lean — only data the client can actually use is sent over the wire.
+ */
+function getActiveUIState(): { [key: string]: unknown } {
+  const knownIds = new Set<string>();
+  for (const conv of conversations.values()) {
+    knownIds.add(conv.id);
+    if (conv.sessionId) knownIds.add(conv.sessionId);
+  }
+
+  const state = { ...uiStateCache };
+
+  const lastSeen = uiStateCache.lastSeenMessageIndex;
+  if (lastSeen && typeof lastSeen === 'object' && !Array.isArray(lastSeen)) {
+    const pruned: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(lastSeen as Record<string, unknown>)) {
+      if (knownIds.has(key)) pruned[key] = val;
+    }
+    state.lastSeenMessageIndex = pruned;
+  }
+
+  const done = uiStateCache.doneConversations;
+  if (Array.isArray(done)) {
+    state.doneConversations = done.filter((id: unknown) => typeof id === 'string' && knownIds.has(id));
+  }
+
+  return state;
 }
 
 /**
  * Update UI state cache and write to disk asynchronously.
- * Merges partial updates into the existing state.
+ * Merges partial updates into the existing state. Disk file keeps ALL entries
+ * (including stale) so nothing is lost across server restarts — getActiveUIState
+ * filters at read time.
  */
 function setUIState(partial: { [key: string]: unknown }): void {
   uiStateCache = { ...uiStateCache, ...partial };
@@ -1943,10 +1972,12 @@ function setUIState(partial: { [key: string]: unknown }): void {
 }
 
 app.get('/api/ui-state', (_req: Request, res: Response) => {
-  res.json(getUIState());
+  res.json(getActiveUIState());
 });
 
-app.post('/api/ui-state', express.json(), (req: Request, res: Response) => {
+// Body limit raised from default 100kb — lastSeenMessageIndex grows with conversation count
+// and was causing silent 413 rejections once the payload crossed ~100KB.
+app.post('/api/ui-state', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
   setUIState(req.body);
   res.json({ ok: true });
 });
@@ -2183,6 +2214,32 @@ app.get('/api/files', (req: Request, res: Response) => {
   }
 
   // Security: only serve files under known conversation directories or the uploads dir
+  if (!isUnderKnownProject(resolved) && !resolved.startsWith(UPLOADS_DIR + path.sep)) {
+    res.status(403).json({ error: 'Path not under any known project' });
+    return;
+  }
+
+  res.sendFile(resolved, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({ error: 'File not found' });
+    }
+  });
+});
+
+// Serve local files via URL path so relative assets (videos, CSS, images)
+// resolve naturally from the HTML file's directory.
+// e.g. /api/serve/Users/nick/project/report.html
+//      → relative <video src="video.mp4"> resolves to /api/serve/Users/nick/project/video.mp4
+app.get('/api/serve/*', (req: Request, res: Response) => {
+  // Express wildcard: everything after /api/serve/
+  const rawPath = '/' + req.params[0];
+  const resolved = path.resolve(rawPath);
+
+  if (resolved !== path.normalize(rawPath)) {
+    res.status(400).json({ error: 'Path traversal rejected' });
+    return;
+  }
+
   if (!isUnderKnownProject(resolved) && !resolved.startsWith(UPLOADS_DIR + path.sep)) {
     res.status(403).json({ error: 'Path not under any known project' });
     return;

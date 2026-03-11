@@ -93,6 +93,7 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
 
   return {
     id: session.sessionId,
+    sessionId: session.sessionId,
     messages: session.messages,
     isRunning: false,
     isStreaming: false, // Loaded from disk — process is dead
