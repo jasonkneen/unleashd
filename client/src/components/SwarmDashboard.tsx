@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { workersByProjectAtom } from '../atoms/conversations';
+import { useSwarmProjects } from '../hooks/useSwarmProjects';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
@@ -56,6 +57,10 @@ export function SwarmDashboard() {
   );
   const runtimeSnapshots = useSwarmRuntimeSnapshots(runtimeProjectRoots);
 
+  // Primary discovery: projects with oompa runs/ directories on disk.
+  // This surfaces swarms regardless of worker harness (gemini, codex, etc.).
+  const runsDiscoveredProjects = useSwarmProjects();
+
   // Tick every 30s to keep time-ago displays current
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -63,51 +68,77 @@ export function SwarmDashboard() {
     return () => clearInterval(id);
   }, []);
 
-  // Group worker sessions by project root
+  // Merge conversation-based projects with runs-discovered projects.
+  // Conversation data enriches runs-discovered projects; runs-discovered
+  // projects ensure visibility even without worker conversation files.
   const swarmProjects = useMemo((): SwarmProject[] => {
-    return Array.from(workerConversationsByProject.entries())
-      .map(([projectRoot, sessions]) => {
-        const runtime = runtimeSnapshots[projectRoot];
-        const runtimeRun = runtime?.available ? runtime.run : null;
-        const visibility = getWorkerVisibilitySummary(
-          sessions,
-          runtime,
-          (worker) => worker.isRunning
-        );
+    const projectMap = new Map<string, SwarmProject>();
 
-        // Run count: from runtime (disk), fallback to distinct swarmIds from sessions
-        const distinctSwarmIds = new Set(sessions.map((s) => s.swarmId).filter(Boolean));
-        const runCount = runtimeRun?.runCount ?? distinctSwarmIds.size;
+    // First pass: projects with worker conversations (existing behavior)
+    for (const [projectRoot, sessions] of workerConversationsByProject.entries()) {
+      const runtime = runtimeSnapshots[projectRoot];
+      const runtimeRun = runtime?.available ? runtime.run : null;
+      const visibility = getWorkerVisibilitySummary(
+        sessions,
+        runtime,
+        (worker) => worker.isRunning
+      );
 
-        let latestActivity: Date | undefined;
-        for (const w of sessions) {
-          const lastTime = getLastMessageTime(w.messages);
-          if (lastTime && (!latestActivity || lastTime > latestActivity)) {
-            latestActivity = lastTime;
-          }
+      const distinctSwarmIds = new Set(sessions.map((s) => s.swarmId).filter(Boolean));
+      const runCount = runtimeRun?.runCount ?? distinctSwarmIds.size;
+
+      let latestActivity: Date | undefined;
+      for (const w of sessions) {
+        const lastTime = getLastMessageTime(w.messages);
+        if (lastTime && (!latestActivity || lastTime > latestActivity)) {
+          latestActivity = lastTime;
         }
+      }
 
-        return {
-          projectRoot,
-          projectName: getProjectName(projectRoot),
-          sessions,
-          workerCount: visibility.totalWorkers,
-          runningCount: visibility.runningWorkers,
-          idleCount: Math.max(visibility.totalWorkers - visibility.runningWorkers, 0),
-          runCount,
-          latestActivity,
-          accentColor: getProjectColor(projectRoot),
-        };
-      })
-      .sort((a, b) => {
-        // Running projects first, then by latest activity
-        if (a.runningCount > 0 && b.runningCount === 0) return -1;
-        if (b.runningCount > 0 && a.runningCount === 0) return 1;
-        const aTime = a.latestActivity?.getTime() ?? 0;
-        const bTime = b.latestActivity?.getTime() ?? 0;
-        return bTime - aTime;
+      projectMap.set(projectRoot, {
+        projectRoot,
+        projectName: getProjectName(projectRoot),
+        sessions,
+        workerCount: visibility.totalWorkers,
+        runningCount: visibility.runningWorkers,
+        idleCount: Math.max(visibility.totalWorkers - visibility.runningWorkers, 0),
+        runCount,
+        latestActivity,
+        accentColor: getProjectColor(projectRoot),
       });
-  }, [runtimeSnapshots, workerConversationsByProject]);
+    }
+
+    // Second pass: add runs-discovered projects that have no worker conversations.
+    // These are projects where workers use non-Claude harnesses (gemini, codex).
+    for (const discovered of runsDiscoveredProjects) {
+      if (projectMap.has(discovered.projectRoot)) continue; // already covered
+      const runtimeRun = discovered.runtime?.available ? discovered.runtime.run : null;
+
+      projectMap.set(discovered.projectRoot, {
+        projectRoot: discovered.projectRoot,
+        projectName: discovered.projectName,
+        sessions: [],
+        workerCount: runtimeRun?.totalWorkers ?? 0,
+        runningCount: runtimeRun?.activeWorkers ?? 0,
+        idleCount: Math.max(
+          (runtimeRun?.totalWorkers ?? 0) - (runtimeRun?.activeWorkers ?? 0),
+          0
+        ),
+        runCount: runtimeRun?.runCount ?? 1,
+        latestActivity: undefined,
+        accentColor: getProjectColor(discovered.projectRoot),
+      });
+    }
+
+    return Array.from(projectMap.values()).sort((a, b) => {
+      // Running projects first, then by latest activity
+      if (a.runningCount > 0 && b.runningCount === 0) return -1;
+      if (b.runningCount > 0 && a.runningCount === 0) return 1;
+      const aTime = a.latestActivity?.getTime() ?? 0;
+      const bTime = b.latestActivity?.getTime() ?? 0;
+      return bTime - aTime;
+    });
+  }, [runtimeSnapshots, workerConversationsByProject, runsDiscoveredProjects]);
 
   if (swarmProjects.length === 0) {
     return (

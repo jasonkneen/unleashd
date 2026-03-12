@@ -704,6 +704,13 @@ class Conversation extends EventEmitter {
 
         // INVARIANT: dead process can't stream. Clear both atomically.
         // This is the safety net for crash/kill/OOM — all paths that skip message_complete.
+        
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.completedAt) {
+          lastMsg.completedAt = new Date();
+          lastMsg.completionReason = reason || (exitCode === 0 ? 'success' : 'error');
+        }
+
         this.isStreaming = false;
         this.isRunning = false;
         this.process = null;
@@ -903,6 +910,14 @@ class Conversation extends EventEmitter {
         this._clearTurnWatchdogs();
         // Mark all running sub-agents as complete
         const completedAt = new Date();
+        
+        // Update the last assistant message with completion metadata
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.completedAt) {
+          lastMsg.completedAt = completedAt;
+          lastMsg.completionReason = event.reason;
+        }
+
         for (const agent of this.subAgents) {
           if (agent.status === 'running') {
             agent.status = 'completed';
@@ -3219,6 +3234,52 @@ app.get('/api/swarm-runtime', (req: Request, res: Response) => {
 
   const snapshot = readLatestOompaRuntime(resolved);
   res.json(snapshot);
+});
+
+/**
+ * Discover all projects that have oompa runs/ directories.
+ * This is the primary swarm discovery mechanism — derived from oompa's own
+ * event-sourced run data, not from conversation files. Projects appear here
+ * even when workers use non-Claude harnesses (gemini, codex, etc.) that
+ * don't produce JSONL conversation files.
+ */
+app.get('/api/swarm-projects', (_req: Request, res: Response) => {
+  // Collect unique project roots from all conversations
+  const projectRoots = new Set<string>();
+  for (const conv of conversations.values()) {
+    if (conv.workingDirectory) {
+      projectRoots.add(path.resolve(conv.workingDirectory));
+    }
+  }
+
+  const projects: Array<{
+    projectRoot: string;
+    projectName: string;
+    runtime: ReturnType<typeof readLatestOompaRuntime>;
+  }> = [];
+
+  for (const root of projectRoots) {
+    const runsDir = path.join(root, 'runs');
+    try {
+      if (!fs.existsSync(runsDir)) continue;
+      const latestRun = readLatestRunDir(runsDir);
+      if (!latestRun) continue;
+      // Verify it has a started.json (not just a random directory)
+      const startedPath = path.join(latestRun.path, 'started.json');
+      if (!fs.existsSync(startedPath)) continue;
+
+      const runtime = readLatestOompaRuntime(root);
+      projects.push({
+        projectRoot: root,
+        projectName: root.split('/').filter(Boolean).pop() ?? root,
+        runtime,
+      });
+    } catch {
+      // Skip projects where runs/ scan fails
+    }
+  }
+
+  res.json({ projects });
 });
 
 /**
