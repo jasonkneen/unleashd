@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# setup-domain.sh — Configure unleashd.dev to resolve locally and forward port 80 → 7489
+# setup-domain.sh — Forward port 80 → 7489 for unleashd.localhost
 #
 # What it does:
-#   1. Adds "127.0.0.1 unleashd.dev" to /etc/hosts (if not already present)
+#   1. Removes old unleash*.dev host overrides if present
 #   2. Creates a pf (packet filter) anchor to redirect port 80 → 7489
-#   3. Loads the pf rule so http://unleashd.dev works without typing a port
+#   3. Loads the pf rule so http://unleashd.localhost works without typing a port
 #
 # Usage:
 #   sudo bash tools/setup-domain.sh          # install
@@ -14,10 +14,9 @@
 
 set -euo pipefail
 
-DOMAIN="unleashd.dev"
+DOMAIN="unleashd.localhost"
 DEV_PORT=7489
 TARGET_PORT=7489
-HOSTS_LINE="127.0.0.1 ${DOMAIN}"
 PF_ANCHOR_NAME="com.unleashd"
 PF_ANCHOR_FILE="/etc/pf.anchors/${PF_ANCHOR_NAME}"
 
@@ -29,13 +28,9 @@ fi
 remove() {
   echo "Removing ${DOMAIN} domain setup..."
 
-  # Remove hosts entry
-  if grep -qF "${HOSTS_LINE}" /etc/hosts; then
-    sed -i '' "/${DOMAIN}/d" /etc/hosts
-    echo "  ✓ Removed ${DOMAIN} from /etc/hosts"
-  else
-    echo "  - ${DOMAIN} not in /etc/hosts, skipping"
-  fi
+  # Remove old host overrides that may shadow localhost aliases
+  sed -i '' '/unleash\.dev/d;/unleashd\.dev/d;/unleashd\.localhost/d' /etc/hosts
+  echo "  ✓ Removed old unleash host overrides from /etc/hosts"
 
   # Remove pf anchor file
   if [[ -f "${PF_ANCHOR_FILE}" ]]; then
@@ -58,13 +53,9 @@ remove() {
 install() {
   echo "Setting up ${DOMAIN} → 127.0.0.1:${TARGET_PORT}..."
 
-  # Step 1: /etc/hosts
-  if grep -qF "${HOSTS_LINE}" /etc/hosts; then
-    echo "  - /etc/hosts already has ${DOMAIN}, skipping"
-  else
-    echo "${HOSTS_LINE}" >> /etc/hosts
-    echo "  ✓ Added ${DOMAIN} to /etc/hosts"
-  fi
+  # Step 1: clean up old host overrides. `.localhost` resolves to loopback automatically.
+  sed -i '' '/unleash\.dev/d;/unleashd\.dev/d;/unleashd\.localhost/d' /etc/hosts
+  echo "  ✓ Cleared old unleash host overrides from /etc/hosts"
 
   # Step 2: pf anchor file (port 80 → TARGET_PORT)
   cat > "${PF_ANCHOR_FILE}" <<EOF

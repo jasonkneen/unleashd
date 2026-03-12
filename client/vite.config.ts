@@ -1,29 +1,47 @@
 import { exec } from 'node:child_process';
-import dns from 'node:dns';
+import net from 'node:net';
 import react from '@vitejs/plugin-react';
 import { type ViteDevServer, defineConfig } from 'vite';
 
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
-const LOCAL_DOMAIN = 'unleashd.dev';
+const LOCAL_DOMAIN = 'unleashd.localhost';
+const LOCAL_HTTP_PORT = 80;
+
+function openInBrowser(url: string) {
+  const startCmd =
+    process.platform === 'darwin'
+      ? 'open'
+      : process.platform === 'win32'
+        ? 'start'
+        : 'xdg-open';
+  exec(`${startCmd} ${url}`);
+}
+
+function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void) {
+  const socket = net.connect({ host: '127.0.0.1', port: LOCAL_HTTP_PORT });
+  const finish = (result: boolean) => {
+    socket.removeAllListeners();
+    socket.destroy();
+    callback(result);
+  };
+
+  socket.setTimeout(250);
+  socket.once('connect', () => finish(true));
+  socket.once('timeout', () => finish(false));
+  socket.once('error', () => finish(false));
+}
 
 function openPreferredDevUrlPlugin() {
   return {
     name: 'open-preferred-dev-url',
     configureServer(server: ViteDevServer) {
       server.httpServer?.once('listening', () => {
-        dns.lookup(LOCAL_DOMAIN, (err: NodeJS.ErrnoException | null, address: string) => {
-          const useDomain = !err && (address === '127.0.0.1' || address === '::1');
-          const startUrl = useDomain
+        canReachBareLocalDomain((useBareDomain) => {
+          const startUrl = useBareDomain
             ? `http://${LOCAL_DOMAIN}`
             : `http://localhost:${DEV_CLIENT_PORT}`;
-          const startCmd =
-            process.platform === 'darwin'
-              ? 'open'
-              : process.platform === 'win32'
-                ? 'start'
-                : 'xdg-open';
-          exec(`${startCmd} ${startUrl}`);
+          openInBrowser(startUrl);
         });
       });
     },
