@@ -120,7 +120,7 @@ export function Sidebar() {
     () =>
       allConversations.filter(
         (conv) =>
-          // Hide workers unless promoted to main view
+          // Hide workers unless promoted to main view — they belong in the Swarm UI.
           !(conv.isWorker && !promotedSet.has(conv.id))
       ),
     [allConversations, promotedSet]
