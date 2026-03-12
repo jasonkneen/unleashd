@@ -39,27 +39,39 @@ function ensureBareLocalDomain(callback: (startUrl: string) => void) {
   const bareUrl = `http://${LOCAL_DOMAIN}`;
 
   const finish = (useBareDomain: boolean) => {
+    if (useBareDomain) {
+      console.log(`[unleashd] Using bare local domain: ${bareUrl}`);
+    } else {
+      console.log(`[unleashd] Falling back to ${fallbackUrl}`);
+    }
     callback(useBareDomain ? bareUrl : fallbackUrl);
   };
 
   canReachBareLocalDomain((useBareDomain) => {
     if (useBareDomain) {
+      console.log('[unleashd] Local port-80 routing already active');
       finish(true);
       return;
     }
 
     if (process.platform !== 'darwin' || !process.stdin.isTTY || !process.stdout.isTTY) {
+      console.log(
+        '[unleashd] Skipping automatic local domain setup: requires macOS + interactive TTY'
+      );
       finish(false);
       return;
     }
 
     try {
+      console.log('[unleashd] Attempting automatic local domain setup...');
       execSync(`sudo bash ${JSON.stringify(SETUP_SCRIPT)}`, { stdio: 'inherit' });
     } catch {
+      console.log('[unleashd] Automatic local domain setup failed or was cancelled');
       finish(false);
       return;
     }
 
+    console.log('[unleashd] Re-checking local domain after setup');
     canReachBareLocalDomain(finish);
   });
 }

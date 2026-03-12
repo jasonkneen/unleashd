@@ -4496,22 +4496,29 @@ function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void): vo
 function ensureBareLocalDomain(callback: (useBareDomain: boolean) => void): void {
   canReachBareLocalDomain((useBareDomain) => {
     if (useBareDomain) {
+      console.log(`[unleashd] Local port-80 routing active for http://${LOCAL_DOMAIN}`);
       callback(true);
       return;
     }
 
     if (process.platform !== 'darwin' || !process.stdin.isTTY || !process.stdout.isTTY) {
+      console.log(
+        '[unleashd] Skipping automatic local domain setup: requires macOS + interactive TTY'
+      );
       callback(false);
       return;
     }
 
     try {
+      console.log('[unleashd] Attempting automatic local domain setup...');
       execSync(`sudo bash ${JSON.stringify(SETUP_SCRIPT)}`, { stdio: 'inherit' });
     } catch {
+      console.log('[unleashd] Automatic local domain setup failed or was cancelled');
       callback(false);
       return;
     }
 
+    console.log('[unleashd] Re-checking local domain after setup');
     canReachBareLocalDomain(callback);
   });
 }
