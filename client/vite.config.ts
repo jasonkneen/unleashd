@@ -5,7 +5,7 @@ import { type ViteDevServer, defineConfig } from 'vite';
 
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
-const LOCAL_DOMAIN = 'unleash.dev';
+const LOCAL_DOMAIN = 'unleashd.dev';
 
 function openPreferredDevUrlPlugin() {
   return {
@@ -15,7 +15,7 @@ function openPreferredDevUrlPlugin() {
         dns.lookup(LOCAL_DOMAIN, (err: NodeJS.ErrnoException | null, address: string) => {
           const useDomain = !err && (address === '127.0.0.1' || address === '::1');
           const startUrl = useDomain
-            ? `http://${LOCAL_DOMAIN}:${DEV_CLIENT_PORT}`
+            ? `http://${LOCAL_DOMAIN}`
             : `http://localhost:${DEV_CLIENT_PORT}`;
           const startCmd =
             process.platform === 'darwin'

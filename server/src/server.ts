@@ -4472,9 +4472,10 @@ process.on('SIGTERM', () => {
   }, HOT_RELOAD_DRAIN_MS);
 });
 
-const PORT = process.env.PORT || 7499;
 const DEV_CLIENT_PORT = 7489;
-const LOCAL_DOMAIN = 'unleash.dev';
+const DEV_API_PORT = 7499;
+const LOCAL_DOMAIN = 'unleashd.dev';
+const PORT = process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
 
 function checkPort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -4944,14 +4945,12 @@ async function startServer(): Promise<void> {
   // Start listening FIRST so the Vite proxy can connect immediately.
   server.listen(portNumber, () => {
     const isDevelopment = process.env.NODE_ENV === 'development';
-    const domainUrl = isDevelopment
-      ? `http://${LOCAL_DOMAIN}:${DEV_CLIENT_PORT}`
-      : `http://${LOCAL_DOMAIN}`;
+    const domainUrl = `http://${LOCAL_DOMAIN}`;
     const fallbackUrl = isDevelopment
       ? `http://localhost:${DEV_CLIENT_PORT}`
       : `http://localhost:${portNumber}`;
 
-    // Check if unleash.dev resolves to localhost (setup-domain.sh was run)
+    // Check if unleashd.dev resolves to localhost (setup-domain.sh was run)
     const dns = require('dns') as typeof import('dns');
     dns.lookup(LOCAL_DOMAIN, (err: NodeJS.ErrnoException | null, address: string) => {
       const useDomain = !err && (address === '127.0.0.1' || address === '::1');

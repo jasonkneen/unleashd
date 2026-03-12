@@ -52,13 +52,13 @@ pnpm install
 pnpm dev
 ```
 
-Opens at [http://unleash.dev:7489](http://unleash.dev:7489) if you have the local domain configured, otherwise [http://localhost:7489](http://localhost:7489), with the API server on port 7499.
+Opens at [http://unleashd.dev](http://unleashd.dev) if you have the local domain configured, otherwise [http://localhost:7489](http://localhost:7489). In dev, the API server stays on port `7499` behind the Vite proxy.
 
 ### Production
 
 ```bash
 pnpm build
-pnpm start     # serves built client + API on port 7499
+pnpm start     # serves built client + API on port 7489
 ```
 
 ## Supported Agents
