@@ -6,6 +6,12 @@ const OOMPA_SUBCOMMANDS = new Set(['run', 'swarm']);
 const OOMPA_NON_LAUNCH_FLAGS = ['--dry-run', '--help', '-h'];
 const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 
+function isLikelyOompaConfigArg(arg: string): boolean {
+  if (!arg || arg.startsWith('-')) return false;
+  const lower = arg.toLowerCase();
+  return lower.endsWith('.json');
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === 'object') return value as Record<string, unknown>;
   return null;
@@ -213,10 +219,14 @@ function detectOompaSubcommand(command: string, depth = 0): 'run' | 'swarm' | nu
 
     const commandName = basenameLower(normalized[0]);
     const subcommand = normalized[1]?.toLowerCase();
+    const args = normalized.slice(1);
     if (commandName === 'oompa' && subcommand && OOMPA_SUBCOMMANDS.has(subcommand)) {
-      const args = normalized.slice(2);
       if (isNonLaunchOompaInvocation(args)) continue;
       return subcommand as 'run' | 'swarm';
+    }
+    if (commandName === 'oompa' && isLikelyOompaConfigArg(normalized[1] ?? '')) {
+      if (isNonLaunchOompaInvocation(args)) continue;
+      return 'run';
     }
 
     if (SHELL_WRAPPER_NAMES.has(commandName)) {
