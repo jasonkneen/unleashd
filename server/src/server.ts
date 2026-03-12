@@ -4473,6 +4473,8 @@ process.on('SIGTERM', () => {
 });
 
 const PORT = process.env.PORT || 7499;
+const DEV_CLIENT_PORT = 7489;
+const LOCAL_DOMAIN = 'unleash.dev';
 
 function checkPort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -4941,11 +4943,28 @@ async function startServer(): Promise<void> {
 
   // Start listening FIRST so the Vite proxy can connect immediately.
   server.listen(portNumber, () => {
-    console.log(`Server running on http://localhost:${portNumber}`);
-    const clientPort = process.env.NODE_ENV === 'development' ? 7489 : portNumber;
-    const startUrl = `http://localhost:${clientPort}`;
-    const startCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-    require('child_process').exec(`${startCmd} ${startUrl}`);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    const domainUrl = isDevelopment
+      ? `http://${LOCAL_DOMAIN}:${DEV_CLIENT_PORT}`
+      : `http://${LOCAL_DOMAIN}`;
+    const fallbackUrl = isDevelopment
+      ? `http://localhost:${DEV_CLIENT_PORT}`
+      : `http://localhost:${portNumber}`;
+
+    // Check if unleash.dev resolves to localhost (setup-domain.sh was run)
+    const dns = require('dns') as typeof import('dns');
+    dns.lookup(LOCAL_DOMAIN, (err: NodeJS.ErrnoException | null, address: string) => {
+      const useDomain = !err && (address === '127.0.0.1' || address === '::1');
+      const startUrl = useDomain ? domainUrl : fallbackUrl;
+      if (isDevelopment) {
+        console.log(`Server running on http://localhost:${portNumber} (frontend on ${startUrl})`);
+        return;
+      }
+      console.log(`Server running on ${startUrl} (backend on port ${portNumber})`);
+      const startCmd =
+        process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+      require('child_process').exec(`${startCmd} ${startUrl}`);
+    });
   });
 
   // Unblock WebSocket handlers immediately — clients get an init with whatever

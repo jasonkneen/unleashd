@@ -52,13 +52,13 @@ pnpm install
 pnpm dev
 ```
 
-Opens at [http://localhost:5173](http://localhost:5173) (client) with the API server on port 3000.
+Opens at [http://unleash.dev:7489](http://unleash.dev:7489) if you have the local domain configured, otherwise [http://localhost:7489](http://localhost:7489), with the API server on port 7499.
 
 ### Production
 
 ```bash
 pnpm build
-pnpm start     # serves built client + API on port 3000
+pnpm start     # serves built client + API on port 7499
 ```
 
 ## Supported Agents
