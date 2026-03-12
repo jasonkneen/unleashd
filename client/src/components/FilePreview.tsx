@@ -1,5 +1,5 @@
 /**
- * FilePreview — inline file path preview for images, HTML & video in chat messages.
+ * FilePreview — inline file path preview for images, HTML, video, and markdown in chat messages.
  *
  * Detects file paths (in inline code) ending in previewable extensions and renders
  * them as: icon + clickable link + hover popup preview.
@@ -17,16 +17,19 @@
  * VirtualizedMessageList.tsx.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './FilePreview.css';
 
 const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|webp)$/i;
 const HTML_EXTENSIONS = /\.(html|htm)$/i;
+const MARKDOWN_EXTENSIONS = /\.(md|markdown)$/i;
 const VIDEO_EXTENSIONS = /\.(mp4|webm)$/i;
 
 /**
- * Returns 'image' | 'html' | 'video' | null for a given text string.
+ * Returns 'image' | 'html' | 'video' | 'markdown' | null for a given text string.
  * Matches absolute paths (`/foo/bar.png`) and relative paths with at least one
  * directory separator (`test_outputs/render.png`). Bare filenames like `foo.png`
  * are rejected to avoid false-matching inline code in prose.
@@ -47,7 +50,7 @@ const VIDEO_EXTENSIONS = /\.(mp4|webm)$/i;
  * contains "/", and ends with ".png", it matched — rendering the entire block
  * as a single FilePreview (all paths collapsed into one line, no hover).
  */
-export function getPreviewType(text: string): 'image' | 'html' | 'video' | null {
+export function getPreviewType(text: string): 'image' | 'html' | 'video' | 'markdown' | null {
   // DO NOT REMOVE: Rejects multi-line and whitespace text. See docstring above.
   if (text.includes(' ') || text.includes('\n')) return null;
   // Must contain at least one `/` (absolute or relative with directory)
@@ -55,17 +58,18 @@ export function getPreviewType(text: string): 'image' | 'html' | 'video' | null 
   if (IMAGE_EXTENSIONS.test(text)) return 'image';
   if (VIDEO_EXTENSIONS.test(text)) return 'video';
   if (HTML_EXTENSIONS.test(text)) return 'html';
+  if (MARKDOWN_EXTENSIONS.test(text)) return 'markdown';
   return null;
 }
 
 interface FilePreviewProps {
   path: string;
-  type: 'image' | 'html' | 'video';
+  type: 'image' | 'html' | 'video' | 'markdown';
   /** When set, relative paths are resolved against this directory for the API URL. */
   workingDirectory?: string;
 }
 
-const TYPE_ICONS = { image: '🖼', html: '🌐', video: '🎬' } as const;
+const TYPE_ICONS = { image: '🖼', html: '🌐', video: '🎬', markdown: '📝' } as const;
 
 /** Gap in px between the trigger element and the popup */
 const POPUP_GAP = 8;
@@ -83,10 +87,39 @@ export function FilePreview({ path, type, workingDirectory }: FilePreviewProps) 
   // Resolve relative paths against workingDirectory for the API URL.
   // Display text stays as the original `path` the user wrote.
   const resolvedPath = path.startsWith('/') ? path : `${workingDirectory}/${path}`;
-  const fileUrl = `/api/files?path=${encodeURIComponent(resolvedPath)}`;
+  // HTML files use path-based /api/serve/ so relative assets (videos, images, CSS)
+  // resolve naturally from the file's directory. The query-param /api/files proxy
+  // breaks relative paths since the browser sees the URL as /api/files, not the
+  // file's actual directory.
+  const fileUrl = type === 'html'
+    ? `/api/serve${resolvedPath}`
+    : `/api/files?path=${encodeURIComponent(resolvedPath)}`;
   const triggerRef = useRef<HTMLSpanElement>(null);
   const [hovered, setHovered] = useState(false);
   const [position, setPosition] = useState<PopupPosition | null>(null);
+  const [markdownContent, setMarkdownContent] = useState<string | null>(null);
+  const [markdownError, setMarkdownError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hovered || type !== 'markdown' || markdownContent !== null || markdownError) return;
+
+    const controller = new AbortController();
+
+    fetch(fileUrl, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const text = await response.text();
+        setMarkdownContent(text);
+      })
+      .catch((error: unknown) => {
+        if ((error as Error).name === 'AbortError') return;
+        setMarkdownError(error instanceof Error ? error.message : 'Failed to load markdown');
+      });
+
+    return () => controller.abort();
+  }, [fileUrl, hovered, markdownContent, markdownError, type]);
 
   const handleMouseEnter = () => {
     const rect = triggerRef.current!.getBoundingClientRect();
@@ -130,6 +163,17 @@ export function FilePreview({ path, type, workingDirectory }: FilePreviewProps) 
         )}
         {type === 'html' && (
           <iframe className="file-preview-iframe" src={fileUrl} sandbox="" title={path} />
+        )}
+        {type === 'markdown' && (
+          <div className="file-preview-markdown">
+            {markdownError ? (
+              <div className="file-preview-markdown-status">{markdownError}</div>
+            ) : markdownContent === null ? (
+              <div className="file-preview-markdown-status">Loading preview...</div>
+            ) : (
+              <Markdown remarkPlugins={[remarkGfm]}>{markdownContent}</Markdown>
+            )}
+          </div>
         )}
         <span className="file-preview-path">{path}</span>
       </div>,

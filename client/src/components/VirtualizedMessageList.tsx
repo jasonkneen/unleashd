@@ -160,7 +160,7 @@ function collapseToolLines(content: string): string {
 
 // -- Types: what a single line within a multi-line code block can be -----------
 type PathBlockEntry =
-  | { kind: 'file_path'; path: string; type: 'image' | 'html' | 'video' }
+  | { kind: 'file_path'; path: string; type: 'image' | 'html' | 'video' | 'markdown' }
   | { kind: 'text_line'; text: string };
 
 // -- Types: what the entire <code> element represents -------------------------
@@ -169,7 +169,7 @@ type CodeContent =
   | { kind: 'syntax_highlighted'; className: string }
   | { kind: 'path_block'; entries: PathBlockEntry[] }
   | { kind: 'clickable_url'; url: string }
-  | { kind: 'single_file_path'; path: string; type: 'image' | 'html' | 'video' }
+  | { kind: 'single_file_path'; path: string; type: 'image' | 'html' | 'video' | 'markdown' }
   | { kind: 'plain_code' };
 
 // -- Canonicalization: classify each line independently -----------------------
@@ -341,13 +341,14 @@ type ContentSegment =
 // Only treat normalized shell tool_use fragments as run-widget triggers.
 // This avoids false positives from plain assistant prose containing `oompa run`.
 //
-// Two patterns (OR'd):
+// Patterns:
 //   1. Canonical: ⚡ Bash oompa run|swarm :: <command...>
 //      (from formatToolUse when detectOompaSubcommand succeeds)
-//   2. Raw env-wrapped: ⚡ Bash env -u VAR [-u VAR]... oompa run|swarm <args>
-//      (fallback for old JSONLs or when canonical rewrite didn't run)
+//   2. Raw env-wrapped canonical: ⚡ Bash env -u VAR [-u VAR]... oompa run|swarm <args>
+//   3. Raw shorthand launch: ⚡ Bash oompa <config>.json <args>
+//      (legacy shorthand like `oompa oompa/xyz.json`; treated as `oompa run`)
 const OOMPA_RUN_TOOL_FRAGMENT_RE =
-  /⚡\s+(?:bash|shell|run_shell_command)\s+(?:oompa\s+(?:run|swarm)\s+::|(?:env\s+(?:-\w+\s+\S+\s+)*)?oompa\s+(?:run|swarm)\s)[^\n]*/i;
+  /⚡\s+(?:bash|shell|run_shell_command)\s+(?:(?:oompa\s+(?:run|swarm)\s+::|(?:env\s+(?:-\w+\s+\S+\s+)*)?oompa\s+(?:run|swarm)\s)[^\n]*|(?:env\s+(?:-\w+\s+\S+\s+)*)?oompa\s+\S+\.json[^\n]*)/i;
 
 function splitWidgets(content: string): ContentSegment[] {
   const segments: ContentSegment[] = [];
@@ -494,12 +495,15 @@ export type MessageGroup =
 /**
  * Returns true if the message is an assistant turn consisting entirely of
  * tool-emoji lines (no explanatory prose). Used to group consecutive tool-only
- * turns into a single collapsible block.
+ * turns into a single collapsible block. Oompa launch lines are excluded so
+ * the inline swarm widget stays visible instead of disappearing into the
+ * generic "N tool calls" accordion.
  */
 export function isToolCallOnlyMessage(msg: Message): boolean {
   if (msg.role !== 'assistant') return false;
   const content = msg.content?.trim() ?? '';
   if (!content) return false;
+  if (OOMPA_RUN_TOOL_FRAGMENT_RE.test(content)) return false;
   return content
     .split('\n')
     .filter((l) => l.trim().length > 0)
