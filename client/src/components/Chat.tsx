@@ -849,17 +849,24 @@ export function Chat() {
                 <polyline points="7 3 7 8 15 8" />
               </svg>
             </button>
-            <button
-              type="button"
-              className={`send-btn ${willQueue ? 'interrupt-mode' : ''}`}
-              onClick={willQueue ? handleInterrupt : handleSend}
-              disabled={!confirmed || !hasContent}
-              title={
-                willQueue ? 'Enter: Interrupt & send | Tab: Queue' : 'Enter: Send | Tab: Queue'
-              }
-            >
-              {willQueue ? 'Interrupt' : 'Send'}
-            </button>
+            <div className="send-action">
+              <button
+                type="button"
+                className={`send-btn ${willQueue ? 'interrupt-mode' : ''}`}
+                onClick={willQueue ? handleInterrupt : handleSend}
+                disabled={!confirmed || !hasContent}
+                title={
+                  willQueue ? 'Enter: Interrupt & send | Tab: Queue' : 'Enter: Send | Tab: Queue'
+                }
+              >
+                {willQueue ? 'Interrupt' : 'Send'}
+              </button>
+              {isStreaming && hasContent && (
+                <div className="send-queue-hint" aria-live="polite">
+                  Tab to queue
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

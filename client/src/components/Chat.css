@@ -521,9 +521,24 @@
 .input-actions {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: flex-end;
   flex-shrink: 0;
-  max-height: 44px; /* Fixed height - don't grow with textarea */
+}
+
+.send-action {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.send-queue-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .message-input {
