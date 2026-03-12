@@ -1,14 +1,28 @@
-# oomp
+# unleashd
 
-A cross-client layer on top of agent swarms.
+A SWARM FIRST ADE (Agent Development Environment) for running and managing agent swarms across Claude Code, Codex, Gemini, and OpenCode.
 
-![oomp](docs/screenshots/gallery.png)
+<p align="center">
+  <video
+    src="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/resources/unleashd.mp4"
+    poster="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/screenshots/gallery.png"
+    controls
+    muted
+    playsinline
+    preload="metadata"
+    width="100%">
+  </video>
+</p>
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/nbardy/unleashd/main/docs/resources/unleashd.mp4">Download the unleashd demo video</a>
+</p>
 
 ## The problem
 
 You run agents from different CLIs — Claude Code, Codex, Gemini, OpenCode. Each has its own terminal, its own session history, its own way of showing what happened. When you're running a swarm of agents across a codebase, there's no single place to see what's going on, steer the work, or review what was done.
 
-## What oomp does
+## What unleashd does
 
 Two things:
 

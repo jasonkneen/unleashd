@@ -3,19 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unleashd - Multi-Agent Swarm Orchestrator</title>
+    <title>Unleashd - SWARM FIRST ADE</title>
     
     <!-- Open Graph / Meta Tags -->
-    <meta property="og:title" content="Unleashd - Multi-Agent Swarm Orchestrator">
-    <meta property="og:description" content="A local, git-worktree multi-agent swarm orchestrator for Codex, Claude, Gemini, and OpenCode.">
+    <meta property="og:title" content="Unleashd - SWARM FIRST ADE">
+    <meta property="og:description" content="Unleashd is a SWARM FIRST ADE (Agent Development Environment) for Claude Code, Codex, Gemini, and OpenCode.">
     <meta property="og:image" content="https://nbardy.github.io/unleashd/screenshots/gallery.png">
     <meta property="og:url" content="https://nbardy.github.io/unleashd/">
     <meta property="og:type" content="website">
     
     <!-- Twitter Meta Tags -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Unleashd - Multi-Agent Swarm Orchestrator">
-    <meta name="twitter:description" content="A local, git-worktree multi-agent swarm orchestrator for Codex, Claude, Gemini, and OpenCode.">
+    <meta name="twitter:title" content="Unleashd - SWARM FIRST ADE">
+    <meta name="twitter:description" content="Unleashd is a SWARM FIRST ADE (Agent Development Environment) for Claude Code, Codex, Gemini, and OpenCode.">
     <meta name="twitter:image" content="https://nbardy.github.io/unleashd/screenshots/gallery.png">
 
     <style>
@@ -74,7 +74,7 @@
         .hero {
             position: relative;
             text-align: center;
-            padding: 6rem 1.5rem 4rem;
+            padding: 5.5rem 1.5rem 3rem;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -286,6 +286,10 @@
             z-index: 10;
         }
 
+        .hero-media {
+            margin-top: -1.75rem;
+        }
+
         .screenshot::before {
             content: '';
             display: block;
@@ -307,10 +311,17 @@
             box-shadow: 20px 0 0 #eab308, 40px 0 0 #22c55e;
         }
 
-        .screenshot img {
+        .screenshot img,
+        .screenshot video {
             width: 100%;
             display: block;
             height: auto;
+        }
+
+        .hero-video {
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            background: #020617;
         }
 
         /* Details Content - Below Fold */
@@ -497,6 +508,7 @@
             .install-box { max-width: 100%; }
             .features { grid-template-columns: 1fr; }
             .agents-table th, .agents-table td { padding: 1rem; }
+            .hero-media { margin-top: -0.75rem; }
             .content-block { padding: 2rem 1.5rem; }
         }
     </style>
@@ -510,7 +522,7 @@
         </div>
         <h2 class="tagline">Unleash the swarm!</h2>
         
-        <p class="subtitle">Open Source Swarm first agent development environment</p>
+        <p class="subtitle">Open Source SWARM FIRST ADE (Agent Development Environment)</p>
 
         <div class="install-box">
             <code id="install-cmd">git clone --recursive https://github.com/nbardy/unleashd && cd unleashd && pnpm install && pnpm build && pnpm start</code>
@@ -532,12 +544,23 @@
     </header>
 
     <main>
-        <div class="screenshot">
-            <img src="screenshots/gallery.png" alt="Unleashd UI showing multi-agent conversation management">
+        <div class="screenshot hero-media">
+            <video
+                class="hero-video"
+                autoplay
+                muted
+                loop
+                playsinline
+                controls
+                preload="metadata"
+                poster="screenshots/gallery.png"
+                aria-label="Unleashd product demo video">
+                <source src="resources/unleashd.mp4" type="video/mp4">
+            </video>
         </div>
 
         <div class="content-block">
-            <p class="details">An open source cross agent development environment with swarms as first level primitives. This lets you bring your own max accounts, reduce costs, and manage agents and swarms across multiple providers. Supports Claude, Codex, OpenCode, and Gemini CLI, and lets you filter and search for chats across all platforms. And launch swarms that coordinate agents using all envs.</p>
+            <p class="details">Unleashd is an open source SWARM FIRST ADE (Agent Development Environment) with swarms as first-class primitives. It lets you bring your own max accounts, reduce costs, and manage agents and swarms across multiple providers. Supports Claude, Codex, OpenCode, and Gemini CLI, and lets you filter and search chats across all platforms while launching swarms that coordinate agents across environments.</p>
             <p class="details">Keep your token costs down, utilize the best existing harnesses for each model AND run your oompa loompa swarms for autonomous swarm development, built on top of the oompa loompa.</p>
         </div>
 
