@@ -4477,6 +4477,7 @@ const DEV_API_PORT = 7499;
 const LOCAL_DOMAIN = 'unleashd.localhost';
 const LOCAL_HTTP_PORT = 80;
 const PORT = process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
+const SETUP_SCRIPT = path.join(__dirname, '../../tools/setup-domain.sh');
 
 function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void): void {
   const socket = net.connect({ host: '127.0.0.1', port: LOCAL_HTTP_PORT });
@@ -4490,6 +4491,29 @@ function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void): vo
   socket.once('connect', () => finish(true));
   socket.once('timeout', () => finish(false));
   socket.once('error', () => finish(false));
+}
+
+function ensureBareLocalDomain(callback: (useBareDomain: boolean) => void): void {
+  canReachBareLocalDomain((useBareDomain) => {
+    if (useBareDomain) {
+      callback(true);
+      return;
+    }
+
+    if (process.platform !== 'darwin' || !process.stdin.isTTY || !process.stdout.isTTY) {
+      callback(false);
+      return;
+    }
+
+    try {
+      execSync(`sudo bash ${JSON.stringify(SETUP_SCRIPT)}`, { stdio: 'inherit' });
+    } catch {
+      callback(false);
+      return;
+    }
+
+    canReachBareLocalDomain(callback);
+  });
 }
 
 function checkPort(port: number): Promise<boolean> {
@@ -4965,8 +4989,8 @@ async function startServer(): Promise<void> {
       ? `http://localhost:${DEV_CLIENT_PORT}`
       : `http://localhost:${portNumber}`;
 
-    // Use the bare localhost alias only when the local port-80 redirect is active.
-    canReachBareLocalDomain((useDomain) => {
+    // Use the bare localhost alias when port-80 routing is active, or set it up on demand.
+    ensureBareLocalDomain((useDomain) => {
       const startUrl = useDomain ? domainUrl : fallbackUrl;
       if (isDevelopment) {
         console.log(`Server running on http://localhost:${portNumber} (frontend on ${startUrl})`);

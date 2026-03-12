@@ -52,7 +52,7 @@ pnpm install
 pnpm dev
 ```
 
-Opens at [http://unleashd.localhost](http://unleashd.localhost) if you have the local port-80 redirect configured, otherwise [http://localhost:7489](http://localhost:7489). In dev, the API server stays on port `7499` behind the Vite proxy.
+Opens at [http://unleashd.localhost](http://unleashd.localhost) if local port-80 routing is active, otherwise [http://localhost:7489](http://localhost:7489). On macOS startup, unleashd will try to run the local routing setup automatically and may prompt for `sudo` once. In dev, the API server stays on port `7499` behind the Vite proxy.
 
 ### Production
 

@@ -1,12 +1,14 @@
-import { exec } from 'node:child_process';
+import { exec, execSync } from 'node:child_process';
 import net from 'node:net';
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
 import { type ViteDevServer, defineConfig } from 'vite';
 
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
 const LOCAL_DOMAIN = 'unleashd.localhost';
 const LOCAL_HTTP_PORT = 80;
+const SETUP_SCRIPT = fileURLToPath(new URL('../tools/setup-domain.sh', import.meta.url));
 
 function openInBrowser(url: string) {
   const startCmd =
@@ -32,15 +34,42 @@ function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void) {
   socket.once('error', () => finish(false));
 }
 
+function ensureBareLocalDomain(callback: (startUrl: string) => void) {
+  const fallbackUrl = `http://localhost:${DEV_CLIENT_PORT}`;
+  const bareUrl = `http://${LOCAL_DOMAIN}`;
+
+  const finish = (useBareDomain: boolean) => {
+    callback(useBareDomain ? bareUrl : fallbackUrl);
+  };
+
+  canReachBareLocalDomain((useBareDomain) => {
+    if (useBareDomain) {
+      finish(true);
+      return;
+    }
+
+    if (process.platform !== 'darwin' || !process.stdin.isTTY || !process.stdout.isTTY) {
+      finish(false);
+      return;
+    }
+
+    try {
+      execSync(`sudo bash ${JSON.stringify(SETUP_SCRIPT)}`, { stdio: 'inherit' });
+    } catch {
+      finish(false);
+      return;
+    }
+
+    canReachBareLocalDomain(finish);
+  });
+}
+
 function openPreferredDevUrlPlugin() {
   return {
     name: 'open-preferred-dev-url',
     configureServer(server: ViteDevServer) {
       server.httpServer?.once('listening', () => {
-        canReachBareLocalDomain((useBareDomain) => {
-          const startUrl = useBareDomain
-            ? `http://${LOCAL_DOMAIN}`
-            : `http://localhost:${DEV_CLIENT_PORT}`;
+        ensureBareLocalDomain((startUrl) => {
           openInBrowser(startUrl);
         });
       });
