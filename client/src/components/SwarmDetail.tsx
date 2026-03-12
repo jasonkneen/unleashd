@@ -13,7 +13,7 @@ import { createConversation } from '../atoms/actions';
 import { conversationAtomFamily, workersByProjectAtom } from '../atoms/conversations';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
-import { getProjectName, getProjectRoot } from '../utils/swarmUtils';
+import { getProjectRoot } from '../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getLastMessageTime } from '../utils/time';
 import { VirtualizedMessageList } from './VirtualizedMessageList';
@@ -200,7 +200,7 @@ function WorkerChatPane({
   runningState,
 }: {
   conversationId: string | null;
-  label: string;
+  label?: string;
   accentColor: 'cyan' | 'magenta';
   runningState: 'running' | 'idle';
 }) {
@@ -224,7 +224,7 @@ function WorkerChatPane({
   if (!conversationId || !conversation) {
     return (
       <div className="worker-chat-pane empty">
-        <div className="empty-state">No {label.toLowerCase()} log</div>
+        <div className="empty-state">No {label ? label.toLowerCase() : 'worker'} log</div>
       </div>
     );
   }
@@ -235,9 +235,9 @@ function WorkerChatPane({
   return (
     <div className="worker-chat-pane">
       <div className={`worker-pane-header pane-${accentColor}`}>
-        <span className={`pane-label ${accentColor}`}>{label}</span>
+        {label && <span className={`pane-label ${accentColor}`}>{label}</span>}
         <span className="worker-pane-id">{conversationId.substring(0, 8)}</span>
-        <span className={`role-badge role-${role}`}>{ROLE_LABELS[role]}</span>
+        {role !== 'work' && <span className={`role-badge role-${role}`}>{ROLE_LABELS[role]}</span>}
         {model && (
           <span className={`worker-pane-provider provider-${conversation.provider || 'claude'}`}>
             {model}
@@ -412,10 +412,18 @@ function OompaConfigPanel({ projectRoot }: { projectRoot: string }) {
 // SwarmRunsPanel — shows structured run history from runs/{swarm-id}/ files
 // =============================================================================
 
-function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
+function SwarmRunsPanel({
+  projectRoot,
+  selectedRunId,
+  onSelectRunId,
+}: {
+  projectRoot: string;
+  selectedRunId: string | null;
+  onSelectRunId: (id: string) => void;
+}) {
   const [runs, setRuns] = useState<SwarmRun[]>([]);
   const [reviews, setReviews] = useState<SwarmReviewLog[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const setSelectedRunId = onSelectRunId;
   const [expandedReview, setExpandedReview] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [newFilesCount, setNewFilesCount] = useState<number | null>(null);
@@ -425,7 +433,7 @@ function SwarmRunsPanel({ projectRoot }: { projectRoot: string }) {
       .then((res) => res.json())
       .then((data: { runs: SwarmRun[] }) => {
         setRuns(data.runs);
-        if (data.runs.length > 0) {
+        if (data.runs.length > 0 && !selectedRunId) {
           setSelectedRunId(data.runs[0].swarmId);
         }
         setLoading(false);
@@ -674,16 +682,23 @@ export function SwarmDetail() {
   // Tab state
   const [activeTab, setActiveTab] = useState<SwarmTab>('runs');
 
+  // Selected run ID — lifted here so handleStartDebugConversation uses the correct swarm
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
   // Inline confirmation for destructive stop/kill actions (replaces window.confirm/alert)
   const [confirmAction, setConfirmAction] = useState<'stop' | 'kill' | null>(null);
   const [signalError, setSignalError] = useState<string | null>(null);
 
-  // Swarm debug conversation: create a new Claude conversation pre-seeded with swarm context
+  // Swarm debug conversation: create a new Claude conversation pre-seeded with swarm context.
+  // Uses selectedRunId (the run the user has selected in the Runs tab) so the debug context
+  // matches what the user is looking at — not always the latest/live swarm.
   const handleStartDebugConversation = useCallback(async () => {
-    const swarmId = runtimeSnapshot?.run?.swarmId ?? null;
+    // selectedRunId is the run currently selected in SwarmRunsPanel; fall back to runtime's
+    // swarmId only when no run has been selected yet (e.g. panel not yet loaded).
+    const swarmId = selectedRunId ?? runtimeSnapshot?.run?.swarmId ?? null;
     const configPath = runtimeSnapshot?.run?.configPath ?? null;
 
-    // Fetch the latest run summary for the prefix context.
+    // Fetch run summary for the selected swarm.
     let summary: SwarmRunSummary | null = null;
     let startedAt: string | null = null;
     try {
@@ -704,7 +719,7 @@ export function SwarmDetail() {
     const prefix = buildSwarmDebugPrefix(projectRoot, configPath, swarmId, summary, startedAt);
     const id = createConversation(projectRoot, 'claude', undefined, prefix);
     navigate(`/chat/${id}`);
-  }, [projectRoot, runtimeSnapshot, createConversation, navigate]);
+  }, [projectRoot, selectedRunId, runtimeSnapshot, createConversation, navigate]);
 
   // Filter workers belonging to this project, build exec groups with paired reviews/fixes.
   // Reviews/fixes are matched to exec workers by time proximity within the same swarmId.
@@ -824,7 +839,6 @@ export function SwarmDetail() {
     return earliest;
   }, [allWorkers]);
 
-  const projectName = getProjectName(projectRoot);
   const displayPath = projectRoot.replace(/^\/Users\/[^/]+/, '~');
 
   if (!projectRoot) {
@@ -848,8 +862,7 @@ export function SwarmDetail() {
           &#8592; Swarm Projects Overview
         </button>
         <div className="swarm-detail-title-block">
-          <h2>{projectName}</h2>
-          <span className="swarm-detail-path">{displayPath}</span>
+          <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', fontWeight: 500 }}>{displayPath}</h2>
         </div>
         <div className="swarm-detail-header-stats">
           <button
@@ -859,14 +872,15 @@ export function SwarmDetail() {
           >
             Debug Conversation
           </button>
-          <div className={`state-badge state-${displayRunning > 0 ? 'running' : 'idle'}`}>
-            <div className="state-indicator" />
-            <span className="state-label">
-              {displayRunning > 0 ? `${displayRunning} running` : 'All idle'}
-            </span>
-          </div>
-          {displayRunning > 0 && confirmAction === null && (
-            <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
+          <div className="swarm-run-controls">
+            <div className={`state-badge swarm-header-badge state-${displayRunning > 0 ? 'running' : 'idle'}`}>
+              <div className="state-indicator" />
+              <span className="state-label">
+                {displayRunning > 0 ? `${displayRunning} running` : 'All idle'}
+              </span>
+            </div>
+            {displayRunning > 0 && confirmAction === null && (
+              <div className="swarm-run-actions">
               <button
                 style={{
                   padding: '3px 10px',
@@ -965,6 +979,7 @@ export function SwarmDetail() {
               {signalError}
             </span>
           )}
+          </div>
           <div className="swarm-info-btn-wrap">
             <button className="swarm-info-btn" aria-label="Project stats">ⓘ</button>
             <div className="swarm-info-tooltip">
@@ -996,7 +1011,6 @@ export function SwarmDetail() {
         <div className="swarm-detail-body">
           {/* Worker Roster sidebar — exec workers with reviews nested below */}
           <div className="swarm-roster">
-            <div className="swarm-roster-header">Workers ({allWorkers.length})</div>
             <div className="swarm-roster-list">
               {execGroups.map((group, groupIdx) => {
                 const w = group.exec;
@@ -1018,19 +1032,8 @@ export function SwarmDetail() {
                     <div className={`roster-worker ${isSelected ? 'selected' : ''}`}>
                       <span className={`roster-status-dot ${statusClass}`} />
                       <span className="roster-worker-id">{w.workerId ?? w.id.substring(0, 8)}</span>
-                      <span className="role-badge role-work">{ROLE_LABELS.work}</span>
                       {model && <span className="roster-model">{model}</span>}
                       <span className="roster-worker-msgs">{w.messages.length}m</span>
-                      {(() => {
-                        const firstUser = w.messages.find((m) => m.role === 'user');
-                        if (!firstUser?.content) return null;
-                        const preview = firstUser.content.slice(0, 60);
-                        return (
-                          <span className="roster-worker-task" title={firstUser.content}>
-                            {preview}{firstUser.content.length > 60 ? '…' : ''}
-                          </span>
-                        );
-                      })()}
                       {group.reviews.length > 0 && (
                         <span className="roster-review-count">{group.reviews.length}r</span>
                       )}
@@ -1067,13 +1070,11 @@ export function SwarmDetail() {
           <div className="swarm-panes">
             <WorkerChatPane
               conversationId={taskPaneId}
-              label="Task Log"
               accentColor="cyan"
               runningState={taskPaneRunning ? 'running' : 'idle'}
             />
             <WorkerChatPane
               conversationId={reviewPaneId}
-              label="Review"
               accentColor="magenta"
               runningState={reviewPaneRunning ? 'running' : 'idle'}
             />
@@ -1084,7 +1085,11 @@ export function SwarmDetail() {
       {/* Runs tab: structured run history with reviews and metrics */}
       {activeTab === 'runs' && (
         <div className="swarm-runs-body">
-          <SwarmRunsPanel projectRoot={projectRoot} />
+          <SwarmRunsPanel
+            projectRoot={projectRoot}
+            selectedRunId={selectedRunId}
+            onSelectRunId={setSelectedRunId}
+          />
         </div>
       )}
 
