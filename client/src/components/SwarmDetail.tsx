@@ -452,7 +452,7 @@ function SwarmRunsPanel({
       .catch(() => setReviews([]));
   }, [projectRoot, selectedRunId]);
 
-  // Fetch count of .edn files added in merge commits during this run's time window
+  // Fetch count of .json files added in merge commits during this run's time window
   useEffect(() => {
     if (!selectedRunId) return;
     setNewFilesCount(null);
@@ -684,6 +684,8 @@ export function SwarmDetail() {
 
   // Selected run ID — lifted here so handleStartDebugConversation uses the correct swarm
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const effectiveRunId =
+    selectedRunId ?? runtimeSnapshot?.run?.swarmId ?? runtimeSnapshot?.run?.runId ?? null;
 
   // Inline confirmation for destructive stop/kill actions (replaces window.confirm/alert)
   const [confirmAction, setConfirmAction] = useState<'stop' | 'kill' | null>(null);
@@ -695,7 +697,7 @@ export function SwarmDetail() {
   const handleStartDebugConversation = useCallback(async () => {
     // selectedRunId is the run currently selected in SwarmRunsPanel; fall back to runtime's
     // swarmId only when no run has been selected yet (e.g. panel not yet loaded).
-    const swarmId = selectedRunId ?? runtimeSnapshot?.run?.swarmId ?? null;
+    const swarmId = effectiveRunId;
     const configPath = runtimeSnapshot?.run?.configPath ?? null;
 
     // Fetch run summary for the selected swarm.
@@ -719,7 +721,7 @@ export function SwarmDetail() {
     const prefix = buildSwarmDebugPrefix(projectRoot, configPath, swarmId, summary, startedAt);
     const id = createConversation(projectRoot, 'claude', undefined, prefix);
     navigate(`/chat/${id}`);
-  }, [projectRoot, selectedRunId, runtimeSnapshot, createConversation, navigate]);
+  }, [projectRoot, effectiveRunId, runtimeSnapshot, createConversation, navigate]);
 
   // Filter workers belonging to this project, build exec groups with paired reviews/fixes.
   // Reviews/fixes are matched to exec workers by time proximity within the same swarmId.
@@ -732,6 +734,7 @@ export function SwarmDetail() {
       for (const conv of workers) {
         if (promotedSet.has(conv.id)) continue;
         if (getProjectRoot(conv.workingDirectory) !== projectRoot) continue;
+        if (effectiveRunId && conv.swarmId !== effectiveRunId) continue;
 
         if (conv.workerRole === 'review' || conv.workerRole === 'fix') {
           reviewsAndFixes.push(conv);
@@ -791,19 +794,25 @@ export function SwarmDetail() {
       reviewCount: reviewsAndFixes.filter((r) => r.workerRole === 'review').length,
       fixCount: reviewsAndFixes.filter((r) => r.workerRole === 'fix').length,
     };
-  }, [rawWorkersByProject, promotedSet, projectRoot, isWorkerRunningLive]);
+  }, [rawWorkersByProject, promotedSet, projectRoot, effectiveRunId, isWorkerRunningLive]);
 
   // Selected exec group — click a worker to show task log (left) + review (right)
   const [selectedGroupIdx, setSelectedGroupIdx] = useState<number>(0);
 
-  const didInit = useRef(false);
+  const lastScopedRunIdRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (didInit.current || execGroups.length === 0) return;
-    didInit.current = true;
-    // Prefer running exec for initial selection
-    const runningIdx = execGroups.findIndex((g) => isWorkerRunningLive(g.exec));
-    if (runningIdx >= 0) setSelectedGroupIdx(runningIdx);
-  }, [execGroups, isWorkerRunningLive]);
+    const isFirstSelection = lastScopedRunIdRef.current === undefined;
+    const runChanged = lastScopedRunIdRef.current !== effectiveRunId;
+    lastScopedRunIdRef.current = effectiveRunId;
+
+    setSelectedGroupIdx((currentIdx) => {
+      if (execGroups.length === 0) return 0;
+      if (!isFirstSelection && !runChanged && currentIdx < execGroups.length) return currentIdx;
+
+      const runningIdx = execGroups.findIndex((g) => isWorkerRunningLive(g.exec));
+      return runningIdx >= 0 ? runningIdx : 0;
+    });
+  }, [effectiveRunId, execGroups, isWorkerRunningLive]);
 
   // Derive pane IDs from selected group
   const selectedGroup = execGroups[selectedGroupIdx] ?? null;

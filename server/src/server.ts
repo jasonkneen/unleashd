@@ -1932,34 +1932,13 @@ async function initUIStateCache(): Promise<void> {
  * Get UI state from cache. Returns object (or {} if cache not initialized).
  */
 /**
- * Return UI state filtered to only active conversations. Strips stale entries
- * from lastSeenMessageIndex and doneConversations so the WS init payload stays
- * lean — only data the client can actually use is sent over the wire.
+ * Return UI state from cache. No pruning — conversations load progressively
+ * after the WebSocket init fires, so pruning against an incomplete `conversations`
+ * Map would silently drop valid doneConversations / lastSeenMessageIndex entries.
+ * The client tolerates stale keys harmlessly (they reference IDs that don't render).
  */
 function getActiveUIState(): { [key: string]: unknown } {
-  const knownIds = new Set<string>();
-  for (const conv of conversations.values()) {
-    knownIds.add(conv.id);
-    if (conv.sessionId) knownIds.add(conv.sessionId);
-  }
-
-  const state = { ...uiStateCache };
-
-  const lastSeen = uiStateCache.lastSeenMessageIndex;
-  if (lastSeen && typeof lastSeen === 'object' && !Array.isArray(lastSeen)) {
-    const pruned: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(lastSeen as Record<string, unknown>)) {
-      if (knownIds.has(key)) pruned[key] = val;
-    }
-    state.lastSeenMessageIndex = pruned;
-  }
-
-  const done = uiStateCache.doneConversations;
-  if (Array.isArray(done)) {
-    state.doneConversations = done.filter((id: unknown) => typeof id === 'string' && knownIds.has(id));
-  }
-
-  return state;
+  return { ...uiStateCache };
 }
 
 /**
@@ -3141,9 +3120,9 @@ app.get('/api/swarm-runs', async (req: Request, res: Response) => {
   res.json({ runs });
 });
 
-// Count .edn files added in merge commits during a swarm run's time window.
+// Count .json files added in merge commits during a swarm run's time window.
 // Uses git log --merges with the run's started-at / finished-at to scope commits,
-// then --diff-filter=A --name-only to find added .edn files across those merges.
+// then --diff-filter=A --name-only to find added .json files across those merges.
 app.get('/api/swarm-new-files', async (req: Request, res: Response) => {
   const dir = req.query.dir as string;
   const swarmId = req.query.swarmId as string;
@@ -3206,7 +3185,7 @@ app.get('/api/swarm-new-files', async (req: Request, res: Response) => {
       : '';
 
     const raw = execSync(
-      `git log --merges --after="${safeStart}" ${beforeFlag} --diff-filter=A --name-only --pretty=format: -- "*.edn"`,
+      `git log --merges --after="${safeStart}" ${beforeFlag} --diff-filter=A --name-only --pretty=format: -- "*.json"`,
       { cwd: resolved, timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
     )
       .toString()
