@@ -2597,7 +2597,7 @@ function findDocCandidates(projectRoot: string): string[] {
     'docs/README.md',
     'docs/SWARM_GUIDE.md',
     'docs/OOMPA.md',
-    'docs/EDN_TICKETS.md',
+    'docs/JSON_TICKETS.md',
   ];
   const seen = new Set<string>();
   const result: string[] = [];
