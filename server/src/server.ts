@@ -139,6 +139,7 @@ const TURN_MAX_RUNTIME_MS = readPositiveIntEnv('CWV_TURN_MAX_RUNTIME_MS', 60 * 6
 const TURN_TIMEOUT_KILL_GRACE_MS = readPositiveIntEnv('CWV_TURN_TIMEOUT_KILL_GRACE_MS', 5_000);
 const SWARM_POLL_INTERVAL_MS = readPositiveIntEnv('CWV_SWARM_POLL_INTERVAL_MS', 2_000);
 const SWARM_POLL_THROTTLE_MS = readPositiveIntEnv('CWV_SWARM_POLL_THROTTLE_MS', 1_500);
+const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -535,6 +536,7 @@ class Conversation extends EventEmitter {
       resumeSessionId: shouldResume ? this.sessionId : undefined,
       yolo: true,
       detached: true,
+      debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
     });
 
     this.process = turn.child;
@@ -594,6 +596,17 @@ class Conversation extends EventEmitter {
           case 'stderr': {
             this._stderrBuffer = (this._stderrBuffer + event.text).slice(-4096);
             console.error(`[${this.id}] stderr:`, event.text);
+            break;
+          }
+          case 'progress': {
+            // Always log provider warnings (network retries, etc.) — these are
+            // operational signals, not debug noise. Other progress events
+            // (heartbeats, non-assistant messages) only log with debug flag.
+            if (event.source === 'gemini.warning') {
+              console.warn(`[${this.id}] provider warning:`, event.data?.message ?? JSON.stringify(event));
+            } else if (AGENT_CLI_DEBUG_EVENTS) {
+              console.error(`[${this.id}] progress:`, JSON.stringify(event));
+            }
             break;
           }
           case 'turn.started': {
@@ -1175,12 +1188,14 @@ class Conversation extends EventEmitter {
     const now = Date.now();
     const elapsedSec = Math.round((now - this._processStartTime) / 1000);
     const idleSec = Math.round((now - this._lastTurnEventAt) / 1000);
+    const sawContent = this._sawStdoutEventThisRun;
+    const detail = !sawContent ? ' (no content ever received — likely API-level hang)' : '';
     const message =
       kind === 'idle'
-        ? `Turn stalled: no provider events for ${idleSec}s (timed out)`
-        : `Turn exceeded max runtime after ${elapsedSec}s (timed out)`;
+        ? `Turn stalled: no provider events for ${idleSec}s${detail} (timed out)`
+        : `Turn exceeded max runtime after ${elapsedSec}s${detail} (timed out)`;
 
-    console.error(`[${this.id}] ${message}`);
+    console.error(`[${this.id}] ${message} | sawContent=${sawContent} elapsed=${elapsedSec}s idle=${idleSec}s stderr=${this._stderrBuffer.length > 0 ? 'yes' : 'no'}`);
     this._clearTurnWatchdogs();
     this.handleOutput({ type: 'error', message });
     // Clear busy state now so processQueue() sees isRunning=false and can dequeue.
@@ -3650,6 +3665,7 @@ Requirements:
       prompt,
       cwd: process.cwd(),
       yolo: true,
+      debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
     });
 
     // Timeout: kill the process if it takes longer than 90 seconds
