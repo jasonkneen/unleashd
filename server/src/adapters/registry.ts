@@ -1,3 +1,6 @@
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs';
 import type { DiskAdapter, ParsedSession } from './disk-adapter';
 import {
   CLAUDE_PROJECTS_DIR,
@@ -21,6 +24,22 @@ import {
   parseOpenCodeSessionDirectory,
   scanSessionDirectory,
 } from './jsonl';
+
+// Oompa's gemini harness uses GEMINI_CLI_HOME=~/.gemini-sandbox/acc{N} to isolate
+// multiple gemini workers. Their sessions live under {home}/tmp/ instead of ~/.gemini/tmp/.
+const GEMINI_SANDBOX_DIR = path.join(os.homedir(), '.gemini-sandbox');
+
+async function discoverGeminiSandboxDirs(): Promise<string[]> {
+  try {
+    const entries = await fs.promises.readdir(GEMINI_SANDBOX_DIR, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isDirectory())
+      // Gemini CLI stores sessions under $GEMINI_CLI_HOME/.gemini/tmp/, not $GEMINI_CLI_HOME/tmp/
+      .map((e) => path.join(GEMINI_SANDBOX_DIR, e.name, '.gemini', 'tmp'));
+  } catch {
+    return [];
+  }
+}
 
 // =============================================================================
 // Claude adapter
@@ -158,7 +177,10 @@ const geminiAdapter: DiskAdapter = {
   provider: 'gemini',
 
   async discoverFiles(): Promise<string[]> {
-    return getGeminiSessionFiles(GEMINI_SESSIONS_DIR);
+    const mainFiles = await getGeminiSessionFiles(GEMINI_SESSIONS_DIR);
+    const sandboxDirs = await discoverGeminiSandboxDirs();
+    const sandboxFiles = await Promise.all(sandboxDirs.map((d) => getGeminiSessionFiles(d)));
+    return [...mainFiles, ...sandboxFiles.flat()];
   },
 
   async parseFile(filePath: string): Promise<ParsedSession | null> {
