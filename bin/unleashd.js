@@ -1,2 +1,3 @@
 #!/usr/bin/env node
-require('../server/dist/server.js');
+require('tsx/cjs');
+require('../server/src/server.ts');
