@@ -17,6 +17,7 @@
  * VirtualizedMessageList.tsx.
  */
 
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
@@ -27,6 +28,10 @@ const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|webp)$/i;
 const HTML_EXTENSIONS = /\.(html|htm)$/i;
 const MARKDOWN_EXTENSIONS = /\.(md|markdown)$/i;
 const VIDEO_EXTENSIONS = /\.(mp4|webm)$/i;
+const POSIX_ABSOLUTE_FILE_RE = /^\/(?:Users|home|private|var|tmp|mnt)\//;
+const WINDOWS_ABSOLUTE_FILE_RE = /^\/[A-Za-z]:\//;
+
+export type PreviewableFileType = 'image' | 'html' | 'video' | 'markdown';
 
 /**
  * Returns 'image' | 'html' | 'video' | 'markdown' | null for a given text string.
@@ -50,7 +55,7 @@ const VIDEO_EXTENSIONS = /\.(mp4|webm)$/i;
  * contains "/", and ends with ".png", it matched — rendering the entire block
  * as a single FilePreview (all paths collapsed into one line, no hover).
  */
-export function getPreviewType(text: string): 'image' | 'html' | 'video' | 'markdown' | null {
+export function getPreviewType(text: string): PreviewableFileType | null {
   // DO NOT REMOVE: Rejects multi-line and whitespace text. See docstring above.
   if (text.includes(' ') || text.includes('\n')) return null;
   // Must contain at least one `/` (absolute or relative with directory)
@@ -62,11 +67,55 @@ export function getPreviewType(text: string): 'image' | 'html' | 'video' | 'mark
   return null;
 }
 
+function isLoopbackLikeHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
+}
+
+function looksLikeAbsoluteFilePath(pathname: string): boolean {
+  return POSIX_ABSOLUTE_FILE_RE.test(pathname) || WINDOWS_ABSOLUTE_FILE_RE.test(pathname);
+}
+
+/**
+ * Recognizes previewable local-file links that were rendered as ordinary anchors,
+ * such as:
+ * - http://localhost:7489/Users/nick/project/output.png
+ * - /api/files?path=/Users/nick/project/output.png
+ * - /api/serve/Users/nick/project/report.html
+ */
+export function getPreviewableLocalHref(
+  href: string
+): { path: string; type: PreviewableFileType } | null {
+  try {
+    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(href, baseOrigin);
+
+    let pathFromHref: string | null = null;
+    if (url.pathname === '/api/files') {
+      pathFromHref = url.searchParams.get('path');
+    } else if (url.pathname.startsWith('/api/serve/')) {
+      pathFromHref = decodeURIComponent(url.pathname.slice('/api/serve'.length));
+    } else if (isLoopbackLikeHostname(url.hostname)) {
+      const decodedPath = decodeURIComponent(url.pathname);
+      if (looksLikeAbsoluteFilePath(decodedPath)) {
+        pathFromHref = decodedPath;
+      }
+    }
+
+    if (!pathFromHref) return null;
+    const type = getPreviewType(pathFromHref);
+    return type ? { path: pathFromHref, type } : null;
+  } catch {
+    return null;
+  }
+}
+
 interface FilePreviewProps {
   path: string;
-  type: 'image' | 'html' | 'video' | 'markdown';
+  type: PreviewableFileType;
   /** When set, relative paths are resolved against this directory for the API URL. */
   workingDirectory?: string;
+  /** Optional custom text/content for the clickable link. */
+  linkLabel?: ReactNode;
 }
 
 const TYPE_ICONS = { image: '🖼', html: '🌐', video: '🎬', markdown: '📝' } as const;
@@ -83,7 +132,7 @@ interface PopupPosition {
   placement: 'above' | 'below';
 }
 
-export function FilePreview({ path, type, workingDirectory }: FilePreviewProps) {
+export function FilePreview({ path, type, workingDirectory, linkLabel }: FilePreviewProps) {
   // Resolve relative paths against workingDirectory for the API URL.
   // Display text stays as the original `path` the user wrote.
   const resolvedPath = path.startsWith('/') ? path : `${workingDirectory}/${path}`;
@@ -91,9 +140,10 @@ export function FilePreview({ path, type, workingDirectory }: FilePreviewProps) 
   // resolve naturally from the file's directory. The query-param /api/files proxy
   // breaks relative paths since the browser sees the URL as /api/files, not the
   // file's actual directory.
-  const fileUrl = type === 'html'
-    ? `/api/serve${resolvedPath}`
-    : `/api/files?path=${encodeURIComponent(resolvedPath)}`;
+  const fileUrl =
+    type === 'html'
+      ? `/api/serve${resolvedPath}`
+      : `/api/files?path=${encodeURIComponent(resolvedPath)}`;
   const triggerRef = useRef<HTMLSpanElement>(null);
   const [hovered, setHovered] = useState(false);
   const [position, setPosition] = useState<PopupPosition | null>(null);
@@ -189,7 +239,7 @@ export function FilePreview({ path, type, workingDirectory }: FilePreviewProps) 
     >
       <span className="file-preview-icon">{TYPE_ICONS[type]}</span>
       <a className="file-preview-link" href={fileUrl} target="_blank" rel="noreferrer">
-        {path}
+        {linkLabel ?? path}
       </a>
       {popup}
     </span>

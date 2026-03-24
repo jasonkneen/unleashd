@@ -12,7 +12,7 @@ import {
   AskUserQuestionWidget,
   parseAskUserQuestion,
 } from './AskUserQuestion';
-import { FilePreview, getPreviewType } from './FilePreview';
+import { FilePreview, getPreviewType, getPreviewableLocalHref } from './FilePreview';
 import { InlineSwarmRunWidget } from './InlineSwarmRunWidget';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
 
@@ -241,6 +241,18 @@ function getCodeText(children: unknown): string | null {
 function makeMarkdownComponents(workingDirectory: string): Components {
   return {
     a({ href, children, ...rest }) {
+      const previewableLocalHref = href ? getPreviewableLocalHref(href) : null;
+      if (previewableLocalHref) {
+        return (
+          <FilePreview
+            path={previewableLocalHref.path}
+            type={previewableLocalHref.type}
+            workingDirectory={workingDirectory}
+            linkLabel={children}
+          />
+        );
+      }
+
       return (
         <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
           {children}
@@ -295,6 +307,19 @@ function makeMarkdownComponents(workingDirectory: string): Components {
           );
 
         case 'clickable_url':
+          {
+            const previewableLocalHref = getPreviewableLocalHref(content.url);
+            if (previewableLocalHref) {
+              return (
+                <FilePreview
+                  path={previewableLocalHref.path}
+                  type={previewableLocalHref.type}
+                  workingDirectory={workingDirectory}
+                  linkLabel={<code {...rest}>{children}</code>}
+                />
+              );
+            }
+          }
           return (
             <a href={content.url} target="_blank" rel="noopener noreferrer">
               <code {...rest}>{children}</code>
@@ -355,7 +380,12 @@ function splitWidgets(content: string): ContentSegment[] {
   let lastIndex = 0;
 
   // Find all matches for both patterns, then sort by index
-  const matches: Array<{ type: 'ask_user_question' | 'oompa_run'; index: number; length: number; match: RegExpExecArray }> = [];
+  const matches: Array<{
+    type: 'ask_user_question' | 'oompa_run';
+    index: number;
+    length: number;
+    match: RegExpExecArray;
+  }> = [];
 
   // Create a fresh regex with `g` flag for multi-match .exec() loop —
   // avoids stale lastIndex on the module-level ASK_USER_QUESTION_RE singleton
