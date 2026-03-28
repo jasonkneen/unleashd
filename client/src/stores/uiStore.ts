@@ -70,6 +70,12 @@ interface UIStoreState extends UIState {
 // Debounce timer for server sync — shared across all mutations
 let syncToServerTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Guard: don't sync default (empty) state to server before hydration.
+// Without this, the Chat component's setActiveConversationId fires syncToServer
+// on mount — before the WS init delivers the authoritative server state — and
+// overwrites persisted doneConversations/lastSeenMessageIndex with empty defaults.
+let hydrated = false;
+
 export const useUIStore = create<UIStoreState>((set, get) => ({
   // State — defaults match UIStateSchema
   activeConversationId: null,
@@ -203,13 +209,26 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
    * This ensures null values (e.g., clearing activeConversationId) are preserved.
    */
   hydrateFromServer: (serverState) => {
+    // Capture pre-hydration activeConversationId — it comes from the URL-routed
+    // Chat component and is more current than the server's (previous-session) value.
+    const preHydrationActiveId = get().activeConversationId;
     set((s) => ({ ...s, ...serverState }));
+    // Restore URL-derived active ID so it's not overwritten by stale server state.
+    if (preHydrationActiveId && preHydrationActiveId !== get().activeConversationId) {
+      set({ activeConversationId: preHydrationActiveId });
+    }
+    hydrated = true;
+    // Sync merged state back so pre-hydration mutations (activeConversationId,
+    // lastSeenMessageIndex) aren't lost if the server restarts before the next
+    // user-initiated mutation.
+    get().syncToServer();
   },
 
   /**
    * Debounced sync to server. Collects all mutations and sends once every 500ms.
    */
   syncToServer: () => {
+    if (!hydrated) return; // Don't overwrite server state with empty defaults
     if (syncToServerTimer) {
       clearTimeout(syncToServerTimer);
     }

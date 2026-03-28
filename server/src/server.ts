@@ -1980,6 +1980,24 @@ function setUIState(partial: { [key: string]: unknown }): void {
   }, 500);
 }
 
+/**
+ * Flush any pending debounced UI state write synchronously.
+ * Called from signal handlers before process.exit() to avoid losing state
+ * that was updated in the last 500ms debounce window.
+ */
+function flushUIStateSync(): void {
+  if (uiStateSyncTimer) {
+    clearTimeout(uiStateSyncTimer);
+    uiStateSyncTimer = null;
+    try {
+      fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+      fs.writeFileSync(UI_STATE_FILE, JSON.stringify(uiStateCache, null, 2));
+    } catch (e) {
+      console.error('Error flushing UI state on shutdown:', e);
+    }
+  }
+}
+
 app.get('/api/ui-state', (_req: Request, res: Response) => {
   res.json(getActiveUIState());
 });
@@ -4419,10 +4437,12 @@ process.on('SIGINT', () => {
       conv.process.kill('SIGKILL');
     }
   }
+  flushUIStateSync();
   process.exit();
 });
 
 process.on('SIGTERM', () => {
+  flushUIStateSync();
   const activeRuns = getActiveConversationRuns();
   if (activeRuns.length === 0) {
     console.log('SIGTERM — no active turns, exiting for restart');
