@@ -1,0 +1,42 @@
+{
+  "planner": {
+    "model": "codex:gpt-5.3-codex:high",
+    "prompt": [
+      "oompa/bug-audit/prompts/base.md",
+      "oompa/bug-audit/prompts/planner.md"
+    ],
+    "max_pending": 18
+  },
+  "reviewer": {
+    "model": "claude:opus",
+    "prompt": [
+      "oompa/bug-audit/prompts/base.md",
+      "oompa/bug-audit/prompts/reviewer.md"
+    ]
+  },
+  "workers": [
+    {
+      "model": "codex:gpt-5.3-codex:medium",
+      "prompt": [
+        "oompa/bug-audit/prompts/base.md",
+        "oompa/bug-audit/prompts/auditor-codex.md"
+      ],
+      "max_cycle": 8,
+      "count": 3,
+      "can_plan": false,
+      "max_wait_for_tasks": 1800
+    },
+    {
+      "model": "claude:opus",
+      "prompt": [
+        "oompa/bug-audit/prompts/base.md",
+        "oompa/bug-audit/prompts/auditor-opus.md"
+      ],
+      "max_cycle": 4,
+      "count": 1,
+      "can_plan": false,
+      "max_wait_for_tasks": 1800,
+      "wait_between": 20
+    }
+  ]
+}
