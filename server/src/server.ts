@@ -1342,7 +1342,6 @@ class Conversation extends EventEmitter {
   interruptAndSend(content: string): void {
     const pendingQueuedMessages = this.queue.filter((m) => m.status === 'pending');
     const hasPendingTasks = pendingQueuedMessages.length > 0;
-    const pendingBlock = pendingQueuedMessages.map((m, i) => `${i + 1}. ${m.content}`).join('\n');
 
     if (hasPendingTasks) {
       this.queue = this.queue.filter((m) => m.status === 'sending');
@@ -1352,21 +1351,11 @@ class Conversation extends EventEmitter {
       this.broadcastQueue();
     }
 
-    const wrappedContent = hasPendingTasks
-      ? [
-          'We interrupted and flushed the pending tasks.',
-          'Pending tasks flushed:',
-          pendingBlock,
-          '',
-          `This final message was added as an interruption: "${content}"`,
-        ].join('\n')
-      : `Interrupted.\nThis final message was added as an interruption: "${content}"`;
-
     if (this.process) {
       this.stop();
     }
 
-    this.enqueueMessage(wrappedContent);
+    this.enqueueMessage(content);
   }
 
   /**

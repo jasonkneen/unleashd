@@ -194,10 +194,13 @@ export function Chat() {
   const canInput = confirmed;
   const availableProviders = PROVIDER_OPTIONS;
 
-  const willQueue = confirmed && (isRunning || isStreaming);
-  const hasContent = hasInput || pendingFiles.length > 0;
   const currentMessage = queue.find((m) => m.status === 'sending') ?? null;
   const pendingQueue = queue.filter((m) => m.status === 'pending');
+  // Enter should switch to interrupt mode as soon as a turn is in flight,
+  // including the short pre-stream window where the queue marks it "sending"
+  // before provider status flips to isRunning/isStreaming.
+  const hasActiveTurn = confirmed && (isRunning || isStreaming || currentMessage !== null);
+  const hasContent = hasInput || pendingFiles.length > 0;
 
   const handleFilesUpload = useCallback(
     async (acceptedFiles: File[]) => {
@@ -552,7 +555,7 @@ export function Chat() {
 
     if (e.key === 'Enter' && !e.shiftKey && hasContent && confirmed) {
       e.preventDefault();
-      if (willQueue) {
+      if (hasActiveTurn) {
         handleInterrupt();
       } else {
         handleQueue();
@@ -854,7 +857,7 @@ export function Chat() {
         <div className="input-wrapper">
           <textarea
             ref={textareaRef}
-            className={`message-input ${willQueue ? 'interrupt-mode' : ''}`}
+            className={`message-input ${hasActiveTurn ? 'interrupt-mode' : ''}`}
             defaultValue=""
             onInput={handleInput}
             onKeyDown={handleKeyDown}
@@ -862,7 +865,7 @@ export function Chat() {
             placeholder={
               !confirmed
                 ? `Waiting for ${conversation.provider || 'claude'}...`
-                : willQueue
+                : hasActiveTurn
                   ? 'Enter to interrupt, Tab to queue...'
                   : 'Type your message...'
             }
@@ -903,14 +906,16 @@ export function Chat() {
             <div className="send-action">
               <button
                 type="button"
-                className={`send-btn ${willQueue ? 'interrupt-mode' : ''}`}
-                onClick={willQueue ? handleInterrupt : handleSend}
+                className={`send-btn ${hasActiveTurn ? 'interrupt-mode' : ''}`}
+                onClick={hasActiveTurn ? handleInterrupt : handleSend}
                 disabled={!confirmed || !hasContent}
                 title={
-                  willQueue ? 'Enter: Interrupt & send | Tab: Queue' : 'Enter: Send | Tab: Queue'
+                  hasActiveTurn
+                    ? 'Enter: Interrupt & send | Tab: Queue'
+                    : 'Enter: Send | Tab: Queue'
                 }
               >
-                {willQueue ? 'Interrupt' : 'Send'}
+                {hasActiveTurn ? 'Interrupt' : 'Send'}
               </button>
               {isStreaming && hasContent && (
                 <div className="send-queue-hint" aria-live="polite">

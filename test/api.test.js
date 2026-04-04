@@ -206,8 +206,8 @@ async function runTests() {
       });
       const msg = await waitForMessage(ws, 'error');
 
-      if (!msg.message.includes('not found')) {
-        throw new Error(`Expected 'not found' error, got: ${msg.message}`);
+      if (!msg.message.includes('No matching folder')) {
+        throw new Error(`Expected 'No matching folder' error, got: ${msg.message}`);
       }
 
       ws.close();
@@ -314,6 +314,45 @@ async function runTests() {
       send(ws, { type: 'new_conversation' });
       const msg = await waitForMessage(ws, 'conversation_created');
       if (!msg.conversation.id) throw new Error('Server crashed after malformed message');
+
+      ws.close();
+    });
+
+    // Test: interrupt_and_send is handled and preserves the interruption message
+    await test('interrupt_and_send queues interruption message', async () => {
+      const ws = await createConnection();
+      await waitForMessage(ws, 'init');
+
+      send(ws, {
+        type: 'new_conversation',
+        workingDirectory: '/tmp',
+      });
+      const created = await waitForMessage(ws, 'conversation_created');
+      const convId = created.conversation.id;
+
+      send(ws, {
+        type: 'interrupt_and_send',
+        conversationId: convId,
+        content: 'follow-up after interrupt',
+      });
+      const queueUpdated = await waitForMessage(ws, 'queue_updated');
+
+      if (queueUpdated.conversationId !== convId) {
+        throw new Error(`Expected queue update for ${convId}, got ${queueUpdated.conversationId}`);
+      }
+      if (queueUpdated.queue.length !== 1) {
+        throw new Error(`Expected 1 queued interruption, got ${queueUpdated.queue.length}`);
+      }
+      if (queueUpdated.queue[0].content !== 'follow-up after interrupt') {
+        throw new Error(
+          `Expected raw interruption content, got: ${queueUpdated.queue[0].content}`
+        );
+      }
+      if (!['pending', 'sending'].includes(queueUpdated.queue[0].status)) {
+        throw new Error(
+          `Expected interruption status "pending" or "sending", got ${queueUpdated.queue[0].status}`
+        );
+      }
 
       ws.close();
     });
