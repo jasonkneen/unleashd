@@ -601,7 +601,7 @@ class Conversation extends EventEmitter {
           }
           case 'stderr': {
             this._stderrBuffer = (this._stderrBuffer + event.text).slice(-4096);
-            console.error(`[${this.id}] stderr:`, event.text);
+            if (VERBOSE) console.error(`[${this.id}] stderr:`, event.text);
             break;
           }
           case 'progress': {
