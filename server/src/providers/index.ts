@@ -10,6 +10,7 @@ import claudeProvider from './claude';
 import codexProvider from './codex';
 import geminiProvider from './gemini';
 import opencodeProvider from './opencode';
+import cursorProvider from './cursor';
 
 /**
  * Unified event types consumed by conversation state handling.
@@ -36,11 +37,12 @@ const providers: Record<ProviderName, Provider> = {
   codex: codexProvider,
   opencode: opencodeProvider,
   gemini: geminiProvider,
+  cursor: cursorProvider,
 };
 
 /**
  * Get a provider by name
- * @param name - Provider name ('claude', 'codex', 'opencode', or 'gemini')
+ * @param name - Provider name ('claude', 'codex', 'opencode', 'gemini', or 'cursor')
  * @throws Error if provider not found
  */
 export function getProvider(name: ProviderName): Provider {

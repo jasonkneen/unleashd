@@ -57,6 +57,35 @@
   gap: 12px;
 }
 
+.swarm-run-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.swarm-run-actions {
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.swarm-run-controls:hover .swarm-run-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.swarm-header-badge.state-running {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.swarm-header-badge.state-running .state-indicator {
+  width: 10px;
+  height: 10px;
+}
+
 /* Info icon button + hover tooltip for verbose project stats */
 .swarm-info-btn-wrap {
   position: relative;
@@ -124,16 +153,6 @@
   background: var(--bg-card);
   border-right: 1px solid var(--border-subtle);
   overflow-y: auto;
-}
-
-.swarm-roster-header {
-  padding: 12px 14px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border-subtle);
 }
 
 .swarm-roster-list {
@@ -569,20 +588,6 @@
   flex-shrink: 0;
 }
 
-/* First-user-message task preview shown below worker ID in roster */
-.roster-worker-task {
-  display: block;
-  font-size: 10px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 160px;
-  margin-top: 2px;
-  flex-basis: 100%;
-  order: 10;
-}
-
 /* Exec group container — visual grouping of exec + its reviews */
 .roster-exec-group {
   border-bottom: 1px solid var(--border-subtle);
@@ -646,6 +651,8 @@
 .swarm-tab {
   padding: 10px 20px;
   border: none;
+  border-radius: 0;
+  outline: none;
   background: transparent;
   color: var(--text-muted);
   font-size: 13px;
@@ -653,6 +660,10 @@
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
+}
+
+.swarm-tab:focus {
+  outline: none;
 }
 
 .swarm-tab:hover {

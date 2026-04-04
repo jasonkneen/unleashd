@@ -99,6 +99,10 @@
 
 .nav-search-icon {
   display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  overflow: visible;
   color: var(--ai-bright);
 }
 
@@ -494,6 +498,13 @@
    visible while the glow breathes, giving a "live" feel. */
 .status-indicator.running {
   background: var(--success-bright);
+  animation: glow-pulse 1.5s ease-in-out infinite;
+}
+
+/* Pending indicator: conversation has queued messages waiting to be sent.
+   Amber/orange to distinguish from running (green) and idle (grey). */
+.status-indicator.pending {
+  background: var(--warning, #f0a030);
   animation: glow-pulse 1.5s ease-in-out infinite;
 }
 

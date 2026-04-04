@@ -8,6 +8,7 @@ const GEMINI_MODEL_IDS = new Set([
   'gemini-2.5-flash',
   'gemini-2.0-flash',
 ]);
+const CURSOR_MODEL_IDS = new Set(['composer2']);
 
 // OpenCode model IDs are path-style: provider/model (or provider/subprovider/model).
 const OPENCODE_MODEL_ID_REGEX = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._:+-]*)+$/i;
@@ -28,6 +29,8 @@ export function isModelIdValidForProvider(provider: ProviderName, modelId?: stri
       return GEMINI_MODEL_IDS.has(modelId);
     case 'opencode':
       return isOpenCodeModelId(modelId);
+    case 'cursor':
+      return CURSOR_MODEL_IDS.has(modelId);
     default:
       return false;
   }
@@ -43,6 +46,8 @@ export function modelValidationHint(provider: ProviderName): string {
       return "one of: 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'";
     case 'opencode':
       return "'provider/model' format (e.g. 'opencode/big-pickle')";
+    case 'cursor':
+      return "one of: 'composer2'";
     default:
       return 'a valid model id for the selected provider';
   }

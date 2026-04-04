@@ -12,8 +12,9 @@
 
 /* Gallery content container - scrollable area for all project sections */
 .gallery-content {
+  --gallery-content-padding-inline: 32px;
   flex: 1;
-  padding: 24px 32px;
+  padding: 24px var(--gallery-content-padding-inline);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -28,6 +29,17 @@
 .project-section {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.project-header-row {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 0 calc(var(--gallery-content-padding-inline) * -1);
 }
 
 /* Project header - sticky, clickable to collapse/expand */
@@ -39,24 +51,22 @@
   color: inherit;
   text-align: left;
   width: 100%;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  flex: 1;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
-  background: var(--bg-panel); /* Tier 3 */
-  border-radius: 2px;
+  gap: 12px;
+  padding: 10px var(--gallery-content-padding-inline);
+  background: var(--bg-tertiary);
+  border-radius: 0;
   border-left: 4px solid var(--ai);
   cursor: pointer;
   user-select: none;
-  margin-bottom: 16px;
   transition: all 0.2s;
 }
 
 .project-header:hover {
-  background: var(--bg-hover); /* Tier 4 */
+  background: var(--border-color);
   border-left-color: var(--ai-bright);
 }
 
@@ -64,6 +74,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 /* Chevron indicator for collapse state */
@@ -81,19 +92,47 @@
 .project-path {
   font-family: var(--font-mono);
   font-size: 14px;
-  color: var(--ai-bright);
+  color: var(--text-primary);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Conversation count badge */
 .project-count {
+  flex-shrink: 0;
   font-size: 12px;
-  color: var(--primary-bright);
-  padding: 4px 12px;
-  background: var(--primary-glow);
-  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
-  border-radius: 12px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
   font-weight: 500;
+}
+
+.project-done-toggle {
+  appearance: none;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  padding: 0 20px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background 0.2s, color 0.2s;
+}
+
+.project-done-toggle:hover {
+  background: var(--border-color);
+  color: var(--text-primary);
+}
+
+.project-done-toggle.active {
+  color: var(--success);
 }
 
 /* Grid layout for cards within a project */
@@ -338,6 +377,18 @@
   opacity: 0.85;
 }
 
+.temp-project.has-done-toggle .project-header {
+  border-right: none;
+}
+
+.temp-project.has-done-toggle .project-done-toggle {
+  background: var(--bg-tertiary);
+  border-top: 1px dashed var(--border-subtle);
+  border-right: 1px dashed var(--border-subtle);
+  border-bottom: 1px dashed var(--border-subtle);
+  opacity: 0.85;
+}
+
 .temp-project .project-path {
   color: var(--text-secondary);
 }
@@ -379,6 +430,18 @@
   background: var(--bg-tertiary);
   border: 1px dashed var(--border-subtle);
   border-left: 4px solid var(--success);
+  opacity: 0.85;
+}
+
+.done-project.has-done-toggle .project-header {
+  border-right: none;
+}
+
+.done-project.has-done-toggle .project-done-toggle {
+  background: var(--bg-tertiary);
+  border-top: 1px dashed var(--border-subtle);
+  border-right: 1px dashed var(--border-subtle);
+  border-bottom: 1px dashed var(--border-subtle);
   opacity: 0.85;
 }
 
@@ -491,6 +554,18 @@
   opacity: 0.85;
 }
 
+.worker-project.has-done-toggle .project-header {
+  border-right: none;
+}
+
+.worker-project.has-done-toggle .project-done-toggle {
+  background: var(--bg-tertiary);
+  border-top: 1px dashed var(--border-subtle);
+  border-right: 1px dashed var(--border-subtle);
+  border-bottom: 1px dashed var(--border-subtle);
+  opacity: 0.85;
+}
+
 .worker-project .project-path {
   color: var(--text-secondary);
 }
@@ -532,4 +607,21 @@
   background: color-mix(in srgb, var(--primary) 20%, transparent);
   border-color: var(--primary);
   color: var(--primary);
+}
+
+@media (max-width: 768px) {
+  .gallery-content {
+    --gallery-content-padding-inline: 16px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .project-header {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .project-done-toggle {
+    padding: 0 14px;
+  }
 }

@@ -34,6 +34,13 @@ interface ProjectGroup {
 
 // Number of conversations to show per project before "Show more" button
 const CONVERSATIONS_PER_PROJECT = 10;
+const EMPTY_CONVERSATIONS: Conversation[] = [];
+
+type ProjectProjection = 'real' | 'temp' | 'worker' | 'done';
+
+function compareConversationsByCreatedAtDesc(a: Conversation, b: Conversation): number {
+  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+}
 
 interface GalleryProps {
   filter?: 'done' | 'workers';
@@ -65,6 +72,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
   const promoteWorker = useUIStore((s) => s.promoteWorker);
   const showWorkerConversations = useUIStore((s) => s.showWorkerConversations);
   const setShowWorkerConversations = useUIStore((s) => s.setShowWorkerConversations);
+  const [showDoneBySection, setShowDoneBySection] = useState<Record<string, boolean>>({});
 
   // Derived Sets for O(1) lookup
   const expandedProjects = useMemo(
@@ -87,11 +95,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
       return !(parentId && byId.has(parentId));
     });
 
-    return topLevel.sort((a, b) => {
-      const dateA = new Date(a.createdAt).getTime();
-      const dateB = new Date(b.createdAt).getTime();
-      return dateB - dateA; // Descending order (newest first)
-    });
+    return topLevel.sort(compareConversationsByCreatedAtDesc);
   }, [allConversations]);
 
   // Get folder from conversation
@@ -150,11 +154,17 @@ export function Gallery({ filter }: GalleryProps = {}) {
     doneSessionCount,
     workerGroups,
     workerSessionCount,
+    doneRealGroups,
+    doneTempGroups,
+    doneWorkerGroups,
   } = useMemo(() => {
     const realGroups = new Map<string, Conversation[]>();
     const tempGroupsMap = new Map<string, Conversation[]>();
     const doneGroupsMap = new Map<string, Conversation[]>();
     const workerGroupsMap = new Map<string, Conversation[]>();
+    const doneRealGroupsMap = new Map<string, Conversation[]>();
+    const doneTempGroupsMap = new Map<string, Conversation[]>();
+    const doneWorkerGroupsMap = new Map<string, Conversation[]>();
 
     // Group by working directory, separating done → worker → temp → real
     for (const conv of filtered) {
@@ -162,6 +172,16 @@ export function Gallery({ filter }: GalleryProps = {}) {
       if (doneSet.has(conv.sessionId ?? conv.id)) {
         if (!doneGroupsMap.has(dir)) doneGroupsMap.set(dir, []);
         doneGroupsMap.get(dir)!.push(conv);
+        if (conv.isWorker && !promotedSet.has(conv.id)) {
+          if (!doneWorkerGroupsMap.has(dir)) doneWorkerGroupsMap.set(dir, []);
+          doneWorkerGroupsMap.get(dir)!.push(conv);
+        } else if (isTempDirectory(dir)) {
+          if (!doneTempGroupsMap.has(dir)) doneTempGroupsMap.set(dir, []);
+          doneTempGroupsMap.get(dir)!.push(conv);
+        } else {
+          if (!doneRealGroupsMap.has(dir)) doneRealGroupsMap.set(dir, []);
+          doneRealGroupsMap.get(dir)!.push(conv);
+        }
       } else if (conv.isWorker && !promotedSet.has(conv.id)) {
         // Worker that hasn't been promoted to main view
         if (!workerGroupsMap.has(dir)) workerGroupsMap.set(dir, []);
@@ -184,9 +204,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
 
       // Sort groups by most recent conversation in each group (newest first)
       groupArray.sort((a, b) => {
-        const aLatest = new Date(a.conversations[0].createdAt).getTime();
-        const bLatest = new Date(b.conversations[0].createdAt).getTime();
-        return bLatest - aLatest;
+        return compareConversationsByCreatedAtDesc(a.conversations[0], b.conversations[0]);
       });
 
       return groupArray;
@@ -218,11 +236,255 @@ export function Gallery({ filter }: GalleryProps = {}) {
       doneSessionCount: doneCount,
       workerGroups: toGroupArray(workerGroupsMap),
       workerSessionCount: workerCount,
+      doneRealGroups: doneRealGroupsMap,
+      doneTempGroups: doneTempGroupsMap,
+      doneWorkerGroups: doneWorkerGroupsMap,
     };
   }, [filtered, doneSet, promotedSet]);
 
   const isDoneView = filter === 'done';
   const isWorkersView = filter === 'workers';
+
+  const getSectionKey = useCallback(
+    (projection: Exclude<ProjectProjection, 'done'>, directory: string) => `${projection}:${directory}`,
+    []
+  );
+
+  const toggleSectionDoneVisibility = useCallback(
+    (projection: Exclude<ProjectProjection, 'done'>, directory: string) => {
+      const sectionKey = getSectionKey(projection, directory);
+      setShowDoneBySection((current) => ({
+        ...current,
+        [sectionKey]: !current[sectionKey],
+      }));
+    },
+    [getSectionKey]
+  );
+
+  const getDoneConversationsForSection = useCallback(
+    (projection: Exclude<ProjectProjection, 'done'>, directory: string) => {
+      switch (projection) {
+        case 'real':
+          return doneRealGroups.get(directory) ?? EMPTY_CONVERSATIONS;
+        case 'temp':
+          return doneTempGroups.get(directory) ?? EMPTY_CONVERSATIONS;
+        case 'worker':
+          return doneWorkerGroups.get(directory) ?? EMPTY_CONVERSATIONS;
+      }
+    },
+    [doneRealGroups, doneTempGroups, doneWorkerGroups]
+  );
+
+  const renderConversationCard = useCallback(
+    (conv: Conversation, showWorkerBadge = false) => {
+      const conversationKey = conv.sessionId ?? conv.id;
+      const isDoneConversation = doneSet.has(conversationKey);
+      const state = conv.isRunning ? 'running' : 'idle';
+      const accentColor = getProjectColor(conv.workingDirectory);
+      const cardClassName = [
+        'gallery-card',
+        isDoneConversation && !isDoneView ? 'done-card' : '',
+        showWorkerBadge && !isWorkersView && !isDoneConversation ? 'worker-card' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      const getStateLabel = () => {
+        if (state === 'running') return 'Running';
+        const lastTime = getLastMessageTime(conv.messages);
+        return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
+      };
+
+      return (
+        <div
+          key={conv.id}
+          className={cardClassName}
+          onClick={() => navigate(`/chat/${conv.id}`)}
+          style={{ borderTopColor: accentColor }}
+        >
+          <div className="gallery-card-header">
+            <div className="gallery-card-id">
+              {conv.id.substring(0, 8)}
+              {showWorkerBadge ? (
+                <span className="provider-badge provider-worker">worker</span>
+              ) : (
+                <span className={`provider-badge provider-${conv.provider || 'claude'}`}>
+                  {conv.provider || 'claude'}
+                </span>
+              )}
+            </div>
+            <div className="gallery-card-status">
+              {isDoneConversation ? (
+                <button
+                  type="button"
+                  className="undo-done-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    unmarkDone(conversationKey);
+                  }}
+                >
+                  Restore
+                </button>
+              ) : showWorkerBadge ? (
+                <button
+                  type="button"
+                  className="promote-worker-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    promoteWorker(conv.id);
+                  }}
+                >
+                  Promote
+                </button>
+              ) : null}
+              <div className={`state-badge state-${state}`}>
+                <div className="state-indicator" />
+                <span className="state-label">{getStateLabel()}</span>
+              </div>
+            </div>
+          </div>
+          <div>{conv.messages.length} messages</div>
+          <div className="gallery-messages">
+            {conv.messages.length === 0 ? (
+              <div className="empty-state">No messages yet</div>
+            ) : (
+              conv.messages.slice(-3).map((msg: Message, i: number) => (
+                <div key={i} className={`gallery-message ${msg.role}`}>
+                  <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
+                  {msg.content.length > 100 ? '...' : ''}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    },
+    [doneSet, isDoneView, isWorkersView, navigate, promoteWorker, unmarkDone]
+  );
+
+  const renderProjectSection = useCallback(
+    ({
+      group,
+      projection,
+      sectionClassName,
+      pathLabel = formatFolder(group.directory),
+      countLabel = 'conversation',
+      showWorkerBadge = false,
+    }: {
+      group: ProjectGroup;
+      projection: ProjectProjection;
+      sectionClassName?: string;
+      pathLabel?: string;
+      countLabel?: string;
+      showWorkerBadge?: boolean;
+    }) => {
+      const isCollapsed = collapsedProjects.has(group.directory);
+      const isExpanded = expandedProjects.has(group.directory);
+      const doneConversationsForSection =
+        projection === 'done' ? EMPTY_CONVERSATIONS : getDoneConversationsForSection(projection, group.directory);
+      const sectionKey =
+        projection === 'done' ? null : getSectionKey(projection, group.directory);
+      const showDoneInSection = sectionKey ? Boolean(showDoneBySection[sectionKey]) : false;
+      const sectionConversations = showDoneInSection
+        ? [...group.conversations, ...doneConversationsForSection].sort(compareConversationsByCreatedAtDesc)
+        : group.conversations;
+      const totalCount = sectionConversations.length;
+      const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
+      const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
+      const visibleConversations = isExpanded
+        ? sectionConversations
+        : sectionConversations.slice(0, CONVERSATIONS_PER_PROJECT);
+
+      return (
+        <div
+          key={`${projection}:${group.directory}`}
+          className={[
+            'project-section',
+            sectionClassName,
+            projection !== 'done' && doneConversationsForSection.length > 0 ? 'has-done-toggle' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <div className="project-header-row">
+            <button
+              type="button"
+              className="project-header"
+              onClick={() => toggleCollapsed(group.directory)}
+            >
+              <div className="project-header-left">
+                <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>&#9660;</span>
+                <span className="project-path">{pathLabel}</span>
+              </div>
+              <span className="project-count">
+                {totalCount} {countLabel}
+                {totalCount !== 1 ? 's' : ''}
+              </span>
+            </button>
+
+            {projection !== 'done' && doneConversationsForSection.length > 0 && (
+              <button
+                type="button"
+                className={`project-done-toggle ${showDoneInSection ? 'active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSectionDoneVisibility(projection, group.directory);
+                }}
+              >
+                {showDoneInSection ? 'Hide done' : `Show ${doneConversationsForSection.length} done`}
+              </button>
+            )}
+          </div>
+
+          {!isCollapsed && (
+            <>
+              <div className="project-grid">
+                {visibleConversations.map((conv) => renderConversationCard(conv, showWorkerBadge))}
+              </div>
+
+              {showMoreButton && (
+                <button
+                  type="button"
+                  className="show-more-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleExpanded(group.directory);
+                  }}
+                >
+                  Show more... ({hiddenCount} hidden)
+                </button>
+              )}
+
+              {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
+                <button
+                  type="button"
+                  className="show-more-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleExpanded(group.directory);
+                  }}
+                >
+                  Show less
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      );
+    },
+    [
+      collapsedProjects,
+      expandedProjects,
+      formatFolder,
+      getDoneConversationsForSection,
+      getSectionKey,
+      renderConversationCard,
+      showDoneBySection,
+      toggleCollapsed,
+      toggleExpanded,
+      toggleSectionDoneVisibility,
+    ]
+  );
 
   if (allConversations.length === 0) {
     return (
@@ -297,123 +559,12 @@ export function Gallery({ filter }: GalleryProps = {}) {
         {/* Regular project groups — hidden in done/workers view */}
         {!isDoneView &&
           !isWorkersView &&
-          projectGroups.map((group) => {
-            const isCollapsed = collapsedProjects.has(group.directory);
-            const isExpanded = expandedProjects.has(group.directory);
-            const dirDisplay = formatFolder(group.directory);
-            const totalCount = group.conversations.length;
-            const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-            const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-            const visibleConversations = isExpanded
-              ? group.conversations
-              : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
-
-            return (
-              <div key={group.directory} className="project-section">
-                <button
-                  type="button"
-                  className="project-header"
-                  onClick={() => toggleCollapsed(group.directory)}
-                >
-                  <div className="project-header-left">
-                    <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                      &#9660;
-                    </span>
-                    <span className="project-path">{dirDisplay}</span>
-                  </div>
-                  <span className="project-count">
-                    {totalCount} conversation{totalCount !== 1 ? 's' : ''}
-                  </span>
-                </button>
-
-                {!isCollapsed && (
-                  <>
-                    <div className="project-grid">
-                      {visibleConversations.map((conv) => {
-                        // Determine conversation state
-                        const state = conv.isRunning ? 'running' : 'idle';
-
-                        // Get state label with time-ago for idle conversations
-                        const getStateLabel = () => {
-                          if (state === 'running') return 'Running';
-                          const lastTime = getLastMessageTime(conv.messages);
-                          return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                        };
-
-                        // Get viridis accent color based on project directory
-                        const accentColor = getProjectColor(conv.workingDirectory);
-
-                        return (
-                          <div
-                            key={conv.id}
-                            className="gallery-card"
-                            onClick={() => navigate(`/chat/${conv.id}`)}
-                            style={{ borderTopColor: accentColor }}
-                          >
-                            <div className="gallery-card-header">
-                              <div className="gallery-card-id">
-                                {conv.id.substring(0, 8)}
-                                <span
-                                  className={`provider-badge provider-${conv.provider || 'claude'}`}
-                                >
-                                  {conv.provider || 'claude'}
-                                </span>
-                              </div>
-                              <div className="gallery-card-status">
-                                <div className={`state-badge state-${state}`}>
-                                  <div className="state-indicator" />
-                                  <span className="state-label">{getStateLabel()}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <div>{conv.messages.length} messages</div>
-                            <div className="gallery-messages">
-                              {conv.messages.length === 0 ? (
-                                <div className="empty-state">No messages yet</div>
-                              ) : (
-                                conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                  <div key={i} className={`gallery-message ${msg.role}`}>
-                                    <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                    {msg.content.length > 100 ? '...' : ''}
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {showMoreButton && (
-                      <button
-                        type="button"
-                        className="show-more-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleExpanded(group.directory);
-                        }}
-                      >
-                        Show more... ({hiddenCount} hidden)
-                      </button>
-                    )}
-
-                    {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                      <button
-                        type="button"
-                        className="show-more-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleExpanded(group.directory);
-                        }}
-                      >
-                        Show less
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
+          projectGroups.map((group) =>
+            renderProjectSection({
+              group,
+              projection: 'real',
+            })
+          )}
 
         {/* Temp sessions toggle and groups — hidden in done/workers view */}
         {!isDoneView && !isWorkersView && tempSessionCount > 0 && (
@@ -432,121 +583,16 @@ export function Gallery({ filter }: GalleryProps = {}) {
             </button>
 
             {showTempSessions &&
-              tempGroups.map((group) => {
-                const isCollapsed = collapsedProjects.has(group.directory);
-                const isExpanded = expandedProjects.has(group.directory);
-                // Shorten temp directory display
-                const dirDisplay = group.directory.includes('/T/tmp')
-                  ? `[Temp] ${group.directory.match(/tmp[A-Za-z0-9_-]*/)?.[0] || 'session'}`
-                  : formatFolder(group.directory);
-                const totalCount = group.conversations.length;
-                const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-                const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-                const visibleConversations = isExpanded
-                  ? group.conversations
-                  : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
-
-                return (
-                  <div key={group.directory} className="project-section temp-project">
-                    <button
-                      type="button"
-                      className="project-header"
-                      onClick={() => toggleCollapsed(group.directory)}
-                    >
-                      <div className="project-header-left">
-                        <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                          &#9660;
-                        </span>
-                        <span className="project-path">{dirDisplay}</span>
-                      </div>
-                      <span className="project-count">
-                        {totalCount} conversation{totalCount !== 1 ? 's' : ''}
-                      </span>
-                    </button>
-
-                    {!isCollapsed && (
-                      <>
-                        <div className="project-grid">
-                          {visibleConversations.map((conv) => {
-                            const state = conv.isRunning ? 'running' : 'idle';
-                            const getStateLabel = () => {
-                              if (state === 'running') return 'Running';
-                              const lastTime = getLastMessageTime(conv.messages);
-                              return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                            };
-                            const accentColor = getProjectColor(conv.workingDirectory);
-
-                            return (
-                              <div
-                                key={conv.id}
-                                className="gallery-card"
-                                onClick={() => navigate(`/chat/${conv.id}`)}
-                                style={{ borderTopColor: accentColor }}
-                              >
-                                <div className="gallery-card-header">
-                                  <div className="gallery-card-id">
-                                    {conv.id.substring(0, 8)}
-                                    <span
-                                      className={`provider-badge provider-${conv.provider || 'claude'}`}
-                                    >
-                                      {conv.provider || 'claude'}
-                                    </span>
-                                  </div>
-                                  <div className="gallery-card-status">
-                                    <div className={`state-badge state-${state}`}>
-                                      <div className="state-indicator" />
-                                      <span className="state-label">{getStateLabel()}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div>{conv.messages.length} messages</div>
-                                <div className="gallery-messages">
-                                  {conv.messages.length === 0 ? (
-                                    <div className="empty-state">No messages yet</div>
-                                  ) : (
-                                    conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                      <div key={i} className={`gallery-message ${msg.role}`}>
-                                        <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                        {msg.content.length > 100 ? '...' : ''}
-                                      </div>
-                                    ))
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {showMoreButton && (
-                          <button
-                            type="button"
-                            className="show-more-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleExpanded(group.directory);
-                            }}
-                          >
-                            Show more... ({hiddenCount} hidden)
-                          </button>
-                        )}
-
-                        {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                          <button
-                            type="button"
-                            className="show-more-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleExpanded(group.directory);
-                            }}
-                          >
-                            Show less
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+              tempGroups.map((group) =>
+                renderProjectSection({
+                  group,
+                  projection: 'temp',
+                  sectionClassName: 'temp-project',
+                  pathLabel: group.directory.includes('/T/tmp')
+                    ? `[Temp] ${group.directory.match(/tmp[A-Za-z0-9_-]*/)?.[0] || 'session'}`
+                    : formatFolder(group.directory),
+                })
+              )}
           </div>
         )}
 
@@ -569,123 +615,15 @@ export function Gallery({ filter }: GalleryProps = {}) {
             )}
 
             {(isWorkersView || showWorkerConversations) &&
-              workerGroups.map((group) => {
-                const isCollapsed = collapsedProjects.has(group.directory);
-                const isExpanded = expandedProjects.has(group.directory);
-                const dirDisplay = formatFolder(group.directory);
-                const totalCount = group.conversations.length;
-                const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-                const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-                const visibleConversations = isExpanded
-                  ? group.conversations
-                  : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
-
-                return (
-                  <div key={group.directory} className="project-section worker-project">
-                    <div
-                      className="project-header"
-                      onClick={() => toggleCollapsed(group.directory)}
-                    >
-                      <div className="project-header-left">
-                        <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                          &#9660;
-                        </span>
-                        <span className="project-path">{dirDisplay}</span>
-                      </div>
-                      <span className="project-count">
-                        {totalCount} worker{totalCount !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-
-                    {!isCollapsed && (
-                      <>
-                        <div className="project-grid">
-                          {visibleConversations.map((conv) => {
-                            const state = conv.isRunning ? 'running' : 'idle';
-                            const getStateLabel = () => {
-                              if (state === 'running') return 'Running';
-                              const lastTime = getLastMessageTime(conv.messages);
-                              return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                            };
-                            const accentColor = getProjectColor(conv.workingDirectory);
-
-                            return (
-                              <div
-                                key={conv.id}
-                                className={`gallery-card${isWorkersView ? '' : ' worker-card'}`}
-                                onClick={() => navigate(`/chat/${conv.id}`)}
-                                style={{ borderTopColor: accentColor }}
-                              >
-                                <div className="gallery-card-header">
-                                  <div className="gallery-card-id">
-                                    {conv.id.substring(0, 8)}
-                                    <span className="provider-badge provider-worker">worker</span>
-                                  </div>
-                                  <div className="gallery-card-status">
-                                    <button
-                                      type="button"
-                                      className="promote-worker-btn"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        promoteWorker(conv.id);
-                                      }}
-                                    >
-                                      Promote
-                                    </button>
-                                    <div className={`state-badge state-${state}`}>
-                                      <div className="state-indicator" />
-                                      <span className="state-label">{getStateLabel()}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div>{conv.messages.length} messages</div>
-                                <div className="gallery-messages">
-                                  {conv.messages.length === 0 ? (
-                                    <div className="empty-state">No messages yet</div>
-                                  ) : (
-                                    conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                      <div key={i} className={`gallery-message ${msg.role}`}>
-                                        <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                        {msg.content.length > 100 ? '...' : ''}
-                                      </div>
-                                    ))
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {showMoreButton && (
-                          <button
-                            type="button"
-                            className="show-more-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleExpanded(group.directory);
-                            }}
-                          >
-                            Show more... ({hiddenCount} hidden)
-                          </button>
-                        )}
-
-                        {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                          <button
-                            type="button"
-                            className="show-more-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleExpanded(group.directory);
-                            }}
-                          >
-                            Show less
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+              workerGroups.map((group) =>
+                renderProjectSection({
+                  group,
+                  projection: 'worker',
+                  sectionClassName: 'worker-project',
+                  countLabel: 'worker',
+                  showWorkerBadge: true,
+                })
+              )}
           </div>
         )}
 
@@ -707,128 +645,13 @@ export function Gallery({ filter }: GalleryProps = {}) {
             )}
 
             {(isDoneView || showDoneConversations) &&
-              doneGroups.map((group) => {
-                const isCollapsed = collapsedProjects.has(group.directory);
-                const isExpanded = expandedProjects.has(group.directory);
-                const dirDisplay = formatFolder(group.directory);
-                const totalCount = group.conversations.length;
-                const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
-                const showMoreButton = totalCount > CONVERSATIONS_PER_PROJECT && !isExpanded;
-                const visibleConversations = isExpanded
-                  ? group.conversations
-                  : group.conversations.slice(0, CONVERSATIONS_PER_PROJECT);
-
-                return (
-                  <div key={group.directory} className="project-section done-project">
-                    <button
-                      type="button"
-                      className="project-header"
-                      onClick={() => toggleCollapsed(group.directory)}
-                    >
-                      <div className="project-header-left">
-                        <span className={`project-chevron ${isCollapsed ? 'collapsed' : ''}`}>
-                          &#9660;
-                        </span>
-                        <span className="project-path">{dirDisplay}</span>
-                      </div>
-                      <span className="project-count">
-                        {totalCount} conversation{totalCount !== 1 ? 's' : ''}
-                      </span>
-                    </button>
-
-                    {!isCollapsed && (
-                      <>
-                        <div className="project-grid">
-                          {visibleConversations.map((conv) => {
-                            const state = conv.isRunning ? 'running' : 'idle';
-                            const getStateLabel = () => {
-                              if (state === 'running') return 'Running';
-                              const lastTime = getLastMessageTime(conv.messages);
-                              return lastTime ? `Idle · ${formatTimeAgo(lastTime)}` : 'Idle';
-                            };
-                            const accentColor = getProjectColor(conv.workingDirectory);
-
-                            return (
-                              <div
-                                key={conv.id}
-                                className={`gallery-card${isDoneView ? '' : ' done-card'}`}
-                                onClick={() => navigate(`/chat/${conv.id}`)}
-                                style={{ borderTopColor: accentColor }}
-                              >
-                                <div className="gallery-card-header">
-                                  <div className="gallery-card-id">
-                                    {conv.id.substring(0, 8)}
-                                    <span
-                                      className={`provider-badge provider-${conv.provider || 'claude'}`}
-                                    >
-                                      {conv.provider || 'claude'}
-                                    </span>
-                                  </div>
-                                  <div className="gallery-card-status">
-                                    <button
-                                      type="button"
-                                      className="undo-done-btn"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        unmarkDone(conv.sessionId ?? conv.id);
-                                      }}
-                                    >
-                                      Restore
-                                    </button>
-                                    <div className={`state-badge state-${state}`}>
-                                      <div className="state-indicator" />
-                                      <span className="state-label">{getStateLabel()}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div>{conv.messages.length} messages</div>
-                                <div className="gallery-messages">
-                                  {conv.messages.length === 0 ? (
-                                    <div className="empty-state">No messages yet</div>
-                                  ) : (
-                                    conv.messages.slice(-3).map((msg: Message, i: number) => (
-                                      <div key={i} className={`gallery-message ${msg.role}`}>
-                                        <strong>{msg.role}:</strong> {msg.content.substring(0, 100)}
-                                        {msg.content.length > 100 ? '...' : ''}
-                                      </div>
-                                    ))
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {showMoreButton && (
-                          <button
-                            type="button"
-                            className="show-more-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleExpanded(group.directory);
-                            }}
-                          >
-                            Show more... ({hiddenCount} hidden)
-                          </button>
-                        )}
-
-                        {isExpanded && totalCount > CONVERSATIONS_PER_PROJECT && (
-                          <button
-                            type="button"
-                            className="show-more-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleExpanded(group.directory);
-                            }}
-                          >
-                            Show less
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+              doneGroups.map((group) =>
+                renderProjectSection({
+                  group,
+                  projection: 'done',
+                  sectionClassName: 'done-project',
+                })
+              )}
           </div>
         )}
       </div>

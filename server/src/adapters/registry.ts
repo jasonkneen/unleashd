@@ -63,8 +63,8 @@ const claudeAdapter: DiskAdapter = {
     if (session.entries.length === 0) return null;
 
     const messages = extractMessagesFromEntries(session.entries);
-    const subAgents = extractSubAgentsFromEntries(session.entries);
     const provider = inferProviderFromModel(session.model);
+    const subAgents = extractSubAgentsFromEntries(session.entries, provider);
 
     return {
       sessionId: session.sessionId,
@@ -196,7 +196,7 @@ const geminiAdapter: DiskAdapter = {
       createdAt: session.createdAt,
       modifiedAt: session.modifiedAt,
       messages: [...session.messages],
-      subAgents: [],
+      subAgents: [...session.subAgents],
       parentSessionId: null,
     };
   },

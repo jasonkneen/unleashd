@@ -84,6 +84,7 @@ interface PendingConversation {
   model?: ModelId;
   createdAt: string;
   swarmDebugPrefix?: string;
+  resumedFromConversationId?: string;
 }
 
 function normalizeWorkingDirectory(input: string): string {
@@ -179,7 +180,8 @@ export function createConversation(
   workingDirectory: string,
   provider: Provider = 'claude',
   model?: ModelId,
-  swarmDebugPrefix?: string
+  swarmDebugPrefix?: string,
+  resumedFromConversationId?: string
 ): string {
   const id = crypto.randomUUID();
   const normalizedWorkingDirectory = normalizeWorkingDirectory(workingDirectory);
@@ -201,6 +203,7 @@ export function createConversation(
     workerId: null,
     workerRole: null,
     parentConversationId: null,
+    resumedFromConversationId: resumedFromConversationId ?? null,
     modelName: null,
     swarmDebugPrefix: swarmDebugPrefix ?? null,
   };
@@ -220,6 +223,7 @@ export function createConversation(
     model,
     createdAt: stub.createdAt.toISOString(),
     swarmDebugPrefix,
+    resumedFromConversationId,
   });
   send({
     type: 'new_conversation',
@@ -228,6 +232,7 @@ export function createConversation(
     provider,
     model,
     swarmDebugPrefix,
+    resumedFromConversationId,
   });
 
   return id;
@@ -255,28 +260,7 @@ export function stopConversation(conversationId: string): void {
 export function interruptAndSend(conversationId: string, content: string): void {
   const conv = jotaiStore.get(conversationsAtom).get(conversationId);
   if (!conv) return;
-
-  const pendingQueuedMessages = (conv.queue ?? []).filter((q) => q.status === 'pending');
-  const hasPendingTasks = pendingQueuedMessages.length > 0;
-  const pendingBlock = pendingQueuedMessages.map((q, i) => `${i + 1}. ${q.content}`).join('\n');
-
-  send({ type: 'stop_conversation', conversationId });
-
-  if (hasPendingTasks) {
-    send({ type: 'clear_queue', conversationId });
-  }
-
-  const wrappedContent = hasPendingTasks
-    ? [
-        'We interrupted and flushed the pending tasks.',
-        'Pending tasks flushed:',
-        pendingBlock,
-        '',
-        `This final message was added as an interruption: "${content}"`,
-      ].join('\n')
-    : `Interrupted.\nThis final message was added as an interruption: "${content}"`;
-
-  send({ type: 'queue_message', conversationId, content: wrappedContent });
+  send({ type: 'interrupt_and_send', conversationId, content });
 }
 
 export function setModel(conversationId: string, model: ModelId): void {
@@ -345,6 +329,7 @@ export function handleMessage(data: ServerMessage): void {
             workerId: null,
             workerRole: null,
             parentConversationId: null,
+            resumedFromConversationId: pc.resumedFromConversationId ?? null,
             modelName: null,
             swarmDebugPrefix: pc.swarmDebugPrefix ?? null,
           };
@@ -358,6 +343,7 @@ export function handleMessage(data: ServerMessage): void {
               provider: pc.provider,
               model: pc.model,
               swarmDebugPrefix: pc.swarmDebugPrefix,
+              resumedFromConversationId: pc.resumedFromConversationId,
             });
           }, 0);
         }

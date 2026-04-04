@@ -114,7 +114,7 @@ export {
 // =============================================================================
 
 // Provider enum for multi-CLI support (Claude, Codex, OpenCode, Gemini, etc.)
-export const ProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini']);
+export const ProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini', 'cursor']);
 export type Provider = z.infer<typeof ProviderSchema>;
 
 export interface ProviderMetadata {
@@ -129,6 +129,7 @@ export const PROVIDER_METADATA: Record<Provider, Omit<ProviderMetadata, 'id'>> =
   codex: { label: 'Codex', shortLabel: 'X', cssClass: 'codex' },
   opencode: { label: 'OpenCode', shortLabel: 'O', cssClass: 'opencode' },
   gemini: { label: 'Gemini', shortLabel: 'G', cssClass: 'gemini' },
+  cursor: { label: 'Cursor', shortLabel: 'Cu', cssClass: 'cursor' },
 };
 
 export const PROVIDER_OPTIONS: readonly ProviderMetadata[] = [
@@ -136,6 +137,7 @@ export const PROVIDER_OPTIONS: readonly ProviderMetadata[] = [
   { id: 'codex', ...PROVIDER_METADATA.codex },
   { id: 'opencode', ...PROVIDER_METADATA.opencode },
   { id: 'gemini', ...PROVIDER_METADATA.gemini },
+  { id: 'cursor', ...PROVIDER_METADATA.cursor },
 ];
 
 export const PROVIDER_IDS: readonly Provider[] = PROVIDER_OPTIONS.map((provider) => provider.id);
@@ -172,6 +174,9 @@ export const GeminiModelSchema = z.enum([
 ]);
 export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 
+export const CursorModelSchema = z.enum(['composer2']);
+export type CursorModel = z.infer<typeof CursorModelSchema>;
+
 export const CODEX_THINKING_OPTIONS = ['high', 'medium', 'xhigh'] as const;
 export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
 export const NO_CODEX_THINKING = 'none' as const;
@@ -196,6 +201,13 @@ export const CODEX_MODEL_REGISTRY = [
     thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
     defaultThinkingOption: 'high',
     isDefault: true,
+  },
+  {
+    modelName: 'gpt-5.4-mini',
+    displayName: 'GPT-5.4 Mini',
+    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
+    defaultThinkingOption: 'high',
+    isDefault: false,
   },
   {
     modelName: 'gpt-5.3-codex-spark',
@@ -296,6 +308,7 @@ export const ModelIdSchema = z.union([
   CodexModelSchema,
   GeminiModelSchema,
   OpenCodeModelSchema,
+  CursorModelSchema,
 ]);
 export type ModelId = z.infer<typeof ModelIdSchema>;
 
@@ -311,6 +324,8 @@ export const MessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
   content: z.string(),
   timestamp: z.coerce.date(),
+  completedAt: z.coerce.date().optional(),
+  completionReason: z.enum(['success', 'error', 'out_of_tokens', 'killed']).optional(),
 });
 
 export type Message = z.infer<typeof MessageSchema>;
@@ -420,6 +435,9 @@ export const ConversationSchema = z.object({
   // (e.g., Codex thread_spawn parent_thread_id).
   // When present, UI can render this conversation nested under its parent.
   parentConversationId: z.string().nullish(),
+  // Optional source conversation id for user-created forks/resume threads.
+  // Unlike parentConversationId, this does not imply nested UI treatment.
+  resumedFromConversationId: z.string().nullish(),
   // The actual model name from the CLI (e.g., "claude-sonnet-4-5-20250929").
   // More specific than `provider` which is just "claude", "codex", or "opencode".
   modelName: z.string().nullish(),
@@ -547,6 +565,7 @@ export const NewConversationMessageSchema = z.object({
   provider: ProviderSchema.optional(), // Defaults to 'claude' when not specified
   model: ModelIdSchema.optional(), // Provider-specific model (undefined = provider default)
   swarmDebugPrefix: z.string().optional(), // Debug prefix prepended to first CLI message
+  resumedFromConversationId: z.string().uuid().optional(),
 });
 
 export type NewConversationMessage = z.infer<typeof NewConversationMessageSchema>;
@@ -598,6 +617,14 @@ export const QueueMessageSchema = z.object({
 
 export type QueueMessage = z.infer<typeof QueueMessageSchema>;
 
+export const InterruptAndSendMessageSchema = z.object({
+  type: z.literal('interrupt_and_send'),
+  conversationId: z.string().uuid(),
+  content: z.string().min(1),
+});
+
+export type InterruptAndSendMessage = z.infer<typeof InterruptAndSendMessageSchema>;
+
 export const CancelQueuedMessageSchema = z.object({
   type: z.literal('cancel_queued_message'),
   conversationId: z.string().uuid(),
@@ -621,6 +648,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   SetProviderMessageSchema,
   SetModelMessageSchema,
   QueueMessageSchema,
+  InterruptAndSendMessageSchema,
   CancelQueuedMessageSchema,
   ClearQueueMessageSchema,
 ]);

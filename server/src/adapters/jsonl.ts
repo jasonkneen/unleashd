@@ -38,6 +38,7 @@ import {
   isJsonlUserEntry,
 } from '@unleashd/shared';
 import { formatToolResult, formatToolUse } from './tool-format';
+import { getSubagentDescription, isSubagentSpawnTool } from '../subagent-tools';
 
 /** Canonicalize a directory path: resolve `.`/`..` and strip trailing slashes
  *  so "/foo/bar/" and "/foo/bar" group as the same project. Always returns absolute path. */
@@ -835,10 +836,15 @@ export function extractMessagesFromEntries(entries: JsonlEntry[]): Message[] {
     } else if (isJsonlAssistantEntry(entry)) {
       const content = extractAssistantContent(entry);
       if (content) {
+        const completedAt = parseTimestamp(entry.timestamp) ?? new Date();
+        // Fallback to completedAt if no previous message exists
+        const startedAt = messages.length > 0 ? messages[messages.length - 1].timestamp : completedAt;
         messages.push({
           role: 'assistant',
           content,
-          timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
+          timestamp: startedAt,
+          completedAt,
+          completionReason: 'success', // assume success for historical
         });
       }
     }
@@ -912,10 +918,14 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
       } else if (isCodexAgentMessageEvent(entry)) {
         const content = entry.payload.message;
         if (content) {
+          const completedAt = parseTimestamp(entry.timestamp) ?? new Date();
+          const startedAt = messages.length > 0 ? messages[messages.length - 1].timestamp : completedAt;
           messages.push({
             role: 'assistant',
             content,
-            timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
+            timestamp: startedAt,
+            completedAt,
+            completionReason: 'success', // assume success for historical
           });
         }
       }
@@ -938,11 +948,23 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
       continue;
     }
 
-    messages.push({
-      role,
-      content,
-      timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
-    });
+    if (role === 'assistant') {
+      const completedAt = parseTimestamp(entry.timestamp) ?? new Date();
+      const startedAt = messages.length > 0 ? messages[messages.length - 1].timestamp : completedAt;
+      messages.push({
+        role,
+        content,
+        timestamp: startedAt,
+        completedAt,
+        completionReason: 'success',
+      });
+    } else {
+      messages.push({
+        role,
+        content,
+        timestamp: parseTimestamp(entry.timestamp) ?? new Date(),
+      });
+    }
   }
 
   return dedupeConsecutiveMessages(messages);
@@ -953,11 +975,12 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
 // =============================================================================
 
 /**
- * Extract sub-agent history from JSONL entries by detecting Task tool uses.
+ * Extract sub-agent history from JSONL entries by detecting provider-native
+ * sub-agent spawn tools.
  *
  * This reconstructs historical sub-agent invocations from completed sessions.
  * Sub-agents are detected when an assistant entry contains a tool_use block
- * with name === 'Task'.
+ * with a tool name recognized as a sub-agent spawn for that provider.
  *
  * Limitations:
  * - All sub-agents are marked as 'completed' (we don't have failure data)
@@ -965,7 +988,7 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
  * - Tool use counts are estimates
  * - Timestamps use the entry timestamp (approximation)
  */
-export function extractSubAgentsFromEntries(entries: JsonlEntry[]): SubAgent[] {
+export function extractSubAgentsFromEntries(entries: JsonlEntry[], provider: Provider): SubAgent[] {
   const subAgents: SubAgent[] = [];
   let currentSubAgent: SubAgent | null = null;
 
@@ -983,8 +1006,7 @@ export function extractSubAgentsFromEntries(entries: JsonlEntry[]): SubAgent[] {
       if (isJsonlToolUseBlock(block)) {
         const toolBlock = block as JsonlToolUseBlock;
 
-        // Check if this is a Task tool (sub-agent spawn)
-        if (toolBlock.name === 'Task') {
+        if (isSubagentSpawnTool(provider, toolBlock.name)) {
           // Complete the previous sub-agent if one is active
           if (currentSubAgent) {
             currentSubAgent.status = 'completed';
@@ -992,15 +1014,13 @@ export function extractSubAgentsFromEntries(entries: JsonlEntry[]): SubAgent[] {
             subAgents.push(currentSubAgent);
           }
 
-          // Extract description and subagent_type from input
           const input = toolBlock.input as Record<string, unknown>;
-          const description = (input.description as string) || 'Sub-agent task';
-          const subagentType = input.subagent_type as string | undefined;
+          const description = getSubagentDescription(provider, toolBlock.name, input);
 
           // Create new sub-agent
           currentSubAgent = {
             id: toolBlock.id,
-            description: subagentType ? `[${subagentType}] ${description}` : description,
+            description,
             status: 'running',
             toolUses: 0,
             tokens: 0,
@@ -1194,6 +1214,7 @@ export interface GeminiSession {
   createdAt: Date;
   modifiedAt: Date;
   messages: Message[];
+  subAgents: SubAgent[];
 }
 
 /**
@@ -1266,6 +1287,7 @@ export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSe
       createdAt: new Date(),
       modifiedAt: new Date(),
       messages: [],
+      subAgents: [],
     };
   }
 
@@ -1277,6 +1299,8 @@ export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSe
 
   const rawMessages = Array.isArray(data.messages) ? data.messages : [];
   const messages: Message[] = [];
+  const subAgents: SubAgent[] = [];
+  let currentSubAgent: SubAgent | null = null;
   let model = 'unknown';
 
   for (const msg of rawMessages) {
@@ -1316,6 +1340,28 @@ export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSe
         const name = (call.name as string) ?? 'tool';
         const args = call.args as Record<string, unknown> | undefined;
         parts.push(formatToolUse(name, args));
+
+        if (isSubagentSpawnTool('gemini', name)) {
+          if (currentSubAgent) {
+            currentSubAgent.status = 'completed';
+            currentSubAgent.completedAt = timestamp;
+            subAgents.push(currentSubAgent);
+          }
+
+          currentSubAgent = {
+            id: (call.id as string) ?? `${name}-${timestamp.toISOString()}`,
+            description: getSubagentDescription('gemini', name, args ?? {}),
+            status: 'running',
+            toolUses: 0,
+            tokens: 0,
+            currentAction: undefined,
+            startedAt: timestamp,
+            completedAt: undefined,
+          };
+        } else if (currentSubAgent) {
+          currentSubAgent.toolUses += 1;
+          currentSubAgent.currentAction = name;
+        }
       }
 
       const fullContent = parts.join('\n').trim();
@@ -1323,6 +1369,12 @@ export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSe
         messages.push({ role: 'assistant', content: fullContent, timestamp });
       }
     }
+  }
+
+  if (currentSubAgent) {
+    currentSubAgent.status = 'completed';
+    currentSubAgent.completedAt = currentSubAgent.startedAt;
+    subAgents.push(currentSubAgent);
   }
 
   return {
@@ -1333,6 +1385,7 @@ export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSe
     createdAt: startTime,
     modifiedAt: lastUpdated,
     messages,
+    subAgents,
   };
 }
 

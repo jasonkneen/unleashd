@@ -457,6 +457,7 @@
   gap: 12px;
 }
 
+.fork-thread-btn,
 .copy-thread-btn {
   background: none;
   border: none;
@@ -471,17 +472,34 @@
   transition: opacity 0.15s, color 0.15s;
 }
 
+.chat-header:hover .fork-thread-btn,
 .chat-header:hover .copy-thread-btn {
   opacity: 1;
 }
 
+.fork-thread-btn:hover,
 .copy-thread-btn:hover {
   color: var(--ai-bright);
+}
+
+.fork-thread-btn {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .copy-thread-btn.copied {
   color: var(--accent-success, #4caf50);
   opacity: 1;
+}
+
+.resume-thread-container {
+  padding: 16px 24px 0;
+}
+
+.resume-thread-empty-state {
+  padding: 0 16px 16px;
 }
 
 /* Ready badge in header */

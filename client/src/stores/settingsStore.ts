@@ -7,8 +7,8 @@ import { create } from 'zustand';
  * Semantic key names decouple themes from literal color names, so a
  * monochromatic or analogous palette works without forcing "blue" or "magenta".
  *
- * Structural tones:
- *   bgCanvas = darkest bg, bgSurface = surface bg,
+ * Structural tones (polarity-agnostic — works for dark and light palettes):
+ *   bgCanvas = outermost bg, bgSurface = surface bg (one step toward text),
  *   textMuted = muted text, textSubtle = secondary text,
  *   textBody = primary text, textBright = emphasis text
  *
@@ -205,11 +205,31 @@ const PALETTE_KEYS: { key: keyof Omit<Palette16, 'name'>; css: string }[] = [
   { key: 'meta', css: 'meta' },
 ];
 
+/**
+ * Compute relative luminance from a #RRGGBB hex string (WCAG formula).
+ * Returns 0..1 where 0 = black, 1 = white.
+ */
+function hexLuminance(hex: string): number {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
 export function applyPalette(palette: Palette16) {
   const root = document.documentElement;
   for (const { key, css } of PALETTE_KEYS) {
     root.style.setProperty(`--theme-${css}`, palette[key]);
   }
+
+  // Auto-detect polarity from bgCanvas luminance.
+  // Light canvas (luminance > 0.18) flips the derivation poles in CSS
+  // so elevation, emphasis, and accent-bright all go the right direction.
+  const lum = hexLuminance(palette.bgCanvas);
+  const mode = lum > 0.18 ? 'light' : 'dark';
+  root.dataset.themeMode = mode;
+  root.style.setProperty('--theme-color-scheme', mode);
 }
 
 // =============================================================================

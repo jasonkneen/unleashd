@@ -1,0 +1,108 @@
+/* ResumeThreadWidget — compact banner that links a forked thread back to its source. */
+
+.resume-thread-widget {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--meta) 40%, transparent);
+  border-radius: 2px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--meta) 14%, var(--bg-card)) 0%, color-mix(in srgb, var(--primary) 8%, var(--bg-card)) 100%);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--bg-darkest) 18%, transparent);
+}
+
+.resume-thread-widget__badge {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--meta) 20%, transparent);
+  color: var(--meta);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.resume-thread-widget__body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.resume-thread-widget__title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.resume-thread-widget__title a {
+  color: var(--meta);
+  text-decoration: none;
+}
+
+.resume-thread-widget__title a:hover {
+  text-decoration: underline;
+}
+
+.resume-thread-widget__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.resume-thread-widget__provider {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: color-mix(in srgb, var(--meta) 18%, transparent);
+  color: var(--meta);
+}
+
+.resume-thread-widget__folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-thread-widget__link {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--meta) 45%, transparent);
+  color: var(--meta);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.resume-thread-widget__link:hover {
+  background: color-mix(in srgb, var(--meta) 10%, transparent);
+}
+
+@media (max-width: 700px) {
+  .resume-thread-widget {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .resume-thread-widget__link {
+    width: 100%;
+  }
+}

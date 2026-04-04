@@ -22,9 +22,9 @@
      Default: Solarized Dark.
      ========================================= */
 
-  /* Structural tones */
-  --theme-bg-canvas: #002b36;   /* Darkest background */
-  --theme-bg-surface: #073642;  /* Surface / raised background */
+  /* Structural tones (default: Solarized Dark — overridden by applyPalette()) */
+  --theme-bg-canvas: #002b36;   /* Outermost background (darkest in dark mode, lightest in light) */
+  --theme-bg-surface: #073642;  /* Surface / raised background (one step toward text) */
   --theme-text-muted: #586e75;  /* Muted text, comments */
   --theme-text-subtle: #657b83; /* Secondary text */
   --theme-text-body: #839496;   /* Primary body text */
@@ -41,12 +41,23 @@
   --theme-meta: #d33682;     /* AI model badges, special */
 
   /* =========================================
+     POLARITY POLES — auto-set by applyPalette() via data-theme-mode.
+     Dark mode: bg deepens toward black, fg pops toward white.
+     Light mode: bg deepens toward white, fg pops toward black.
+     Replaces all hardcoded black/white so derivations adapt to
+     any canvas luminance automatically. No toggle needed — the
+     14 palette values implicitly encode the polarity.
+     ========================================= */
+  --pole-bg-deep: black;
+  --pole-fg-pop: white;
+
+  /* =========================================
      DERIVED: Background elevation scale
      9 levels derived from --theme-bg-canvas and --theme-bg-surface.
      Each step increases perceived lightness.
      ========================================= */
-  --bg-darkest: color-mix(in oklch, var(--theme-bg-canvas) 70%, black);
-  --bg-base: color-mix(in oklch, var(--theme-bg-canvas) 85%, black);
+  --bg-darkest: color-mix(in oklch, var(--theme-bg-canvas) 70%, var(--pole-bg-deep));
+  --bg-base: color-mix(in oklch, var(--theme-bg-canvas) 85%, var(--pole-bg-deep));
   --bg-raised-1: var(--theme-bg-canvas);
   --bg-raised-2: color-mix(in oklch, var(--theme-bg-canvas) 85%, var(--theme-bg-surface));
   --bg-raised-3: var(--theme-bg-surface);
@@ -60,7 +71,7 @@
      Named aliases for the elevation scale.
      ========================================= */
   --bg-page: var(--bg-base);
-  --bg-sidebar: color-mix(in oklch, var(--theme-bg-canvas) 92%, black);
+  --bg-sidebar: color-mix(in oklch, var(--theme-bg-canvas) 92%, var(--pole-bg-deep));
   --bg-content: var(--bg-raised-1);
   --bg-card: var(--bg-raised-2);
   --bg-panel: var(--bg-raised-3);
@@ -92,63 +103,66 @@
   --text-secondary: var(--theme-text-subtle);
   --text-primary: var(--theme-text-body);
   --text-emphasis: var(--theme-text-bright);
-  --text-bright: color-mix(in oklch, var(--theme-text-bright) 70%, white);
-  --text-on-accent: color-mix(in oklch, var(--theme-bg-canvas) 90%, black);
+  --text-bright: color-mix(in oklch, var(--theme-text-bright) 70%, var(--pole-fg-pop));
+  /* Text ON accent buttons/badges — must contrast with the accent color.
+     Push canvas toward bg-deep: dark mode → near-black on bright accents,
+     light mode → near-white on saturated accents. */
+  --text-on-accent: color-mix(in oklch, var(--theme-bg-canvas) 80%, var(--pole-bg-deep));
 
   /* =========================================
      DERIVED: Accent color families
      Each has 4 variants: base, dim, bright, glow.
      dim   = 35% of accent mixed toward canvas (oklch) — context-aware for light/dark
-     bright = 75% of accent mixed toward white (oklch)
+     bright = 75% of accent mixed toward pole-fg-pop (oklch) — adapts to polarity
      glow  = 22% of accent over transparent (srgb)
      ========================================= */
 
   /* User (messages, active nav) */
   --user: var(--theme-user);
   --user-dim: color-mix(in oklch, var(--theme-user) 35%, var(--theme-bg-canvas));
-  --user-bright: color-mix(in oklch, var(--theme-user) 75%, white);
+  --user-bright: color-mix(in oklch, var(--theme-user) 75%, var(--pole-fg-pop));
   --user-glow: color-mix(in srgb, var(--theme-user) 22%, transparent);
 
   /* AI (assistant messages) */
   --ai: var(--theme-ai);
   --ai-dim: color-mix(in oklch, var(--theme-ai) 35%, var(--theme-bg-canvas));
-  --ai-bright: color-mix(in oklch, var(--theme-ai) 75%, white);
+  --ai-bright: color-mix(in oklch, var(--theme-ai) 75%, var(--pole-fg-pop));
   --ai-glow: color-mix(in srgb, var(--theme-ai) 22%, transparent);
 
   /* Primary (send button, focus glows) */
   --primary: var(--theme-primary);
   --primary-dim: color-mix(in oklch, var(--theme-primary) 35%, var(--theme-bg-canvas));
-  --primary-bright: color-mix(in oklch, var(--theme-primary) 75%, white);
+  --primary-bright: color-mix(in oklch, var(--theme-primary) 75%, var(--pole-fg-pop));
   --primary-glow: color-mix(in srgb, var(--theme-primary) 22%, transparent);
 
   /* Success (completed states) */
   --success: var(--theme-success);
   --success-dim: color-mix(in oklch, var(--theme-success) 35%, var(--theme-bg-canvas));
-  --success-bright: color-mix(in oklch, var(--theme-success) 75%, white);
+  --success-bright: color-mix(in oklch, var(--theme-success) 75%, var(--pole-fg-pop));
   --success-glow: color-mix(in srgb, var(--theme-success) 22%, transparent);
 
   /* Warning (system alerts) */
   --warning: var(--theme-warning);
   --warning-dim: color-mix(in oklch, var(--theme-warning) 35%, var(--theme-bg-canvas));
-  --warning-bright: color-mix(in oklch, var(--theme-warning) 75%, white);
+  --warning-bright: color-mix(in oklch, var(--theme-warning) 75%, var(--pole-fg-pop));
   --warning-glow: color-mix(in srgb, var(--theme-warning) 22%, transparent);
 
   /* Queue (queued, inline code, pending) */
   --queue: var(--theme-queue);
   --queue-dim: color-mix(in oklch, var(--theme-queue) 35%, var(--theme-bg-canvas));
-  --queue-bright: color-mix(in oklch, var(--theme-queue) 75%, white);
+  --queue-bright: color-mix(in oklch, var(--theme-queue) 75%, var(--pole-fg-pop));
   --queue-glow: color-mix(in srgb, var(--theme-queue) 22%, transparent);
 
   /* Danger (errors, interrupt) */
   --danger: var(--theme-danger);
   --danger-dim: color-mix(in oklch, var(--theme-danger) 35%, var(--theme-bg-canvas));
-  --danger-bright: color-mix(in oklch, var(--theme-danger) 75%, white);
+  --danger-bright: color-mix(in oklch, var(--theme-danger) 75%, var(--pole-fg-pop));
   --danger-glow: color-mix(in srgb, var(--theme-danger) 22%, transparent);
 
   /* Meta (AI model badges, special) */
   --meta: var(--theme-meta);
   --meta-dim: color-mix(in oklch, var(--theme-meta) 35%, var(--theme-bg-canvas));
-  --meta-bright: color-mix(in oklch, var(--theme-meta) 75%, white);
+  --meta-bright: color-mix(in oklch, var(--theme-meta) 75%, var(--pole-fg-pop));
   --meta-glow: color-mix(in srgb, var(--theme-meta) 22%, transparent);
 
   /* =========================================
@@ -200,7 +214,7 @@
   line-height: 1.6;
   font-weight: 400;
 
-  color-scheme: dark;
+  color-scheme: var(--theme-color-scheme, dark);
   color: var(--text-primary);
   background-color: var(--bg-primary);
 
@@ -208,6 +222,17 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* =========================================
+   Light-mode polarity override.
+   applyPalette() sets data-theme-mode="light" when bgCanvas
+   luminance > 0.18. Flips the derivation poles so elevation,
+   emphasis, and accent-bright all go in the correct direction.
+   ========================================= */
+:root[data-theme-mode="light"] {
+  --pole-bg-deep: white;
+  --pole-fg-pop: black;
 }
 
 a {

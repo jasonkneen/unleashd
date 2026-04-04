@@ -9,6 +9,7 @@ import { useDropzone } from 'react-dropzone';
 import {
   cancelQueuedMessage,
   clearQueue,
+  createConversation,
   interruptAndSend,
   queueMessage,
   setActiveConversationId,
@@ -27,6 +28,7 @@ import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../store
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
 import { PromptPalette } from './PromptPalette';
+import { ResumeThreadWidget } from './ResumeThreadWidget';
 import { SubAgentPanel } from './SubAgentPanel';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
 import { VirtualizedMessageList, isToolCallOnlyMessage } from './VirtualizedMessageList';
@@ -76,6 +78,8 @@ export function Chat() {
   const childSessionConversations = useAtomValue(childConversationsAtomFamily(id ?? ''));
   const conversationCount = useAtomValue(conversationCountAtom);
   const queue = conversation?.queue?.length ? conversation.queue : EMPTY_QUEUE;
+  const resumedFromConversationId = conversation?.resumedFromConversationId ?? '';
+  const resumedFromConversation = useAtomValue(conversationAtomFamily(resumedFromConversationId));
 
   // Model picker: fetch available models for the conversation's provider
   const provider = conversation?.provider ?? 'claude';
@@ -427,12 +431,18 @@ export function Chat() {
     return buildUnifiedSubAgents(conversation, childSessionConversations);
   }, [conversation, childSessionConversations]);
 
-  const handleCopyThread = useCallback(async () => {
-    const modelDisplay = models.find((m) => m.id === conversation?.model)?.displayName ?? conversation?.modelName ?? conversation?.model ?? 'default';
-    const folderDisplay = conversation?.workingDirectory.replace(/^\/Users\/[^/]+/, '~') ?? '';
+  const threadCopyText = useMemo(() => {
+    if (!conversation) return '';
+
+    const modelDisplay =
+      models.find((m) => m.id === conversation.model)?.displayName ??
+      conversation.modelName ??
+      conversation.model ??
+      'default';
+    const folderDisplay = conversation.workingDirectory.replace(/^\/Users\/[^/]+/, '~');
     const header = [
-      `Conversation: ${conversation?.id ?? ''}`,
-      `Provider:     ${conversation?.provider ?? 'claude'}`,
+      `Conversation: ${conversation.id}`,
+      `Provider:     ${conversation.provider ?? 'claude'}`,
       `Model:        ${modelDisplay}`,
       `Folder:       ${folderDisplay}`,
       '---',
@@ -441,10 +451,34 @@ export function Chat() {
       .flatMap((g) => g.messages)
       .map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
       .join('\n\n');
-    await navigator.clipboard.writeText(`${header}\n\n${messages}`);
+
+    return messages ? `${header}\n\n${messages}` : header;
+  }, [conversation, messageGroups, models]);
+
+  const forkDraftText = useMemo(() => {
+    if (!threadCopyText) return '';
+    return `${threadCopyText}\n--- resume thread above ---\n\nInstructions:\nPlease resume the thread above it was started by another agent`;
+  }, [threadCopyText]);
+
+  const handleCopyThread = useCallback(async () => {
+    await navigator.clipboard.writeText(threadCopyText);
     setThreadCopied(true);
     setTimeout(() => setThreadCopied(false), 2000);
-  }, [messageGroups, conversation, models]);
+  }, [threadCopyText]);
+
+  const handleForkThread = useCallback(() => {
+    if (!conversation || !id) return;
+
+    const newId = createConversation(
+      conversation.workingDirectory,
+      conversation.provider,
+      conversation.model,
+      undefined,
+      conversation.id
+    );
+    localStorage.setItem(`${DRAFT_KEY_PREFIX}${newId}`, forkDraftText);
+    navigate(`/chat/${newId}`);
+  }, [conversation, forkDraftText, id, navigate]);
 
   if (!conversation) {
     return (
@@ -634,6 +668,14 @@ export function Chat() {
         <div className="header-status">
           <button
             type="button"
+            className="fork-thread-btn"
+            onClick={handleForkThread}
+            title="Fork thread with resume template"
+          >
+            Fork
+          </button>
+          <button
+            type="button"
             className={`copy-thread-btn${threadCopied ? ' copied' : ''}`}
             onClick={handleCopyThread}
             title="Copy full thread"
@@ -672,6 +714,15 @@ export function Chat() {
           subAgents={unifiedSubAgents}
           workingDirectory={conversation.workingDirectory}
         />
+      )}
+
+      {conversation.resumedFromConversationId && (
+        <div className="resume-thread-container">
+          <ResumeThreadWidget
+            sourceConversationId={conversation.resumedFromConversationId}
+            sourceConversation={resumedFromConversation}
+          />
+        </div>
       )}
 
       {conversation.messages.length === 0 ? (

@@ -393,6 +393,7 @@ export function Sidebar() {
               <button
                 type="button"
                 className="nav-create-btn nav-create-btn--search"
+                aria-label="Search conversations"
                 onClick={(event) => {
                   // Keep header click from firing.
                   event.stopPropagation();
@@ -403,7 +404,7 @@ export function Sidebar() {
               >
                 <svg
                   role="img"
-                  aria-label="icon"
+                  aria-hidden="true"
                   className="nav-search-icon"
                   width="12"
                   height="12"
@@ -723,6 +724,7 @@ export function Sidebar() {
                         <button
                           type="button"
                           className="folder-group-add-btn"
+                          aria-label={`Search in ${dirDisplay}`}
                           title={`Search in ${dirDisplay}`}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -732,7 +734,7 @@ export function Sidebar() {
                         >
                           <svg
                             role="img"
-                            aria-label="icon"
+                            aria-hidden="true"
                             width="10"
                             height="10"
                             viewBox="0 0 16 16"
@@ -871,7 +873,7 @@ function ConversationItem({
               {timeAgo}
             </span>
           )}
-          <div className={`status-indicator ${conv.isRunning ? 'running' : ''}`} />
+          <div className={`status-indicator ${conv.isRunning ? 'running' : conv.queue?.length ? 'pending' : ''}`} />
         </div>
       </div>
       <div className="conversation-preview">{preview}</div>
