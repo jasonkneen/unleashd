@@ -31,6 +31,21 @@ import { v4 as uuidv4 } from 'uuid';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadAllConversations, pollForChanges } from './adapters/loader';
 import { formatToolUse, isCompletionOnlyToolUse } from './adapters/tool-format';
+import {
+  EXTERNAL_GRACE_MS,
+  FILE_POLL_INTERVAL_MS,
+  HOT_RELOAD_DRAIN_MS,
+  HOT_RELOAD_FORCE_EXIT_GRACE_MS,
+  LOCAL_COMPLETION_SUPPRESS_MS,
+  PALETTE_GENERATION_TIMEOUT_MS,
+  SWARM_CONTEXT_COMMAND_TIMEOUT_MS,
+  SWARM_POLL_INTERVAL_MS,
+  SWARM_POLL_THROTTLE_MS,
+  TURN_IDLE_TIMEOUT_MS,
+  TURN_MAX_RUNTIME_MS,
+  TURN_TIMEOUT_KILL_GRACE_MS,
+  USAGE_CACHE_TTL_MS,
+} from './constants/timeouts';
 import { type ProviderEvent, getProvider, providers } from './providers';
 import { isModelIdValidForProvider, modelValidationHint } from './providers/model-validation';
 import { getSubagentDescription, isSubagentSpawnTool } from './subagent-tools';
@@ -56,8 +71,6 @@ let fileMtimes = new Map<string, number>();
 // Marked idle only after EXTERNAL_GRACE_MS with no file changes, to avoid
 // flicker during gaps in Claude's output (thinking, API calls, tool use).
 const externallyRunning = new Map<string, number>();
-const EXTERNAL_GRACE_MS = 30_000; // 30s grace period before marking idle
-const LOCAL_COMPLETION_SUPPRESS_MS = EXTERNAL_GRACE_MS;
 // Session IDs that were just completed by a local process.
 // Suppresses false "external running" detection from trailing disk writes.
 const localCompletionSuppressUntil = new Map<string, number>();
@@ -130,16 +143,6 @@ const STARTUP_INITIAL_LOAD_LIMIT = readPositiveIntEnv('CWV_STARTUP_INITIAL_LOAD_
 const STARTUP_PARSE_CONCURRENCY = readPositiveIntEnv('CWV_STARTUP_PARSE_CONCURRENCY', 16);
 const STARTUP_LOAD_BATCH_SIZE = readPositiveIntEnv('CWV_STARTUP_BATCH_SIZE', 100);
 const STARTUP_PROGRESS_FILE_STEP = readPositiveIntEnv('CWV_STARTUP_LOG_EVERY_FILES', 500);
-const HOT_RELOAD_DRAIN_MS = readPositiveIntEnv('CWV_HOT_RELOAD_DRAIN_MS', 15 * 60_000);
-const HOT_RELOAD_FORCE_EXIT_GRACE_MS = readPositiveIntEnv(
-  'CWV_HOT_RELOAD_FORCE_EXIT_GRACE_MS',
-  3_000
-);
-const TURN_IDLE_TIMEOUT_MS = readPositiveIntEnv('CWV_TURN_IDLE_TIMEOUT_MS', 10 * 60_000);
-const TURN_MAX_RUNTIME_MS = readPositiveIntEnv('CWV_TURN_MAX_RUNTIME_MS', 60 * 60_000);
-const TURN_TIMEOUT_KILL_GRACE_MS = readPositiveIntEnv('CWV_TURN_TIMEOUT_KILL_GRACE_MS', 5_000);
-const SWARM_POLL_INTERVAL_MS = readPositiveIntEnv('CWV_SWARM_POLL_INTERVAL_MS', 2_000);
-const SWARM_POLL_THROTTLE_MS = readPositiveIntEnv('CWV_SWARM_POLL_THROTTLE_MS', 1_500);
 const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 
 function readPositiveIntEnv(name: string, fallback: number): number {
@@ -2636,7 +2639,6 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
   };
 }
 
-const SWARM_CONTEXT_COMMAND_TIMEOUT_MS = 8_000;
 const SWARM_CONTEXT_MAX_OUTPUT_CHARS = 8_000;
 const SWARM_CONTEXT_MAX_DOC_CHARS = 3_000;
 const SWARM_CONTEXT_MAX_DOC_FILES = 6;
@@ -3793,12 +3795,13 @@ ${isLightRequest ? `- LIGHT MODE: bgCanvas should be the lightest value. bgSurfa
     });
 
     // Timeout: kill the process if it takes longer than 90 seconds
-    const TIMEOUT_MS = 90_000;
     const timeout = setTimeout(() => {
-      console.error(`[generate-palette] Timed out after ${TIMEOUT_MS / 1000}s — killing process`);
+      console.error(
+        `[generate-palette] Timed out after ${PALETTE_GENERATION_TIMEOUT_MS / 1000}s — killing process`
+      );
       turn.stop('SIGTERM');
-      sendError(504, `Palette generation timed out after ${TIMEOUT_MS / 1000}s`);
-    }, TIMEOUT_MS);
+      sendError(504, `Palette generation timed out after ${PALETTE_GENERATION_TIMEOUT_MS / 1000}s`);
+    }, PALETTE_GENERATION_TIMEOUT_MS);
 
     try {
       for await (const event of turn.events) {
@@ -3991,8 +3994,6 @@ interface UsageResponse {
   rateLimits: Record<ProviderName, RateLimit[]>;
 }
 const usageResponseCache = new Map<number, { time: number; data: UsageResponse }>();
-const USAGE_CACHE_TTL_MS = 60_000; // 60s
-
 // Parse a single Claude JSONL file. Returns cached result if mtime unchanged.
 function parseClaudeSession(
   filePath: string,
@@ -4919,8 +4920,6 @@ function pruneSessionSets(): void {
  * Broadcasts `conversations_updated` and `status` changes to all connected clients.
  */
 function startFilePolling(): void {
-  const POLL_INTERVAL_MS = 5000;
-
   setInterval(async () => {
     try {
       // Snapshot active IDs for pollForChanges skip-list.
@@ -5067,7 +5066,7 @@ function startFilePolling(): void {
     } catch (error) {
       console.error('[Poll] Error during file polling:', error);
     }
-  }, POLL_INTERVAL_MS);
+  }, FILE_POLL_INTERVAL_MS);
 }
 
 async function startServer(): Promise<void> {
