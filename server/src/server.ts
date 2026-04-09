@@ -24,7 +24,7 @@ import type {
   SubAgent,
   UIState,
 } from '@unleashd/shared';
-import { safeParseClientMessage } from '@unleashd/shared';
+import { normalizeModelId, safeParseClientMessage } from '@unleashd/shared';
 import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -481,7 +481,7 @@ class Conversation extends EventEmitter {
     // Resolve to absolute path: sessions are identified by absolute path in oompa
     this.workingDirectory = path.resolve(workingDirectory || process.cwd());
     this.provider = provider;
-    this.model = model;
+    this.model = normalizeModelId(provider, model);
     this.isWorker = isWorker;
     this.swarmId = swarmId;
     this.workerId = workerId;
@@ -1590,7 +1590,7 @@ wss.on('connection', (ws: WebSocket) => {
           // Keeps '/' valid while normalizing '/foo/bar/' to '/foo/bar'.
           const workingDir = resolveWorkingDirectoryInput(data.workingDirectory);
           const provider = data.provider || 'claude'; // Support 'claude', 'codex', or 'opencode'
-          const model = data.model; // Provider-specific model (undefined = provider default)
+          const model = normalizeModelId(provider, data.model); // Provider-specific model (undefined = provider default)
           const swarmDebugPrefix = data.swarmDebugPrefix ?? null;
           const resumedFromConversationId = data.resumedFromConversationId ?? null;
 
@@ -1722,7 +1722,8 @@ wss.on('connection', (ws: WebSocket) => {
         case 'set_model': {
           const conv = conversations.get(data.conversationId);
           if (conv) {
-            if (!isModelIdValidForProvider(conv.provider, data.model)) {
+            const normalizedModel = normalizeModelId(conv.provider, data.model);
+            if (!isModelIdValidForProvider(conv.provider, normalizedModel)) {
               ws.send(
                 JSON.stringify({
                   type: 'error',
@@ -1731,9 +1732,9 @@ wss.on('connection', (ws: WebSocket) => {
               );
               return;
             }
-            conv.model = data.model;
+            conv.model = normalizedModel;
             console.log(
-              `[WS] Model changed for ${data.conversationId}: ${data.model ?? 'default'}`
+              `[WS] Model changed for ${data.conversationId}: ${normalizedModel ?? 'default'}`
             );
             // Broadcast updated conversation
             ws.send(

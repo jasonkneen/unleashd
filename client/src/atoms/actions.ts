@@ -6,6 +6,7 @@ import type {
   QueuedMessage,
   ServerMessage,
 } from '@unleashd/shared';
+import { normalizeModelId } from '@unleashd/shared';
 import { enableMapSet, produce } from 'immer';
 import { DRAFT_KEY_PREFIX, PENDING_CONVERSATIONS_KEY, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import {
@@ -123,7 +124,10 @@ function loadPendingConversations(): PendingConversation[] {
   const raw = localStorage.getItem(PENDING_CONVERSATIONS_KEY);
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as PendingConversation[];
+    return (JSON.parse(raw) as PendingConversation[]).map((conv) => ({
+      ...conv,
+      model: normalizeModelId(conv.provider, conv.model),
+    }));
   } catch {
     // Corrupt localStorage data — clear it so the bad entry doesn't block every
     // subsequent init cycle.
@@ -185,6 +189,7 @@ export function createConversation(
 ): string {
   const id = crypto.randomUUID();
   const normalizedWorkingDirectory = normalizeWorkingDirectory(workingDirectory);
+  const normalizedModel = normalizeModelId(provider, model);
 
   const stub: Conversation = {
     id,
@@ -195,7 +200,7 @@ export function createConversation(
     createdAt: new Date(),
     workingDirectory: normalizedWorkingDirectory,
     provider,
-    model,
+    model: normalizedModel,
     subAgents: [],
     queue: [],
     isWorker: false,
@@ -220,7 +225,7 @@ export function createConversation(
     id,
     workingDirectory: normalizedWorkingDirectory,
     provider,
-    model,
+    model: normalizedModel,
     createdAt: stub.createdAt.toISOString(),
     swarmDebugPrefix,
     resumedFromConversationId,
@@ -230,7 +235,7 @@ export function createConversation(
     id,
     workingDirectory: normalizedWorkingDirectory,
     provider,
-    model,
+    model: normalizedModel,
     swarmDebugPrefix,
     resumedFromConversationId,
   });

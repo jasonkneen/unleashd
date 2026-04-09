@@ -174,7 +174,7 @@ export const GeminiModelSchema = z.enum([
 ]);
 export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 
-export const CursorModelSchema = z.enum(['composer2']);
+export const CursorModelSchema = z.enum(['composer-2', 'composer2']);
 export type CursorModel = z.infer<typeof CursorModelSchema>;
 
 export const CODEX_THINKING_OPTIONS = ['high', 'medium', 'xhigh'] as const;
@@ -311,6 +311,12 @@ export const ModelIdSchema = z.union([
   CursorModelSchema,
 ]);
 export type ModelId = z.infer<typeof ModelIdSchema>;
+
+export function normalizeModelId(provider: Provider, model?: ModelId): ModelId | undefined {
+  if (!model) return undefined;
+  if (provider === 'cursor' && model === 'composer2') return 'composer-2';
+  return model;
+}
 
 /** Display metadata returned by Provider.listModels() for the model dropdown */
 export const ModelInfoSchema = z.object({
