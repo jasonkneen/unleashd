@@ -58,3 +58,10 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
 }
+
+/* Merge mode: dim the main panel so the glowing sidebar reads as the
+   primary focus while the user picks sources. Interaction stays enabled. */
+.main-content--merge-dim {
+  filter: brightness(0.55) saturate(0.8);
+  transition: filter 200ms ease;
+}

@@ -23,11 +23,13 @@ import {
   conversationCountAtom,
   streamingAtomFamily,
 } from '../atoms/conversations';
+import { allMergeChildrenSettledAtomFamily } from '../atoms/mergeAtoms';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
 import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
 import { PromptPalette } from './PromptPalette';
+import { MergeProgressStrip } from './MergeProgressStrip';
 import { ResumeThreadWidget } from './ResumeThreadWidget';
 import { SubAgentPanel } from './SubAgentPanel';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
@@ -78,6 +80,14 @@ export function Chat() {
   const childSessionConversations = useAtomValue(childConversationsAtomFamily(id ?? ''));
   const conversationCount = useAtomValue(conversationCountAtom);
   const queue = conversation?.queue?.length ? conversation.queue : EMPTY_QUEUE;
+  const allMergeChildrenSettled = useAtomValue(allMergeChildrenSettledAtomFamily(id ?? ''));
+  // Merge parent threads must wait for all forked review children to settle
+  // (complete or error) before the user can send their first message — the
+  // server needs the review docs on disk to build the prefix.
+  const mergeGateBlocking =
+    !!conversation?.mergeParentMeta &&
+    conversation.messages.length === 0 &&
+    !allMergeChildrenSettled;
   const resumedFromConversationId = conversation?.resumedFromConversationId ?? '';
   const resumedFromConversation = useAtomValue(conversationAtomFamily(resumedFromConversationId));
 
@@ -123,7 +133,8 @@ export function Chat() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [modelPickerOpen, providerPickerOpen]);
 
-  const { savePrompt } = useSavedPrompts();
+  const { savePrompt, prompts: savedPrompts, fuzzySearch, incrementUsage, deletePrompt } =
+    useSavedPrompts();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastMessageRef = useRef<HTMLDivElement>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
@@ -719,6 +730,8 @@ export function Chat() {
         />
       )}
 
+      {conversation.mergeParentMeta && <MergeProgressStrip parentId={conversation.id} />}
+
       {conversation.resumedFromConversationId && (
         <div className="resume-thread-container">
           <ResumeThreadWidget
@@ -908,11 +921,13 @@ export function Chat() {
                 type="button"
                 className={`send-btn ${hasActiveTurn ? 'interrupt-mode' : ''}`}
                 onClick={hasActiveTurn ? handleInterrupt : handleSend}
-                disabled={!confirmed || !hasContent}
+                disabled={!confirmed || !hasContent || mergeGateBlocking}
                 title={
-                  hasActiveTurn
-                    ? 'Enter: Interrupt & send | Tab: Queue'
-                    : 'Enter: Send | Tab: Queue'
+                  mergeGateBlocking
+                    ? 'Waiting for review forks to finish'
+                    : hasActiveTurn
+                      ? 'Enter: Interrupt & send | Tab: Queue'
+                      : 'Enter: Send | Tab: Queue'
                 }
               >
                 {hasActiveTurn ? 'Interrupt' : 'Send'}
@@ -930,6 +945,10 @@ export function Chat() {
       <PromptPalette
         isOpen={showPalette}
         onClose={() => setShowPalette(false)}
+        prompts={savedPrompts}
+        fuzzySearch={fuzzySearch}
+        incrementUsage={incrementUsage}
+        deletePrompt={deletePrompt}
         onSelect={(content) => {
           if (textareaRef.current) {
             textareaRef.current.value = content;

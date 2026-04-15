@@ -17,6 +17,10 @@ import {
   streamingContentAtom,
   wsStatusAtom,
 } from './conversations';
+import {
+  mergeChildReviewDocPathMapAtom,
+  mergeChildStatusMapAtom,
+} from './mergeAtoms';
 import { jotaiStore } from './store';
 
 // Enable Immer's Map/Set support — must be called once before any produce() on Maps.
@@ -241,6 +245,30 @@ export function createConversation(
   });
 
   return id;
+}
+
+/**
+ * Merge feature: POST /api/conversations/merge. Server mints the parent id
+ * and per-child ids/review UUIDs, creates everything, spawns forks, then
+ * broadcasts conversation_created + merge_child_status events. Returns the
+ * parent id so the caller can navigate to the new thread.
+ */
+export async function createMergeConversations(args: {
+  parentProvider: Provider;
+  parentModel?: ModelId;
+  workingDirectory: string;
+  sourceIds: string[];
+}): Promise<{ parentId: string; children: Array<{ sourceId: string; childId: string; reviewUuid: string }> }> {
+  const res = await fetch('/api/conversations/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'merge failed' }));
+    throw new Error(err.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
 }
 
 export function deleteConversation(id: string): void {
@@ -536,6 +564,27 @@ export function handleMessage(data: ServerMessage): void {
         }
         return { lastSeenMessageIndex: { ...s.lastSeenMessageIndex, ...updates } };
       });
+      break;
+    }
+
+    case 'merge_child_status': {
+      // Review child has settled. Write status (complete | error) + optional
+      // doc path so the progress strip chip in the parent's Chat updates and
+      // the tooltip can fetch the doc.
+      jotaiStore.set(
+        mergeChildStatusMapAtom,
+        produce(jotaiStore.get(mergeChildStatusMapAtom), (draft) => {
+          draft.set(data.childConversationId, data.status);
+        })
+      );
+      if (data.reviewDocPath) {
+        jotaiStore.set(
+          mergeChildReviewDocPathMapAtom,
+          produce(jotaiStore.get(mergeChildReviewDocPathMapAtom), (draft) => {
+            draft.set(data.childConversationId, data.reviewDocPath as string);
+          })
+        );
+      }
       break;
     }
 

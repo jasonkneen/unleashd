@@ -693,3 +693,111 @@
   background: var(--accent-primary);
   color: var(--text-on-accent);
 }
+
+/* ============================================================================
+   Merge feature — sidebar glow, merge button, row checkmark overlay
+   ============================================================================ */
+
+.sidebar--merge-mode {
+  box-shadow:
+    inset 0 0 0 2px var(--theme-violet),
+    0 0 32px color-mix(in oklab, var(--theme-violet) 45%, transparent);
+  transition: box-shadow 200ms ease;
+}
+
+.nav-create-btn--merge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-create-btn--merge-active {
+  background: var(--theme-violet);
+  color: var(--theme-base03);
+}
+
+.merge-mode-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  background: color-mix(in oklab, var(--theme-violet) 12%, transparent);
+  border-bottom: 1px solid var(--theme-violet);
+  font-size: 11px;
+}
+
+.merge-mode-bar__label {
+  flex: 1;
+  color: var(--theme-violet);
+  font-weight: 600;
+}
+
+.merge-mode-bar__confirm {
+  padding: 3px 10px;
+  border-radius: 3px;
+  background: var(--theme-violet);
+  color: var(--theme-base03);
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.merge-mode-bar__confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.merge-mode-bar__cancel {
+  padding: 3px 10px;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--theme-base0);
+  border: 1px solid var(--theme-base01);
+  cursor: pointer;
+}
+
+.conversation-item--merge-mode {
+  cursor: pointer;
+  padding-left: 26px;
+  position: relative;
+}
+
+.conversation-item--merge-selected {
+  background: color-mix(in oklab, var(--theme-violet) 18%, transparent);
+  outline: 1px solid var(--theme-violet);
+}
+
+.conversation-item--merge-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.merge-checkmark {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--theme-base01);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--theme-base03);
+  background: var(--theme-base03);
+}
+
+.merge-checkmark--on {
+  background: var(--theme-violet);
+  border-color: var(--theme-violet);
+  color: var(--theme-base03);
+  font-weight: 700;
+}
+
+.merge-checkmark--disabled {
+  background: transparent;
+  border-color: color-mix(in oklab, var(--theme-base01) 60%, transparent);
+}

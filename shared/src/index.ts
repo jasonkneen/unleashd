@@ -451,9 +451,66 @@ export const ConversationSchema = z.object({
   // UI sees clean user content; CLI process gets the prefix + content.
   // Stays on the object so toJSON() includes it for client rendering.
   swarmDebugPrefix: z.string().nullish(),
+
+  // Merge feature metadata. Parent threads that aggregate review docs from
+  // forked children set mergeParentMeta; forked children set mergeChildMeta.
+  // Exactly one is set; both null for ordinary conversations.
+  mergeParentMeta: z
+    .object({
+      children: z.array(
+        z.object({
+          sourceConversationId: z.string().uuid(),
+          childConversationId: z.string().uuid(),
+          reviewUuid: z.string().uuid(),
+          childWorkingDirectory: z.string(),
+        })
+      ),
+      prefixInjected: z.boolean().default(false),
+    })
+    .nullish(),
+  mergeChildMeta: z
+    .object({
+      parentConversationId: z.string().uuid(),
+      reviewUuid: z.string().uuid(),
+    })
+    .nullish(),
 });
 
 export type Conversation = z.infer<typeof ConversationSchema>;
+
+// =============================================================================
+// Merge feature — provider fork capability
+// =============================================================================
+
+// Providers whose CLI supports native non-interactive fork via
+// sessionForkFlags in agent-cli-tool. Codex/gemini/cursor are excluded
+// until cp+resume emulation lands.
+export const FORK_CAPABLE_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>([
+  'claude',
+  'opencode',
+]);
+
+export function providerSupportsFork(p: Provider): boolean {
+  return FORK_CAPABLE_PROVIDERS.has(p);
+}
+
+export const MergeChildStatusSchema = z.enum(['spinning', 'complete', 'error']);
+export type MergeChildStatus = z.infer<typeof MergeChildStatusSchema>;
+
+// Review prompt sent verbatim to each forked child. {UUID} is replaced by a
+// per-child reviewUuid before the fork spawns.
+export const MERGE_REVIEW_PROMPT = `stop, review the entire thread, report everything you've done, commit completed, work, not incomplete work, reflect on any potential bugs you've raised, any you've fixed what your key goals started as, how they evolved, which sub goals arose, which goals and sub goals are completed, and what is still pending, also report all mistakes you made, key learnings, any struggles or confusion you had, and any broader issues with the tooling or the code base.
+
+Write ALL the above in a long over descriptive doc, then report back with
+"merge_review_docs/REVIEW_DOC_{UUID}.txt"`;
+
+export function buildMergeReviewPrompt(reviewUuid: string): string {
+  return MERGE_REVIEW_PROMPT.replace('{UUID}', reviewUuid);
+}
+
+export function mergeReviewDocPath(reviewUuid: string): string {
+  return `merge_review_docs/REVIEW_DOC_${reviewUuid}.txt`;
+}
 
 // =============================================================================
 // Oompa Runtime Visibility Contract
@@ -808,6 +865,17 @@ export const ConversationsUpdatedMessageSchema = z.object({
 
 export type ConversationsUpdatedMessage = z.infer<typeof ConversationsUpdatedMessageSchema>;
 
+export const MergeChildStatusMessageSchema = z.object({
+  type: z.literal('merge_child_status'),
+  parentConversationId: z.string().uuid(),
+  childConversationId: z.string().uuid(),
+  reviewUuid: z.string().uuid(),
+  status: MergeChildStatusSchema,
+  reviewDocPath: z.string().nullish(),
+});
+
+export type MergeChildStatusMessage = z.infer<typeof MergeChildStatusMessageSchema>;
+
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   InitMessageSchema,
   ConversationCreatedMessageSchema,
@@ -823,6 +891,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   SubAgentCompleteMessageSchema,
   ConversationsUpdatedMessageSchema,
   QueueUpdatedMessageSchema,
+  MergeChildStatusMessageSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;

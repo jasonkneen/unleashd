@@ -5,11 +5,12 @@ import {
   CODEX_UNIFIED_THINKING_OPTIONS,
   NO_CODEX_THINKING,
   PROVIDER_OPTIONS,
+  providerSupportsFork,
   toCodexModelId,
   type CodexThinkingMode,
 } from '@unleashd/shared';
 import type { Conversation, ModelId, ModelInfo, Provider } from '@unleashd/shared';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
@@ -19,7 +20,9 @@ import {
   defaultCwdAtom,
   wsStatusAtom,
 } from '../atoms/conversations';
+import { mergeModeAtom, mergeSelectionAtom } from '../atoms/mergeAtoms';
 import { jotaiStore } from '../atoms/store';
+import { MergeModal } from './MergeModal';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
@@ -42,6 +45,13 @@ interface FolderGroup {
   directory: string;
   conversations: Conversation[];
   lastMessageTime: number;
+}
+
+// Merge feature: a source conversation is eligible for fork only if its
+// provider has native sessionForkFlags AND it is not currently running.
+// Matches the server's POST /api/conversations/merge validation exactly.
+function isConversationForkable(conv: Conversation): boolean {
+  return providerSupportsFork(conv.provider) && !conv.isRunning;
 }
 
 function normalizeFolderDirectory(path: string): string {
@@ -69,6 +79,9 @@ export function Sidebar() {
   const activeConversationId = useAtomValue(activeConversationIdAtom);
   const defaultCwd = useAtomValue(defaultCwdAtom);
   const wsStatus = useAtomValue(wsStatusAtom);
+  const [mergeMode, setMergeMode] = useAtom(mergeModeAtom);
+  const [mergeSelection, setMergeSelection] = useAtom(mergeSelectionAtom);
+  const [showMergeModal, setShowMergeModal] = useState(false);
 
   const lastWorkingDirectory = useUIStore((s) => s.lastWorkingDirectory);
   const setLastWorkingDirectory = useUIStore((s) => s.setLastWorkingDirectory);
@@ -355,7 +368,43 @@ export function Sidebar() {
   };
 
   const handleSelectConversation = (id: string) => {
+    if (mergeMode) {
+      // Hijack row click: toggle the conversation into / out of the selection
+      // set instead of navigating. The Done button is hidden in merge mode
+      // (see ConversationItem) so there's no rogue click path to worry about.
+      const conv = allConversations.find((c) => c.id === id);
+      if (conv && !isConversationForkable(conv)) return;
+      setMergeSelection((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      return;
+    }
     navigate(`/chat/${id}`);
+  };
+
+  const handleToggleMergeMode = () => {
+    if (mergeMode) {
+      // Exiting merge mode without confirming — clear selection.
+      setMergeSelection(new Set());
+      setMergeMode(false);
+    } else {
+      setMergeMode(true);
+    }
+  };
+
+  const handleOpenMergeModal = () => {
+    if (mergeSelection.size === 0) return;
+    setShowMergeModal(true);
+  };
+
+  const handleMergeComplete = (parentId: string) => {
+    setShowMergeModal(false);
+    setMergeMode(false);
+    setMergeSelection(new Set());
+    navigate(`/chat/${parentId}`);
   };
 
   const handleDone = (conv: Conversation, e: React.MouseEvent) => {
@@ -370,7 +419,7 @@ export function Sidebar() {
   };
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${mergeMode ? 'sidebar--merge-mode' : ''}`}>
       <div className="sidebar-header">
         {/* ── Conversations Section ── */}
         <div className="nav-section">
@@ -434,8 +483,69 @@ export function Sidebar() {
               >
                 +
               </button>
+              <button
+                type="button"
+                className={`nav-create-btn nav-create-btn--merge ${mergeMode ? 'nav-create-btn--merge-active' : ''}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleToggleMergeMode();
+                }}
+                title={mergeMode ? 'Exit merge mode' : 'Merge conversations'}
+                aria-pressed={mergeMode}
+              >
+                <svg
+                  role="img"
+                  aria-hidden="true"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                >
+                  <path
+                    d="M3 2v4a3 3 0 0 0 3 3h4a3 3 0 0 1 3 3v2"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
+                  <path
+                    d="M13 2v4a3 3 0 0 1-3 3"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
+                  <circle cx="3" cy="2" r="1.3" fill="currentColor" />
+                  <circle cx="13" cy="2" r="1.3" fill="currentColor" />
+                  <circle cx="13" cy="14" r="1.3" fill="currentColor" />
+                </svg>
+              </button>
             </div>
           </div>
+          {mergeMode && (
+            <div className="merge-mode-bar">
+              <span className="merge-mode-bar__label">
+                {mergeSelection.size === 0
+                  ? 'Select conversations to merge'
+                  : `${mergeSelection.size} selected`}
+              </span>
+              <button
+                type="button"
+                className="merge-mode-bar__confirm"
+                disabled={mergeSelection.size === 0}
+                onClick={handleOpenMergeModal}
+              >
+                Merge →
+              </button>
+              <button
+                type="button"
+                className="merge-mode-bar__cancel"
+                onClick={handleToggleMergeMode}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Swarms Section ── */}
@@ -695,6 +805,9 @@ export function Sidebar() {
               showFolderBadge
               onSelect={handleSelectConversation}
               onDone={handleDone}
+              mergeMode={mergeMode}
+              mergeSelected={mergeSelection.has(conv.id)}
+              mergeDisabled={mergeMode && !isConversationForkable(conv)}
             />
           ))
         ) : (
@@ -779,6 +892,9 @@ export function Sidebar() {
                               showFolderBadge={false}
                               onSelect={handleSelectConversation}
                               onDone={handleDone}
+                              mergeMode={mergeMode}
+                              mergeSelected={mergeSelection.has(conv.id)}
+                              mergeDisabled={mergeMode && !isConversationForkable(conv)}
                             />
                           ))
                         ) : (
@@ -806,6 +922,9 @@ export function Sidebar() {
                       showFolderBadge
                       onSelect={handleSelectConversation}
                       onDone={handleDone}
+                      mergeMode={mergeMode}
+                      mergeSelected={mergeSelection.has(conv.id)}
+                      mergeDisabled={mergeMode && !isConversationForkable(conv)}
                     />
                   ))}
               </div>
@@ -813,6 +932,13 @@ export function Sidebar() {
           </>
         )}
       </div>
+      {showMergeModal && (
+        <MergeModal
+          sourceIds={Array.from(mergeSelection)}
+          onCancel={() => setShowMergeModal(false)}
+          onComplete={handleMergeComplete}
+        />
+      )}
     </div>
   );
 }
@@ -828,6 +954,9 @@ function ConversationItem({
   showFolderBadge,
   onSelect,
   onDone,
+  mergeMode = false,
+  mergeSelected = false,
+  mergeDisabled = false,
 }: {
   conv: Conversation;
   isActive: boolean;
@@ -835,6 +964,9 @@ function ConversationItem({
   showFolderBadge: boolean;
   onSelect: (id: string) => void;
   onDone: (conv: Conversation, e: React.MouseEvent) => void;
+  mergeMode?: boolean;
+  mergeSelected?: boolean;
+  mergeDisabled?: boolean;
 }) {
   const workingDirectory = normalizeFolderDirectory(conv.workingDirectory);
   const projectColor = getProjectColor(workingDirectory);
@@ -849,11 +981,33 @@ function ConversationItem({
   const timeAgo = lastTime ? formatTimeAgo(lastTime) : null;
   const timeColor = lastTime ? timeAgoColor(getMinutesElapsed(lastTime)) : undefined;
 
+  const itemClasses = [
+    'conversation-item',
+    isActive ? 'active' : '',
+    mergeMode ? 'conversation-item--merge-mode' : '',
+    mergeSelected ? 'conversation-item--merge-selected' : '',
+    mergeMode && mergeDisabled ? 'conversation-item--merge-disabled' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const mergeTitle = mergeDisabled
+    ? `Fork not supported for ${conv.provider} yet`
+    : undefined;
+
   return (
     <div
-      className={`conversation-item ${isActive ? 'active' : ''}`}
+      className={itemClasses}
       onClick={() => onSelect(conv.id)}
+      title={mergeTitle}
     >
+      {mergeMode && (
+        <div
+          className={`merge-checkmark ${mergeSelected ? 'merge-checkmark--on' : ''} ${mergeDisabled ? 'merge-checkmark--disabled' : ''}`}
+          aria-hidden="true"
+        >
+          {mergeSelected ? '✓' : ''}
+        </div>
+      )}
       <div className={`conversation-header ${showFolderBadge ? '' : 'no-badge'}`}>
         {showFolderBadge && (
           <span
@@ -877,9 +1031,11 @@ function ConversationItem({
         </div>
       </div>
       <div className="conversation-preview">{preview}</div>
-      <button type="button" className="done-btn" onClick={(e) => onDone(conv, e)}>
-        Done
-      </button>
+      {!mergeMode && (
+        <button type="button" className="done-btn" onClick={(e) => onDone(conv, e)}>
+          Done
+        </button>
+      )}
     </div>
   );
 }

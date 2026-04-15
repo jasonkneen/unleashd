@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { handleMessage, setSendFn, setWsStatus } from './atoms/actions';
 import { allConversationsAtom, conversationsAtom } from './atoms/conversations';
+import { mergeModeAtom } from './atoms/mergeAtoms';
 import { jotaiStore } from './atoms/store';
 import { Chat } from './components/Chat';
 import { ConfigDropdown } from './components/ConfigDropdown';
@@ -67,10 +68,12 @@ function AppLayout() {
     initSettings().catch(console.error);
   }, []);
 
+  const mergeMode = useAtomValue(mergeModeAtom);
+
   return (
-    <div className="app">
+    <div className={`app ${mergeMode ? 'app--merge-mode' : ''}`}>
       <Sidebar />
-      <div className="main-content">
+      <div className={`main-content ${mergeMode ? 'main-content--merge-dim' : ''}`}>
         <div className="top-bar">
           <ConfigDropdown />
         </div>

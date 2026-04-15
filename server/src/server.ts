@@ -24,7 +24,29 @@ import type {
   SubAgent,
   UIState,
 } from '@unleashd/shared';
-import { normalizeModelId, safeParseClientMessage } from '@unleashd/shared';
+import {
+  buildMergeReviewPrompt,
+  FORK_CAPABLE_PROVIDERS,
+  mergeReviewDocPath,
+  normalizeModelId,
+  providerSupportsFork,
+  safeParseClientMessage,
+} from '@unleashd/shared';
+
+type MergeParentMeta = {
+  children: Array<{
+    sourceConversationId: string;
+    childConversationId: string;
+    reviewUuid: string;
+    childWorkingDirectory: string;
+  }>;
+  prefixInjected: boolean;
+};
+
+type MergeChildMeta = {
+  parentConversationId: string;
+  reviewUuid: string;
+};
 import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -374,6 +396,8 @@ interface ConversationOptions {
   resumedFromConversationId?: string | null;
   modelName?: string | null;
   swarmDebugPrefix?: string | null;
+  mergeParentMeta?: MergeParentMeta | null;
+  mergeChildMeta?: MergeChildMeta | null;
 }
 
 class Conversation extends EventEmitter {
@@ -408,6 +432,10 @@ class Conversation extends EventEmitter {
   // Debug prefix for swarm conversations — prepended to first CLI message.
   // Stays on the object (never cleared) so toJSON() includes it for client rendering.
   swarmDebugPrefix: string | null;
+  // Merge feature: set on a "parent" thread that aggregates review docs from
+  // N forked children. Children have mergeChildMeta instead.
+  mergeParentMeta: MergeParentMeta | null;
+  mergeChildMeta: MergeChildMeta | null;
   // Sub-agent tracking
   subAgents: SubAgent[];
   // Server-owned message queue — persists across client navigation/refresh.
@@ -467,6 +495,8 @@ class Conversation extends EventEmitter {
       resumedFromConversationId = null,
       modelName = null,
       swarmDebugPrefix = null,
+      mergeParentMeta = null,
+      mergeChildMeta = null,
     } = opts;
     this.id = id;
     // sessionId defaults to id so JSONL filename matches Map key (no poller mismatch).
@@ -490,6 +520,8 @@ class Conversation extends EventEmitter {
     this.resumedFromConversationId = resumedFromConversationId;
     this.modelName = modelName;
     this.swarmDebugPrefix = swarmDebugPrefix;
+    this.mergeParentMeta = mergeParentMeta;
+    this.mergeChildMeta = mergeChildMeta;
     this.subAgents = [];
     this.queue = [];
     this._pendingTaskTools = new Map();
@@ -512,7 +544,7 @@ class Conversation extends EventEmitter {
    *
    * First turn omits resumeSessionId; subsequent turns resume with the captured session ID.
    */
-  private spawnForMessage(content: string): void {
+  private spawnForMessage(content: string, forkSourceSessionId?: string): void {
     if (this.process || this.isRunning) {
       console.warn(`[${this.id}] Already processing a message, ignoring`);
       return;
@@ -522,9 +554,10 @@ class Conversation extends EventEmitter {
     clearExternalRunningStatus(this.id, this.sessionId);
     clearLocalCompletionSuppression(this.id, this.sessionId);
 
-    const shouldResume = this._hasStartedSession;
+    const forking = !!forkSourceSessionId;
+    const shouldResume = !forking && this._hasStartedSession;
     console.log(
-      `[${this.id}] Spawning ${this.provider} (provider-session=${this.sessionId.substring(0, 8)}..., resume=${shouldResume})`
+      `[${this.id}] Spawning ${this.provider} (provider-session=${this.sessionId.substring(0, 8)}..., resume=${shouldResume}, fork=${forking})`
     );
     console.log(`[${this.id}] Message: "${content.substring(0, 50)}"`);
 
@@ -543,6 +576,7 @@ class Conversation extends EventEmitter {
       cwd: this.workingDirectory,
       model: this.model,
       resumeSessionId: shouldResume ? this.sessionId : undefined,
+      forkSessionId: forking ? forkSourceSessionId : undefined,
       yolo: true,
       detached: true,
       debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
@@ -988,6 +1022,24 @@ class Conversation extends EventEmitter {
         // Close handler will skip redundant state changes and broadcasts.
         this._turnCompletedCleanly = true;
 
+        // Merge feature: if this is a review child, scan the final assistant
+        // message for the sentinel `merge_review_docs/REVIEW_DOC_<uuid>.txt`.
+        // Presence → complete; absence → error. Either way, broadcast once so
+        // the parent's progress strip updates.
+        if (this.mergeChildMeta) {
+          const expectedPath = mergeReviewDocPath(this.mergeChildMeta.reviewUuid);
+          const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
+          const found = !!lastAssistant && lastAssistant.content.includes(expectedPath);
+          broadcastToAll({
+            type: 'merge_child_status',
+            parentConversationId: this.mergeChildMeta.parentConversationId,
+            childConversationId: this.id,
+            reviewUuid: this.mergeChildMeta.reviewUuid,
+            status: found ? 'complete' : 'error',
+            reviewDocPath: found ? expectedPath : null,
+          });
+        }
+
         break;
       }
 
@@ -1036,6 +1088,38 @@ class Conversation extends EventEmitter {
       cliContent = `<!-- unleashd:swarm-prefix -->\n${this.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${content}`;
     }
 
+    // Merge feature: on the very first user send of a merge parent thread,
+    // inject a prefix containing the contents of each child's review doc.
+    // Loaded synchronously from each child's working directory. Missing files
+    // become inline placeholders so the injection always succeeds even if a
+    // child errored. Sentinel markers let a future restart path recover the
+    // injected context the same way swarmDebugPrefix does.
+    if (
+      this.mergeParentMeta !== null &&
+      !this.mergeParentMeta.prefixInjected &&
+      this.messages.length === 0
+    ) {
+      const parts: string[] = [
+        'This is a merge thread that should take all the "reviews" below from other agent conversations as context',
+      ];
+      for (const child of this.mergeParentMeta.children) {
+        const docRel = mergeReviewDocPath(child.reviewUuid);
+        const docAbs = path.join(child.childWorkingDirectory, docRel);
+        let body: string;
+        try {
+          body = fs.readFileSync(docAbs, 'utf-8');
+        } catch {
+          body = `[review doc not found: ${docRel} — child ${child.childConversationId.substring(0, 8)} may have errored]`;
+        }
+        parts.push(
+          `--- review ${child.reviewUuid} (source conversation ${child.sourceConversationId.substring(0, 8)}) ---\n${body}`
+        );
+      }
+      const mergePrefix = parts.join('\n\n');
+      cliContent = `<!-- unleashd:merge-prefix -->\n${mergePrefix}\n<!-- /unleashd:merge-prefix -->\n\n${content}`;
+      this.mergeParentMeta.prefixInjected = true;
+    }
+
     // Add user message to history (clean content for UI)
     const userMessage: Message = {
       role: 'user',
@@ -1054,6 +1138,40 @@ class Conversation extends EventEmitter {
 
     // Spawn CLI process with possibly-prefixed content
     this.spawnForMessage(cliContent);
+  }
+
+  /**
+   * Merge feature: spawn a CLI turn by FORKING from another session.
+   * `forkSourceSessionId` is the provider session id of the source conversation
+   * (NOT its UI id). The CLI harness inherits the full transcript (tool_use
+   * + tool_result) into a new session id without polluting the source.
+   * Requires the provider to have sessionForkFlags defined (claude, opencode).
+   *
+   * Only safe to call on a fresh Conversation (no prior messages). The user
+   * message is recorded and broadcast exactly like sendMessage.
+   */
+  spawnMergeReviewFork(content: string, forkSourceSessionId: string): void {
+    if (this.process || this.isRunning) {
+      console.warn(`[${this.id}] spawnMergeReviewFork: already running, ignoring`);
+      return;
+    }
+    const userMessage: Message = {
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    };
+    this.messages.push(userMessage);
+    this.broadcastMessage({
+      type: 'message',
+      role: 'user',
+      content,
+      conversationId: this.id,
+    });
+    // Mark as NOT started so spawnForMessage treats this as the first turn
+    // and does not try to --resume our own (empty) session before the fork
+    // has produced an id for us.
+    this._hasStartedSession = false;
+    this.spawnForMessage(content, forkSourceSessionId);
   }
 
   stop(): void {
@@ -1441,6 +1559,8 @@ class Conversation extends EventEmitter {
       resumedFromConversationId: this.resumedFromConversationId,
       modelName: this.modelName,
       swarmDebugPrefix: this.swarmDebugPrefix,
+      mergeParentMeta: this.mergeParentMeta,
+      mergeChildMeta: this.mergeChildMeta,
     };
   }
 }
@@ -3521,6 +3641,156 @@ app.post('/api/settings', (req: Request, res: Response) => {
 });
 
 // =============================================================================
+// Merge API — fork N source conversations, aggregate review docs into a parent
+// =============================================================================
+//
+// Flow:
+//  1. Client selects N source conversations (all providers must support fork).
+//  2. Server mints parentId + per-child (childId, reviewUuid).
+//  3. Server creates a parent Conversation (mergeParentMeta set).
+//  4. For each source, server creates a child Conversation (mergeChildMeta set)
+//     and immediately spawns a fork with the verbatim review prompt.
+//  5. As each child completes, server scans final assistant content for the
+//     sentinel `merge_review_docs/REVIEW_DOC_<uuid>.txt` and broadcasts
+//     merge_child_status { complete | error } (see Conversation.handleOutput).
+//  6. Client enables the parent's send button once all children settled; on
+//     first user send, server injects a prefix with review doc contents.
+//
+// Validation:
+//  - sourceIds must all exist in the conversations Map.
+//  - Every source provider must pass providerSupportsFork() (claude, opencode
+//    only for now — codex/gemini/cursor throw until cp+resume lands).
+//  - No source may be currently running (fork of a mid-flight transcript
+//    produces junk). Returns 409 if so.
+app.post('/api/conversations/merge', express.json(), (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const parentProvider = body.parentProvider as ProviderName | undefined;
+  const parentModel = body.parentModel as ModelId | undefined;
+  const sourceIds = body.sourceIds as string[] | undefined;
+  const workingDirectory = body.workingDirectory as string | undefined;
+
+  if (!parentProvider || !providers[parentProvider]) {
+    res.status(400).json({ error: 'Invalid or missing parentProvider' });
+    return;
+  }
+  if (!Array.isArray(sourceIds) || sourceIds.length === 0) {
+    res.status(400).json({ error: 'sourceIds must be a non-empty array' });
+    return;
+  }
+  if (!workingDirectory) {
+    res.status(400).json({ error: 'workingDirectory required' });
+    return;
+  }
+
+  // Resolve + validate every source up front. If any fails, abort without
+  // creating any conversations — the merge must be atomic from the client's
+  // point of view.
+  const sources: Array<{ id: string; conv: Conversation }> = [];
+  for (const sid of sourceIds) {
+    const conv = conversations.get(sid);
+    if (!conv) {
+      res.status(404).json({ error: `Source conversation not found: ${sid}` });
+      return;
+    }
+    if (!providerSupportsFork(conv.provider)) {
+      res.status(400).json({
+        error: `Provider "${conv.provider}" does not support fork yet. Supported: ${[...FORK_CAPABLE_PROVIDERS].join(', ')}.`,
+        conversationId: sid,
+      });
+      return;
+    }
+    if (conv.isRunning) {
+      res.status(409).json({
+        error: `Source conversation is still running: ${sid}. Stop it first.`,
+        conversationId: sid,
+      });
+      return;
+    }
+    sources.push({ id: sid, conv });
+  }
+
+  // Mint all ids atomically.
+  const parentId = uuidv4();
+  const children = sources.map((src) => ({
+    sourceConversationId: src.id,
+    childConversationId: uuidv4(),
+    reviewUuid: uuidv4(),
+    childWorkingDirectory: src.conv.workingDirectory,
+  }));
+
+  // Create parent conversation. It has no fork seed — it's an ordinary chat
+  // whose only peculiarity is mergeParentMeta + the one-time prefix injection
+  // on first send (see sendMessage).
+  const parent = new Conversation({
+    id: parentId,
+    workingDirectory,
+    provider: parentProvider,
+    model: parentModel,
+    mergeParentMeta: {
+      children: children.map((c) => ({
+        sourceConversationId: c.sourceConversationId,
+        childConversationId: c.childConversationId,
+        reviewUuid: c.reviewUuid,
+        childWorkingDirectory: c.childWorkingDirectory,
+      })),
+      prefixInjected: false,
+    },
+  });
+  if (!parent.model) {
+    const def = providers[parentProvider].listModels().find((m) => m.isDefault);
+    if (def) parent.model = def.id as ModelId;
+  }
+  conversations.set(parentId, parent);
+  broadcastToAll({ type: 'conversation_created', conversation: parent.toJSON() });
+
+  // Create each child conversation and immediately spawn the review fork.
+  // Each child inherits the source's provider + model + cwd so the forked
+  // session resumes under the same CLI harness.
+  for (let i = 0; i < children.length; i++) {
+    const meta = children[i];
+    const src = sources[i].conv;
+    const child = new Conversation({
+      id: meta.childConversationId,
+      workingDirectory: src.workingDirectory,
+      provider: src.provider,
+      model: src.model,
+      resumedFromConversationId: src.id,
+      mergeChildMeta: {
+        parentConversationId: parentId,
+        reviewUuid: meta.reviewUuid,
+      },
+    });
+    conversations.set(child.id, child);
+    broadcastToAll({ type: 'conversation_created', conversation: child.toJSON() });
+
+    const prompt = buildMergeReviewPrompt(meta.reviewUuid);
+    try {
+      child.spawnMergeReviewFork(prompt, src.sessionId);
+    } catch (err) {
+      // spawnMergeReviewFork → buildCommand may throw for providers without
+      // sessionForkFlags. We already validated above, but belt-and-suspenders.
+      console.error(`[merge] Failed to spawn fork for source ${src.id}:`, err);
+      broadcastToAll({
+        type: 'merge_child_status',
+        parentConversationId: parentId,
+        childConversationId: child.id,
+        reviewUuid: meta.reviewUuid,
+        status: 'error',
+      });
+    }
+  }
+
+  res.json({
+    parentId,
+    children: children.map((c) => ({
+      sourceId: c.sourceConversationId,
+      childId: c.childConversationId,
+      reviewUuid: c.reviewUuid,
+    })),
+  });
+});
+
+// =============================================================================
 // Custom Palette API — AI-generated color palettes stored as plain .json files
 // Palettes are saved in ~/.agent-viewer/palettes/palette_{N}.json
 // Each file stores a Palette16 (14 color keys + name + description).
@@ -3643,6 +3913,29 @@ async function initPaletteCache(): Promise<void> {
 // Reads from in-memory cache (zero I/O).
 app.get('/api/custom-palettes', (_req: Request, res: Response) => {
   res.json(paletteCache);
+});
+
+// DELETE /api/custom-palettes/:key — remove a custom palette from cache and disk
+app.delete('/api/custom-palettes/:key', (req: Request, res: Response) => {
+  const { key } = req.params;
+  if (!paletteCache[key]) {
+    res.status(404).json({ error: 'Palette not found' });
+    return;
+  }
+
+  // Extract number from key (custom_N -> N)
+  const match = key.match(/^custom_(\d+)$/);
+  delete paletteCache[key];
+
+  // Fire-and-forget disk delete
+  if (match) {
+    const filePath = path.join(PALETTES_DIR, `palette_${match[1]}.json`);
+    fs.promises.unlink(filePath).catch((err) => {
+      console.error(`[delete-palette] Failed to delete ${filePath}:`, err);
+    });
+  }
+
+  res.json({ ok: true });
 });
 
 // POST /api/generate-palette — run executeCommand in single-shot mode to generate a palette.
@@ -4715,6 +5008,8 @@ function hydrateConversation(convData: ConversationData): Conversation {
     parentConversationId: resolveParentConversationId(convData.parentConversationId ?? null),
     resumedFromConversationId: convData.resumedFromConversationId ?? null,
     modelName: convData.modelName ?? null,
+    mergeParentMeta: convData.mergeParentMeta ?? null,
+    mergeChildMeta: convData.mergeChildMeta ?? null,
   });
   conversation.messages = convData.messages;
   conversation.createdAt = convData.createdAt;
