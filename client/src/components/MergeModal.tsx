@@ -54,12 +54,15 @@ export function MergeModal({
       <div className="merge-modal" onClick={(e) => e.stopPropagation()}>
         <h3 className="merge-modal__title">Merge Conversations</h3>
         <p className="merge-modal__hint">
-          Each source is forked with a review prompt; their review docs become
-          the first-message context of a new parent thread.
+          Each source is forked with a review prompt; their review docs become the first-message
+          context of a new parent thread.
         </p>
 
-        <label className="merge-modal__label">Parent Working Directory</label>
+        <label className="merge-modal__label" htmlFor="merge-modal-cwd">
+          Parent Working Directory
+        </label>
         <input
+          id="merge-modal-cwd"
           type="text"
           className="merge-modal__input"
           value={workingDirectory}
@@ -67,7 +70,7 @@ export function MergeModal({
           placeholder="/path/to/project"
         />
 
-        <label className="merge-modal__label">Parent Provider</label>
+        <div className="merge-modal__label">Parent Provider</div>
         <div className="merge-modal__provider-row">
           {PROVIDER_OPTIONS.map((p) => (
             <label key={p.id} className="merge-modal__provider-option">
@@ -85,7 +88,7 @@ export function MergeModal({
           ))}
         </div>
 
-        <label className="merge-modal__label">Merge Chats ({sourceIds.length})</label>
+        <div className="merge-modal__label">Merge Chats ({sourceIds.length})</div>
         <ul className="merge-modal__sources">
           {sourceIds.map((id) => (
             <MergeSourceRow key={id} id={id} />
@@ -138,7 +141,10 @@ function MergeSourceRow({ id }: { id: string }) {
         : null;
 
   return (
-    <li className={`merge-source ${canFork ? '' : 'merge-source--disabled'}`} title={reason ?? undefined}>
+    <li
+      className={`merge-source ${canFork ? '' : 'merge-source--disabled'}`}
+      title={reason ?? undefined}
+    >
       <span className="merge-source__provider">{conv?.provider ?? '?'}</span>
       <span className="merge-source__label">{label}</span>
       {!canFork && <span className="merge-source__badge">unavailable</span>}

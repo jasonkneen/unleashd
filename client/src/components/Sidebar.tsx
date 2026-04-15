@@ -3,11 +3,11 @@ import {
   CODEX_MODEL_REGISTRY,
   CODEX_THINKING_DISPLAY_NAMES,
   CODEX_UNIFIED_THINKING_OPTIONS,
+  type CodexThinkingMode,
   NO_CODEX_THINKING,
   PROVIDER_OPTIONS,
   providerSupportsFork,
   toCodexModelId,
-  type CodexThinkingMode,
 } from '@unleashd/shared';
 import type { Conversation, ModelId, ModelInfo, Provider } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
@@ -22,20 +22,21 @@ import {
 } from '../atoms/conversations';
 import { mergeModeAtom, mergeSelectionAtom } from '../atoms/mergeAtoms';
 import { jotaiStore } from '../atoms/store';
-import { MergeModal } from './MergeModal';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
 import { getProjectRoot, isWorktreeDirectory } from '../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getConversationLastActivity, getMinutesElapsed } from '../utils/time';
+import { MergeModal } from './MergeModal';
 import { PathAutocomplete } from './PathAutocomplete';
 import { SearchPalette } from './SearchPalette';
 import './Sidebar.css';
 
 const RECENT_CUTOFF_MS = 7 * 24 * 60 * 60 * 1000;
 const ROOT_PLACEHOLDER = '/';
-const DEFAULT_CODEX_ENTRY = CODEX_MODEL_REGISTRY.find((entry) => entry.isDefault) ?? CODEX_MODEL_REGISTRY[0];
+const DEFAULT_CODEX_ENTRY =
+  CODEX_MODEL_REGISTRY.find((entry) => entry.isDefault) ?? CODEX_MODEL_REGISTRY[0];
 const DEFAULT_CODEX_THINKING_MODE =
   DEFAULT_CODEX_ENTRY.defaultThinkingOption ??
   DEFAULT_CODEX_ENTRY.thinkingOptions[0] ??
@@ -236,8 +237,9 @@ export function Sidebar() {
   const [model, setModel] = useState<ModelId | undefined>(undefined);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [codexModelName, setCodexModelName] = useState<string>(DEFAULT_CODEX_ENTRY.modelName);
-  const [codexThinkingMode, setCodexThinkingMode] =
-    useState<CodexThinkingMode>(DEFAULT_CODEX_THINKING_MODE);
+  const [codexThinkingMode, setCodexThinkingMode] = useState<CodexThinkingMode>(
+    DEFAULT_CODEX_THINKING_MODE
+  );
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -658,7 +660,10 @@ export function Sidebar() {
               ) : (
                 <div className="model-selector">
                   {models.map((m) => (
-                    <label key={m.id} className={`model-option ${model === m.id ? 'selected' : ''}`}>
+                    <label
+                      key={m.id}
+                      className={`model-option ${model === m.id ? 'selected' : ''}`}
+                    >
                       <input
                         type="radio"
                         name="model"
@@ -796,20 +801,22 @@ export function Sidebar() {
           </div>
         )}
         {sidebarViewMode === 'list' ? (
-          topLevelConversations.filter((conv) => !doneSet.has(conv.sessionId ?? conv.id)).map((conv) => (
-            <ConversationItem
-              key={conv.id}
-              conv={conv}
-              isActive={conv.id === activeConversationId}
-              hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
-              showFolderBadge
-              onSelect={handleSelectConversation}
-              onDone={handleDone}
-              mergeMode={mergeMode}
-              mergeSelected={mergeSelection.has(conv.id)}
-              mergeDisabled={mergeMode && !isConversationForkable(conv)}
-            />
-          ))
+          topLevelConversations
+            .filter((conv) => !doneSet.has(conv.sessionId ?? conv.id))
+            .map((conv) => (
+              <ConversationItem
+                key={conv.id}
+                conv={conv}
+                isActive={conv.id === activeConversationId}
+                hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
+                showFolderBadge
+                onSelect={handleSelectConversation}
+                onDone={handleDone}
+                mergeMode={mergeMode}
+                mergeSelected={mergeSelection.has(conv.id)}
+                mergeDisabled={mergeMode && !isConversationForkable(conv)}
+              />
+            ))
         ) : (
           <>
             {recentGroups.length > 0 && (
@@ -819,7 +826,9 @@ export function Sidebar() {
                   const dirDisplay = group.directory.replace(/^\/Users\/[^/]+/, '~');
                   const projectColor = getProjectColor(group.directory);
                   // Filter done at render time — group position stays stable
-                  const activeConvs = group.conversations.filter((c) => !doneSet.has(c.sessionId ?? c.id));
+                  const activeConvs = group.conversations.filter(
+                    (c) => !doneSet.has(c.sessionId ?? c.id)
+                  );
 
                   return (
                     <div key={group.directory} className="folder-group">
@@ -898,9 +907,7 @@ export function Sidebar() {
                             />
                           ))
                         ) : (
-                          <div className="folder-group-all-done">
-                            All conversations marked done
-                          </div>
+                          <div className="folder-group-all-done">All conversations marked done</div>
                         ))}
                     </div>
                   );
@@ -990,16 +997,10 @@ function ConversationItem({
   ]
     .filter(Boolean)
     .join(' ');
-  const mergeTitle = mergeDisabled
-    ? `Fork not supported for ${conv.provider} yet`
-    : undefined;
+  const mergeTitle = mergeDisabled ? `Fork not supported for ${conv.provider} yet` : undefined;
 
   return (
-    <div
-      className={itemClasses}
-      onClick={() => onSelect(conv.id)}
-      title={mergeTitle}
-    >
+    <div className={itemClasses} onClick={() => onSelect(conv.id)} title={mergeTitle}>
       {mergeMode && (
         <div
           className={`merge-checkmark ${mergeSelected ? 'merge-checkmark--on' : ''} ${mergeDisabled ? 'merge-checkmark--disabled' : ''}`}
@@ -1027,7 +1028,9 @@ function ConversationItem({
               {timeAgo}
             </span>
           )}
-          <div className={`status-indicator ${conv.isRunning ? 'running' : conv.queue?.length ? 'pending' : ''}`} />
+          <div
+            className={`status-indicator ${conv.isRunning ? 'running' : conv.queue?.length ? 'pending' : ''}`}
+          />
         </div>
       </div>
       <div className="conversation-preview">{preview}</div>

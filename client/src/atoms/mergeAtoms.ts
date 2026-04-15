@@ -29,9 +29,7 @@ export const mergeChildStatusMapAtom = atom<Map<string, MergeChildStatus>>(
 );
 
 // Doc path reported by the server on complete. Hover tooltip fetches content.
-export const mergeChildReviewDocPathMapAtom = atom<Map<string, string>>(
-  new Map<string, string>()
-);
+export const mergeChildReviewDocPathMapAtom = atom<Map<string, string>>(new Map<string, string>());
 
 // Per-child derived status. Default 'spinning' until the server reports.
 export const mergeChildStatusAtomFamily = atomFamily((childId: string) =>

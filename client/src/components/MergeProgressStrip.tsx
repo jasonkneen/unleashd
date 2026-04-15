@@ -2,10 +2,7 @@ import type { MergeChildStatus } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useState } from 'react';
 import { conversationAtomFamily } from '../atoms/conversations';
-import {
-  mergeChildReviewDocPathAtomFamily,
-  mergeChildStatusAtomFamily,
-} from '../atoms/mergeAtoms';
+import { mergeChildReviewDocPathAtomFamily, mergeChildStatusAtomFamily } from '../atoms/mergeAtoms';
 import './MergeProgressStrip.css';
 
 // Rendered at the top of a merge-parent Chat thread. One chip per forked
@@ -16,7 +13,7 @@ export function MergeProgressStrip({ parentId }: { parentId: string }) {
   if (!parent || !parent.mergeParentMeta) return null;
 
   return (
-    <div className="merge-progress-strip" role="status" aria-label="Review progress">
+    <output className="merge-progress-strip" aria-label="Review progress">
       <span className="merge-progress-strip__label">Reviews</span>
       {parent.mergeParentMeta.children.map((child) => (
         <MergeChildChip
@@ -26,7 +23,7 @@ export function MergeProgressStrip({ parentId }: { parentId: string }) {
           sourceCwd={child.childWorkingDirectory}
         />
       ))}
-    </div>
+    </output>
   );
 }
 
@@ -64,15 +61,10 @@ function MergeChildChip({
   }, [status, docPath, sourceCwd, hoverPreview, hoverError]);
 
   const chipClass = `merge-chip merge-chip--${status}`;
-  const label =
-    status === 'complete'
-      ? '✓'
-      : status === 'error'
-        ? '!'
-        : '…';
+  const label = status === 'complete' ? '✓' : status === 'error' ? '!' : '…';
   const title =
     status === 'complete'
-      ? docPath ?? `REVIEW_DOC_${reviewUuid}.txt`
+      ? (docPath ?? `REVIEW_DOC_${reviewUuid}.txt`)
       : status === 'error'
         ? `Review did not produce ${reviewUuid}`
         : 'Reviewing…';
@@ -95,7 +87,7 @@ function MergeChildChip({
               : hoverPreview === null
                 ? 'Loading…'
                 : hoverPreview.length > 4000
-                  ? hoverPreview.substring(0, 4000) + '\n…(truncated)'
+                  ? `${hoverPreview.substring(0, 4000)}\n…(truncated)`
                   : hoverPreview}
           </pre>
         </div>

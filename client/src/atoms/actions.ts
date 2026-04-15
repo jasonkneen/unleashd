@@ -8,7 +8,12 @@ import type {
 } from '@unleashd/shared';
 import { normalizeModelId } from '@unleashd/shared';
 import { enableMapSet, produce } from 'immer';
-import { DRAFT_KEY_PREFIX, PENDING_CONVERSATIONS_KEY, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
+import {
+  DRAFT_KEY_PREFIX,
+  PENDING_CONVERSATIONS_KEY,
+  PENDING_FILES_KEY_PREFIX,
+  useUIStore,
+} from '../stores/uiStore';
 import {
   activeConversationIdAtom,
   conversationsAtom,
@@ -17,10 +22,7 @@ import {
   streamingContentAtom,
   wsStatusAtom,
 } from './conversations';
-import {
-  mergeChildReviewDocPathMapAtom,
-  mergeChildStatusMapAtom,
-} from './mergeAtoms';
+import { mergeChildReviewDocPathMapAtom, mergeChildStatusMapAtom } from './mergeAtoms';
 import { jotaiStore } from './store';
 
 // Enable Immer's Map/Set support — must be called once before any produce() on Maps.
@@ -258,7 +260,10 @@ export async function createMergeConversations(args: {
   parentModel?: ModelId;
   workingDirectory: string;
   sourceIds: string[];
-}): Promise<{ parentId: string; children: Array<{ sourceId: string; childId: string; reviewUuid: string }> }> {
+}): Promise<{
+  parentId: string;
+  children: Array<{ sourceId: string; childId: string; reviewUuid: string }>;
+}> {
   const res = await fetch('/api/conversations/merge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

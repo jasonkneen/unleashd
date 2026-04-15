@@ -482,12 +482,15 @@ export type Conversation = z.infer<typeof ConversationSchema>;
 // Merge feature — provider fork capability
 // =============================================================================
 
-// Providers whose CLI supports native non-interactive fork via
-// sessionForkFlags in agent-cli-tool. Codex/gemini/cursor are excluded
-// until cp+resume emulation lands.
+// Providers whose conversations can be forked for merge. Native vs
+// cp+resume emulation is an implementation detail of agent-cli-tool
+// (selected from HarnessConfig); clients only need to know "can fork or
+// not" for UI gating. Cursor has no path yet, others do.
 export const FORK_CAPABLE_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>([
   'claude',
   'opencode',
+  'codex',
+  'gemini',
 ]);
 
 export function providerSupportsFork(p: Provider): boolean {

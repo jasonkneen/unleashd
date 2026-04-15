@@ -22,11 +22,10 @@ import type {
   QueuedMessage,
   ServerMessage,
   SubAgent,
-  UIState,
 } from '@unleashd/shared';
 import {
-  buildMergeReviewPrompt,
   FORK_CAPABLE_PROVIDERS,
+  buildMergeReviewPrompt,
   mergeReviewDocPath,
   normalizeModelId,
   providerSupportsFork,
@@ -340,13 +339,13 @@ function normalizeProviderErrorMessage(message: string): string {
 // Prevents concurrent CLI executions from fighting over token refresh logic on startup.
 const globalSpawnMutex = {
   queue: Promise.resolve(),
-  lock: function() {
+  lock: function () {
     let resolve!: () => void;
     const next = new Promise<void>((r) => (resolve = r));
     const current = this.queue;
     this.queue = this.queue.then(() => next);
     return { wait: current, release: resolve };
-  }
+  },
 };
 
 // =============================================================================
@@ -629,11 +628,17 @@ class Conversation extends EventEmitter {
             break;
           }
           case 'out_of_tokens': {
-            this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(event.message) });
+            this.handleOutput({
+              type: 'error',
+              message: normalizeProviderErrorMessage(event.message),
+            });
             break;
           }
           case 'error': {
-            this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(event.message) });
+            this.handleOutput({
+              type: 'error',
+              message: normalizeProviderErrorMessage(event.message),
+            });
             break;
           }
           case 'stderr': {
@@ -646,7 +651,10 @@ class Conversation extends EventEmitter {
             // operational signals, not debug noise. Other progress events
             // (heartbeats, non-assistant messages) only log with debug flag.
             if (event.source === 'gemini.warning') {
-              console.warn(`[${this.id}] provider warning:`, event.data?.message ?? JSON.stringify(event));
+              console.warn(
+                `[${this.id}] provider warning:`,
+                event.data?.message ?? JSON.stringify(event)
+              );
             } else if (AGENT_CLI_DEBUG_EVENTS) {
               console.error(`[${this.id}] progress:`, JSON.stringify(event));
             }
@@ -760,7 +768,7 @@ class Conversation extends EventEmitter {
 
         // INVARIANT: dead process can't stream. Clear both atomically.
         // This is the safety net for crash/kill/OOM — all paths that skip message_complete.
-        
+
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.completedAt) {
           lastMsg.completedAt = new Date();
@@ -802,7 +810,9 @@ class Conversation extends EventEmitter {
         if (this.queue.length > 0) {
           const removed = this.queue.length;
           this.queue = [];
-          console.warn(`[${this.id}] Cleared ${removed} pending message(s) due to process error to prevent retry loops.`);
+          console.warn(
+            `[${this.id}] Cleared ${removed} pending message(s) due to process error to prevent retry loops.`
+          );
           this.broadcastQueue();
         }
       });
@@ -811,9 +821,7 @@ class Conversation extends EventEmitter {
   private _ensureAssistantMessage(): void {
     const lastMsg = this.messages[this.messages.length - 1];
     if (!lastMsg || lastMsg.role !== 'assistant') {
-      console.log(
-        `[${this.id}] Creating NEW assistant message (msg #${this.messages.length + 1})`
-      );
+      console.log(`[${this.id}] Creating NEW assistant message (msg #${this.messages.length + 1})`);
       const newMsg: Message = {
         role: 'assistant',
         content: '',
@@ -845,7 +853,7 @@ class Conversation extends EventEmitter {
 
       case 'text_delta': {
         this._ensureAssistantMessage();
-        
+
         // Accumulate content server-side too (for debugging)
         const currentMsg = this.messages[this.messages.length - 1];
         if (currentMsg.role === 'assistant') {
@@ -939,10 +947,9 @@ class Conversation extends EventEmitter {
                 currentMsg?.role === 'assistant' &&
                 currentMsg.content.length > 0 &&
                 !currentMsg.content.endsWith('\n');
-              const chunkText =
-                formattedTool.startsWith('<!--ask_user_question:')
-                  ? formattedTool
-                  : `${needsLeadingNewline ? '\n' : ''}${formattedTool}\n`;
+              const chunkText = formattedTool.startsWith('<!--ask_user_question:')
+                ? formattedTool
+                : `${needsLeadingNewline ? '\n' : ''}${formattedTool}\n`;
               if (currentMsg?.role === 'assistant') {
                 // Keep server-side message text aligned with streamed chunks.
                 currentMsg.content += chunkText;
@@ -964,7 +971,7 @@ class Conversation extends EventEmitter {
         this._clearTurnWatchdogs();
         // Mark all running sub-agents as complete
         const completedAt = new Date();
-        
+
         // Update the last assistant message with completion metadata
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.completedAt) {
@@ -1099,6 +1106,35 @@ class Conversation extends EventEmitter {
       !this.mergeParentMeta.prefixInjected &&
       this.messages.length === 0
     ) {
+      // Race guard: even though the client disables Send until all children
+      // settle via allMergeChildrenSettledAtomFamily, a server restart or a
+      // WS reconnect could briefly put the client's view ahead of reality.
+      // If any child is still running we reject with a clear system message
+      // so the user retries rather than getting placeholder-injected reviews.
+      const stillRunning: string[] = [];
+      for (const child of this.mergeParentMeta.children) {
+        const childConv = conversations.get(child.childConversationId);
+        if (childConv?.isRunning) stillRunning.push(child.childConversationId.substring(0, 8));
+      }
+      if (stillRunning.length > 0) {
+        const msg = `Merge send blocked — ${stillRunning.length} review fork(s) still running: ${stillRunning.join(', ')}. Wait for the progress strip to settle.`;
+        console.warn(`[${this.id}] ${msg}`);
+        const systemMessage: Message = {
+          role: 'system',
+          content: msg,
+          timestamp: new Date(),
+        };
+        broadcastToAll({
+          type: 'message',
+          conversationId: this.id,
+          role: 'system',
+          content: msg,
+        });
+        // Do NOT push into this.messages — leaving messages empty preserves
+        // prefixInjected=false so a retry re-enters this branch cleanly.
+        void systemMessage;
+        return;
+      }
       const parts: string[] = [
         'This is a merge thread that should take all the "reviews" below from other agent conversations as context',
       ];
@@ -1167,9 +1203,10 @@ class Conversation extends EventEmitter {
       content,
       conversationId: this.id,
     });
-    // Mark as NOT started so spawnForMessage treats this as the first turn
-    // and does not try to --resume our own (empty) session before the fork
-    // has produced an id for us.
+    // Native vs cp+resume emulation is decided inside agent-cli-tool based
+    // on the harness config. From here it's opaque: pass the source session
+    // id through, let the library handle the rest. Mark _hasStartedSession
+    // false so spawnForMessage treats this as a first-turn fork.
     this._hasStartedSession = false;
     this.spawnForMessage(content, forkSourceSessionId);
   }
@@ -1320,7 +1357,9 @@ class Conversation extends EventEmitter {
         ? `Turn stalled: no provider events for ${idleSec}s${detail} (timed out)`
         : `Turn exceeded max runtime after ${elapsedSec}s${detail} (timed out)`;
 
-    console.error(`[${this.id}] ${message} | sawContent=${sawContent} elapsed=${elapsedSec}s idle=${idleSec}s stderr=${this._stderrBuffer.length > 0 ? 'yes' : 'no'}`);
+    console.error(
+      `[${this.id}] ${message} | sawContent=${sawContent} elapsed=${elapsedSec}s idle=${idleSec}s stderr=${this._stderrBuffer.length > 0 ? 'yes' : 'no'}`
+    );
     this._clearTurnWatchdogs();
     this.handleOutput({ type: 'error', message });
     // Clear busy state now so processQueue() sees isRunning=false and can dequeue.
@@ -2184,11 +2223,9 @@ app.post('/api/ui-state', express.json({ limit: '1mb' }), (req: Request, res: Re
 app.get('/api/models', (req: Request, res: Response) => {
   const providerName = (req.query.provider as string) || 'claude';
   if (!(providerName in providers)) {
-    res
-      .status(400)
-      .json({
-        error: `Invalid provider: ${providerName}. Must be one of: ${Object.keys(providers).join(', ')}.`,
-      });
+    res.status(400).json({
+      error: `Invalid provider: ${providerName}. Must be one of: ${Object.keys(providers).join(', ')}.`,
+    });
     return;
   }
   const provider = getProvider(providerName as ProviderName);
@@ -2200,7 +2237,9 @@ app.get('/api/models', (req: Request, res: Response) => {
 // conversation into client state.
 app.get('/api/search', (req: Request, res: Response) => {
   const rawQuery = req.query.q;
-  const filterDirectory = (typeof req.query.filterDirectory === 'string' ? req.query.filterDirectory : '').trim();
+  const filterDirectory = (
+    typeof req.query.filterDirectory === 'string' ? req.query.filterDirectory : ''
+  ).trim();
   const rawLimit = Number(req.query.limit);
 
   const limit =
@@ -2296,9 +2335,7 @@ app.get('/api/paths', async (req: Request, res: Response) => {
       // Path is a complete directory - list its contents
       const entries = await fs.promises.readdir(normalizedPath, { withFileTypes: true });
       const results = entries
-        .filter(
-          (entry) => entry.isDirectory() && (includeHidden || !entry.name.startsWith('.'))
-        )
+        .filter((entry) => entry.isDirectory() && (includeHidden || !entry.name.startsWith('.')))
         .slice(0, 20)
         .map((entry) => ({
           name: entry.name,
@@ -2783,8 +2820,8 @@ function runCommandCapture(command: string, cwd: string): string {
       stderr?: string | Buffer;
       message?: string;
     };
-    const stdout = typeof e.stdout === 'string' ? e.stdout : e.stdout?.toString('utf-8') ?? '';
-    const stderr = typeof e.stderr === 'string' ? e.stderr : e.stderr?.toString('utf-8') ?? '';
+    const stdout = typeof e.stdout === 'string' ? e.stdout : (e.stdout?.toString('utf-8') ?? '');
+    const stderr = typeof e.stderr === 'string' ? e.stderr : (e.stderr?.toString('utf-8') ?? '');
     const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
     return combined || e.message || `Command failed: ${command}`;
   }
@@ -2924,8 +2961,14 @@ app.get('/api/oompa-swarm-context', (req: Request, res: Response) => {
     }
   }
 
-  const oompaStatus = clip(runCommandCapture('oompa status', projectRoot), SWARM_CONTEXT_MAX_OUTPUT_CHARS);
-  const oompaInfo = clip(runCommandCapture('oompa info', projectRoot), SWARM_CONTEXT_MAX_OUTPUT_CHARS);
+  const oompaStatus = clip(
+    runCommandCapture('oompa status', projectRoot),
+    SWARM_CONTEXT_MAX_OUTPUT_CHARS
+  );
+  const oompaInfo = clip(
+    runCommandCapture('oompa info', projectRoot),
+    SWARM_CONTEXT_MAX_OUTPUT_CHARS
+  );
   const docCandidates = findDocCandidates(projectRoot);
   const docBlocks = docCandidates.map((absPath) => {
     try {
@@ -3382,9 +3425,7 @@ app.get('/api/swarm-new-files', async (req: Request, res: Response) => {
   try {
     // Sanitize ISO 8601 timestamps — only allow digits, T, :, Z, ., +, -
     const safeStart = startedAt.replace(/[^0-9T:Z.+\-]/g, '');
-    const beforeFlag = finishedAt
-      ? `--before="${finishedAt.replace(/[^0-9T:Z.+\-]/g, '')}"`
-      : '';
+    const beforeFlag = finishedAt ? `--before="${finishedAt.replace(/[^0-9T:Z.+\-]/g, '')}"` : '';
 
     const raw = execSync(
       `git log --merges --after="${safeStart}" ${beforeFlag} --diff-filter=A --name-only --pretty=format: -- "*.json"`,
@@ -3662,7 +3703,7 @@ app.post('/api/settings', (req: Request, res: Response) => {
 //    only for now — codex/gemini/cursor throw until cp+resume lands).
 //  - No source may be currently running (fork of a mid-flight transcript
 //    produces junk). Returns 409 if so.
-app.post('/api/conversations/merge', express.json(), (req: Request, res: Response) => {
+app.post('/api/conversations/merge', express.json(), async (req: Request, res: Response) => {
   const body = req.body ?? {};
   const parentProvider = body.parentProvider as ProviderName | undefined;
   const parentModel = body.parentModel as ModelId | undefined;
@@ -3746,6 +3787,11 @@ app.post('/api/conversations/merge', express.json(), (req: Request, res: Respons
   // Create each child conversation and immediately spawn the review fork.
   // Each child inherits the source's provider + model + cwd so the forked
   // session resumes under the same CLI harness.
+  //
+  // Strategy per provider:
+  //   native   → spawn with forkSessionId=src.sessionId; CLI flags handle it
+  //   emulated → cp the source session file to a new uuid on disk, then
+  //              spawn a plain --resume on the clone. Source file untouched.
   for (let i = 0; i < children.length; i++) {
     const meta = children[i];
     const src = sources[i].conv;
@@ -3765,10 +3811,10 @@ app.post('/api/conversations/merge', express.json(), (req: Request, res: Respons
 
     const prompt = buildMergeReviewPrompt(meta.reviewUuid);
     try {
+      // Opaque call: the shared agent-cli library handles native vs
+      // cp+resume emulation transparently based on the harness config.
       child.spawnMergeReviewFork(prompt, src.sessionId);
     } catch (err) {
-      // spawnMergeReviewFork → buildCommand may throw for providers without
-      // sessionForkFlags. We already validated above, but belt-and-suspenders.
       console.error(`[merge] Failed to spawn fork for source ${src.id}:`, err);
       broadcastToAll({
         type: 'merge_child_status',
@@ -3982,8 +4028,10 @@ GitHub Light:
   // Detect polarity and expressiveness from the description.
   // The palette system is polarity-agnostic — this only steers the prompt
   // so the LLM generates appropriate luminance ordering and contrast.
-  const lightKeywords = /\blight\b|\bbright\b|\bpastel\b|\bwhite\b|\bcream\b|\blatte\b|\bday\b|\bsnow\b|\bpaper\b|\bchalk\b|\bmorning\b/i;
-  const wildKeywords = /\brainbow\b|\bneon\b|\bchaos\b|\bwild\b|\bcrazy\b|\bfun\b|\bvaporwave\b|\bpsychedelic\b|\bglitch\b|\bacid\b|\bfunky\b|\bparty\b|\bmatrix\b|\bcyberpunk\b|\bretro\b|\b80s\b|\b90s\b|\bunreadable\b/i;
+  const lightKeywords =
+    /\blight\b|\bbright\b|\bpastel\b|\bwhite\b|\bcream\b|\blatte\b|\bday\b|\bsnow\b|\bpaper\b|\bchalk\b|\bmorning\b/i;
+  const wildKeywords =
+    /\brainbow\b|\bneon\b|\bchaos\b|\bwild\b|\bcrazy\b|\bfun\b|\bvaporwave\b|\bpsychedelic\b|\bglitch\b|\bacid\b|\bfunky\b|\bparty\b|\bmatrix\b|\bcyberpunk\b|\bretro\b|\b80s\b|\b90s\b|\bunreadable\b/i;
   const isLightRequest = lightKeywords.test(description);
   const isWildRequest = wildKeywords.test(description);
 
@@ -4018,7 +4066,9 @@ LIGHT vs DARK:
 - In both modes, bgCanvas ↔ textBright should have >= 7:1 contrast ratio (WCAG AAA for body text).
   Intent accents against bgCanvas should be >= 4.5:1 (WCAG AA).
 
-${isWildRequest ? `## CREATIVE MODE — rules are suggestions, not constraints
+${
+  isWildRequest
+    ? `## CREATIVE MODE — rules are suggestions, not constraints
 
 The user is asking for something expressive, fun, or extreme. Lean into it hard:
 - Colored/tinted backgrounds are encouraged (neon green canvas, deep purple, hot pink — whatever fits).
@@ -4028,7 +4078,9 @@ The user is asking for something expressive, fun, or extreme. Lean into it hard:
 - bgCanvas can be ANY color. bgSurface should still be visually distinguishable from it.
 - Have fun. Be bold. If "rainbow" is requested, actually use the full spectrum, not pastel approximations.
 - The only hard rule: all 14 values must be valid #RRGGBB hex and all 8 accents should be visually
-  distinguishable from each other (even if they're all neon).` : ''}
+  distinguishable from each other (even if they're all neon).`
+    : ''
+}
 You MUST respond with ONLY a JSON object (no markdown, no explanation) with exactly these 15 keys:
 {
   "name": "Palette Name",
@@ -4052,14 +4104,18 @@ Requirements:
 - All values must be valid #RRGGBB hex strings.
 - bgCanvas is the outermost background. bgSurface is the surface/card background (one step toward text).
 - textMuted = muted/comment text. textSubtle = secondary text. textBody = primary body text. textBright = emphasis text.
-${isLightRequest ? `- LIGHT MODE: bgCanvas should be the lightest value. bgSurface slightly darker.
+${
+  isLightRequest
+    ? `- LIGHT MODE: bgCanvas should be the lightest value. bgSurface slightly darker.
 - Monotonic luminance: bgCanvas (lightest) > bgSurface > textMuted > textSubtle > textBody >= textBright (darkest).
 - Intent colors should have good contrast (WCAG AA, >= 4.5:1) against the LIGHT bgCanvas background.
   For pastels/light palettes, use medium-saturated accent colors (not washed-out pastels) so text remains readable.
-- bgCanvas should be very light (white, cream, or pale tint).` : `- DARK MODE: bgCanvas should be the darkest value. bgSurface slightly lighter.
+- bgCanvas should be very light (white, cream, or pale tint).`
+    : `- DARK MODE: bgCanvas should be the darkest value. bgSurface slightly lighter.
 - Monotonic luminance: bgCanvas (darkest) < bgSurface < textMuted < textSubtle < textBody <= textBright (lightest).
 - Intent colors should have good contrast (WCAG AA, >= 4.5:1) against the DARK bgCanvas background.
-- bgCanvas should be very dark (suitable for long coding sessions).`}
+- bgCanvas should be very dark (suitable for long coding sessions).`
+}
 - The 8 intent colors (primary, user, ai, success, warning, queue, danger, meta) should be visually distinct.`;
 
   // Use cached counter instead of scanning filesystem
@@ -4142,10 +4198,7 @@ ${isLightRequest ? `- LIGHT MODE: bgCanvas should be the lightest value. bgSurfa
           }
         }
       } catch (parseErr) {
-        console.error(
-          `[generate-palette] Raw stdout (first 500 chars):`,
-          stdout.substring(0, 500)
-        );
+        console.error(`[generate-palette] Raw stdout (first 500 chars):`, stdout.substring(0, 500));
         const msg = parseErr instanceof Error ? parseErr.message : 'Unknown parse error';
         sendError(500, `Failed to parse palette from ${providerName} response: ${msg}`);
         return;
@@ -4892,7 +4945,8 @@ const DEV_CLIENT_PORT = 7489;
 const DEV_API_PORT = 7499;
 const LOCAL_DOMAIN = 'unleashd.localhost';
 const LOCAL_HTTP_PORT = 80;
-const PORT = process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
+const PORT =
+  process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
 const SETUP_SCRIPT = path.join(__dirname, '../../tools/setup-domain.sh');
 
 function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void): void {
@@ -5050,7 +5104,10 @@ async function loadExistingConversations(): Promise<void> {
           });
         }
 
-        if (progress.loaded % STARTUP_PROGRESS_FILE_STEP === 0 || progress.loaded === progress.total) {
+        if (
+          progress.loaded % STARTUP_PROGRESS_FILE_STEP === 0 ||
+          progress.loaded === progress.total
+        ) {
           console.log(
             `[startup] Parsed ${progress.loaded}/${progress.total} files (${conversations.size} conversations)...`
           );
@@ -5155,7 +5212,7 @@ function findBootstrapMatch(
   for (const conv of conversations.values()) {
     if (conv.provider !== convData.provider) continue;
     if (conv.id === sessionId) continue;
-    
+
     // If the conversation already has a provider session ID assigned, skip it.
     // We know it's unassigned if sessionId === id (the UI-generated UUID).
     // Exception: Gemini's CLI emits a session.started event with a random UUID
@@ -5246,7 +5303,8 @@ function startFilePolling(): void {
         // File changed and we didn't cause it — refresh the "last seen" timestamp
         if (!externallyRunning.has(sessionId)) {
           // Newly detected external activity
-          if (VERBOSE) console.log(`[Poll] External activity detected: ${sessionId.substring(0, 8)}`);
+          if (VERBOSE)
+            console.log(`[Poll] External activity detected: ${sessionId.substring(0, 8)}`);
           broadcastToAll({
             type: 'status',
             conversationId,
@@ -5268,7 +5326,8 @@ function startFilePolling(): void {
           externallyRunning.delete(sessionId);
           const existingConversation = findConversationBySessionId(sessionId);
           const conversationId = existingConversation?.id ?? sessionId;
-          if (VERBOSE) console.log(`[Poll] External activity stopped: ${sessionId.substring(0, 8)}`);
+          if (VERBOSE)
+            console.log(`[Poll] External activity stopped: ${sessionId.substring(0, 8)}`);
           broadcastToAll({
             type: 'status',
             conversationId,
@@ -5338,7 +5397,11 @@ function startFilePolling(): void {
             json.isRunning = true;
           }
           changedForBroadcast.push(json);
-        } else if (!existing && !knownSessionIds.has(sessionId) && !deletedSessionIds.has(sessionId)) {
+        } else if (
+          !existing &&
+          !knownSessionIds.has(sessionId) &&
+          !deletedSessionIds.has(sessionId)
+        ) {
           // New conversation (not an orphaned JSONL from resetProcess or a deleted one) — create fresh instance
           const conversation = hydrateConversation(convData);
           conversations.set(sessionId, conversation);
@@ -5423,7 +5486,11 @@ async function startServer(): Promise<void> {
       }
       console.log(`Server running on ${startUrl} (backend on port ${portNumber})`);
       const startCmd =
-        process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+        process.platform === 'darwin'
+          ? 'open'
+          : process.platform === 'win32'
+            ? 'start'
+            : 'xdg-open';
       require('child_process').exec(`${startCmd} ${startUrl}`);
     });
   });

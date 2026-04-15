@@ -19,9 +19,8 @@
   max-width: 560px;
   max-height: 80vh;
   overflow-y: auto;
-  box-shadow:
-    0 0 40px color-mix(in oklab, var(--theme-violet) 35%, transparent),
-    0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 40px color-mix(in oklab, var(--theme-violet) 35%, transparent), 0 8px 24px
+    rgba(0, 0, 0, 0.45);
 }
 
 .merge-modal__title {
