@@ -72,6 +72,7 @@
   background: color-mix(in oklab, var(--theme-red) 20%, transparent);
   border-color: var(--theme-red);
   color: var(--theme-red);
+  cursor: help;
 }
 
 .merge-chip__tooltip {
@@ -99,6 +100,10 @@
   margin-bottom: 6px;
   padding-bottom: 4px;
   border-bottom: 1px solid color-mix(in oklab, var(--theme-base01) 40%, transparent);
+}
+
+.merge-chip__tooltip-path--error {
+  color: var(--theme-red);
 }
 
 .merge-chip__tooltip-body {

@@ -1,15 +1,5 @@
-import {
-  CODEX_BASE_MODEL_INFOS,
-  CODEX_MODEL_REGISTRY,
-  CODEX_THINKING_DISPLAY_NAMES,
-  CODEX_UNIFIED_THINKING_OPTIONS,
-  type CodexThinkingMode,
-  NO_CODEX_THINKING,
-  PROVIDER_OPTIONS,
-  providerSupportsFork,
-  toCodexModelId,
-} from '@unleashd/shared';
-import type { Conversation, ModelId, ModelInfo, Provider } from '@unleashd/shared';
+import type { Conversation, ModelId, Provider } from '@unleashd/shared';
+import { providerSupportsFork } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -28,31 +18,17 @@ import { getProjectColor } from '../utils/projectColors';
 import { getProjectRoot, isWorktreeDirectory } from '../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getConversationLastActivity, getMinutesElapsed } from '../utils/time';
-import { MergeModal } from './MergeModal';
 import { PathAutocomplete } from './PathAutocomplete';
+import { ProviderModelPicker } from './ProviderModelPicker';
 import { SearchPalette } from './SearchPalette';
 import './Sidebar.css';
 
 const RECENT_CUTOFF_MS = 7 * 24 * 60 * 60 * 1000;
 const ROOT_PLACEHOLDER = '/';
-const DEFAULT_CODEX_ENTRY =
-  CODEX_MODEL_REGISTRY.find((entry) => entry.isDefault) ?? CODEX_MODEL_REGISTRY[0];
-const DEFAULT_CODEX_THINKING_MODE =
-  DEFAULT_CODEX_ENTRY.defaultThinkingOption ??
-  DEFAULT_CODEX_ENTRY.thinkingOptions[0] ??
-  NO_CODEX_THINKING;
-
 interface FolderGroup {
   directory: string;
   conversations: Conversation[];
   lastMessageTime: number;
-}
-
-// Merge feature: a source conversation is eligible for fork only if its
-// provider has native sessionForkFlags AND it is not currently running.
-// Matches the server's POST /api/conversations/merge validation exactly.
-function isConversationForkable(conv: Conversation): boolean {
-  return providerSupportsFork(conv.provider) && !conv.isRunning;
 }
 
 function normalizeFolderDirectory(path: string): string {
@@ -82,7 +58,6 @@ export function Sidebar() {
   const wsStatus = useAtomValue(wsStatusAtom);
   const [mergeMode, setMergeMode] = useAtom(mergeModeAtom);
   const [mergeSelection, setMergeSelection] = useAtom(mergeSelectionAtom);
-  const [showMergeModal, setShowMergeModal] = useState(false);
 
   const lastWorkingDirectory = useUIStore((s) => s.lastWorkingDirectory);
   const setLastWorkingDirectory = useUIStore((s) => s.setLastWorkingDirectory);
@@ -135,7 +110,10 @@ export function Sidebar() {
       allConversations.filter(
         (conv) =>
           // Hide workers unless promoted to main view — they belong in the Swarm UI.
-          !(conv.isWorker && !promotedSet.has(conv.id))
+          !(conv.isWorker && !promotedSet.has(conv.id)) &&
+          // Hide merge review children — they're internal forks shown only in the
+          // parent's MergeProgressStrip, not as standalone sidebar entries.
+          !conv.mergeChildMeta
       ),
     [allConversations, promotedSet]
   );
@@ -235,50 +213,10 @@ export function Sidebar() {
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
   const [provider, setProvider] = useState<Provider>('codex');
   const [model, setModel] = useState<ModelId | undefined>(undefined);
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [codexModelName, setCodexModelName] = useState<string>(DEFAULT_CODEX_ENTRY.modelName);
-  const [codexThinkingMode, setCodexThinkingMode] = useState<CodexThinkingMode>(
-    DEFAULT_CODEX_THINKING_MODE
-  );
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-
-  // Fetch available models when provider changes
-  useEffect(() => {
-    if (provider === 'codex') {
-      setModels([]);
-      setCodexModelName(DEFAULT_CODEX_ENTRY.modelName);
-      setCodexThinkingMode(DEFAULT_CODEX_THINKING_MODE);
-      setModel(toCodexModelId(DEFAULT_CODEX_ENTRY.modelName, DEFAULT_CODEX_THINKING_MODE));
-      return;
-    }
-
-    fetch(`/api/models?provider=${provider}`)
-      .then((res) => res.json())
-      .then((data: ModelInfo[]) => {
-        setModels(data);
-        const defaultModel = data.find((m) => m.isDefault);
-        setModel(defaultModel?.id);
-      });
-  }, [provider]);
-
-  const handleCodexModelChange = useCallback(
-    (nextModelName: string) => {
-      setCodexModelName(nextModelName);
-      setModel(toCodexModelId(nextModelName, codexThinkingMode));
-    },
-    [codexThinkingMode]
-  );
-
-  const handleCodexThinkingModeChange = useCallback(
-    (nextThinkingMode: CodexThinkingMode) => {
-      setCodexThinkingMode(nextThinkingMode);
-      setModel(toCodexModelId(codexModelName, nextThinkingMode));
-    },
-    [codexModelName]
-  );
 
   const handleNewConversation = useCallback(() => {
     // Default to the most recently active conversation's working directory,
@@ -371,11 +309,10 @@ export function Sidebar() {
 
   const handleSelectConversation = (id: string) => {
     if (mergeMode) {
-      // Hijack row click: toggle the conversation into / out of the selection
-      // set instead of navigating. The Done button is hidden in merge mode
-      // (see ConversationItem) so there's no rogue click path to worry about.
+      // In merge mode, clicks toggle selection instead of navigating
       const conv = allConversations.find((c) => c.id === id);
-      if (conv && !isConversationForkable(conv)) return;
+      if (conv && !providerSupportsFork(conv.provider)) return;
+      if (conv?.isRunning) return;
       setMergeSelection((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
@@ -389,24 +326,11 @@ export function Sidebar() {
 
   const handleToggleMergeMode = () => {
     if (mergeMode) {
-      // Exiting merge mode without confirming — clear selection.
       setMergeSelection(new Set());
       setMergeMode(false);
     } else {
       setMergeMode(true);
     }
-  };
-
-  const handleOpenMergeModal = () => {
-    if (mergeSelection.size === 0) return;
-    setShowMergeModal(true);
-  };
-
-  const handleMergeComplete = (parentId: string) => {
-    setShowMergeModal(false);
-    setMergeMode(false);
-    setMergeSelection(new Set());
-    navigate(`/chat/${parentId}`);
   };
 
   const handleDone = (conv: Conversation, e: React.MouseEvent) => {
@@ -493,7 +417,6 @@ export function Sidebar() {
                   handleToggleMergeMode();
                 }}
                 title={mergeMode ? 'Exit merge mode' : 'Merge conversations'}
-                aria-pressed={mergeMode}
               >
                 <svg
                   role="img"
@@ -524,30 +447,6 @@ export function Sidebar() {
               </button>
             </div>
           </div>
-          {mergeMode && (
-            <div className="merge-mode-bar">
-              <span className="merge-mode-bar__label">
-                {mergeSelection.size === 0
-                  ? 'Select conversations to merge'
-                  : `${mergeSelection.size} selected`}
-              </span>
-              <button
-                type="button"
-                className="merge-mode-bar__confirm"
-                disabled={mergeSelection.size === 0}
-                onClick={handleOpenMergeModal}
-              >
-                Merge →
-              </button>
-              <button
-                type="button"
-                className="merge-mode-bar__cancel"
-                onClick={handleToggleMergeMode}
-              >
-                Cancel
-              </button>
-            </div>
-          )}
         </div>
 
         {/* ── Swarms Section ── */}
@@ -598,84 +497,12 @@ export function Sidebar() {
                 onValidationChange={setIsDirectoryValid}
                 autoFocus
               />
-              <label className="new-conv-label">Provider</label>
-              <div className="provider-selector">
-                {PROVIDER_OPTIONS.map((option) => (
-                  <label
-                    className={`provider-option ${provider === option.id ? 'selected' : ''}`}
-                    key={option.id}
-                  >
-                    <input
-                      type="radio"
-                      name="provider"
-                      value={option.id}
-                      checked={provider === option.id}
-                      onChange={() => setProvider(option.id)}
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
-              <label className="new-conv-label">Model</label>
-              {provider === 'codex' ? (
-                <>
-                  <div className="model-selector">
-                    {CODEX_BASE_MODEL_INFOS.map((m) => (
-                      <label
-                        key={m.id}
-                        className={`model-option ${codexModelName === m.id ? 'selected' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          name="codex-model"
-                          value={m.id}
-                          checked={codexModelName === m.id}
-                          onChange={() => handleCodexModelChange(m.id)}
-                        />
-                        {m.displayName}
-                      </label>
-                    ))}
-                  </div>
-                  <label className="new-conv-label">Reasoning</label>
-                  <div className="model-selector">
-                    {CODEX_UNIFIED_THINKING_OPTIONS.map((thinkingMode) => (
-                      <label
-                        key={thinkingMode}
-                        className={`model-option ${codexThinkingMode === thinkingMode ? 'selected' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          name="codex-reasoning"
-                          value={thinkingMode}
-                          checked={codexThinkingMode === thinkingMode}
-                          onChange={() => handleCodexThinkingModeChange(thinkingMode)}
-                        />
-                        {thinkingMode === NO_CODEX_THINKING
-                          ? 'No Extra Reasoning'
-                          : CODEX_THINKING_DISPLAY_NAMES[thinkingMode]}
-                      </label>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="model-selector">
-                  {models.map((m) => (
-                    <label
-                      key={m.id}
-                      className={`model-option ${model === m.id ? 'selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name="model"
-                        value={m.id}
-                        checked={model === m.id}
-                        onChange={() => setModel(m.id)}
-                      />
-                      {m.displayName}
-                    </label>
-                  ))}
-                </div>
-              )}
+              <ProviderModelPicker
+                provider={provider}
+                onProviderChange={setProvider}
+                model={model}
+                onModelChange={setModel}
+              />
               <div className="directory-actions">
                 <button
                   type="button"
@@ -814,7 +641,9 @@ export function Sidebar() {
                 onDone={handleDone}
                 mergeMode={mergeMode}
                 mergeSelected={mergeSelection.has(conv.id)}
-                mergeDisabled={mergeMode && !isConversationForkable(conv)}
+                mergeDisabled={
+                  mergeMode && (!providerSupportsFork(conv.provider) || conv.isRunning)
+                }
               />
             ))
         ) : (
@@ -901,9 +730,6 @@ export function Sidebar() {
                               showFolderBadge={false}
                               onSelect={handleSelectConversation}
                               onDone={handleDone}
-                              mergeMode={mergeMode}
-                              mergeSelected={mergeSelection.has(conv.id)}
-                              mergeDisabled={mergeMode && !isConversationForkable(conv)}
                             />
                           ))
                         ) : (
@@ -929,9 +755,6 @@ export function Sidebar() {
                       showFolderBadge
                       onSelect={handleSelectConversation}
                       onDone={handleDone}
-                      mergeMode={mergeMode}
-                      mergeSelected={mergeSelection.has(conv.id)}
-                      mergeDisabled={mergeMode && !isConversationForkable(conv)}
                     />
                   ))}
               </div>
@@ -939,13 +762,6 @@ export function Sidebar() {
           </>
         )}
       </div>
-      {showMergeModal && (
-        <MergeModal
-          sourceIds={Array.from(mergeSelection)}
-          onCancel={() => setShowMergeModal(false)}
-          onComplete={handleMergeComplete}
-        />
-      )}
     </div>
   );
 }
@@ -997,10 +813,13 @@ function ConversationItem({
   ]
     .filter(Boolean)
     .join(' ');
-  const mergeTitle = mergeDisabled ? `Fork not supported for ${conv.provider} yet` : undefined;
 
   return (
-    <div className={itemClasses} onClick={() => onSelect(conv.id)} title={mergeTitle}>
+    <div
+      className={itemClasses}
+      onClick={() => onSelect(conv.id)}
+      title={mergeDisabled ? `Fork not supported for ${conv.provider}` : undefined}
+    >
       {mergeMode && (
         <div
           className={`merge-checkmark ${mergeSelected ? 'merge-checkmark--on' : ''} ${mergeDisabled ? 'merge-checkmark--disabled' : ''}`}

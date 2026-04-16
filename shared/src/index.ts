@@ -875,6 +875,7 @@ export const MergeChildStatusMessageSchema = z.object({
   reviewUuid: z.string().uuid(),
   status: MergeChildStatusSchema,
   reviewDocPath: z.string().nullish(),
+  errorMessage: z.string().nullish(),
 });
 
 export type MergeChildStatusMessage = z.infer<typeof MergeChildStatusMessageSchema>;

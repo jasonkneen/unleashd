@@ -367,6 +367,7 @@ export function ColorPalettePicker({ onClose }: Props) {
   const previewPalette = useSettingsStore((s) => s.previewPalette);
   const restorePalette = useSettingsStore((s) => s.restorePalette);
   const addCustomPalette = useSettingsStore((s) => s.addCustomPalette);
+  const removeCustomPalette = useSettingsStore((s) => s.removeCustomPalette);
 
   const [selectedPalette, setSelectedPalette] = useState(settings.colorPalette);
   const [aiMode, setAiMode] = useState(false);
@@ -439,25 +440,45 @@ export function ColorPalettePicker({ onClose }: Props) {
         <div className="palette-picker-content">
           {/* ─── Left: palette list ─── */}
           <div className="palette-list">
-            {Object.entries(allPalettes).map(([key, palette]) => (
-              <button
-                key={key}
-                type="button"
-                className={`palette-option ${selectedPalette === key ? 'selected' : ''}`}
-                onClick={() => handleSelect(key)}
-              >
-                <div className="palette-swatches">
-                  {ACCENT_KEYS.map((ak) => (
-                    <div
-                      key={ak}
-                      className="mini-swatch"
-                      style={{ backgroundColor: palette[ak] }}
-                    />
-                  ))}
+            {Object.entries(allPalettes).map(([key, palette]) => {
+              const isCustom = key in customPalettes;
+              return (
+                <div key={key} className="palette-option-row">
+                  <button
+                    type="button"
+                    className={`palette-option ${selectedPalette === key ? 'selected' : ''}`}
+                    onClick={() => handleSelect(key)}
+                  >
+                    <div className="palette-swatches">
+                      {ACCENT_KEYS.map((ak) => (
+                        <div
+                          key={ak}
+                          className="mini-swatch"
+                          style={{ backgroundColor: palette[ak] }}
+                        />
+                      ))}
+                    </div>
+                    <span className="palette-name">{palette.name}</span>
+                  </button>
+                  {isCustom && (
+                    <button
+                      type="button"
+                      className="palette-delete-btn"
+                      title="Delete palette"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeCustomPalette(key);
+                        if (selectedPalette === key) {
+                          handleSelect('solarized');
+                        }
+                      }}
+                    >
+                      &times;
+                    </button>
+                  )}
                 </div>
-                <span className="palette-name">{palette.name}</span>
-              </button>
-            ))}
+              );
+            })}
 
             <div className="palette-list-divider" />
 

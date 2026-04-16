@@ -9,6 +9,7 @@ import { jotaiStore } from './atoms/store';
 import { Chat } from './components/Chat';
 import { ConfigDropdown } from './components/ConfigDropdown';
 import { Gallery } from './components/Gallery';
+import { MergeModal } from './components/MergeModal';
 import { RobotLoader } from './components/RobotLoader';
 import { Sidebar } from './components/Sidebar';
 import { SwarmAnalytics } from './components/SwarmAnalytics';
@@ -69,23 +70,34 @@ function AppLayout() {
   }, []);
 
   const mergeMode = useAtomValue(mergeModeAtom);
+  const navigate = useNavigate();
+
+  const handleMergeComplete = (parentId: string) => {
+    navigate(`/chat/${parentId}`);
+  };
 
   return (
-    <div className={`app ${mergeMode ? 'app--merge-mode' : ''}`}>
+    <div className="app">
       <Sidebar />
       <div className={`main-content ${mergeMode ? 'main-content--merge-dim' : ''}`}>
-        <div className="top-bar">
-          <ConfigDropdown />
-        </div>
-        <Routes>
-          <Route path="/" element={<Gallery />} />
-          <Route path="/done" element={<Gallery filter="done" />} />
-          <Route path="/workers" element={<SwarmDashboard />} />
-          <Route path="/workers/detail" element={<SwarmDetail />} />
-          <Route path="/workers/analytics" element={<SwarmAnalytics />} />
-          <Route path="/chat/:id" element={<Chat />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {mergeMode ? (
+          <MergeModal onComplete={handleMergeComplete} />
+        ) : (
+          <>
+            <div className="top-bar">
+              <ConfigDropdown />
+            </div>
+            <Routes>
+              <Route path="/" element={<Gallery />} />
+              <Route path="/done" element={<Gallery filter="done" />} />
+              <Route path="/workers" element={<SwarmDashboard />} />
+              <Route path="/workers/detail" element={<SwarmDetail />} />
+              <Route path="/workers/analytics" element={<SwarmAnalytics />} />
+              <Route path="/chat/:id" element={<Chat />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </>
+        )}
       </div>
     </div>
   );

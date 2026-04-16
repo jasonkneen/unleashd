@@ -22,7 +22,11 @@ import {
   streamingContentAtom,
   wsStatusAtom,
 } from './conversations';
-import { mergeChildReviewDocPathMapAtom, mergeChildStatusMapAtom } from './mergeAtoms';
+import {
+  mergeChildErrorMapAtom,
+  mergeChildReviewDocPathMapAtom,
+  mergeChildStatusMapAtom,
+} from './mergeAtoms';
 import { jotaiStore } from './store';
 
 // Enable Immer's Map/Set support — must be called once before any produce() on Maps.
@@ -587,6 +591,14 @@ export function handleMessage(data: ServerMessage): void {
           mergeChildReviewDocPathMapAtom,
           produce(jotaiStore.get(mergeChildReviewDocPathMapAtom), (draft) => {
             draft.set(data.childConversationId, data.reviewDocPath as string);
+          })
+        );
+      }
+      if (data.errorMessage) {
+        jotaiStore.set(
+          mergeChildErrorMapAtom,
+          produce(jotaiStore.get(mergeChildErrorMapAtom), (draft) => {
+            draft.set(data.childConversationId, data.errorMessage as string);
           })
         );
       }

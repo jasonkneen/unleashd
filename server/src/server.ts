@@ -3815,6 +3815,7 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
       // cp+resume emulation transparently based on the harness config.
       child.spawnMergeReviewFork(prompt, src.sessionId);
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[merge] Failed to spawn fork for source ${src.id}:`, err);
       broadcastToAll({
         type: 'merge_child_status',
@@ -3822,6 +3823,7 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
         childConversationId: child.id,
         reviewUuid: meta.reviewUuid,
         status: 'error',
+        errorMessage,
       });
     }
   }

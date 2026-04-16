@@ -91,6 +91,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
   const sortedConversations = useMemo(() => {
     const byId = new Set(allConversations.map((conv) => conv.id));
     const topLevel = allConversations.filter((conv) => {
+      if (conv.mergeChildMeta) return false;
       const parentId = conv.parentConversationId;
       return !(parentId && byId.has(parentId));
     });

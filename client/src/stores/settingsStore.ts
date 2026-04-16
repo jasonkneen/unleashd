@@ -249,6 +249,7 @@ interface SettingsState {
   _init: () => Promise<void>;
   setColorPalette: (paletteKey: string) => void;
   addCustomPalette: (key: string, palette: Palette16) => void;
+  removeCustomPalette: (key: string) => void;
   previewPalette: (paletteKey: string) => void;
   restorePalette: () => void;
 }
@@ -328,6 +329,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set((s) => ({
       customPalettes: { ...s.customPalettes, [key]: palette },
     }));
+  },
+
+  // Remove a custom palette from local state and server
+  removeCustomPalette: (key) => {
+    set((s) => {
+      const { [key]: _, ...rest } = s.customPalettes;
+      return { customPalettes: rest };
+    });
+
+    fetch(`/api/custom-palettes/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+    }).catch(console.error);
   },
 
   // Preview a palette without saving

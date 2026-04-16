@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-interface SavedPrompt {
+export interface SavedPrompt {
   id: string;
   name: string;
   content: string;

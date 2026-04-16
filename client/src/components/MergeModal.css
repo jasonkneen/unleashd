@@ -1,26 +1,15 @@
-.merge-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: color-mix(in oklab, var(--theme-base03) 60%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-  backdrop-filter: blur(2px);
-}
-
+/* Merge modal sits inside .main-content (not a full-viewport overlay)
+   so the sidebar stays interactive for selection. */
 .merge-modal {
   background: var(--theme-base02);
   color: var(--theme-base0);
   border: 1px solid var(--theme-violet);
   border-radius: 8px;
   padding: 20px 24px;
-  min-width: 440px;
-  max-width: 560px;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 0 40px color-mix(in oklab, var(--theme-violet) 35%, transparent), 0 8px 24px
-    rgba(0, 0, 0, 0.45);
+  margin: 40px auto;
+  max-width: 480px;
+  box-shadow: 0 0 32px color-mix(in oklab, var(--theme-violet) 30%, transparent), 0 4px 16px
+    rgba(0, 0, 0, 0.3);
 }
 
 .merge-modal__title {
@@ -55,71 +44,7 @@
   color: var(--theme-base0);
   border: 1px solid color-mix(in oklab, var(--theme-base01) 50%, transparent);
   border-radius: 4px;
-}
-
-.merge-modal__provider-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 4px 0;
-}
-
-.merge-modal__provider-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.merge-modal__sources {
-  list-style: none;
-  padding: 0;
-  margin: 4px 0 12px;
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid color-mix(in oklab, var(--theme-base01) 30%, transparent);
-  border-radius: 4px;
-}
-
-.merge-source {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 6px 10px;
-  font-size: 11px;
-  border-bottom: 1px solid color-mix(in oklab, var(--theme-base01) 20%, transparent);
-}
-
-.merge-source:last-child {
-  border-bottom: none;
-}
-
-.merge-source--disabled {
-  opacity: 0.45;
-  text-decoration: line-through;
-}
-
-.merge-source__provider {
-  font-weight: 600;
-  color: var(--theme-violet);
-  min-width: 56px;
-}
-
-.merge-source__label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.merge-source__badge {
-  font-size: 9px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: var(--theme-red);
-  color: var(--theme-base03);
-  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .merge-modal__error {

@@ -85,6 +85,43 @@
   overflow-y: auto;
 }
 
+.palette-option-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.palette-option-row .palette-option {
+  flex: 1;
+  min-width: 0;
+}
+
+.palette-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.palette-option-row:hover .palette-delete-btn {
+  opacity: 1;
+}
+
+.palette-delete-btn:hover {
+  background: color-mix(in srgb, var(--accent-error) 15%, transparent);
+  color: var(--accent-error);
+}
+
 .palette-option {
   display: flex;
   flex-direction: column;

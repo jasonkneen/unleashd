@@ -1,17 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSavedPrompts } from '../hooks/useSavedPrompts';
+import type { SavedPrompt } from '../hooks/useSavedPrompts';
 import './PromptPalette.css';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSelect: (content: string) => void;
+  prompts: SavedPrompt[];
+  fuzzySearch: (query: string) => SavedPrompt[];
+  incrementUsage: (id: string) => void;
+  deletePrompt: (id: string) => void;
 }
 
-export function PromptPalette({ isOpen, onClose, onSelect }: Props) {
+export function PromptPalette({
+  isOpen,
+  onClose,
+  onSelect,
+  prompts,
+  fuzzySearch,
+  incrementUsage,
+  deletePrompt,
+}: Props) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const { prompts, fuzzySearch, incrementUsage, deletePrompt } = useSavedPrompts();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const results = fuzzySearch(query);

@@ -2,7 +2,11 @@ import type { MergeChildStatus } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useState } from 'react';
 import { conversationAtomFamily } from '../atoms/conversations';
-import { mergeChildReviewDocPathAtomFamily, mergeChildStatusAtomFamily } from '../atoms/mergeAtoms';
+import {
+  mergeChildErrorAtomFamily,
+  mergeChildReviewDocPathAtomFamily,
+  mergeChildStatusAtomFamily,
+} from '../atoms/mergeAtoms';
 import './MergeProgressStrip.css';
 
 // Rendered at the top of a merge-parent Chat thread. One chip per forked
@@ -38,13 +42,15 @@ function MergeChildChip({
 }) {
   const status: MergeChildStatus = useAtomValue(mergeChildStatusAtomFamily(childId));
   const docPath = useAtomValue(mergeChildReviewDocPathAtomFamily(childId));
+  const errorMessage = useAtomValue(mergeChildErrorAtomFamily(childId));
   const [hoverPreview, setHoverPreview] = useState<string | null>(null);
   const [hoverError, setHoverError] = useState<string | null>(null);
   const [hoverOpen, setHoverOpen] = useState(false);
 
   const loadPreview = useCallback(async () => {
-    if (status !== 'complete' || !docPath) return;
     setHoverOpen(true);
+    if (status === 'error') return; // error tooltip uses errorMessage atom directly
+    if (status !== 'complete' || !docPath) return;
     if (hoverPreview !== null || hoverError !== null) return;
     try {
       const abs = `${sourceCwd}/${docPath}`;
@@ -78,6 +84,16 @@ function MergeChildChip({
     >
       <span className="merge-chip__icon">{label}</span>
       <span className="merge-chip__uuid">{reviewUuid.substring(0, 6)}</span>
+      {hoverOpen && status === 'error' && (
+        <div className="merge-chip__tooltip">
+          <div className="merge-chip__tooltip-path merge-chip__tooltip-path--error">
+            Fork failed
+          </div>
+          <pre className="merge-chip__tooltip-body">
+            {errorMessage ?? 'Unknown error — check server logs'}
+          </pre>
+        </div>
+      )}
       {hoverOpen && status === 'complete' && (
         <div className="merge-chip__tooltip">
           <div className="merge-chip__tooltip-path">{docPath}</div>
