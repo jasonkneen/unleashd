@@ -5,6 +5,46 @@ Start here before touching state, components, or the server.
 
 ---
 
+## Code tree map (where does each concern live)
+
+```
+shared/src/index.ts                     → Zod schemas, types, per-provider helpers.
+                                          Single 900+-line file; split only when it hurts.
+server/src/server.ts                    → Conversation class + WS router. Authority for
+                                          in-memory conversation state. Very large.
+server/src/adapters/disk-adapter.ts     → ParsedSession → Conversation hydration.
+server/src/adapters/registry.ts         → Per-provider DiskAdapter registry.
+server/src/adapters/loader.ts           → Scan + poll loop over all adapters.
+server/src/providers/{claude,codex,...} → Thin Provider impls (listModels, etc.).
+server/src/subagent-tools.ts            → Sub-agent tool-name/status helpers.
+
+vendor/agent-cli-tool/                  → GIT SUBMODULE. Its own commit + push cycle.
+  src/runtime-types.ts                  → Canonical request + unified event union.
+  src/build.ts                          → Canonical request → argv (via harnesses).
+  src/harnesses/{claude,codex,...}.ts   → Per-CLI argv syntax (one file per CLI).
+  src/process-runner.ts                 → spawn + stdio wiring.
+  src/parsers/{claude,codex,...}.ts     → Raw harness JSON → unified events.
+  src/execute.ts                        → Glue: session capture, completion, heartbeat.
+  test/*.test.ts                        → Contract tests (125 in tree). `npm test`.
+  manual_tests/                         → Live-CLI captures for studying harness drift.
+
+client/src/atoms/conversations.ts       → Jotai atoms + derived views.
+client/src/atoms/actions.ts             → WS dispatch + optimistic atom writes.
+client/src/atoms/store.ts               → Jotai store instance.
+client/src/components/Sidebar.tsx       → New-conversation MODAL + conversation list.
+client/src/components/Chat.tsx          → Thread view: header dropdowns + message flow.
+client/src/components/ProviderModelPicker.tsx → Shared picker UI (used inside modal).
+client/src/stores/uiStore.ts            → Persisted UI prefs (localStorage).
+```
+
+**Rule of thumb — when adding a per-conversation setting, you touch roughly:**
+shared schema → server Conversation + WS handlers + (maybe) disk-adapter →
+agent-cli harness reasoningFlags-style hook → client atoms actions → 2–3 UI
+surfaces (modal + header + optional list). See the "per-conversation setting
+checklist" below.
+
+---
+
 ## Writing state subscriptions
 
 **Before subscribing to any store, identify what you need:**
@@ -99,6 +139,114 @@ Then in the component: `useAtomValue(yourViewAtom)`.
 
 ---
 
+## Adding a per-conversation setting (quick checklist)
+
+For settings that differ per provider (effort levels, reasoning modes, sandbox
+policies, etc.), follow the **"Pass-through pattern for provider-bespoke
+values"** section below. Summary of the 7 touch points — confirm each before
+committing:
+
+1. **shared/src/index.ts** — per-provider `as const` array(s) + literal types;
+   schema fields on `ConversationSchema`, `NewConversationMessage`, `Set*Message`
+   as `z.string().optional()`.
+2. **shared/src/index.ts** — `xLevelsForProvider`, `isXValidForProvider`,
+   `defaultXForProvider` helpers.
+3. **server/src/server.ts** — new field on the `Conversation` class;
+   constructor applies default via `defaultXForProvider`; WS `new_conversation`
+   + `set_*` handlers validate via `isXValidForProvider` and reject with a
+   message listing the valid set.
+4. **server/src/adapters/disk-adapter.ts** — decide what happens on session
+   reload. Most CLI session files DON'T store these fields; emit a warn on load.
+5. **vendor/agent-cli-tool** — extend the harness's `reasoningFlags`-style
+   hook. Pass the string verbatim; do not translate. Submodule commit → push
+   → bump outer pointer (see submodule commit dance).
+6. **client/src/components/Sidebar.tsx + ProviderModelPicker.tsx** — per-provider
+   option list; reset state on modal-open; reset on provider-switch **synchronously
+   inside the radio onChange**, NEVER an async `useEffect` that races user clicks.
+7. **client/src/components/Chat.tsx** — thread-header dropdown for mid-conversation
+   changes; dispatch a `set_*` WS action (mirror `setReasoningEffort` in
+   `actions.ts`, remembering optimistic writes need schema-complete stubs).
+
+See "Pass-through pattern" at the bottom of this file for the full rules and
+anti-patterns.
+
+---
+
+## Submodule commit dance (vendor/agent-cli-tool)
+
+`vendor/agent-cli-tool` is a **git submodule** with its own history. Commits
+inside it are separate from the outer repo. The outer repo stores a **pointer
+SHA** — bumping that pointer is how you pull in submodule changes.
+
+### The order that actually works
+
+1. **Inside the submodule**: `git add`, `git commit`, `git push origin main`.
+2. **Outer repo**: `git add vendor/agent-cli-tool` (stages the pointer bump).
+3. **Verify**: `git diff --cached vendor/agent-cli-tool` — should show
+   `-Subproject commit <old-sha>` / `+Subproject commit <new-sha>`.
+4. **Outer**: `git commit` + `git push origin main`.
+
+Pushing the outer pointer before pushing the submodule leaves anyone else
+cloning on a broken ref. Always submodule-first.
+
+### `git status` cheatsheet for submodules
+
+| Symbol | Meaning |
+|---|---|
+| `M vendor/agent-cli-tool` | Pointer staged to move (capital M) |
+| ` M vendor/agent-cli-tool` | Pointer moved but not staged |
+| ` m vendor/agent-cli-tool` | **Content inside the submodule is dirty** (lowercase m) |
+| `Mm vendor/agent-cli-tool` | Pointer bumped AND inside is dirty. Only the pointer is part of the outer commit; the `m` is separate work. |
+
+### Don't push main unless asked
+
+Pushing to main is a write to shared state. The assistant never pushes unless
+the user explicitly authorizes it.
+
+---
+
+## WebSocket message contract — surprises
+
+### `conversation_created` is reused for UPDATES
+
+Set-value handlers (`set_model`, `set_provider`, `set_reasoning_effort`)
+broadcast `conversation_created` carrying the new state. There is no
+`conversation_updated` type today. Consequences:
+
+- Any client-side code reacting to `conversation_created` (like
+  `removePendingConversation`) MUST be idempotent or guarded against the id
+  not being in the pending list.
+- If you add a new setter, follow the same pattern OR introduce a proper
+  `conversation_updated` message and update all existing handlers in lockstep.
+
+### Rejection → authoritative rebroadcast
+
+When a setter rejects input (e.g. `isEffortValidForProvider` fails), the
+server sends `{type: 'error', message}` AND a `conversation_created` carrying
+the unchanged authoritative state. The client uses this to roll back optimistic
+writes. Without the rebroadcast, optimistic writes would stick forever.
+
+### Optimistic stubs need the full schema shape
+
+`createConversation` writes a Conversation stub to `conversationsAtom` before
+the server confirms. Any field you add to the schema MUST also land in that
+stub (plus the pending-conversation localStorage stub in `handleMessage`'s
+`init` reconciler), otherwise the UI renders wrong for a brief window before
+the server confirmation arrives.
+
+---
+
+## When source is broken, `server/dist/*.js` is the oracle
+
+The build output under `server/dist/` often survives source-level mistakes
+(deleted exports, failed rebases, checkouts that lose files). If a runtime
+error says `X is not a function` and the source doesn't export `X`, look at
+`server/dist/*.js` — the compiled JS retains the author's prior intent and
+often reveals the missing shape faster than git archaeology. Same trick works
+for `shared/dist/` and `vendor/agent-cli-tool/dist/` (if present).
+
+---
+
 ## React hook ordering
 
 ALL hooks must appear before any early `return` statement.
@@ -146,7 +294,74 @@ Provider-specific CLI details are expressed through a shared contract, split int
 - Server provider runtime in `server`
   - Provider interface + registry: `server/src/providers/index.ts`
   - Provider implementations: `server/src/providers/{claude,codex,opencode,gemini}.ts`
-  - Shared provider IDs: `shared/src/index.ts`
+- Shared provider IDs: `shared/src/index.ts`
+
+### 1.5) Shared agent CLI stays a thin wrapper
+
+The `vendor/agent-cli-tool` submodule is deliberately small. Its job is:
+
+1. take one canonical request shape
+2. map that request into harness-specific argv
+3. run the real CLI process
+4. parse harness-specific stdout/stderr
+5. emit one unified event stream
+
+Keep the architecture split explicit:
+
+- `vendor/agent-cli-tool/src/build.ts`
+  - unified input → harness command/argv
+- `vendor/agent-cli-tool/src/process-runner.ts`
+  - spawn + stdio wiring only
+- `vendor/agent-cli-tool/src/parsers/*`
+  - harness-native JSON/events → unified events
+- `vendor/agent-cli-tool/src/execute.ts`
+  - glue layer for session capture, completion, buffering, heartbeat
+- `vendor/agent-cli-tool/src/runtime-types.ts`
+  - canonical request + canonical unified event union
+
+### Core rules for `vendor/agent-cli-tool`
+
+1. **One input model, one output model.**
+   Callers should pass one canonical request object. Harnesses may have
+   different raw JSON/event formats, but the submodule emits one shared event
+   union (`session.started`, `turn.started`, `text.delta`, `tool.use`,
+   `progress`, `stderr`, `error`, `out_of_tokens`, `turn.complete`).
+
+2. **Harness-specific differences belong at the edges.**
+   Harness config owns argv syntax. Harness parsers own raw-output translation.
+   Do not spread provider conditionals through the generic executor.
+
+3. **The submodule is not an app runtime.**
+   No conversation model, no merge/swarm orchestration, no sidebar/UI state, no
+   product-specific subagent data model. The submodule only reports normalized
+   runtime facts.
+
+4. **Per-harness JSON in, unified JSON out.**
+   Think of each parser as:
+   `raw harness JSON/events -> unified events`
+   The parser may keep small local state when the provider protocol requires
+   it (for example streamed tool-call reconstruction), but that state must stay
+   parser-local.
+
+5. **Session helpers are separate from parsing.**
+   Resume/fork/session-id capture are executor/session concerns, not parser
+   concerns. Keep filesystem/session emulation out of harness config except as
+   explicit helper hooks.
+
+6. **When adding a harness, prefer extension over branching.**
+   Usually this means:
+   - add/update harness config in `src/harnesses/*`
+   - add/update one parser in `src/parsers/*`
+   - add a focused session helper only if the harness truly needs one
+   Avoid growing `execute.ts` into another monolith.
+
+7. **Test the contract, not implementation trivia.**
+   High-value coverage for the submodule is:
+   - build-command contract tests
+   - parser/executor integration tests with shim CLIs
+   - opt-in real-harness captures under `vendor/agent-cli-tool/manual_tests/`
+   Use manual tests to study harness drift; do not turn every live-debug script
+   into an automated test.
 
 ### 2) Registry-first persistence
 
