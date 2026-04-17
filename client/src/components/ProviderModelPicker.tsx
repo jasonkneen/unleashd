@@ -5,7 +5,7 @@ import {
   PROVIDER_OPTIONS,
   effortLevelsForProvider,
 } from '@unleashd/shared';
-import type { ModelId, ModelInfo, Provider, ReasoningEffort } from '@unleashd/shared';
+import type { ModelId, ModelInfo, Provider } from '@unleashd/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const DEFAULT_CODEX_ENTRY =
@@ -18,8 +18,8 @@ export interface ProviderModelPickerProps {
   onProviderChange: (p: Provider) => void;
   model: ModelId | undefined;
   onModelChange: (m: ModelId | undefined) => void;
-  reasoningEffort?: ReasoningEffort;
-  onReasoningEffortChange?: (e: ReasoningEffort | undefined) => void;
+  reasoningEffort?: string;
+  onReasoningEffortChange?: (e: string | undefined) => void;
   /** Hide providers that don't match the filter (e.g. for merge, only fork-capable). */
   providerFilter?: (p: Provider) => boolean;
 }
@@ -101,7 +101,7 @@ export function ProviderModelPicker({
   // opposite. "Standard" (undefined) is always first — means no --effort flag.
   const reasoningOptions = useMemo(() => {
     const levels = effortLevelsForProvider(provider);
-    const standard: { value: ReasoningEffort | undefined; label: string } = {
+    const standard: { value: string | undefined; label: string } = {
       value: undefined,
       label: 'Standard',
     };

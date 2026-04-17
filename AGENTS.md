@@ -203,6 +203,74 @@ If you want exactly three tests:
 2. `loadAllConversations/pollForChanges` fixture test
 3. `test/api.test.js` create/reconcile path normalization test
 
+## Pass-through pattern for provider-bespoke values
+
+Use this pattern for **any per-conversation setting whose accepted values are
+bespoke per provider/CLI** (effort levels, reasoning modes, sandbox policies,
+output formats, anything the upstream CLI owns).
+
+**Canonical example: `reasoningEffort` (claude `--effort`, codex `-c model_reasoning_effort=`).**
+Each CLI accepts a different set, and those sets change as vendors ship updates.
+
+### Rules
+
+1. **Wire and storage = plain `z.string()`.** Do not invent a shared union Zod
+   enum. A shared enum forces a schema bump every time a CLI adds/removes a
+   level, and it implies a "canonical" vocabulary we don't own.
+2. **Submodule (`vendor/agent-cli-tool`) knows the FLAG, not the VALUES.** Each
+   harness's `reasoningFlags(level)` maps `level` into the CLI's flag shape
+   (e.g. `['--effort', level]` vs `['-c', 'model_reasoning_effort=<level>']`).
+   The value string passes through unchanged — we never rename or translate.
+3. **Per-provider accepted lists live in `shared/src/index.ts` as `as const`
+   string arrays**, one per provider. Derive literal-union types from them if
+   useful for UI typing, but do NOT export them as the wire type.
+   - Today: `CLAUDE_EFFORT_LEVELS`, `CODEX_EFFORT_LEVELS`.
+4. **Validation helpers are functions, not schemas.** Expose
+   `xLevelsForProvider(p): readonly string[]` and
+   `isXValidForProvider(p, v): boolean`. Use them in:
+   - the UI, to render only valid options per provider;
+   - the server, at every WS boundary that accepts the value (both create and
+     update handlers), with a typed rejection that lists the valid set.
+5. **Defaults live in the server's Conversation constructor**, not in UI state.
+   A single `defaultXForProvider(p)` helper keeps every creation path (WS,
+   merge fork, swarm spawn, test setup) consistent. The UI sends `undefined`
+   when the user didn't pick; server applies the canonical default.
+6. **Source of truth for each CLI's accepted values = `<cli> --help` and the
+   runtime rejection message** (for codex, passing an invalid `-c foo=bogus`
+   prints `expected one of ...`). Record the verification command in a comment
+   next to the per-provider array so the next update is a grep-and-bump.
+7. **Keep pass-through through the entire spine:** do not coerce, rename, or
+   alias values at any layer. UI string → WS string → server string → submodule
+   string → CLI flag argument. Every hop is identity on the value.
+
+### How to add a new bespoke-value setting
+
+1. Add the per-provider `as const` array(s) to `shared/src/index.ts` with a
+   comment citing the `--help` line or rejection message.
+2. Add the field to `ConversationSchema`, `NewConversationMessage`, and the
+   relevant `Set*Message` as `z.string().optional()` (or `.nullable()` for
+   clear-on-null update).
+3. Add `xLevelsForProvider` + `isXValidForProvider` helpers.
+4. Add `defaultXForProvider` and call it from the Conversation constructor.
+5. Wire the UI: per-provider option list, reset state on modal-open, reset on
+   provider-switch (synchronous — inside the radio onChange, NEVER an async
+   useEffect that races user clicks).
+6. Extend the relevant harness's `reasoningFlags`-style function in the
+   submodule. Pass the string verbatim; do not translate.
+7. Server rejects mismatches at both create and update boundaries with a
+   message that enumerates the valid set for the target provider.
+
+### Anti-patterns (don't do these)
+
+- A shared `z.enum([...union of all providers...])` on the wire. Couples every
+  CLI's vocabulary together and breaks when any one vendor ships an update.
+- Translating/renaming values at the submodule layer. If you're tempted to
+  write `valueMap['medium'] = 'moderate'`, stop — use the CLI's name directly.
+- UI-state defaults (e.g. `useState('high')`). Defaults belong server-side so
+  alt clients (CLI, API, tests) get them too.
+- Async `useEffect` to reset user-picked state on provider change. Races user
+  clicks. Reset synchronously inside the click handler.
+
 ## Integration Test Focus (Lean, No Mock-heavy Coverage)
 
 1. Runtime creation and visibility

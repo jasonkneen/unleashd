@@ -4,7 +4,6 @@ import type {
   ModelId,
   Provider,
   QueuedMessage,
-  ReasoningEffort,
   ServerMessage,
 } from '@unleashd/shared';
 import { normalizeModelId } from '@unleashd/shared';
@@ -97,7 +96,7 @@ interface PendingConversation {
   createdAt: string;
   swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
-  reasoningEffort?: ReasoningEffort;
+  reasoningEffort?: string;
 }
 
 function normalizeWorkingDirectory(input: string): string {
@@ -203,7 +202,7 @@ export function createConversation(
   model?: ModelId,
   swarmDebugPrefix?: string,
   resumedFromConversationId?: string,
-  reasoningEffort?: ReasoningEffort
+  reasoningEffort?: string
 ): string {
   const id = crypto.randomUUID();
   const normalizedWorkingDirectory = normalizeWorkingDirectory(workingDirectory);
@@ -326,7 +325,7 @@ export function setProvider(conversationId: string, provider: Provider): void {
 
 export function setReasoningEffort(
   conversationId: string,
-  value: ReasoningEffort | null
+  value: string | null
 ): void {
   jotaiStore.set(
     conversationsAtom,

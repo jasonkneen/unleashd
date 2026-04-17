@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { ModelId, ModelInfo, ReasoningEffort } from '@unleashd/shared';
+import type { ModelId, ModelInfo } from '@unleashd/shared';
 import {
   CLAUDE_EFFORT_LEVELS,
   CODEX_BASE_MODEL_INFOS,
@@ -53,8 +53,8 @@ const DRAFT_SAVE_DELAY_MS = 500;
 
 // Thread-header effort dropdowns use the provider's REAL level list.
 // Claude: low..max (no minimal). Codex: minimal..xhigh (no max). See shared.
-const STANDARD_OPTION = { value: null as ReasoningEffort | null, label: 'Standard' };
-const CLAUDE_EFFORT_OPTIONS: Array<{ value: ReasoningEffort | null; label: string }> = [
+const STANDARD_OPTION = { value: null as string | null, label: 'Standard' };
+const CLAUDE_EFFORT_OPTIONS: Array<{ value: string | null; label: string }> = [
   STANDARD_OPTION,
   ...CLAUDE_EFFORT_LEVELS.map((level) => ({ value: level, label: EFFORT_DISPLAY_NAMES[level] })),
 ];

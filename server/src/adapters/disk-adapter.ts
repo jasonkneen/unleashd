@@ -11,13 +11,7 @@
  *   sessionToConversation(ParsedSession) → Conversation | null  (null = hidden)
  */
 
-import type {
-  Conversation,
-  Message,
-  Provider,
-  ReasoningEffort,
-  SubAgent,
-} from '@unleashd/shared';
+import type { Conversation, Message, Provider, SubAgent } from '@unleashd/shared';
 import { ModelIdSchema, fromCodexModelId } from '@unleashd/shared';
 import { extractSwarmDebugPrefix, extractWorkerMetadata } from './jsonl';
 
@@ -150,7 +144,7 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
  */
 function recoverModelAndEffort(session: ParsedSession): {
   model: Conversation['model'];
-  reasoningEffort: ReasoningEffort | undefined;
+  reasoningEffort: string | undefined;
 } {
   if (session.model === 'unknown') {
     return { model: undefined, reasoningEffort: undefined };

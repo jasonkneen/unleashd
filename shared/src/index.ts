@@ -268,7 +268,7 @@ export function toCodexModelId(modelName: string, thinkingOption: CodexThinkingM
  */
 export function fromCodexModelId(modelId: string): {
   baseModel: string;
-  effort: ReasoningEffort | null;
+  effort: string | null;
 } {
   // Longest base name first so e.g. `gpt-5.3-codex-spark` wins over `gpt-5.3`.
   const baseNames = CODEX_MODEL_REGISTRY.map((entry) => entry.modelName).sort(
@@ -282,9 +282,9 @@ export function fromCodexModelId(modelId: string): {
     const prefix = `${base}-`;
     if (modelId.startsWith(prefix)) {
       const suffix = modelId.slice(prefix.length);
-      const parsed = ReasoningEffortSchema.safeParse(suffix);
-      if (parsed.success) {
-        return { baseModel: base, effort: parsed.data };
+      // Accept any codex-recognized effort suffix (see CODEX_EFFORT_LEVELS).
+      if ((CODEX_EFFORT_LEVELS as readonly string[]).includes(suffix)) {
+        return { baseModel: base, effort: suffix };
       }
     }
   }
@@ -450,50 +450,45 @@ export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 //   The poller skips active session IDs and rehydrates idle/reloaded sessions
 //   from persisted files.
 
-// Canonical reasoning-effort enum = UNION of every level any supported provider
-// accepts. Each provider supports a SUBSET (see *_EFFORT_LEVELS below).
+// Reasoning-effort values are passed through verbatim — we never translate or
+// map them. Whatever the CLI accepts is what flows through the wire.
 //
-// Authoritative sources (verified via --help / config rejection message):
+// Per-provider authoritative sources (verified via --help / rejection messages):
 //   claude --effort:                 low | medium | high | xhigh | max
 //   codex -c model_reasoning_effort: none | minimal | low | medium | high | xhigh
 //
-// 'none' is represented as undefined on Conversation.reasoningEffort, so it is
-// NOT in this enum. Every other level a CLI accepts IS in this enum.
-export const ReasoningEffortSchema = z.enum([
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-]);
-export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
-
-// Per-provider accepted subsets, ordered low → high for UI display.
-// Mismatches with these subsets are rejected server-side (see server.ts validation).
+// 'none' is represented as undefined on Conversation.reasoningEffort, so it
+// doesn't appear in these lists. Every other CLI-accepted level does.
+//
+// No shared union enum on the wire — reasoningEffort is z.string().optional()
+// at the schema layer. The per-provider arrays below are for UI rendering and
+// server-side validation only; the submodule only "aligns" the flag name, and
+// each CLI does the final runtime reject if something slips through.
 export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export const CODEX_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
 export type CodexEffortLevel = (typeof CODEX_EFFORT_LEVELS)[number];
 
-export const EFFORT_LEVELS_BY_PROVIDER: Partial<Record<Provider, readonly ReasoningEffort[]>> = {
+const EFFORT_LEVELS_BY_PROVIDER: Partial<Record<Provider, readonly string[]>> = {
   claude: CLAUDE_EFFORT_LEVELS,
   codex: CODEX_EFFORT_LEVELS,
 };
 
-export function effortLevelsForProvider(provider: Provider): readonly ReasoningEffort[] {
+export function effortLevelsForProvider(provider: Provider): readonly string[] {
   return EFFORT_LEVELS_BY_PROVIDER[provider] ?? [];
 }
 
 export function isEffortValidForProvider(
   provider: Provider,
-  effort: ReasoningEffort | null | undefined
+  effort: string | null | undefined
 ): boolean {
   if (effort == null) return true; // undefined/null = "no effort flag" = always valid
   return effortLevelsForProvider(provider).includes(effort);
 }
 
-export const EFFORT_DISPLAY_NAMES: Record<ReasoningEffort, string> = {
+// Display labels for the union of every level any provider accepts. Keyed by
+// plain string since the wire shape is string, not a typed enum.
+export const EFFORT_DISPLAY_NAMES: Record<string, string> = {
   minimal: 'Minimal',
   low: 'Low',
   medium: 'Medium',
@@ -520,8 +515,9 @@ export const ConversationSchema = z.object({
   provider: ProviderSchema.default('claude'),
   model: ModelIdSchema.optional(), // Provider-specific model identifier (undefined = provider default)
   // Standalone reasoning level for providers that expose it (claude + codex).
-  // Other providers (opencode, gemini, cursor) leave this undefined.
-  reasoningEffort: ReasoningEffortSchema.optional(),
+  // Pass-through string: value is whatever the target CLI accepts (see
+  // CLAUDE_EFFORT_LEVELS / CODEX_EFFORT_LEVELS). Other providers leave it undefined.
+  reasoningEffort: z.string().optional(),
   subAgents: z.array(SubAgentSchema).default([]), // Active/recent sub-agents
   queue: z.array(QueuedMessageSchema).default([]), // Server-owned message queue
   // Oompa worker detection: true if first user message started with "[oompa]".
@@ -732,7 +728,7 @@ export const NewConversationMessageSchema = z.object({
   workingDirectory: z.string().optional(),
   provider: ProviderSchema.optional(), // Defaults to 'claude' when not specified
   model: ModelIdSchema.optional(), // Provider-specific model (undefined = provider default)
-  reasoningEffort: ReasoningEffortSchema.optional(), // Standalone reasoning level (claude + codex)
+  reasoningEffort: z.string().optional(), // Pass-through: whatever the target CLI accepts
   swarmDebugPrefix: z.string().optional(), // Debug prefix prepended to first CLI message
   resumedFromConversationId: z.string().uuid().optional(),
 });
@@ -780,7 +776,9 @@ export type SetProviderMessage = z.infer<typeof SetProviderMessageSchema>;
 export const SetReasoningEffortMessageSchema = z.object({
   type: z.literal('set_reasoning_effort'),
   conversationId: z.string(),
-  value: ReasoningEffortSchema.nullable(),
+  // null = clear the effort (server stores undefined, CLI gets no flag). Otherwise
+  // a pass-through string the target CLI accepts; rejected by isEffortValidForProvider.
+  value: z.string().nullable(),
 });
 
 export type SetReasoningEffortMessage = z.infer<typeof SetReasoningEffortMessageSchema>;

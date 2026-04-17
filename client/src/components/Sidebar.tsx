@@ -1,4 +1,4 @@
-import type { Conversation, ModelId, Provider, ReasoningEffort } from '@unleashd/shared';
+import type { Conversation, ModelId, Provider } from '@unleashd/shared';
 import { providerSupportsFork } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -213,7 +213,7 @@ export function Sidebar() {
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
   const [provider, setProvider] = useState<Provider>('codex');
   const [model, setModel] = useState<ModelId | undefined>(undefined);
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | undefined>(undefined);
+  const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(undefined);
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -227,12 +227,16 @@ export function Sidebar() {
     setDirectory(lastDir);
     setHasPendingDefault(true);
     setModalError(null);
-    // Reset reasoningEffort for each fresh modal so a previous session's pick
-    // doesn't leak into the next create. Server applies the canonical per-provider
-    // default when the field is absent.
-    setReasoningEffort(undefined);
     setShowPicker(true);
   }, [allConversations, lastWorkingDirectory, defaultCwd]);
+
+  // Unified reset on modal-open. Runs for every entry point (main "+"" button,
+  // per-folder "+" button, keyboard shortcut, swarm flow) so a previous pick
+  // can't leak into the next create. Server applies the canonical per-provider
+  // default when reasoningEffort is absent.
+  useEffect(() => {
+    if (showPicker) setReasoningEffort(undefined);
+  }, [showPicker]);
 
   const handleOpenNewSwarmFlow = useCallback(() => {
     handleNewConversation();

@@ -20,7 +20,6 @@ import type {
   OompaWorkerStatus,
   Provider as ProviderName,
   QueuedMessage,
-  ReasoningEffort,
   ServerMessage,
   SubAgent,
 } from '@unleashd/shared';
@@ -50,11 +49,7 @@ type MergeChildMeta = {
   parentConversationId: string;
   reviewUuid: string;
 };
-import {
-  executeCommand,
-  type ClaudeReasoningLevel,
-  type CodexReasoningLevel,
-} from '@nbardy/agent-cli';
+import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -402,7 +397,7 @@ interface ConversationOptions {
   provider?: ProviderName;
   existingSessionId?: string;
   model?: ModelId;
-  reasoningEffort?: ReasoningEffort;
+  reasoningEffort?: string;
   isWorker?: boolean;
   swarmId?: string | null;
   workerId?: string | null;
@@ -417,7 +412,7 @@ interface ConversationOptions {
 
 // Canonical reasoning-effort default per provider. Claude and Codex are the
 // only providers with an effort flag today; others stay undefined forever.
-function defaultReasoningEffortForProvider(provider: ProviderName): ReasoningEffort | undefined {
+function defaultReasoningEffortForProvider(provider: ProviderName): string | undefined {
   if (provider === 'claude') return 'high';
   if (provider === 'codex') return 'xhigh';
   return undefined;
@@ -437,7 +432,7 @@ class Conversation extends EventEmitter {
   provider: ProviderName;
   model: ModelId | undefined; // Provider-specific base model identifier (e.g. 'opus', 'gpt-5.4')
   // Standalone reasoning level for claude + codex. Undefined for providers without reasoning.
-  reasoningEffort: ReasoningEffort | undefined;
+  reasoningEffort: string | undefined;
   // Oompa worker detection — true if first user message started with "[oompa]".
   // Set during JSONL loading, preserved across restarts.
   isWorker: boolean;
@@ -616,11 +611,10 @@ class Conversation extends EventEmitter {
     }
 
     // Per-provider narrowing: ExecuteCommandRequest is a discriminated union
-    // keyed on `harness`; each branch accepts a provider-specific reasoning
-    // type (ClaudeReasoningLevel / CodexReasoningLevel). The server's shared
-    // ReasoningEffort enum is the superset — the `set_reasoning_effort` /
-    // `new_conversation` validation rejects any level not accepted by the
-    // target provider, so casting here is safe at runtime.
+    // keyed on `harness`. Reasoning effort is a pass-through string — the
+    // `set_reasoning_effort` / `new_conversation` validation rejects any level
+    // not accepted by the target provider before we get here. Submodule
+    // harness wraps the string in the correct CLI flag.
     const baseRequest = {
       mode: 'conversation' as const,
       prompt: content,
@@ -637,13 +631,13 @@ class Conversation extends EventEmitter {
         ? {
             harness: 'claude',
             ...baseRequest,
-            reasoningEffort: this.reasoningEffort as ClaudeReasoningLevel | undefined,
+            reasoningEffort: this.reasoningEffort,
           }
         : this.provider === 'codex'
           ? {
               harness: 'codex',
               ...baseRequest,
-              reasoningEffort: this.reasoningEffort as CodexReasoningLevel | undefined,
+              reasoningEffort: this.reasoningEffort,
             }
           : { harness: this.provider, ...baseRequest }
     );
@@ -1863,7 +1857,7 @@ interface NewConversationData {
   workingDirectory?: string;
   provider?: ProviderName;
   model?: ModelId; // Provider-specific base model identifier (e.g. 'opus', 'gpt-5.4')
-  reasoningEffort?: ReasoningEffort; // Standalone reasoning level (claude + codex)
+  reasoningEffort?: string; // Standalone reasoning level (claude + codex)
   swarmDebugPrefix?: string; // Debug prefix prepended to first CLI message
   resumedFromConversationId?: string;
 }
@@ -1922,7 +1916,7 @@ interface SetProviderData {
 interface SetReasoningEffortData {
   type: 'set_reasoning_effort';
   conversationId: string;
-  value: ReasoningEffort | null;
+  value: string | null;
 }
 
 type ClientMessageData =
