@@ -156,7 +156,12 @@ function savePendingConversation(conv: PendingConversation): void {
 }
 
 function removePendingConversation(id: string): void {
-  const pending = loadPendingConversations().filter((c) => c.id !== id);
+  const existing = loadPendingConversations();
+  // No-op if this id isn't pending — avoids spurious localStorage writes when
+  // conversation_created is broadcast for UPDATES (set_reasoning_effort,
+  // set_model, set_provider), which is the current wire shape for updates.
+  if (!existing.some((c) => c.id === id)) return;
+  const pending = existing.filter((c) => c.id !== id);
   if (pending.length === 0) {
     localStorage.removeItem(PENDING_CONVERSATIONS_KEY);
   } else {
