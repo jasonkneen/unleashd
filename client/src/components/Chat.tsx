@@ -3,8 +3,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { ModelId, ModelInfo } from '@unleashd/shared';
-import { PROVIDER_OPTIONS } from '@unleashd/shared';
+import type { ModelId, ModelInfo, ReasoningEffort } from '@unleashd/shared';
+import {
+  CLAUDE_EFFORT_LEVELS,
+  CODEX_BASE_MODEL_INFOS,
+  CODEX_EFFORT_LEVELS,
+  EFFORT_DISPLAY_NAMES,
+  fromCodexModelId,
+  PROVIDER_OPTIONS,
+} from '@unleashd/shared';
 import { useDropzone } from 'react-dropzone';
 import {
   cancelQueuedMessage,
@@ -15,6 +22,7 @@ import {
   setActiveConversationId,
   setModel,
   setProvider,
+  setReasoningEffort,
 } from '../atoms/actions';
 import type { QueuedMessage } from '../atoms/actions';
 import {
@@ -42,6 +50,14 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 
 // Draft persistence: debounce delay for saving textarea content to localStorage
 const DRAFT_SAVE_DELAY_MS = 500;
+
+// Thread-header effort dropdowns use the provider's REAL level list.
+// Claude: low..max (no minimal). Codex: minimal..xhigh (no max). See shared.
+const STANDARD_OPTION = { value: null as ReasoningEffort | null, label: 'Standard' };
+const CLAUDE_EFFORT_OPTIONS: Array<{ value: ReasoningEffort | null; label: string }> = [
+  STANDARD_OPTION,
+  ...CLAUDE_EFFORT_LEVELS.map((level) => ({ value: level, label: EFFORT_DISPLAY_NAMES[level] })),
+];
 
 interface PendingFile {
   originalName: string;
@@ -96,8 +112,16 @@ export function Chat() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  // Codex thread header: base and effort are two independent dropdowns that fire
+  // separate setModel / setReasoningEffort wire events (same shape claude uses).
+  // fromCodexModelId is kept as a DISPLAY-ONLY bridge for legacy in-memory
+  // composite model ids (e.g. "gpt-5.4-xhigh") from before the server migration —
+  // once the server heals them on next spawn, conversation.model becomes the
+  // base id and conversation.reasoningEffort holds the effort directly.
+  const [effortPickerOpen, setEffortPickerOpen] = useState(false);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const providerPickerRef = useRef<HTMLDivElement>(null);
+  const effortPickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch(`/api/models?provider=${provider}`)
@@ -108,30 +132,22 @@ export function Chat() {
 
   // Click-outside to close pickers
   useEffect(() => {
-    if (!modelPickerOpen && !providerPickerOpen) return;
+    if (!modelPickerOpen && !providerPickerOpen && !effortPickerOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        modelPickerRef.current &&
-        !modelPickerRef.current.contains(e.target as Node) &&
-        providerPickerRef.current &&
-        !providerPickerRef.current.contains(e.target as Node)
-      ) {
-        setModelPickerOpen(false);
-        setProviderPickerOpen(false);
-        return;
-      }
-
-      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (modelPickerRef.current && !modelPickerRef.current.contains(target)) {
         setModelPickerOpen(false);
       }
-
-      if (providerPickerRef.current && !providerPickerRef.current.contains(e.target as Node)) {
+      if (providerPickerRef.current && !providerPickerRef.current.contains(target)) {
         setProviderPickerOpen(false);
+      }
+      if (effortPickerRef.current && !effortPickerRef.current.contains(target)) {
+        setEffortPickerOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [modelPickerOpen, providerPickerOpen]);
+  }, [modelPickerOpen, providerPickerOpen, effortPickerOpen]);
 
   const {
     savePrompt,
@@ -636,45 +652,184 @@ export function Chat() {
               )}
             </div>
           )}
-          {models.length > 0 && (
-            <div className="model-picker" ref={modelPickerRef}>
-              <button
-                type="button"
-                className="model-picker-trigger"
-                onClick={() => {
-                  setModelPickerOpen((o) => !o);
-                  setProviderPickerOpen(false);
-                }}
-              >
-                {models.find((m) => m.id === conversation.model)?.displayName ??
-                  models.find((m) => m.isDefault)?.displayName ??
-                  conversation.modelName ??
-                  'default'}
-                <span className="model-picker-caret">&#x25BE;</span>
-              </button>
-              {modelPickerOpen && (
-                <div className="model-picker-menu">
-                  {models.map((m) => (
+          {conversation.provider === 'codex' ? (
+            (() => {
+              // conversation.reasoningEffort is the source of truth once the
+              // server has written it. For legacy in-memory composite model ids
+              // ("gpt-5.4-xhigh") still hanging around before the server heals
+              // them on next spawn, fall through to the decomposed effort.
+              const currentModelId =
+                (conversation.model as string | undefined) ??
+                CODEX_BASE_MODEL_INFOS.find((b) => b.isDefault)?.id ??
+                CODEX_BASE_MODEL_INFOS[0].id;
+              const { baseModel, effort: effortFromModel } = fromCodexModelId(currentModelId);
+              const effort = conversation.reasoningEffort ?? effortFromModel;
+              const baseDisplay =
+                CODEX_BASE_MODEL_INFOS.find((b) => b.id === baseModel)?.displayName ?? baseModel;
+              const effortDisplay =
+                effort === null || effort === undefined
+                  ? 'No Reasoning'
+                  : EFFORT_DISPLAY_NAMES[effort];
+
+              return (
+                <>
+                  <div className="model-picker" ref={modelPickerRef}>
                     <button
-                      key={m.id}
                       type="button"
-                      className={`model-picker-option ${
-                        m.id === (conversation.model ?? models.find((d) => d.isDefault)?.id)
-                          ? 'selected'
-                          : ''
-                      }`}
+                      className="model-picker-trigger"
                       onClick={() => {
-                        setModel(conversation.id, m.id as ModelId);
-                        setModelPickerOpen(false);
+                        setModelPickerOpen((o) => !o);
+                        setProviderPickerOpen(false);
+                        setEffortPickerOpen(false);
                       }}
                     >
-                      {m.displayName}
-                      {m.isDefault && <span className="model-default-tag">default</span>}
+                      {baseDisplay}
+                      <span className="model-picker-caret">&#x25BE;</span>
                     </button>
-                  ))}
+                    {modelPickerOpen && (
+                      <div className="model-picker-menu">
+                        {CODEX_BASE_MODEL_INFOS.map((b) => (
+                          <button
+                            key={b.id}
+                            type="button"
+                            className={`model-picker-option ${b.id === baseModel ? 'selected' : ''}`}
+                            onClick={() => {
+                              setModel(conversation.id, b.id as ModelId);
+                              setModelPickerOpen(false);
+                            }}
+                          >
+                            {b.displayName}
+                            {b.isDefault && <span className="model-default-tag">default</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="model-picker" ref={effortPickerRef}>
+                    <button
+                      type="button"
+                      className="model-picker-trigger"
+                      onClick={() => {
+                        setEffortPickerOpen((o) => !o);
+                        setModelPickerOpen(false);
+                        setProviderPickerOpen(false);
+                      }}
+                    >
+                      {effortDisplay}
+                      <span className="model-picker-caret">&#x25BE;</span>
+                    </button>
+                    {effortPickerOpen && (
+                      <div className="model-picker-menu">
+                        <button
+                          type="button"
+                          className={`model-picker-option ${effort === null || effort === undefined ? 'selected' : ''}`}
+                          onClick={() => {
+                            setReasoningEffort(conversation.id, null);
+                            setEffortPickerOpen(false);
+                          }}
+                        >
+                          No Reasoning
+                        </button>
+                        {CODEX_EFFORT_LEVELS.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            className={`model-picker-option ${effort === opt ? 'selected' : ''}`}
+                            onClick={() => {
+                              setReasoningEffort(conversation.id, opt);
+                              setEffortPickerOpen(false);
+                            }}
+                          >
+                            {EFFORT_DISPLAY_NAMES[opt]}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()
+          ) : (
+            <>
+              {models.length > 0 && (
+                <div className="model-picker" ref={modelPickerRef}>
+                  <button
+                    type="button"
+                    className="model-picker-trigger"
+                    onClick={() => {
+                      setModelPickerOpen((o) => !o);
+                      setProviderPickerOpen(false);
+                      setEffortPickerOpen(false);
+                    }}
+                  >
+                    {models.find((m) => m.id === conversation.model)?.displayName ??
+                      models.find((m) => m.isDefault)?.displayName ??
+                      conversation.modelName ??
+                      'default'}
+                    <span className="model-picker-caret">&#x25BE;</span>
+                  </button>
+                  {modelPickerOpen && (
+                    <div className="model-picker-menu">
+                      {models.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          className={`model-picker-option ${
+                            m.id === (conversation.model ?? models.find((d) => d.isDefault)?.id)
+                              ? 'selected'
+                              : ''
+                          }`}
+                          onClick={() => {
+                            setModel(conversation.id, m.id as ModelId);
+                            setModelPickerOpen(false);
+                          }}
+                        >
+                          {m.displayName}
+                          {m.isDefault && <span className="model-default-tag">default</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+              {conversation.provider === 'claude' && (
+                <div className="model-picker" ref={effortPickerRef}>
+                  <button
+                    type="button"
+                    className="model-picker-trigger"
+                    onClick={() => {
+                      setEffortPickerOpen((o) => !o);
+                      setModelPickerOpen(false);
+                      setProviderPickerOpen(false);
+                    }}
+                  >
+                    {CLAUDE_EFFORT_OPTIONS.find(
+                      (o) => o.value === (conversation.reasoningEffort ?? null)
+                    )?.label ?? 'Standard'}
+                    <span className="model-picker-caret">&#x25BE;</span>
+                  </button>
+                  {effortPickerOpen && (
+                    <div className="model-picker-menu">
+                      {CLAUDE_EFFORT_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.label}
+                          type="button"
+                          className={`model-picker-option ${
+                            (conversation.reasoningEffort ?? null) === opt.value ? 'selected' : ''
+                          }`}
+                          onClick={() => {
+                            setReasoningEffort(conversation.id, opt.value);
+                            setEffortPickerOpen(false);
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
           <Link
             className="chat-dir"
@@ -983,6 +1138,9 @@ export function Chat() {
             textareaRef.current.style.height = 'auto';
             textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 300)}px`;
             setHasInput(content.trim().length > 0);
+            textareaRef.current.focus();
+            const end = content.length;
+            textareaRef.current.setSelectionRange(end, end);
           }
         }}
       />

@@ -1,4 +1,4 @@
-import type { Conversation, ModelId, Provider } from '@unleashd/shared';
+import type { Conversation, ModelId, Provider, ReasoningEffort } from '@unleashd/shared';
 import { providerSupportsFork } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -213,6 +213,7 @@ export function Sidebar() {
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
   const [provider, setProvider] = useState<Provider>('codex');
   const [model, setModel] = useState<ModelId | undefined>(undefined);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | undefined>(undefined);
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -226,6 +227,10 @@ export function Sidebar() {
     setDirectory(lastDir);
     setHasPendingDefault(true);
     setModalError(null);
+    // Reset reasoningEffort for each fresh modal so a previous session's pick
+    // doesn't leak into the next create. Server applies the canonical per-provider
+    // default when the field is absent.
+    setReasoningEffort(undefined);
     setShowPicker(true);
   }, [allConversations, lastWorkingDirectory, defaultCwd]);
 
@@ -271,10 +276,20 @@ export function Sidebar() {
     if (!directory.trim()) return;
     setModalError(null);
     setLastWorkingDirectory(directory);
-    createConversation(directory, provider, model);
+    // reasoningEffort applies to claude + codex; server ignores it for other providers.
+    const effectiveReasoning =
+      provider === 'claude' || provider === 'codex' ? reasoningEffort : undefined;
+    createConversation(directory, provider, model, undefined, undefined, effectiveReasoning);
     setShowPicker(false);
     navigateToCreatedConversation();
-  }, [directory, model, navigateToCreatedConversation, provider, setLastWorkingDirectory]);
+  }, [
+    directory,
+    model,
+    navigateToCreatedConversation,
+    provider,
+    reasoningEffort,
+    setLastWorkingDirectory,
+  ]);
 
   const handleCreateNewSwarm = useCallback(async () => {
     if (!directory.trim()) return;
@@ -291,7 +306,16 @@ export function Sidebar() {
       }
 
       setLastWorkingDirectory(directory);
-      createConversation(directory, provider, model, payload.prefix);
+      const effectiveReasoning =
+        provider === 'claude' || provider === 'codex' ? reasoningEffort : undefined;
+      createConversation(
+        directory,
+        provider,
+        model,
+        payload.prefix,
+        undefined,
+        effectiveReasoning
+      );
       setShowPicker(false);
       navigateToCreatedConversation();
     } catch (error) {
@@ -299,7 +323,14 @@ export function Sidebar() {
     } finally {
       setIsCreatingSwarm(false);
     }
-  }, [directory, model, navigateToCreatedConversation, provider, setLastWorkingDirectory]);
+  }, [
+    directory,
+    model,
+    navigateToCreatedConversation,
+    provider,
+    reasoningEffort,
+    setLastWorkingDirectory,
+  ]);
 
   const handleCancel = () => {
     if (isCreatingSwarm) return;
@@ -502,6 +533,8 @@ export function Sidebar() {
                 onProviderChange={setProvider}
                 model={model}
                 onModelChange={setModel}
+                reasoningEffort={reasoningEffort}
+                onReasoningEffortChange={setReasoningEffort}
               />
               <div className="directory-actions">
                 <button

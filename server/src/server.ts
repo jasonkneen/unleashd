@@ -20,12 +20,16 @@ import type {
   OompaWorkerStatus,
   Provider as ProviderName,
   QueuedMessage,
+  ReasoningEffort,
   ServerMessage,
   SubAgent,
 } from '@unleashd/shared';
 import {
   FORK_CAPABLE_PROVIDERS,
   buildMergeReviewPrompt,
+  effortLevelsForProvider,
+  fromCodexModelId,
+  isEffortValidForProvider,
   mergeReviewDocPath,
   normalizeModelId,
   providerSupportsFork,
@@ -46,7 +50,11 @@ type MergeChildMeta = {
   parentConversationId: string;
   reviewUuid: string;
 };
-import { executeCommand } from '@nbardy/agent-cli';
+import {
+  executeCommand,
+  type ClaudeReasoningLevel,
+  type CodexReasoningLevel,
+} from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -69,7 +77,14 @@ import {
 } from './constants/timeouts';
 import { type ProviderEvent, getProvider, providers } from './providers';
 import { isModelIdValidForProvider, modelValidationHint } from './providers/model-validation';
-import { getSubagentDescription, isSubagentSpawnTool } from './subagent-tools';
+import {
+  extractCodexCollabToolInput,
+  getSubagentDescription,
+  isCodexCollabToolName,
+  isSubagentSpawnTool,
+  isTerminalSubagentStatus,
+  normalizeCodexSubagentStatus,
+} from './subagent-tools';
 
 import multer from 'multer';
 import { auditLocalAgents } from './audit.js';
@@ -387,6 +402,7 @@ interface ConversationOptions {
   provider?: ProviderName;
   existingSessionId?: string;
   model?: ModelId;
+  reasoningEffort?: ReasoningEffort;
   isWorker?: boolean;
   swarmId?: string | null;
   workerId?: string | null;
@@ -397,6 +413,14 @@ interface ConversationOptions {
   swarmDebugPrefix?: string | null;
   mergeParentMeta?: MergeParentMeta | null;
   mergeChildMeta?: MergeChildMeta | null;
+}
+
+// Canonical reasoning-effort default per provider. Claude and Codex are the
+// only providers with an effort flag today; others stay undefined forever.
+function defaultReasoningEffortForProvider(provider: ProviderName): ReasoningEffort | undefined {
+  if (provider === 'claude') return 'high';
+  if (provider === 'codex') return 'xhigh';
+  return undefined;
 }
 
 class Conversation extends EventEmitter {
@@ -411,7 +435,9 @@ class Conversation extends EventEmitter {
   createdAt: Date;
   workingDirectory: string;
   provider: ProviderName;
-  model: ModelId | undefined; // Provider-specific model identifier (e.g. 'opus', 'gpt-5.3-codex-high')
+  model: ModelId | undefined; // Provider-specific base model identifier (e.g. 'opus', 'gpt-5.4')
+  // Standalone reasoning level for claude + codex. Undefined for providers without reasoning.
+  reasoningEffort: ReasoningEffort | undefined;
   // Oompa worker detection — true if first user message started with "[oompa]".
   // Set during JSONL loading, preserved across restarts.
   isWorker: boolean;
@@ -486,6 +512,7 @@ class Conversation extends EventEmitter {
       provider = 'claude',
       existingSessionId,
       model,
+      reasoningEffort,
       isWorker = false,
       swarmId = null,
       workerId = null,
@@ -511,6 +538,12 @@ class Conversation extends EventEmitter {
     this.workingDirectory = path.resolve(workingDirectory || process.cwd());
     this.provider = provider;
     this.model = normalizeModelId(provider, model);
+    // Canonical server-side default per provider. Applied in the constructor
+    // so every creation path (WS new_conversation, merge forks, swarm spawns,
+    // test setup) yields a Conversation with a valid effort for the provider.
+    // claude defaults to 'high', codex to 'xhigh'; other providers have no
+    // effort flag and stay undefined regardless.
+    this.reasoningEffort = reasoningEffort ?? defaultReasoningEffortForProvider(provider);
     this.isWorker = isWorker;
     this.swarmId = swarmId;
     this.workerId = workerId;
@@ -568,9 +601,28 @@ class Conversation extends EventEmitter {
     this._processStartTime = Date.now();
     this._primeSwarmBaseline();
 
-    const turn = executeCommand({
-      harness: this.provider,
-      mode: 'conversation',
+    // Self-heal legacy in-memory codex conversations that still carry a composite
+    // model id (e.g. "gpt-5.4-xhigh") from the pre-refactor wire contract. Decompose
+    // once so downstream uses base model + separate reasoningEffort.
+    if (this.provider === 'codex' && typeof this.model === 'string') {
+      const { baseModel, effort } = fromCodexModelId(this.model);
+      if (baseModel !== this.model) {
+        console.warn(
+          `[${this.id}] Migrating legacy codex composite model '${this.model}' → base='${baseModel}' effort='${effort ?? this.reasoningEffort ?? 'none'}'`
+        );
+        this.model = baseModel as ModelId;
+        this.reasoningEffort = effort ?? this.reasoningEffort;
+      }
+    }
+
+    // Per-provider narrowing: ExecuteCommandRequest is a discriminated union
+    // keyed on `harness`; each branch accepts a provider-specific reasoning
+    // type (ClaudeReasoningLevel / CodexReasoningLevel). The server's shared
+    // ReasoningEffort enum is the superset — the `set_reasoning_effort` /
+    // `new_conversation` validation rejects any level not accepted by the
+    // target provider, so casting here is safe at runtime.
+    const baseRequest = {
+      mode: 'conversation' as const,
       prompt: content,
       cwd: this.workingDirectory,
       model: this.model,
@@ -579,7 +631,22 @@ class Conversation extends EventEmitter {
       yolo: true,
       detached: true,
       debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
-    });
+    };
+    const turn = executeCommand(
+      this.provider === 'claude'
+        ? {
+            harness: 'claude',
+            ...baseRequest,
+            reasoningEffort: this.reasoningEffort as ClaudeReasoningLevel | undefined,
+          }
+        : this.provider === 'codex'
+          ? {
+              harness: 'codex',
+              ...baseRequest,
+              reasoningEffort: this.reasoningEffort as CodexReasoningLevel | undefined,
+            }
+          : { harness: this.provider, ...baseRequest }
+    );
 
     this.process = turn.child;
     this.isRunning = true;
@@ -841,6 +908,153 @@ class Conversation extends EventEmitter {
     }
   }
 
+  private _findSubAgentByRuntimeId(id: string): SubAgent | undefined {
+    return this.subAgents.find((agent) => agent.id === id || agent.providerThreadId === id);
+  }
+
+  private _broadcastSubAgentUpdate(agent: SubAgent): void {
+    broadcastToAll({
+      type: 'subagent_update',
+      conversationId: this.id,
+      subAgentId: agent.id,
+      toolUses: agent.toolUses,
+      tokens: agent.tokens,
+      currentAction: agent.currentAction,
+      status: agent.status,
+      rawStatus: agent.rawStatus,
+      statusSource: agent.statusSource,
+    });
+  }
+
+  private _completeNativeCodexSubAgent(agent: SubAgent, completedAt = new Date()): void {
+    if (agent.status === 'completed' || agent.status === 'error') {
+      agent.completedAt = completedAt;
+      agent.currentAction = agent.status === 'error' ? 'Error' : 'Done';
+      broadcastToAll({
+        type: 'subagent_complete',
+        conversationId: this.id,
+        subAgentId: agent.id,
+        status: agent.status,
+        completedAt,
+      });
+    }
+  }
+
+  private _createOrUpdateCodexNativeSubAgent(
+    childThreadId: string,
+    toolName: string,
+    prompt: string | undefined,
+    rawStatus: string | undefined
+  ): { agent: SubAgent; isNew: boolean; wasTerminal: boolean } {
+    const description = getSubagentDescription(this.provider, toolName, {
+      ...(prompt ? { prompt } : {}),
+    });
+    const fallbackStatus = toolName === 'spawn_agent' ? 'pending' : 'running';
+    const normalizedStatus = normalizeCodexSubagentStatus(rawStatus, fallbackStatus);
+    let agent = this._findSubAgentByRuntimeId(childThreadId);
+    const isNew = !agent;
+    const wasTerminal = !!agent && isTerminalSubagentStatus(agent.status);
+
+    if (!agent) {
+      agent = {
+        id: childThreadId,
+        description,
+        status: normalizedStatus,
+        toolUses: 0,
+        tokens: 0,
+        currentAction: undefined,
+        startedAt: new Date(),
+        providerThreadId: childThreadId,
+        rawStatus,
+        statusSource: 'native',
+      };
+      this.subAgents.push(agent);
+    } else {
+      agent.providerThreadId = childThreadId;
+      if (!agent.description || agent.description.startsWith('Running ')) {
+        agent.description = description;
+      }
+      agent.status = normalizedStatus;
+      agent.rawStatus = rawStatus;
+      agent.statusSource = 'native';
+      if (normalizedStatus === 'completed' || normalizedStatus === 'error') {
+        agent.completedAt ??= new Date();
+      }
+    }
+
+    return { agent, isNew, wasTerminal };
+  }
+
+  private _handleCodexCollabToolUse(
+    event: Extract<ProviderEvent, { type: 'tool_use' }>
+  ): { suppressGenericSubagentHandling: boolean; suppressFormattedOutput: boolean } | null {
+    if (this.provider !== 'codex' || !isCodexCollabToolName(event.name)) {
+      return null;
+    }
+
+    const { phase, receiverThreadIds, prompt, agentStates } = extractCodexCollabToolInput(event.input);
+    if (phase !== 'completed') {
+      return {
+        suppressGenericSubagentHandling: true,
+        suppressFormattedOutput: false,
+      };
+    }
+
+    const childIds = new Set<string>(receiverThreadIds);
+    for (const childId of Object.keys(agentStates)) {
+      childIds.add(childId);
+    }
+
+    for (const childId of childIds) {
+      const agentState = agentStates[childId];
+      const { agent, isNew, wasTerminal } = this._createOrUpdateCodexNativeSubAgent(
+        childId,
+        event.name,
+        prompt,
+        agentState?.status
+      );
+
+      if (event.name !== 'spawn_agent') {
+        agent.toolUses += 1;
+        agent.currentAction = event.name;
+      }
+
+      if (isNew) {
+        console.log(
+          `[${this.id}] Codex sub-agent started: ${agent.id.substring(0, 8)} - "${agent.description.substring(0, 50)}"`
+        );
+        broadcastToAll({
+          type: 'subagent_start',
+          conversationId: this.id,
+          subAgent: agent,
+        });
+      } else {
+        this._broadcastSubAgentUpdate(agent);
+      }
+
+      if (agentState?.message !== undefined && agentState.message !== null) {
+        agent.currentAction = event.name;
+        this._broadcastSubAgentUpdate(agent);
+      }
+
+      if (isTerminalSubagentStatus(agent.status)) {
+        if (!agent.completedAt) {
+          agent.completedAt = new Date();
+        }
+        agent.currentAction = agent.status === 'error' ? 'Error' : 'Done';
+        this._broadcastSubAgentUpdate(agent);
+        if (!wasTerminal) {
+          this._completeNativeCodexSubAgent(agent, agent.completedAt);
+        }
+      }
+    }
+
+    return {
+      suppressGenericSubagentHandling: true,
+      suppressFormattedOutput: true,
+    };
+  }
+
   /**
    * Unified output handler from executeCommand normalized events.
    */
@@ -874,8 +1088,9 @@ class Conversation extends EventEmitter {
 
       case 'tool_use': {
         this._ensureAssistantMessage();
+        const codexCollabHandling = this._handleCodexCollabToolUse(event);
         // Check if this tool spawns a sub-agent
-        if (isSubagentSpawnTool(this.provider, event.name)) {
+        if (!codexCollabHandling && isSubagentSpawnTool(this.provider, event.name)) {
           const description = getSubagentDescription(this.provider, event.name, event.input);
           const blockId = (event.input as { _blockId?: string })._blockId || uuidv4();
 
@@ -903,7 +1118,7 @@ class Conversation extends EventEmitter {
             conversationId: this.id,
             subAgent,
           });
-        } else {
+        } else if (!codexCollabHandling?.suppressGenericSubagentHandling) {
           // For non-Task tools, check if we have an active sub-agent and update its current action
           if (this.subAgents.length > 0) {
             const activeAgent = this.subAgents.find((a) => a.status === 'running');
@@ -938,7 +1153,10 @@ class Conversation extends EventEmitter {
 
           // Normalize tool line formatting across providers (Claude/Gemini/Codex).
           // Suppress Codex shell completion-only events to avoid duplicate lines.
-          if (!isCompletionOnlyToolUse(event.name, event.input, event.displayText)) {
+          if (
+            !codexCollabHandling?.suppressFormattedOutput &&
+            !isCompletionOnlyToolUse(event.name, event.input, event.displayText)
+          ) {
             const formattedTool = formatToolUse(event.name, event.input, event.displayText);
             if (formattedTool) {
               const currentMsg = this.messages[this.messages.length - 1];
@@ -961,6 +1179,30 @@ class Conversation extends EventEmitter {
               });
             }
           }
+        } else if (
+          !codexCollabHandling.suppressFormattedOutput &&
+          !isCompletionOnlyToolUse(event.name, event.input, event.displayText)
+        ) {
+          const formattedTool = formatToolUse(event.name, event.input, event.displayText);
+          if (formattedTool) {
+            const currentMsg = this.messages[this.messages.length - 1];
+            const needsLeadingNewline =
+              !formattedTool.startsWith('<!--ask_user_question:') &&
+              currentMsg?.role === 'assistant' &&
+              currentMsg.content.length > 0 &&
+              !currentMsg.content.endsWith('\n');
+            const chunkText = formattedTool.startsWith('<!--ask_user_question:')
+              ? formattedTool
+              : `${needsLeadingNewline ? '\n' : ''}${formattedTool}\n`;
+            if (currentMsg?.role === 'assistant') {
+              currentMsg.content += chunkText;
+            }
+            this.broadcastChunk({
+              type: 'chunk',
+              conversationId: this.id,
+              text: chunkText,
+            });
+          }
         }
         break;
       }
@@ -981,8 +1223,14 @@ class Conversation extends EventEmitter {
 
         for (const agent of this.subAgents) {
           if (agent.status === 'running') {
+            if (this.provider === 'codex' && agent.providerThreadId) {
+              continue;
+            }
             agent.status = 'completed';
             agent.completedAt = completedAt;
+            if (!agent.statusSource) {
+              agent.statusSource = 'inferred_parent_completion';
+            }
             agent.currentAction = 'Done';
 
             console.log(`[${this.id}] Sub-agent completed: ${agent.id.substring(0, 8)}`);
@@ -1588,6 +1836,7 @@ class Conversation extends EventEmitter {
       workingDirectory: this.workingDirectory,
       provider: this.provider,
       model: this.model,
+      reasoningEffort: this.reasoningEffort,
       subAgents: this.subAgents,
       queue: this.queue,
       isWorker: this.isWorker,
@@ -1613,7 +1862,8 @@ interface NewConversationData {
   id?: string; // Client-generated UUID for optimistic insert
   workingDirectory?: string;
   provider?: ProviderName;
-  model?: ModelId; // Provider-specific model identifier (e.g. 'opus', 'gpt-5.3-codex-high')
+  model?: ModelId; // Provider-specific base model identifier (e.g. 'opus', 'gpt-5.4')
+  reasoningEffort?: ReasoningEffort; // Standalone reasoning level (claude + codex)
   swarmDebugPrefix?: string; // Debug prefix prepended to first CLI message
   resumedFromConversationId?: string;
 }
@@ -1669,6 +1919,12 @@ interface SetProviderData {
   provider: ProviderName;
 }
 
+interface SetReasoningEffortData {
+  type: 'set_reasoning_effort';
+  conversationId: string;
+  value: ReasoningEffort | null;
+}
+
 type ClientMessageData =
   | NewConversationData
   | SendMessageData
@@ -1679,7 +1935,8 @@ type ClientMessageData =
   | InterruptAndSendData
   | CancelQueuedMessageData
   | ClearQueueData
-  | SetModelData;
+  | SetModelData
+  | SetReasoningEffortData;
 
 // =============================================================================
 // WebSocket Handler
@@ -1796,11 +2053,27 @@ wss.on('connection', (ws: WebSocket) => {
             return;
           }
 
+          // Reject reasoning levels the selected provider doesn't accept
+          // (claude has 'max' but not 'minimal'; codex is the opposite).
+          if (
+            data.reasoningEffort !== undefined &&
+            !isEffortValidForProvider(provider, data.reasoningEffort)
+          ) {
+            ws.send(
+              JSON.stringify({
+                type: 'error',
+                message: `Reasoning effort '${data.reasoningEffort}' is not accepted by provider '${provider}'. Valid: ${effortLevelsForProvider(provider).join(', ') || '(none — provider has no reasoning flag)'}.`,
+              })
+            );
+            return;
+          }
+
           const conv = new Conversation({
             id,
             workingDirectory: workingDir,
             provider,
             model,
+            reasoningEffort: data.reasoningEffort,
             swarmDebugPrefix,
             resumedFromConversationId,
           });
@@ -1903,6 +2176,45 @@ wss.on('connection', (ws: WebSocket) => {
               })
             );
           }
+          break;
+        }
+
+        case 'set_reasoning_effort': {
+          const conv = conversations.get(data.conversationId);
+          if (!conv) break;
+          // On any rejection below, also broadcast the current authoritative
+          // Conversation so a client that optimistically applied the bad value
+          // rolls back from the server's reply.
+          const sendRejection = (message: string): void => {
+            ws.send(JSON.stringify({ type: 'error', message }));
+            ws.send(
+              JSON.stringify({
+                type: 'conversation_created',
+                conversation: conv.toJSON(),
+              })
+            );
+          };
+          // Only providers with a reasoning flag (claude + codex) accept this.
+          if (conv.provider !== 'claude' && conv.provider !== 'codex') {
+            sendRejection(`Reasoning effort is not supported for provider '${conv.provider}'.`);
+            return;
+          }
+          // Claude and Codex accept different subsets (claude has max, codex has
+          // minimal — see shared/src/index.ts). Reject mismatches at the boundary.
+          if (!isEffortValidForProvider(conv.provider, data.value ?? undefined)) {
+            sendRejection(
+              `Reasoning effort '${data.value}' is not accepted by provider '${conv.provider}'. Valid: ${effortLevelsForProvider(conv.provider).join(', ')}.`
+            );
+            return;
+          }
+          conv.reasoningEffort = data.value ?? undefined;
+          console.log(
+            `[WS] Reasoning effort changed for ${data.conversationId}: ${conv.reasoningEffort ?? 'standard'}`
+          );
+          broadcastToAll({
+            type: 'conversation_created',
+            conversation: conv.toJSON(),
+          });
           break;
         }
 

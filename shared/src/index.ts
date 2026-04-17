@@ -155,9 +155,10 @@ export const getProviderMetadata = (provider: Provider): ProviderMetadata => ({
 // The server's Provider.modelToParams() decomposes them into CLI flags.
 //
 // Claude: aliases passed to `claude --model <alias>`
-// Codex: base model strings plus optional composite reasoning suffixes
-//   e.g. "gpt-5.4-high" → `-m gpt-5.4 -c model_reasoning_effort=high`
-//   e.g. "gpt-5.3-codex-spark-xhigh" → `-m gpt-5.3-codex-spark -c model_reasoning_effort=xhigh`
+// Codex: base model IDs only. Reasoning effort is a SEPARATE field on the
+//   Conversation (Conversation.reasoningEffort), mirroring Claude. Composite IDs
+//   (e.g. "gpt-5.4-high") are a legacy wire format that survives only as a
+//   display/migration helper via toCodexModelId/fromCodexModelId.
 // OpenCode: path-style identifiers passed to `opencode run -m <id>`
 //   e.g. "opencode/big-pickle" or "opencode/gpt-5-nano"
 // We require at least one "/" segment to avoid collisions with Claude/Codex IDs.
@@ -177,7 +178,9 @@ export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 export const CursorModelSchema = z.enum(['composer-2', 'composer2']);
 export type CursorModel = z.infer<typeof CursorModelSchema>;
 
-export const CODEX_THINKING_OPTIONS = ['high', 'medium', 'xhigh'] as const;
+// Codex's own accepted effort levels — NOT the union across all providers.
+// Must match CODEX_EFFORT_LEVELS defined below. Ordering is low → high for UI.
+export const CODEX_THINKING_OPTIONS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
 export const NO_CODEX_THINKING = 'none' as const;
 export type CodexThinkingMode = typeof NO_CODEX_THINKING | CodexThinkingOption;
@@ -199,79 +202,112 @@ export const CODEX_MODEL_REGISTRY = [
     modelName: 'gpt-5.4',
     displayName: 'GPT-5.4',
     thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'high',
+    defaultThinkingOption: 'xhigh',
     isDefault: true,
   },
   {
     modelName: 'gpt-5.4-mini',
     displayName: 'GPT-5.4 Mini',
     thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'high',
+    defaultThinkingOption: 'xhigh',
     isDefault: false,
   },
   {
     modelName: 'gpt-5.3-codex-spark',
     displayName: 'Codex Spark',
     thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'high',
+    defaultThinkingOption: 'xhigh',
     isDefault: false,
   },
 ] as const satisfies ReadonlyArray<CodexModelRegistryEntry>;
 
 type CodexModelRegistryItem = (typeof CODEX_MODEL_REGISTRY)[number];
-type CodexModelIdForEntry<TEntry extends CodexModelRegistryItem> = TEntry extends unknown
-  ? TEntry['thinkingOptions'][number] extends infer TThinkingOption
-    ? TThinkingOption extends typeof NO_CODEX_THINKING
-      ? TEntry['modelName']
-      : TThinkingOption extends string
-        ? `${TEntry['modelName']}-${TThinkingOption}`
-        : never
-    : never
-  : never;
 
-export type CodexModel = CodexModelIdForEntry<CodexModelRegistryItem>;
+// Codex model IDs are base IDs only. Reasoning effort lives on
+// Conversation.reasoningEffort (same shape as Claude). Composite IDs like
+// "gpt-5.4-high" are a legacy wire format handled by toCodexModelId/fromCodexModelId.
+export type CodexModel = CodexModelRegistryItem['modelName'];
 
 export const CODEX_THINKING_DISPLAY_NAMES: Record<CodexThinkingOption, string> = {
+  minimal: 'Minimal Effort',
+  low: 'Low Effort',
   medium: 'Medium Effort',
   high: 'High Effort',
   xhigh: 'Extra High Effort',
 };
 
-export function toCodexModelId(modelName: string, thinkingOption: CodexThinkingMode): CodexModel {
-  return (
-    thinkingOption === NO_CODEX_THINKING ? modelName : `${modelName}-${thinkingOption}`
-  ) as CodexModel;
+/**
+ * MIGRATION HELPER for legacy composite Codex model IDs.
+ *
+ * Preferred path: store `model` as a base CodexModel and `reasoningEffort` as
+ * a separate field on Conversation. This helper only exists for (a) decoding
+ * legacy composites persisted on disk / in old in-memory state, and (b) building
+ * display strings where a single combined label is still useful. The return type
+ * is a plain `string` because composites are no longer valid `CodexModel` values.
+ */
+export function toCodexModelId(modelName: string, thinkingOption: CodexThinkingMode): string {
+  return thinkingOption === NO_CODEX_THINKING ? modelName : `${modelName}-${thinkingOption}`;
 }
 
-function formatCodexDisplayName(
-  entry: CodexModelRegistryEntry,
-  thinkingOption: CodexThinkingMode
-): string {
-  if (thinkingOption === NO_CODEX_THINKING) return entry.displayName;
+/**
+ * MIGRATION HELPER: inverse of `toCodexModelId`. Decomposes a (possibly legacy)
+ * composite Codex model id into its base model + optional effort suffix.
+ *
+ * Used by:
+ *   - disk-adapter: parse legacy composite `session.model` strings
+ *   - server spawn path: self-heal in-memory conversations that still hold a
+ *     composite `conv.model` from the pre-refactor wire contract
+ *   - client display: recover base+effort from a composite for split dropdowns
+ *
+ * Matching strategy: try the longest known base-model prefix first, then check
+ * for a known effort suffix. This disambiguates base names that themselves
+ * contain hyphens (e.g. `gpt-5.3-codex-spark` vs. `gpt-5.3-codex-spark-high`).
+ *
+ * Unknown composites pass through as `{ baseModel: modelId, effort: null }`
+ * (NO silent defaulting of the effort — unknown means unknown).
+ */
+export function fromCodexModelId(modelId: string): {
+  baseModel: string;
+  effort: ReasoningEffort | null;
+} {
+  // Longest base name first so e.g. `gpt-5.3-codex-spark` wins over `gpt-5.3`.
+  const baseNames = CODEX_MODEL_REGISTRY.map((entry) => entry.modelName).sort(
+    (a, b) => b.length - a.length
+  );
 
-  return `${entry.displayName} (${CODEX_THINKING_DISPLAY_NAMES[thinkingOption]})`;
+  for (const base of baseNames) {
+    if (modelId === base) {
+      return { baseModel: base, effort: null };
+    }
+    const prefix = `${base}-`;
+    if (modelId.startsWith(prefix)) {
+      const suffix = modelId.slice(prefix.length);
+      const parsed = ReasoningEffortSchema.safeParse(suffix);
+      if (parsed.success) {
+        return { baseModel: base, effort: parsed.data };
+      }
+    }
+  }
+
+  // Passthrough for unknown composites: preserve the raw id as baseModel and
+  // leave effort explicitly null (no accidental optionality — this is the
+  // documented "unknown" sum-variant for this decomposition).
+  return { baseModel: modelId, effort: null };
 }
 
 export const CODEX_BASE_MODEL_INFOS = CODEX_MODEL_REGISTRY.map((entry) => ({
   id: entry.modelName,
   displayName: entry.displayName,
   isDefault: Boolean(entry.isDefault),
-}));
-
-export const CODEX_MODEL_INFOS = CODEX_MODEL_REGISTRY.flatMap((entry: CodexModelRegistryEntry) =>
-  entry.thinkingOptions.map((thinkingOption: CodexThinkingMode) => {
-    const defaultThinkingOption = entry.defaultThinkingOption ?? entry.thinkingOptions[0];
-    return {
-      id: toCodexModelId(entry.modelName, thinkingOption),
-      displayName: formatCodexDisplayName(entry, thinkingOption),
-      isDefault: Boolean(entry.isDefault && thinkingOption === defaultThinkingOption),
-    };
-  })
-) as ReadonlyArray<{
+})) as ReadonlyArray<{
   id: CodexModel;
   displayName: string;
   isDefault: boolean;
 }>;
+
+// Canonical Codex ModelInfo list — base IDs only. Effort is chosen via
+// Conversation.reasoningEffort (separate field), mirroring Claude.
+export const CODEX_MODEL_INFOS = CODEX_BASE_MODEL_INFOS;
 
 export const CODEX_MODEL_IDS = CODEX_MODEL_INFOS.map((model) => model.id) as readonly CodexModel[];
 const CODEX_MODEL_ID_SET = new Set<string>(CODEX_MODEL_IDS);
@@ -280,7 +316,7 @@ if (DEFAULT_CODEX_MODELS.length !== 1) {
   throw new Error(`Expected exactly one default Codex model, found ${DEFAULT_CODEX_MODELS.length}`);
 }
 
-export const DEFAULT_CODEX_MODEL_ID = DEFAULT_CODEX_MODELS[0].id;
+export const DEFAULT_CODEX_MODEL_ID: CodexModel = DEFAULT_CODEX_MODELS[0].id;
 export const CodexModelSchema = z.custom<CodexModel>(
   (value): value is CodexModel => typeof value === 'string' && CODEX_MODEL_ID_SET.has(value),
   {
@@ -343,6 +379,13 @@ export type Message = z.infer<typeof MessageSchema>;
 export const SubAgentStatusSchema = z.enum(['pending', 'running', 'completed', 'error']);
 export type SubAgentStatus = z.infer<typeof SubAgentStatusSchema>;
 
+export const SubAgentStatusSourceSchema = z.enum([
+  'native',
+  'inferred_parent_completion',
+  'recovered_from_disk',
+]);
+export type SubAgentStatusSource = z.infer<typeof SubAgentStatusSourceSchema>;
+
 export const SubAgentSchema = z.object({
   id: z.string(),
   description: z.string(),
@@ -352,6 +395,9 @@ export const SubAgentSchema = z.object({
   currentAction: z.string().optional(), // e.g., "Write: client/src/App.css"
   startedAt: z.coerce.date(),
   completedAt: z.coerce.date().optional(),
+  providerThreadId: z.string().optional(),
+  rawStatus: z.string().optional(),
+  statusSource: SubAgentStatusSourceSchema.optional(),
 });
 
 export type SubAgent = z.infer<typeof SubAgentSchema>;
@@ -403,6 +449,59 @@ export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 //   self-persists native session files under ~/.codex/sessions.
 //   The poller skips active session IDs and rehydrates idle/reloaded sessions
 //   from persisted files.
+
+// Canonical reasoning-effort enum = UNION of every level any supported provider
+// accepts. Each provider supports a SUBSET (see *_EFFORT_LEVELS below).
+//
+// Authoritative sources (verified via --help / config rejection message):
+//   claude --effort:                 low | medium | high | xhigh | max
+//   codex -c model_reasoning_effort: none | minimal | low | medium | high | xhigh
+//
+// 'none' is represented as undefined on Conversation.reasoningEffort, so it is
+// NOT in this enum. Every other level a CLI accepts IS in this enum.
+export const ReasoningEffortSchema = z.enum([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
+// Per-provider accepted subsets, ordered low → high for UI display.
+// Mismatches with these subsets are rejected server-side (see server.ts validation).
+export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const CODEX_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
+export type CodexEffortLevel = (typeof CODEX_EFFORT_LEVELS)[number];
+
+export const EFFORT_LEVELS_BY_PROVIDER: Partial<Record<Provider, readonly ReasoningEffort[]>> = {
+  claude: CLAUDE_EFFORT_LEVELS,
+  codex: CODEX_EFFORT_LEVELS,
+};
+
+export function effortLevelsForProvider(provider: Provider): readonly ReasoningEffort[] {
+  return EFFORT_LEVELS_BY_PROVIDER[provider] ?? [];
+}
+
+export function isEffortValidForProvider(
+  provider: Provider,
+  effort: ReasoningEffort | null | undefined
+): boolean {
+  if (effort == null) return true; // undefined/null = "no effort flag" = always valid
+  return effortLevelsForProvider(provider).includes(effort);
+}
+
+export const EFFORT_DISPLAY_NAMES: Record<ReasoningEffort, string> = {
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'xHigh',
+  max: 'Max',
+};
+
 export const ConversationSchema = z.object({
   id: z.string().uuid(),
   sessionId: z.string().optional(),
@@ -420,6 +519,9 @@ export const ConversationSchema = z.object({
   workingDirectory: z.string(),
   provider: ProviderSchema.default('claude'),
   model: ModelIdSchema.optional(), // Provider-specific model identifier (undefined = provider default)
+  // Standalone reasoning level for providers that expose it (claude + codex).
+  // Other providers (opencode, gemini, cursor) leave this undefined.
+  reasoningEffort: ReasoningEffortSchema.optional(),
   subAgents: z.array(SubAgentSchema).default([]), // Active/recent sub-agents
   queue: z.array(QueuedMessageSchema).default([]), // Server-owned message queue
   // Oompa worker detection: true if first user message started with "[oompa]".
@@ -630,6 +732,7 @@ export const NewConversationMessageSchema = z.object({
   workingDirectory: z.string().optional(),
   provider: ProviderSchema.optional(), // Defaults to 'claude' when not specified
   model: ModelIdSchema.optional(), // Provider-specific model (undefined = provider default)
+  reasoningEffort: ReasoningEffortSchema.optional(), // Standalone reasoning level (claude + codex)
   swarmDebugPrefix: z.string().optional(), // Debug prefix prepended to first CLI message
   resumedFromConversationId: z.string().uuid().optional(),
 });
@@ -674,6 +777,14 @@ export const SetProviderMessageSchema = z.object({
 
 export type SetProviderMessage = z.infer<typeof SetProviderMessageSchema>;
 
+export const SetReasoningEffortMessageSchema = z.object({
+  type: z.literal('set_reasoning_effort'),
+  conversationId: z.string(),
+  value: ReasoningEffortSchema.nullable(),
+});
+
+export type SetReasoningEffortMessage = z.infer<typeof SetReasoningEffortMessageSchema>;
+
 // Queue Messages (Client → Server)
 export const QueueMessageSchema = z.object({
   type: z.literal('queue_message'),
@@ -713,6 +824,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   DeleteConversationMessageSchema,
   SetProviderMessageSchema,
   SetModelMessageSchema,
+  SetReasoningEffortMessageSchema,
   QueueMessageSchema,
   InterruptAndSendMessageSchema,
   CancelQueuedMessageSchema,
@@ -837,6 +949,8 @@ export const SubAgentUpdateMessageSchema = z.object({
   tokens: z.number().int().nonnegative().optional(),
   currentAction: z.string().optional(),
   status: SubAgentStatusSchema.optional(),
+  rawStatus: z.string().optional(),
+  statusSource: SubAgentStatusSourceSchema.optional(),
 });
 
 export type SubAgentUpdateMessage = z.infer<typeof SubAgentUpdateMessageSchema>;

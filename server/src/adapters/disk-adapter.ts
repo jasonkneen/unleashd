@@ -11,7 +11,14 @@
  *   sessionToConversation(ParsedSession) → Conversation | null  (null = hidden)
  */
 
-import type { Conversation, Message, Provider, SubAgent } from '@unleashd/shared';
+import type {
+  Conversation,
+  Message,
+  Provider,
+  ReasoningEffort,
+  SubAgent,
+} from '@unleashd/shared';
+import { ModelIdSchema, fromCodexModelId } from '@unleashd/shared';
 import { extractSwarmDebugPrefix, extractWorkerMetadata } from './jsonl';
 
 // =============================================================================
@@ -91,6 +98,22 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
   const worker = extractWorkerMetadata(session.messages);
   if (worker.isHidden) return null;
 
+  // Recover the canonical ModelId when session.model parses against the schema.
+  // For codex, decompose any legacy composite (e.g. "gpt-5.4-xhigh") into its
+  // base + reasoningEffort so they live as separate fields (matches claude shape).
+  const { model: recoveredModel, reasoningEffort } = recoverModelAndEffort(session);
+
+  // Neither claude nor (post-refactor) codex session files persist reasoning effort
+  // separately. Warn when claude loses it on load, OR when codex loads without a
+  // recovered effort (i.e. the persisted model was base-only, not a legacy composite).
+  // Drift is visible: the next resumed turn runs without an effort flag until the
+  // user picks one from the UI.
+  if (session.provider === 'claude' || (session.provider === 'codex' && !reasoningEffort)) {
+    console.warn(
+      `[disk-adapter] ${session.provider} conversation ${session.sessionId} loaded without reasoningEffort; effort flag will not be passed on resume until set via UI`
+    );
+  }
+
   return {
     id: session.sessionId,
     sessionId: session.sessionId,
@@ -101,6 +124,8 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
     createdAt: session.createdAt,
     workingDirectory: session.workingDirectory,
     provider: session.provider,
+    model: recoveredModel,
+    reasoningEffort,
     subAgents: session.subAgents ?? [],
     queue: [],
     isWorker: worker.isWorker,
@@ -110,5 +135,39 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
     parentConversationId: session.parentSessionId ?? null,
     modelName: session.model !== 'unknown' ? session.model : null,
     swarmDebugPrefix: swarmDebugPrefix ?? null,
+  };
+}
+
+/**
+ * Recover canonical ModelId + reasoningEffort from a ParsedSession.model string.
+ *
+ * Codex: legacy composite strings ("gpt-5.4-xhigh") are split into base model +
+ * reasoningEffort via fromCodexModelId. Native codex session files already store
+ * base IDs, so this is a no-op for non-legacy data.
+ *
+ * Claude/opencode/gemini/cursor: session files don't persist --effort, so
+ * reasoningEffort is always undefined on load (see claude warn above).
+ */
+function recoverModelAndEffort(session: ParsedSession): {
+  model: Conversation['model'];
+  reasoningEffort: ReasoningEffort | undefined;
+} {
+  if (session.model === 'unknown') {
+    return { model: undefined, reasoningEffort: undefined };
+  }
+
+  if (session.provider === 'codex') {
+    const { baseModel, effort } = fromCodexModelId(session.model);
+    const parsedBase = ModelIdSchema.safeParse(baseModel);
+    return {
+      model: parsedBase.success ? parsedBase.data : undefined,
+      reasoningEffort: effort ?? undefined,
+    };
+  }
+
+  const parsed = ModelIdSchema.safeParse(session.model);
+  return {
+    model: parsed.success ? parsed.data : undefined,
+    reasoningEffort: undefined,
   };
 }

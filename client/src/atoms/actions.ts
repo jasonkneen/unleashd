@@ -4,6 +4,7 @@ import type {
   ModelId,
   Provider,
   QueuedMessage,
+  ReasoningEffort,
   ServerMessage,
 } from '@unleashd/shared';
 import { normalizeModelId } from '@unleashd/shared';
@@ -96,6 +97,7 @@ interface PendingConversation {
   createdAt: string;
   swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
+  reasoningEffort?: ReasoningEffort;
 }
 
 function normalizeWorkingDirectory(input: string): string {
@@ -195,7 +197,8 @@ export function createConversation(
   provider: Provider = 'claude',
   model?: ModelId,
   swarmDebugPrefix?: string,
-  resumedFromConversationId?: string
+  resumedFromConversationId?: string,
+  reasoningEffort?: ReasoningEffort
 ): string {
   const id = crypto.randomUUID();
   const normalizedWorkingDirectory = normalizeWorkingDirectory(workingDirectory);
@@ -211,6 +214,7 @@ export function createConversation(
     workingDirectory: normalizedWorkingDirectory,
     provider,
     model: normalizedModel,
+    reasoningEffort,
     subAgents: [],
     queue: [],
     isWorker: false,
@@ -239,6 +243,7 @@ export function createConversation(
     createdAt: stub.createdAt.toISOString(),
     swarmDebugPrefix,
     resumedFromConversationId,
+    reasoningEffort,
   });
   send({
     type: 'new_conversation',
@@ -248,6 +253,7 @@ export function createConversation(
     model: normalizedModel,
     swarmDebugPrefix,
     resumedFromConversationId,
+    reasoningEffort,
   });
 
   return id;
@@ -313,6 +319,21 @@ export function setProvider(conversationId: string, provider: Provider): void {
   send({ type: 'set_provider', conversationId, provider });
 }
 
+export function setReasoningEffort(
+  conversationId: string,
+  value: ReasoningEffort | null
+): void {
+  jotaiStore.set(
+    conversationsAtom,
+    produce(jotaiStore.get(conversationsAtom), (draft) => {
+      const conv = draft.get(conversationId);
+      if (!conv) return;
+      conv.reasoningEffort = value ?? undefined;
+    })
+  );
+  send({ type: 'set_reasoning_effort', conversationId, value });
+}
+
 export function queueMessage(conversationId: string, content: string): void {
   send({ type: 'queue_message', conversationId, content });
 }
@@ -364,6 +385,7 @@ export function handleMessage(data: ServerMessage): void {
             workingDirectory: normalizeWorkingDirectory(pc.workingDirectory),
             provider: pc.provider,
             model: pc.model,
+            reasoningEffort: pc.reasoningEffort,
             subAgents: [],
             queue: [],
             isWorker: false,
@@ -386,6 +408,7 @@ export function handleMessage(data: ServerMessage): void {
               model: pc.model,
               swarmDebugPrefix: pc.swarmDebugPrefix,
               resumedFromConversationId: pc.resumedFromConversationId,
+              reasoningEffort: pc.reasoningEffort,
             });
           }, 0);
         }
@@ -647,6 +670,8 @@ export function handleMessage(data: ServerMessage): void {
           if (data.tokens !== undefined) agent.tokens = data.tokens;
           if (data.currentAction !== undefined) agent.currentAction = data.currentAction;
           if (data.status !== undefined) agent.status = data.status;
+          if (data.rawStatus !== undefined) agent.rawStatus = data.rawStatus;
+          if (data.statusSource !== undefined) agent.statusSource = data.statusSource;
         })
       );
       break;
