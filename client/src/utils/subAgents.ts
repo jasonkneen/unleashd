@@ -42,6 +42,27 @@ function projectChildConversationToSubAgent(child: Conversation): SubAgent {
   };
 }
 
+function mergeNativeSubAgentWithChild(nativeAgent: SubAgent, child: Conversation): SubAgent {
+  const childStartedAt = new Date(child.createdAt);
+  const childCompletedAt = child.isRunning
+    ? undefined
+    : (getLastMessageTime(child.messages) ?? childStartedAt);
+  const childDescription = firstUserSummary(child.messages);
+  const childCurrentAction = child.isRunning
+    ? (lastMessageSummary(child.messages) ?? 'Running...')
+    : undefined;
+
+  return {
+    ...nativeAgent,
+    description:
+      nativeAgent.description && !nativeAgent.description.startsWith('Running ')
+        ? nativeAgent.description
+        : (childDescription ? `[${getProviderMetadata(child.provider).label}] ${childDescription}` : nativeAgent.description),
+    currentAction: nativeAgent.currentAction ?? childCurrentAction,
+    completedAt: nativeAgent.completedAt ?? childCompletedAt,
+  };
+}
+
 /**
  * Build one unified sub-agent list for header display.
  * Includes native provider sub-agents (Task tool stream) + Codex spawned child sessions.
@@ -50,10 +71,20 @@ export function buildUnifiedSubAgents(
   conversation: Conversation,
   allConversations: Iterable<Conversation>
 ): SubAgent[] {
-  const merged: SubAgent[] = [...conversation.subAgents];
+  const merged: SubAgent[] = conversation.subAgents.map((agent) => ({ ...agent }));
+  const nativeByThreadId = new Map<string, SubAgent>();
+
+  for (const agent of merged) {
+    nativeByThreadId.set(agent.providerThreadId ?? agent.id, agent);
+  }
 
   for (const candidate of allConversations) {
     if (candidate.parentConversationId !== conversation.id) continue;
+    const existing = nativeByThreadId.get(candidate.id);
+    if (existing) {
+      Object.assign(existing, mergeNativeSubAgentWithChild(existing, candidate));
+      continue;
+    }
     merged.push(projectChildConversationToSubAgent(candidate));
   }
 

@@ -694,7 +694,11 @@ export function handleMessage(data: ServerMessage): void {
           if (!agent) return;
           agent.status = data.status;
           agent.completedAt = data.completedAt;
-          agent.currentAction = 'Done';
+          if (data.status === 'error') {
+            agent.currentAction = 'Error';
+          } else if (!agent.currentAction) {
+            agent.currentAction = 'Done';
+          }
         })
       );
       break;

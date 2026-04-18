@@ -74,6 +74,7 @@ import { type ProviderEvent, getProvider, providers } from './providers';
 import { isModelIdValidForProvider, modelValidationHint } from './providers/model-validation';
 import {
   extractCodexCollabToolInput,
+  getCodexSubagentCurrentAction,
   getSubagentDescription,
   isCodexCollabToolName,
   isSubagentSpawnTool,
@@ -938,13 +939,15 @@ class Conversation extends EventEmitter {
     childThreadId: string,
     toolName: string,
     prompt: string | undefined,
-    rawStatus: string | undefined
+    rawStatus: string | undefined,
+    statusMessage: string | null | undefined
   ): { agent: SubAgent; isNew: boolean; wasTerminal: boolean } {
     const description = getSubagentDescription(this.provider, toolName, {
       ...(prompt ? { prompt } : {}),
     });
     const fallbackStatus = toolName === 'spawn_agent' ? 'pending' : 'running';
     const normalizedStatus = normalizeCodexSubagentStatus(rawStatus, fallbackStatus);
+    const currentAction = getCodexSubagentCurrentAction(toolName, rawStatus, statusMessage);
     let agent = this._findSubAgentByRuntimeId(childThreadId);
     const isNew = !agent;
     const wasTerminal = !!agent && isTerminalSubagentStatus(agent.status);
@@ -956,7 +959,7 @@ class Conversation extends EventEmitter {
         status: normalizedStatus,
         toolUses: 0,
         tokens: 0,
-        currentAction: undefined,
+        currentAction,
         startedAt: new Date(),
         providerThreadId: childThreadId,
         rawStatus,
@@ -971,6 +974,11 @@ class Conversation extends EventEmitter {
       agent.status = normalizedStatus;
       agent.rawStatus = rawStatus;
       agent.statusSource = 'native';
+      if (currentAction) {
+        agent.currentAction = currentAction;
+      } else if (normalizedStatus === 'completed' || normalizedStatus === 'error') {
+        agent.currentAction = undefined;
+      }
       if (normalizedStatus === 'completed' || normalizedStatus === 'error') {
         agent.completedAt ??= new Date();
       }
@@ -1005,12 +1013,12 @@ class Conversation extends EventEmitter {
         childId,
         event.name,
         prompt,
-        agentState?.status
+        agentState?.status,
+        agentState?.message
       );
 
       if (event.name !== 'spawn_agent') {
         agent.toolUses += 1;
-        agent.currentAction = event.name;
       }
 
       if (isNew) {
@@ -1027,7 +1035,6 @@ class Conversation extends EventEmitter {
       }
 
       if (agentState?.message !== undefined && agentState.message !== null) {
-        agent.currentAction = event.name;
         this._broadcastSubAgentUpdate(agent);
       }
 
@@ -1035,7 +1042,11 @@ class Conversation extends EventEmitter {
         if (!agent.completedAt) {
           agent.completedAt = new Date();
         }
-        agent.currentAction = agent.status === 'error' ? 'Error' : 'Done';
+        if (agent.status === 'error') {
+          agent.currentAction = 'Error';
+        } else if (!agent.currentAction) {
+          agent.currentAction = 'Done';
+        }
         this._broadcastSubAgentUpdate(agent);
         if (!wasTerminal) {
           this._completeNativeCodexSubAgent(agent, agent.completedAt);
