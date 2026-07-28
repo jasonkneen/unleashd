@@ -5,6 +5,10 @@
 **Purpose:** Convert the retrospective into a smaller set of proof-driven
 implementation gates.
 
+**Status:** Historical quality plan, implemented and superseded by the canonical
+completion audit:
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md`.
+
 ## Why another pass is necessary
 
 The first implementation pass established most of the architecture:

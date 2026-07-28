@@ -2,7 +2,9 @@
 
 **Date:** 2026-07-28
 
-**Status:** Design correction before the next implementation pass
+**Status:** Implemented design record. Current completion status and remaining
+gates are maintained in
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md`.
 
 **Primary evidence:** Growth Lead conversation
 `101ca901-754c-427f-bcfd-25a6ac8777d3`

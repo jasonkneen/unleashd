@@ -3,6 +3,10 @@
 **Date:** 2026-07-28
 **Constraint:** Another agent is actively refactoring `server.ts`.
 
+**Status:** Historical coordination record. The server/runtime integration is
+complete; current status is maintained in
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md`.
+
 ## Purpose
 
 Prevent Buddy work from colliding with the general server decomposition while

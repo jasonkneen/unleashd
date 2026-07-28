@@ -2,6 +2,11 @@
 
 **Date:** 2026-07-28
 
+**Status:** Historical hardening checkpoint. Several “still not claimed” items
+below were completed in later passes. Use
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md` for the
+current completion record and open gates.
+
 ## Scheduler hardening
 
 The scheduler no longer trusts a text sentinel embedded anywhere in model
@@ -78,7 +83,7 @@ The initializer no longer hard-codes a user home. It accepts
 - Server typecheck passing.
 - Clean package install/start/API smoke passing.
 
-## Still not claimed
+## Still not claimed at this historical checkpoint
 
 - Provider-native tool registration is not wired yet.
 - Review settlement is implemented and tested but still needs the terminal

@@ -2,6 +2,10 @@
 
 **Date:** 2026-07-28
 
+**Status:** Completed evidence record. Current completion status and open gates
+are maintained in
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md`.
+
 ## Why this slice exists
 
 Before this change, the Buddy briefing said that `new_project`,

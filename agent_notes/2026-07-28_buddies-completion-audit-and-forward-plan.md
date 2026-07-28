@@ -2,11 +2,16 @@
 
 Date: 2026-07-28
 
+Status: Implemented control-plane baseline; current open gates and final
+reliability closure are recorded below.
+
 Scope: standalone `~/git/buddies`, Unleashd integration, UI, and the EventMap
 Growth team proof
 
-Concurrent constraint: another agent is refactoring `server/src/server.ts`; this
-work deliberately does not modify that file.
+Historical coordination constraint: another agent was refactoring
+`server/src/server.ts` during the original audit. The audit pass itself avoided
+that file; the later reliability integration intentionally modified the server
+composition and runtime.
 
 ## Why this second note exists
 
@@ -796,3 +801,48 @@ Codex-native, and focused on GTM accountability rather than channels/plugins.
 The control plane is now credible enough to stop adding architecture. The next
 learning must come from one authorized native EventMap occurrence and its
 actual artifact/decision quality.
+
+## 2026-07-29 reliability closure
+
+The final Unleashd integration pass closed the runtime failures found while
+running real Buddy and multi-agent conversations:
+
+- durable, rotated turn-attempt journaling under
+  `~/.agent-viewer/observability/turn-attempts.jsonl`;
+- boot, conversation, queue-message, provider-session, activity, and terminal
+  cause correlation;
+- explicit queued, starting, running, stopping, completed, failed, cancelled,
+  interrupted, timeout, and server-restart projections in the thread UI;
+- visible historical markers for explicit native Codex `turn_aborted` records,
+  without guessing that open external turns are dead;
+- per-spawn runtime tokens so late events from a reset process cannot mutate a
+  newer turn;
+- process-group-aware provider shutdown and working SIGKILL escalation;
+- guaranteed post-run disk reconciliation for session writes deferred while an
+  in-memory conversation is active;
+- a non-reentrant shutdown state machine with one idempotent flush/exit path;
+- a single-owner dev supervisor covering full/partial dev, build, and typecheck,
+  including unmanaged port detection and replacement deadlines aligned with
+  the server drain contract.
+
+The integrated verification passed:
+
+- 18 focused lifecycle, recovery, journal, shutdown, and loader tests;
+- 14 dev-supervisor tests;
+- 4 client turn-diagnostics tests;
+- 45 focused Buddy server tests;
+- 11 Buddy UI contract tests;
+- server, client, and shared CLI typechecks;
+- targeted Biome, syntax, and diff checks.
+
+The shipped commits are:
+
+- Unleashd reliability/control-plane integration: `5e13355`;
+- vendored Buddies lock-integrity correction: `17a5e4b`;
+- shared CLI detached-stop correction: `dfdb4d1`.
+
+This closes the engineering/reliability pass. It does not change the product
+gates already listed above: one explicitly authorized native EventMap
+occurrence, scheduler handover only after that proof, reliable provider usage
+events, consumable approval authority before automatic external actions, and
+eventual retirement of duplicate legacy scheduling.

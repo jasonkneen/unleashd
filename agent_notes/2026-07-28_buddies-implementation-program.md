@@ -4,6 +4,11 @@
 **Goal:** Move Buddies from a functional prototype to a reproducible,
 evidence-backed persistent employee system.
 
+**Status:** Historical implementation program. The control-plane baseline is
+implemented; use
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md` for the
+current record.
+
 ## Program rules
 
 1. Do not add another employee role until one closure loop passes end to end.

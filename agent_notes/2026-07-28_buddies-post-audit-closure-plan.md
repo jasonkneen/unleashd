@@ -1,7 +1,9 @@
 # Buddies Post-Audit Closure Plan
 
 **Date:** 2026-07-28
-**Status:** Active execution note
+**Status:** Completed historical execution note. Current completion status and
+remaining gates are maintained in
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md`.
 **Constraint:** Do not edit `server/src/server.ts` while the conversation-server
 refactor is active. Integrate through the extracted Buddy, conversation, HTTP,
 and lifecycle modules.

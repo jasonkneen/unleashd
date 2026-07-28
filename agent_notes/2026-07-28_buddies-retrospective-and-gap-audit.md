@@ -2,7 +2,9 @@
 
 **Date:** 2026-07-28
 **Repositories:** `unleashd`, sibling `buddies`
-**Status:** Functional prototype; not yet a proven autonomous employee loop
+**Status:** Historical prototype checkpoint. Later implementation and live
+proof supersede its completion claims; current gates are maintained in
+`agent_notes/2026-07-28_buddies-completion-audit-and-forward-plan.md`.
 
 ## Why this note exists
 
