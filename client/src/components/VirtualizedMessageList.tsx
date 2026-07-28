@@ -19,15 +19,26 @@ import remarkGfm from 'remark-gfm';
 import type { Plugin } from 'unified';
 import type { BuddyContext } from '../atoms/pending-creations';
 import {
-  ASK_USER_QUESTION_RE,
   AskUserQuestionWidget,
   parseAskUserQuestion,
 } from './AskUserQuestion';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
+import {
+  BuddyReviewRequestCard,
+  BuddyReviewResultCard,
+} from './BuddyReviewMessage';
 import { FilePreview, getPreviewType, getPreviewableLocalHref } from './FilePreview';
 import { InlineSwarmRunWidget } from './InlineSwarmRunWidget';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
+import {
+  parseBuddyReviewRequest,
+  parseBuddyReviewResult,
+} from './buddy-review-message';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
+import {
+  OOMPA_RUN_TOOL_FRAGMENT_RE,
+  splitStructuredMessageContent,
+} from './structured-message-segments';
 
 // =============================================================================
 // remarkBreaks — inline remark plugin (replaces the `remark-breaks` npm package)
@@ -469,89 +480,6 @@ interface MemoizedMessageProps {
   workingDirectory: string;
 }
 
-/**
- * Split message content into segments: text (rendered as Markdown) and
- * AskUserQuestion markers (rendered as interactive widgets).
- *
- * The <!--ask_user_question:{json}--> markers are injected by the Claude
- * provider when it detects an AskUserQuestion tool_use in the assistant
- * message. See server/src/providers/claude.ts for the injection point.
- */
-type ContentSegment =
-  | { type: 'text'; content: string }
-  | { type: 'ask_user_question'; json: string }
-  | { type: 'oompa_run' };
-
-// Only treat normalized shell tool_use fragments as run-widget triggers.
-// This avoids false positives from plain assistant prose containing `oompa run`.
-//
-// Patterns:
-//   1. Canonical: ⚡ Bash oompa run|swarm :: <command...>
-//      (from formatToolUse when detectOompaSubcommand succeeds)
-//   2. Raw env-wrapped canonical: ⚡ Bash env -u VAR [-u VAR]... oompa run|swarm <args>
-//   3. Raw shorthand launch: ⚡ Bash oompa <config>.json <args>
-//      (legacy shorthand like `oompa oompa/xyz.json`; treated as `oompa run`)
-const OOMPA_RUN_TOOL_FRAGMENT_RE =
-  /⚡\s+(?:bash|shell|run_shell_command)\s+(?:(?:oompa\s+(?:run|swarm)\s+::|(?:env\s+(?:-\w+\s+\S+\s+)*)?oompa\s+(?:run|swarm)\s)[^\n]*|(?:env\s+(?:-\w+\s+\S+\s+)*)?oompa\s+\S+\.json[^\n]*)/i;
-
-function splitWidgets(content: string): ContentSegment[] {
-  const segments: ContentSegment[] = [];
-  let lastIndex = 0;
-
-  // Find all matches for both patterns, then sort by index
-  const matches: Array<{
-    type: 'ask_user_question' | 'oompa_run';
-    index: number;
-    length: number;
-    match: RegExpExecArray;
-  }> = [];
-
-  // Create a fresh regex with `g` flag for multi-match .exec() loop —
-  // avoids stale lastIndex on the module-level ASK_USER_QUESTION_RE singleton
-  // (same pattern as OOMPA_RUN_TOOL_FRAGMENT_RE below).
-  const askUserRe = new RegExp(ASK_USER_QUESTION_RE.source, `${ASK_USER_QUESTION_RE.flags}g`);
-  let match = askUserRe.exec(content);
-  while (match !== null) {
-    matches.push({ type: 'ask_user_question', index: match.index, length: match[0].length, match });
-    match = askUserRe.exec(content);
-  }
-
-  // Create a fresh regex with `g` flag for multi-match .exec() loop —
-  // avoids stale lastIndex on the module-level OOMPA_RUN_TOOL_FRAGMENT_RE singleton.
-  const oompaRunGlobal = new RegExp(OOMPA_RUN_TOOL_FRAGMENT_RE.source, 'gi');
-  match = oompaRunGlobal.exec(content);
-  while (match !== null) {
-    matches.push({ type: 'oompa_run', index: match.index, length: match[0].length, match });
-    match = oompaRunGlobal.exec(content);
-  }
-
-  matches.sort((a, b) => a.index - b.index);
-
-  for (const m of matches) {
-    if (m.index < lastIndex) continue; // Skip overlaps
-
-    // Text before the marker
-    if (m.index > lastIndex) {
-      segments.push({ type: 'text', content: content.slice(lastIndex, m.index) });
-    }
-
-    if (m.type === 'ask_user_question') {
-      segments.push({ type: 'ask_user_question', json: m.match[1] });
-    } else if (m.type === 'oompa_run') {
-      segments.push({ type: 'oompa_run' });
-    }
-
-    lastIndex = m.index + m.length;
-  }
-
-  // Remaining text after last marker
-  if (lastIndex < content.length) {
-    segments.push({ type: 'text', content: content.slice(lastIndex) });
-  }
-
-  return segments;
-}
-
 const MemoizedMessage = memo(
   function MemoizedMessage({
     msg,
@@ -566,9 +494,23 @@ const MemoizedMessage = memo(
       return collapseToolLines(msg.content || '...');
     }, [msg.content, msg.role]);
 
+    const reviewRequest = useMemo(
+      () => (msg.role === 'user' ? parseBuddyReviewRequest(displayContent) : null),
+      [displayContent, msg.role]
+    );
+
     // Split content into text + AskUserQuestion widget segments
-    const segments = useMemo(() => splitWidgets(displayContent), [displayContent]);
+    const segments = useMemo(
+      () => (reviewRequest ? [] : splitStructuredMessageContent(displayContent)),
+      [displayContent, reviewRequest]
+    );
     const hasWidget = segments.some((s) => s.type !== 'text');
+    const hasReviewResult = segments.some((s) => s.type === 'buddy_review_result');
+    const roleLabel = reviewRequest
+      ? 'review request'
+      : hasReviewResult && segments.every((segment) => segment.type === 'buddy_review_result')
+        ? 'review response'
+        : msg.role;
 
     // Memoize markdown components keyed on workingDirectory so react-markdown
     // gets a stable reference and doesn't re-mount its component tree.
@@ -579,9 +521,11 @@ const MemoizedMessage = memo(
 
     return (
       <div className={className} ref={forwardedRef}>
-        {msg.role !== 'system' && <div className={`message-role ${msg.role}`}>{msg.role}</div>}
+        {msg.role !== 'system' && <div className={`message-role ${msg.role}`}>{roleLabel}</div>}
         <div className="message-content">
-          {hasWidget ? (
+          {reviewRequest ? (
+            <BuddyReviewRequestCard request={reviewRequest} />
+          ) : hasWidget ? (
             // Mixed content: interleave Markdown and interactive widgets
             segments.map((seg, i) => {
               if (seg.type === 'text') {
@@ -600,6 +544,14 @@ const MemoizedMessage = memo(
               }
               if (seg.type === 'oompa_run') {
                 return <InlineSwarmRunWidget key={i} workingDirectory={workingDirectory} />;
+              }
+              if (seg.type === 'buddy_review_result') {
+                const result = parseBuddyReviewResult(seg.json);
+                return result ? (
+                  <BuddyReviewResultCard key={i} result={result} />
+                ) : (
+                  <code key={i}>Buddy review result (parse error)</code>
+                );
               }
               // AskUserQuestion widget
               try {

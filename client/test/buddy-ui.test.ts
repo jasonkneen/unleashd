@@ -14,6 +14,12 @@ import {
   effectiveSwarmDebugPrefix,
   selectDirectoryEmployees,
 } from '../src/components/buddies/ui-contract';
+import {
+  BUDDY_REVIEW_RESULT_RE,
+  parseBuddyReviewRequest,
+  parseBuddyReviewResult,
+} from '../src/components/buddy-review-message';
+import { splitStructuredMessageContent } from '../src/components/structured-message-segments';
 
 const buddy = (id: string, name: string, managerId: string | null = null): Buddy => ({
   id,
@@ -156,6 +162,88 @@ test('Buddy header language is independent from Swarm debug language', () => {
   const source = readFileSync(path.resolve('src/components/BuddyConvoHeader.tsx'), 'utf8');
   assert.match(source, />BUDDY</);
   assert.doesNotMatch(source, /Swarm|DEBUG/i);
+});
+
+test('generated Buddy review requests become structured request data', () => {
+  const request = parseBuddyReviewRequest(
+    [
+      'Review requested by Buddy buddy_lead-123.',
+      'Review id: review_abc-123.',
+      'Review Buddy buddy_operator-456.',
+      'No Buddy project was selected.',
+      'Review purpose: Check the evidence without sending anything.',
+      'Input evidence: [{"kind":"file","reference":"/tmp/proof.md","observation":"Packet exists."}]',
+      'Allowed Buddy operations: buddy.get_current_work, buddy.submit_review.',
+      'Use the native submit_review operation.',
+    ].join('\n')
+  );
+
+  assert.deepEqual(request, {
+    requestedByBuddyId: 'buddy_lead-123',
+    reviewId: 'review_abc-123',
+    subjectBuddyId: 'buddy_operator-456',
+    projectId: null,
+    purpose: 'Check the evidence without sending anything.',
+    evidence: [{ kind: 'file', reference: '/tmp/proof.md', observation: 'Packet exists.' }],
+    allowedOperations: ['buddy.get_current_work', 'buddy.submit_review'],
+  });
+  assert.equal(parseBuddyReviewRequest('Please review this ordinary paragraph.'), null);
+});
+
+test('older direct Buddy review prompts still become structured request data', () => {
+  const request = parseBuddyReviewRequest(
+    [
+      'Review Buddy buddy_operator-456.',
+      'Review id: review_legacy-123.',
+      'Review purpose: Check the employee work.',
+      'Use the native submit_review operation.',
+    ].join('\n')
+  );
+
+  assert.deepEqual(request, {
+    requestedByBuddyId: null,
+    reviewId: 'review_legacy-123',
+    subjectBuddyId: 'buddy_operator-456',
+    projectId: null,
+    purpose: 'Check the employee work.',
+    evidence: [],
+    allowedOperations: [],
+  });
+});
+
+test('structured message adapters produce one normalized segment stream', () => {
+  const content = [
+    'Before',
+    '<!--ask_user_question:{"questions":[]}-->',
+    'Middle',
+    '<!-- unleashd:buddy-review-result -->',
+    '{"verdict":"needs_work","summary":"Fix it.","evidence":[],"requiredActions":[]}',
+    '<!-- /unleashd:buddy-review-result -->',
+    'After',
+  ].join('\n');
+  const segments = splitStructuredMessageContent(content);
+  assert.deepEqual(
+    segments.map((segment) => segment.type),
+    ['text', 'ask_user_question', 'text', 'buddy_review_result', 'text']
+  );
+});
+
+test('Buddy review result envelopes parse into verdict cards without transport text', () => {
+  const content = [
+    '<!-- unleashd:buddy-review-result -->',
+    '{"verdict":"pass","score":96,"summary":"Evidence is complete.","evidence":[{"kind":"metric","reference":"audit","observation":"Checks passed."}],"requiredActions":[]}',
+    '<!-- /unleashd:buddy-review-result -->',
+  ].join('\n');
+  const match = content.match(BUDDY_REVIEW_RESULT_RE);
+  assert.ok(match);
+  assert.deepEqual(parseBuddyReviewResult(match[1]), {
+    verdict: 'pass',
+    score: 96,
+    summary: 'Evidence is complete.',
+    evidence: [{ kind: 'metric', reference: 'audit', observation: 'Checks passed.' }],
+    requiredActions: [],
+  });
+  assert.equal(parseBuddyReviewResult('{"verdict":"pass"}'), null);
 });
 
 test('automation surface exposes durable policy and explicit owner approval decisions', () => {

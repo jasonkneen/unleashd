@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react';
+import { ASK_USER_QUESTION_RE } from './structured-message-segments';
 import './AskUserQuestion.css';
 
 interface QuestionOption {
@@ -33,7 +34,7 @@ interface AskUserQuestionInput {
 // NOTE: No `g` flag — module-level regexes with `g` are stateful singletons
 // (lastIndex persists across calls) and race under concurrent React rendering.
 // Consumers that need multi-match .exec() loops must create a local copy with `g`.
-export const ASK_USER_QUESTION_RE = /<!--ask_user_question:(.*?)-->/s;
+export { ASK_USER_QUESTION_RE };
 
 /**
  * Parse marker string into structured data.
