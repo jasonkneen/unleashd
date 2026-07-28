@@ -118,6 +118,63 @@ test('file poller coalesces overlapping cycles', async () => {
   await third;
 });
 
+test('file poller preserves dirty baselines until an active session can be reconciled', async () => {
+  let active = true;
+  let currentMtimes = new Map([['session-file', 1]]);
+  const applied: string[] = [];
+  const seenBaselines: number[] = [];
+  const external = new Map<string, number>();
+  const poller = createFilePoller<string, string>(
+    { intervalMs: 5_000, externalGraceMs: 30_000, verbose: false },
+    {
+      getMtimes: () => currentMtimes,
+      setMtimes: (mtimes) => {
+        currentMtimes = mtimes;
+      },
+      collectActiveIds: () => (active ? new Set(['session-1']) : new Set()),
+      poll: async (mtimes) => {
+        seenBaselines.push(mtimes.get('session-file') ?? -1);
+        return active
+          ? {
+              updated: new Map(),
+              mtimes: new Map([['session-file', 2]]),
+              deferredDirtyPaths: new Set(['session-file']),
+            }
+          : {
+              updated: new Map([['session-1', 'final-update']]),
+              mtimes: new Map([['session-file', 2]]),
+            };
+      },
+      pruneCompletionSuppressions: () => undefined,
+      isCompletionSuppressed: () => false,
+      externalActivity: {
+        entries: () => external.entries(),
+        has: (sessionId) => external.has(sessionId),
+        set: (sessionId, lastSeen) => external.set(sessionId, lastSeen),
+        delete: (sessionId) => external.delete(sessionId),
+      },
+      findConversationId: () => undefined,
+      broadcastStatus: () => undefined,
+      applyUpdate: async (sessionId, update) => {
+        applied.push(`${sessionId}:${update}`);
+        return null;
+      },
+      broadcastUpdates: () => undefined,
+      pruneTracking: () => undefined,
+    }
+  );
+
+  await poller.runOnce();
+  assert.equal(currentMtimes.get('session-file'), 1);
+  assert.deepEqual(applied, []);
+
+  active = false;
+  await poller.runOnce();
+  assert.deepEqual(seenBaselines, [1, 1]);
+  assert.equal(currentMtimes.get('session-file'), 2);
+  assert.deepEqual(applied, ['session-1:final-update']);
+});
+
 test('port guard kills an approved listener and verifies release', async () => {
   const calls: string[] = [];
   let checks = 0;

@@ -326,6 +326,14 @@ export class ConversationConfigService {
     return this.store.claimInitialMessageDispatch(conversationId, dispatchedAt);
   }
 
+  completeInitialMessageDispatch(
+    conversationId: string,
+    claimToken: string,
+    dispatchedAt?: Date
+  ): Promise<PersistedConversationConfigRecord | undefined> {
+    return this.store.completeInitialMessageDispatch(conversationId, claimToken, dispatchedAt);
+  }
+
   delete(conversationId: string): Promise<boolean> {
     return this.store.delete(conversationId);
   }

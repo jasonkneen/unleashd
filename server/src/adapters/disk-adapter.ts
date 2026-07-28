@@ -70,6 +70,10 @@ export interface LoadResult {
 export interface PollResult {
   updated: Map<string, DiscoveredConversation>; // changed or new conversations
   mtimes: Map<string, number>; // full updated mtime index
+  // Changed sources skipped because their session is active. Callers must keep
+  // the previous baseline for these paths so the final persisted state is
+  // guaranteed to be reconciled after the process stops.
+  deferredDirtyPaths: Set<string>;
 }
 
 export type LoadProgressCallback = (

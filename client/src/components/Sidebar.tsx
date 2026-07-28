@@ -192,6 +192,12 @@ export function Sidebar() {
       (conversation) => getConversationLastActivity(conversation).getTime() >= cutoff
     );
   }, [topLevelBuddyConversations]);
+  const olderBuddyConversations = useMemo(() => {
+    const cutoff = Date.now() - RECENT_CUTOFF_MS;
+    return topLevelBuddyConversations.filter(
+      (conversation) => getConversationLastActivity(conversation).getTime() < cutoff
+    );
+  }, [topLevelBuddyConversations]);
   const buddyPendingCreations = useMemo(
     () => pendingCreations.filter((creation) => creation.buddyContext != null),
     [pendingCreations]
@@ -286,6 +292,25 @@ export function Sidebar() {
     () => new Map(buddyDirectory.map((employee) => [employee.id, employee.name])),
     [buddyDirectory]
   );
+  const buddyWorkspaceNameById = useMemo(
+    () =>
+      new Map(
+        buddyDirectory.flatMap((employee) =>
+          (employee.workspaces ?? []).map((workspace) => [workspace.id, workspace.name] as const)
+        )
+      ),
+    [buddyDirectory]
+  );
+  const buddyContextLabel = useCallback(
+    (conversation: Conversation) => {
+      const context = conversation.buddyContext;
+      if (!context) return undefined;
+      const buddyName = buddyNameById.get(context.buddyId) ?? 'Buddy';
+      const workspaceName = buddyWorkspaceNameById.get(context.workspaceId);
+      return workspaceName ? `${buddyName} · ${workspaceName}` : buddyName;
+    },
+    [buddyNameById, buddyWorkspaceNameById]
+  );
   const recentBuddyLinks = useMemo(() => {
     const loadedIds = new Set(
       topLevelBuddyConversations.flatMap((conversation) =>
@@ -325,24 +350,26 @@ export function Sidebar() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/buddies/overview')
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((payload: BuddySidebarOverview) => {
-        if (!cancelled) {
-          setBuddyDirectory(
-            payload.employees.map(({ buddy, workspaces }) => ({ ...buddy, workspaces }))
-          );
-          setBuddyRecentRuns(payload.recentRuns);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setBuddyDirectory([]);
-          setBuddyRecentRuns([]);
-        }
-      });
+    const loadBuddyOverview = () => {
+      void fetch('/api/buddies/overview')
+        .then((response) => (response.ok ? response.json() : Promise.reject()))
+        .then((payload: BuddySidebarOverview) => {
+          if (!cancelled) {
+            setBuddyDirectory(
+              payload.employees.map(({ buddy, workspaces }) => ({ ...buddy, workspaces }))
+            );
+            setBuddyRecentRuns(payload.recentRuns);
+          }
+        })
+        .catch(() => {
+          // Keep the last good projection through a transient server restart.
+        });
+    };
+    loadBuddyOverview();
+    const interval = window.setInterval(loadBuddyOverview, 30_000);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -800,9 +827,7 @@ export function Sidebar() {
                 hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
                 showFolderBadge
                 contextLabel={
-                  conv.buddyContext
-                    ? (buddyNameById.get(conv.buddyContext.buddyId) ?? 'Buddy')
-                    : undefined
+                  conv.buddyContext ? buddyContextLabel(conv) : undefined
                 }
                 onSelect={handleSelectConversation}
                 onDone={handleDone}
@@ -865,9 +890,7 @@ export function Sidebar() {
                             conversation.messages.length
                           )}
                           showFolderBadge={false}
-                          contextLabel={
-                            buddyNameById.get(conversation.buddyContext?.buddyId ?? '') ?? 'Buddy'
-                          }
+                          contextLabel={buddyContextLabel(conversation)}
                           onSelect={handleSelectConversation}
                           onDone={handleDone}
                         />
@@ -1029,10 +1052,17 @@ export function Sidebar() {
               </div>
             )}
 
-            {olderConversations.some((c) => !doneSet.has(c.sessionId ?? c.id)) && (
+            {[...olderConversations, ...olderBuddyConversations].some(
+              (conversation) => !doneSet.has(conversation.sessionId ?? conversation.id)
+            ) && (
               <div className="sidebar-section">
                 <div className="sidebar-section-header">Older</div>
-                {olderConversations
+                {[...olderConversations, ...olderBuddyConversations]
+                  .sort(
+                    (left, right) =>
+                      getConversationLastActivity(right).getTime() -
+                      getConversationLastActivity(left).getTime()
+                  )
                   .filter((conv) => !doneSet.has(conv.sessionId ?? conv.id))
                   .map((conv) => (
                     <ConversationItem
@@ -1041,6 +1071,7 @@ export function Sidebar() {
                       isActive={conv.id === activeConversationId}
                       hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
                       showFolderBadge
+                      contextLabel={conv.buddyContext ? buddyContextLabel(conv) : undefined}
                       onSelect={handleSelectConversation}
                       onDone={handleDone}
                     />
@@ -1130,7 +1161,7 @@ function ConversationItem({
             {conv.buddyContext ? 'Buddies' : folderName}
           </span>
         )}
-        {!showFolderBadge && contextLabel && (
+        {contextLabel && (
           <span className="buddy-conversation-label">{contextLabel}</span>
         )}
         <div className="conversation-header-right">

@@ -2,12 +2,17 @@ export type BuddyAutomationRunStatus = 'claimed' | 'running' | 'complete' | 'fai
 
 export type BuddyOperationName =
   | 'buddy.get_current_work'
+  | 'buddy.get_inbox'
+  | 'buddy.get_automations'
+  | 'buddy.set_automation'
   | 'buddy.new_project'
   | 'buddy.update_project'
   | 'buddy.remember'
   | 'buddy.compact_memory'
   | 'buddy.delegate'
+  | 'buddy.request_review'
   | 'buddy.complete_delegation'
+  | 'buddy.complete_assignment'
   | 'buddy.submit_review'
   | 'buddy.request_human_approval';
 
@@ -64,6 +69,9 @@ export interface BuddyAutomationRun {
   claimed_at: string;
   started_at: string | null;
   ended_at: string | null;
+  claim_token: string | null;
+  claim_expires_at: string | null;
+  claim_acquired?: boolean;
 }
 
 export interface BuddyApprovalRequest {
@@ -112,8 +120,13 @@ export interface BuddyDelegation {
   workspace_id: string;
   buddy_project_id: string | null;
   child_conversation_id: string | null;
+  purpose: string;
+  parent_conversation_id: string | null;
   status: string;
   outcome?: string | null;
+  dispatch_token?: string | null;
+  dispatch_expires_at?: string | null;
+  dispatch_claim_acquired?: boolean;
 }
 
 export interface BuddyReviewRecord {
@@ -189,6 +202,18 @@ export interface BuddiesStorePort {
   assignBuddySkill(input: Record<string, unknown>): unknown;
   createDelegation(input: Record<string, unknown>): BuddyDelegation;
   getDelegation(id: string): BuddyDelegation | null;
+  claimDelegationDispatch(
+    id: string,
+    input: { claimToken: string; leaseSeconds?: number }
+  ): BuddyDelegation;
+  bindDelegationConversation(
+    id: string,
+    input: { claimToken: string; childConversationId: string }
+  ): BuddyDelegation;
+  failDelegationDispatch(
+    id: string,
+    input: { claimToken: string; error: string }
+  ): BuddyDelegation;
   createReview(input: Record<string, unknown>): { id: string };
   getReview(id: string): BuddyReviewRecord | null;
   updateReview(id: string, changes: Record<string, unknown>): unknown;
@@ -196,6 +221,18 @@ export interface BuddiesStorePort {
   remember(buddy: string, input: Record<string, unknown>): unknown;
   compactMemory(buddy: string, input: Record<string, unknown>): unknown;
   recordAuditEvent(input: Record<string, unknown>): unknown;
+  listAuditEvents(input?: {
+    buddy?: string;
+    workspace?: string;
+    project?: string;
+    limit?: number;
+  }): Array<{
+    id: string;
+    buddy_id: string;
+    operation: string;
+    payload: Record<string, unknown>;
+    created_at: string;
+  }>;
   createApprovalRequest(input: {
     buddy: string;
     workspace: string;
@@ -231,7 +268,12 @@ export interface BuddiesStorePort {
   listDueAutomations(at: Date): BuddyAutomation[];
   claimAutomationRun(
     id: string,
-    input?: { scheduledFor?: string; idempotencyKey?: string }
+    input?: {
+      scheduledFor?: string;
+      idempotencyKey?: string;
+      claimToken?: string;
+      leaseSeconds?: number;
+    }
   ): BuddyAutomationRun;
   getAutomationRun(id: string): BuddyAutomationRun | null;
   updateAutomationRun(
@@ -245,6 +287,7 @@ export interface BuddiesStorePort {
       outcome?: string | null;
       error?: string | null;
       nextRunAt?: string | null;
+      claimToken?: string;
     }
   ): BuddyAutomationRun;
   listAutomationRuns(id: string, options?: { limit?: number }): BuddyAutomationRun[];

@@ -6,8 +6,47 @@ import { BuddyClosureService, BuddyReviewSettlementSchema } from './closure';
 import type { BuddiesModule, BuddiesStorePort } from './contract';
 
 const BUDDIES_PACKAGE_NAME: string = '@nbardy/buddies';
+const BUDDY_BRIEFING_MAX_CHARACTERS = 40_000;
+const BUDDY_SOUL_MAX_CHARACTERS = 12_000;
+const BUDDY_SKILLS_MAX_CHARACTERS = 12_000;
+const BUDDY_MEMORY_MAX_CHARACTERS = 6_000;
+const BUDDY_WORK_MAX_CHARACTERS = 8_000;
 export const BUDDY_REVIEW_RESULT_START = '<!-- unleashd:buddy-review-result -->';
 export const BUDDY_REVIEW_RESULT_END = '<!-- /unleashd:buddy-review-result -->';
+
+function boundedText(value: string, maxCharacters: number): string {
+  if (value.length <= maxCharacters) return value;
+  return `${value.slice(0, Math.max(0, maxCharacters - 80))}\n… [truncated; use native reads or the referenced file for current detail]`;
+}
+
+function compactProject(project: unknown): unknown {
+  if (!project || typeof project !== 'object') return project;
+  const source = project as Record<string, unknown>;
+  return {
+    id: source.id,
+    title: source.title,
+    status: source.status,
+    priority: source.priority,
+    definition_of_done: source.definition_of_done,
+    next_action: source.next_action,
+    blocked_reason: source.blocked_reason,
+    source_path: source.source_path,
+    todos: Array.isArray(source.todos)
+      ? source.todos.slice(0, 12).map((todo) => {
+          if (!todo || typeof todo !== 'object') return todo;
+          const item = todo as Record<string, unknown>;
+          return {
+            id: item.id,
+            title: item.title,
+            status: item.status,
+            definition_of_done: item.definition_of_done,
+            next_action: item.next_action,
+            blocked_reason: item.blocked_reason,
+          };
+        })
+      : undefined,
+  };
+}
 
 /**
  * Parse only the explicitly delimited review result emitted by a Buddy review
@@ -150,6 +189,7 @@ export function createBuddiesIntegration(dependencies: BuddiesIntegrationDepende
       automationRunId: requested.automationRunId ?? null,
       delegatedByBuddyId: requested.delegatedByBuddyId ?? null,
       parentBuddyConversationId: requested.parentBuddyConversationId ?? null,
+      allowedBuddyOperations: requested.allowedBuddyOperations,
     };
     const skillBriefings = detail.skills.map((skill) => {
       if (skill.mode !== 'always') {
@@ -161,45 +201,73 @@ export function createBuddiesIntegration(dependencies: BuddiesIntegrationDepende
         return `${skill.name} (always; instructions unavailable at ${skill.instruction_path})`;
       }
     });
-    const briefing = [
+    const prefix = [
       `You are ${detail.buddy.name}, the ${detail.buddy.role} Buddy.`,
       `Workspace: ${detail.workspace.name} (${detail.workspace.root_path})`,
+      requested.delegatedByBuddyId
+        ? `This conversation is delegated by Buddy ${requested.delegatedByBuddyId}.`
+        : '',
+      requested.allowedBuddyOperations?.length
+        ? `Allowed Buddy operations: ${requested.allowedBuddyOperations.join(', ')}.`
+        : 'Buddy operations are scoped by the trusted conversation context.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const middle = [
       '',
       'BUDDY_SOUL.md',
-      detail.soul || '(No Buddy soul has been configured.)',
+      boundedText(
+        detail.soul || '(No Buddy soul has been configured.)',
+        BUDDY_SOUL_MAX_CHARACTERS
+      ),
       '',
       'RELATIONSHIPS AND SKILLS',
-      JSON.stringify(detail.relationships, null, 2),
-      ...skillBriefings,
+      boundedText(JSON.stringify(detail.relationships, null, 2), 4_000),
+      boundedText(skillBriefings.join('\n\n'), BUDDY_SKILLS_MAX_CHARACTERS),
       '',
       'BUDDY MEMORY',
-      detail.memory.summary || '(No curated memory yet.)',
-      ...detail.memory.recentJournal.map(
-        (entry: { path: string; content: string }) =>
-          `\nRecent journal ${path.basename(entry.path)}\n${entry.content}`
+      boundedText(
+        detail.memory.summary || '(No curated memory yet.)',
+        BUDDY_MEMORY_MAX_CHARACTERS
       ),
+      detail.memory.recentJournal.length
+        ? `Recent journal pointers:\n${detail.memory.recentJournal
+            .slice(0, 8)
+            .map((entry: { path: string }) => `- ${path.basename(entry.path)}`)
+            .join('\n')}`
+        : 'No recent journal entries.',
       '',
       'CURRENT SPRINT / OWNED WORK',
-      JSON.stringify(
-        {
-          sprint: detail.sprint,
-          selectedProject: detail.project,
-          projects: detail.projects,
-          legacyWorkItems: detail.legacyWorkItems,
-        },
-        null,
-        2
+      boundedText(
+        JSON.stringify(
+          {
+            sprint: detail.sprint,
+            selectedProject: compactProject(detail.project),
+            attentionProjects: detail.projects.slice(0, 8).map(compactProject),
+            legacyWorkItemCount: detail.legacyWorkItems.length,
+          },
+          null,
+          2
+        ),
+        BUDDY_WORK_MAX_CHARACTERS
       ),
+    ].join('\n');
+    const suffix = [
       '',
       'BUDDY OPERATIONS',
       'Use the native `unleashd_buddy` tools for durable employee state whenever they are available.',
       'Those tools are already bound to this employee, workspace, and selected project.',
       'Never pass identity through prose, edit the Buddies SQLite database directly, or substitute filesystem notes for project state.',
-      'Use get_current_work before choosing work; use new_project/update_project for authoritative work; use remember for durable personal handoffs.',
+      'Use get_inbox and get_current_work before choosing work; use new_project/update_project for authoritative work; use remember for durable personal handoffs.',
       'Completing work requires concrete evidence. External sends, spend, publishing, and deployment require request_human_approval first.',
       'An approval request records pending intent only. Stop after requesting it; do not treat the request itself as authorization.',
       'If this provider cannot expose the native tools, the `buddies` CLI is a compatibility fallback.',
     ].join('\n');
+    const middleBudget = Math.max(
+      0,
+      BUDDY_BRIEFING_MAX_CHARACTERS - prefix.length - suffix.length - 2
+    );
+    const briefing = [prefix, boundedText(middle, middleBudget), suffix].join('\n');
     return {
       context,
       briefing,

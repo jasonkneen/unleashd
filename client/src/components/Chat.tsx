@@ -27,6 +27,7 @@ import { allMergeChildrenSettledAtomFamily } from '../atoms/mergeAtoms';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
+import { useTurnDiagnostics } from '../hooks/useTurnDiagnostics';
 import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
@@ -37,9 +38,11 @@ import { PromptPalette } from './PromptPalette';
 import { ResumeThreadWidget } from './ResumeThreadWidget';
 import { SubAgentPanel } from './SubAgentPanel';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
+import { TurnStatus } from './TurnStatus';
 import { VirtualizedMessageList, isToolCallOnlyMessage } from './VirtualizedMessageList';
 import type { MessageGroup } from './VirtualizedMessageList';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
+import { shouldPresentTurnAttempt, turnDiagnosticsFromAttempt } from './turn-diagnostics';
 import './Chat.css';
 
 // Stable reference for empty queue — avoids new [] on every render triggering re-renders
@@ -209,6 +212,12 @@ export function Chat() {
   const confirmed = conversation?.confirmed ?? false;
   const isRunning = conversation?.isRunning ?? false;
   const isStreaming = conversation?.isStreaming ?? false;
+  const runtimeTurnActive = isRunning || isStreaming;
+  const { attempt: latestTurnAttempt } = useTurnDiagnostics(id, runtimeTurnActive);
+  const turnDiagnostics =
+    latestTurnAttempt && shouldPresentTurnAttempt(latestTurnAttempt, runtimeTurnActive)
+      ? turnDiagnosticsFromAttempt(latestTurnAttempt)
+      : null;
   const canChangeHarness =
     confirmed &&
     (conversation?.messages.length ?? 0) === 0 &&
@@ -427,7 +436,7 @@ export function Chat() {
   const buddyContext = readBuddyContext(conversation);
   const visibleSwarmDebugPrefix = effectiveSwarmDebugPrefix(buddyContext, swarmDebugPrefix);
   const messageGroups = useMemo((): MessageGroup[] => {
-    const prefix = swarmDebugPrefix;
+    const prefix = visibleSwarmDebugPrefix;
     const groups: MessageGroup[] = [];
     let toolCallRun: (typeof conversationMessages)[number][] = [];
 
@@ -456,7 +465,7 @@ export function Chat() {
 
     flushRun();
     return groups;
-  }, [conversationMessages, swarmDebugPrefix]);
+  }, [conversationMessages, visibleSwarmDebugPrefix]);
 
   const unifiedSubAgents = useMemo(() => {
     if (!conversation) return [];
@@ -753,7 +762,11 @@ export function Chat() {
               </button>
             </div>
           )}
-          <div className={`status-indicator ${isRunning || isStreaming ? 'running' : ''}`} />
+          {turnDiagnostics ? (
+            <TurnStatus diagnostics={turnDiagnostics} className="chat-turn-status" />
+          ) : (
+            <div className={`status-indicator ${isRunning || isStreaming ? 'running' : ''}`} />
+          )}
         </div>
       </div>
 

@@ -139,3 +139,110 @@ test('human approval routes list pending requests and persist one terminal owner
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('manager review request dispatches one least-privilege reviewer conversation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'buddy-review-routes-'));
+  const store = new BuddiesStore(':memory:');
+  const workspace = store.createWorkspace({ name: 'Workspace', rootPath: root });
+  const lead = store.createBuddy({ project: workspace.id, name: 'Lead', role: 'Lead' });
+  const operator = store.createBuddy({
+    project: workspace.id,
+    name: 'Operator',
+    role: 'Operate',
+  });
+  const critic = store.createBuddy({
+    project: workspace.id,
+    name: 'Critic',
+    role: 'Review',
+  });
+  store.setBuddyRelationship({ fromBuddy: lead.id, toBuddy: operator.id, kind: 'manager' });
+  store.setBuddyRelationship({ fromBuddy: lead.id, toBuddy: critic.id, kind: 'manager' });
+  const project = store.newProject({
+    buddy: operator.id,
+    workspace: workspace.id,
+    title: 'Proof slice',
+    definitionOfDone: 'Evidence reviewed',
+  });
+  const created: Array<Record<string, unknown>> = [];
+  const conversationId = 'a2e89aa3-f8df-4ceb-bf66-44cc031024fe';
+  const app = express();
+  app.use(express.json());
+  registerBuddyRoutes(app, {
+    getStore: async () => store as unknown as BuddiesStorePort,
+    getScheduler: () => null,
+    createConversation: async (input) => {
+      created.push(input as unknown as Record<string, unknown>);
+      return { id: conversationId, toJSON: () => ({ id: conversationId }) };
+    },
+    sendError(response, error, fallbackStatus) {
+      response
+        .status(fallbackStatus)
+        .json({ error: error instanceof Error ? error.message : String(error) });
+    },
+    getNextAutomationRunAt: () => '2026-07-29T00:00:00.000Z',
+    createId: () => conversationId,
+  });
+
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('listening', resolve);
+      server.once('error', reject);
+    });
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/buddies/${encodeURIComponent(lead.id)}/review-requests`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviewerBuddyId: critic.id,
+          subjectBuddyId: operator.id,
+          workspaceId: workspace.id,
+          buddyProjectId: project.id,
+          purpose: 'Pressure-test the evidence',
+          evidence: [
+            {
+              kind: 'conversation',
+              reference: 'delegation-proof',
+              observation: 'The report submitted a failed terminal outcome.',
+            },
+          ],
+        }),
+      }
+    );
+    assert.equal(response.status, 201);
+    const body = (await response.json()) as {
+      review: { reviewer_buddy_id: string; subject_buddy_id: string; conversation_id: string };
+    };
+    assert.equal(body.review.reviewer_buddy_id, critic.id);
+    assert.equal(body.review.subject_buddy_id, operator.id);
+    assert.equal(body.review.conversation_id, conversationId);
+    assert.match(
+      String(created[0]?.initialMessage),
+      /delegation-proof/
+    );
+    assert.equal(created.length, 1);
+    assert.deepEqual(created[0]?.context, {
+      buddyId: critic.id,
+      workspaceId: workspace.id,
+      buddyProjectId: null,
+      delegatedByBuddyId: lead.id,
+      parentBuddyConversationId: null,
+      allowedBuddyOperations: [
+        'buddy.get_current_work',
+        'buddy.get_inbox',
+        'buddy.get_automations',
+        'buddy.remember',
+        'buddy.submit_review',
+        'buddy.request_human_approval',
+      ],
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve()))
+    );
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

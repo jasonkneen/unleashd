@@ -375,6 +375,70 @@ test('overdue intervals schedule from now instead of replaying missed ticks', as
   assert.equal(recordedNextRunAt, '2026-01-01T01:01:00.000Z');
 });
 
+test('scheduler start immediately coalesces an overdue definition into one catch-up run', async () => {
+  const definition = automation();
+  const now = new Date('2026-01-01T01:00:00.000Z');
+  let claims = 0;
+  let turns = 0;
+  let recordedNextRunAt: string | undefined;
+  let run: BuddyAutomationRun = {
+    id: 'run-startup-catch-up',
+    automation_id: definition.id,
+    scheduled_for: definition.next_run_at!,
+    idempotency_key: `${definition.id}:${definition.next_run_at}`,
+    status: 'claimed',
+    conversation_id: null,
+    iteration: 0,
+    outcome: null,
+    error: null,
+    claimed_at: now.toISOString(),
+    started_at: null,
+    ended_at: null,
+  };
+  const store = {
+    listDueAutomations: () => [definition],
+    claimAutomationRun: () => {
+      claims += 1;
+      return run;
+    },
+    updateAutomationRun: (
+      _id: string,
+      changes: Partial<BuddyAutomationRun> & { nextRunAt?: string }
+    ) => {
+      recordedNextRunAt = changes.nextRunAt ?? recordedNextRunAt;
+      run = { ...run, ...changes };
+      return run;
+    },
+    getAutomation: () => definition,
+    getAutomationRun: () => run,
+  } as unknown as BuddiesStorePort;
+  const scheduler = new BuddyScheduler({
+    store,
+    now: () => now,
+    pollIntervalMs: 60_000,
+    createConversation: async () => ({
+      conversationId: 'conversation-startup-catch-up',
+      async runTurn() {
+        turns += 1;
+        return 'caught up';
+      },
+      stop() {},
+      finish() {},
+    }),
+  });
+
+  scheduler.start();
+  for (let attempt = 0; attempt < 20 && run.status !== 'complete'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  scheduler.stop();
+
+  assert.equal(claims, 1);
+  assert.equal(turns, 1);
+  assert.equal(run.status, 'complete');
+  assert.equal(recordedNextRunAt, '2026-01-01T01:01:00.000Z');
+});
+
 test('scheduler fails and advances a run interrupted by process restart', async () => {
   const definition = automation();
   const now = new Date('2026-01-01T01:00:00.000Z');
@@ -515,20 +579,35 @@ test('scheduler recovers an interrupted run from a real SQLite database after re
       status: 'running',
       conversationId: 'conversation-before-restart',
     });
+    store.db
+      .prepare('UPDATE buddy_automation_runs SET claim_expires_at = ? WHERE id = ?')
+      .run('2026-07-28T00:59:00.000Z', claimed.id);
     store.close();
 
     store = new BuddiesStore(databasePath);
+    let recoveryConversations = 0;
     const scheduler = new BuddyScheduler({
       store: store as unknown as BuddiesStorePort,
       now: () => new Date('2026-07-28T01:00:00.000Z'),
       createConversation: async () => {
-        throw new Error('restart recovery must not create another conversation');
+        recoveryConversations += 1;
+        return {
+          conversationId: 'conversation-after-restart',
+          runTurn: async () => 'Recovered after the expired executor lease.',
+          stop() {},
+          finish() {},
+        };
       },
     });
     await scheduler.poll();
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (store.getAutomationRun(claimed.id)?.status === 'complete') break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     const recovered = store.getAutomationRun(claimed.id);
-    assert.equal(recovered.status, 'failed');
-    assert.equal(recovered.error, 'Automation interrupted by scheduler restart');
+    assert.equal(recoveryConversations, 1);
+    assert.equal(recovered.status, 'complete');
+    assert.equal(recovered.conversation_id, 'conversation-after-restart');
     assert.equal(store.getAutomation(definition.id).next_run_at, '2026-07-28T01:01:00.000Z');
   } finally {
     store.close();

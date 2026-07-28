@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { BuddiesStorePort } from './contract';
+import { nextAutomationRunAt } from './scheduler';
 
 export const BuddyOperationContextSchema = z.object({
   buddyId: z.string().min(1),
@@ -7,6 +8,7 @@ export const BuddyOperationContextSchema = z.object({
   buddyProjectId: z.string().min(1).nullable().optional(),
   automationRunId: z.string().min(1).nullable().optional(),
   conversationId: z.string().min(1).nullable().optional(),
+  allowedOperations: z.array(z.string().min(1)).min(1).optional(),
 });
 
 const TodoOperationSchema = z.discriminatedUnion('operation', [
@@ -30,8 +32,65 @@ const TodoOperationSchema = z.discriminatedUnion('operation', [
   }),
 ]);
 
+const AutomationPolicyInputSchema = z
+  .object({
+    maxRuntimeSeconds: z.number().int().positive().optional(),
+    maxIterations: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+    maxCostUsd: z.number().positive().optional(),
+    allowedOperations: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+const SetAutomationSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('create'),
+      targetBuddyId: z.string().min(1).optional(),
+      projectId: z.string().min(1).optional(),
+      name: z.string().min(1),
+      scheduleKind: z.enum(['cron', 'interval']),
+      scheduleExpression: z.string().min(1),
+      timezone: z.string().min(1).default('UTC'),
+      jobKind: z.enum(['prompt', 'sequence', 'loop']),
+      jobPayload: z.record(z.string(), z.unknown()),
+      policy: AutomationPolicyInputSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('update'),
+      automationId: z.string().min(1),
+      name: z.string().min(1).optional(),
+      scheduleKind: z.enum(['cron', 'interval']).optional(),
+      scheduleExpression: z.string().min(1).optional(),
+      timezone: z.string().min(1).optional(),
+      jobKind: z.enum(['prompt', 'sequence', 'loop']).optional(),
+      jobPayload: z.record(z.string(), z.unknown()).optional(),
+      policy: AutomationPolicyInputSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('disable'),
+      automationId: z.string().min(1),
+    })
+    .strict(),
+]);
+
 export const BuddyOperationInputSchemas = {
-  'buddy.get_current_work': z.object({}).strict(),
+  'buddy.get_current_work': z
+    .object({
+      targetBuddyId: z.string().min(1).optional(),
+    })
+    .strict(),
+  'buddy.get_inbox': z.object({}).strict(),
+  'buddy.get_automations': z
+    .object({
+      targetBuddyId: z.string().min(1).optional(),
+    })
+    .strict(),
+  'buddy.set_automation': SetAutomationSchema,
   'buddy.new_project': z.object({
     title: z.string().min(1),
     objective: z.string().min(1).optional(),
@@ -78,11 +137,34 @@ export const BuddyOperationInputSchemas = {
     purpose: z.string().min(1),
     projectId: z.string().min(1).optional(),
     parentConversationId: z.string().min(1).optional(),
+    allowedOperations: z.array(z.string().min(1)).min(1).optional(),
+  }),
+  'buddy.request_review': z.object({
+    reviewerBuddyId: z.string().min(1),
+    subjectBuddyId: z.string().min(1),
+    purpose: z.string().min(1),
+    projectId: z.string().min(1).optional(),
+    parentConversationId: z.string().min(1).optional(),
+    evidence: z
+      .array(
+        z.object({
+          kind: z.enum(['file', 'conversation', 'project', 'metric']),
+          reference: z.string().min(1),
+          observation: z.string().min(1),
+        })
+      )
+      .default([]),
   }),
   'buddy.complete_delegation': z.object({
     delegationId: z.string().min(1),
     status: z.enum(['complete', 'failed', 'cancelled']).default('complete'),
     outcome: z.string().min(1),
+  }),
+  'buddy.complete_assignment': z.object({
+    delegationId: z.string().min(1).optional(),
+    status: z.enum(['complete', 'failed', 'cancelled']).default('complete'),
+    outcome: z.string().min(1),
+    evidence: z.array(z.string().min(1)).min(1),
   }),
   'buddy.submit_review': z.object({
     reviewId: z.string().min(1),
@@ -110,6 +192,60 @@ export const BuddyOperationInputSchemas = {
 
 export type BuddyOperationName = keyof typeof BuddyOperationInputSchemas;
 export type BuddyOperationContext = z.infer<typeof BuddyOperationContextSchema>;
+export type PreparedBuddyDelegation = {
+  toBuddyId: string;
+  purpose: string;
+  projectId?: string;
+  parentConversationId?: string;
+  allowedOperations: BuddyOperationName[];
+};
+
+export type PreparedBuddyReviewRequest = {
+  reviewerBuddyId: string;
+  subjectBuddyId: string;
+  purpose: string;
+  projectId?: string;
+  parentConversationId?: string;
+  evidence: Array<{
+    kind: 'file' | 'conversation' | 'project' | 'metric';
+    reference: string;
+    observation: string;
+  }>;
+};
+
+export const DEFAULT_DELEGATED_BUDDY_OPERATIONS: BuddyOperationName[] = [
+  'buddy.get_current_work',
+  'buddy.get_inbox',
+  'buddy.get_automations',
+  'buddy.update_project',
+  'buddy.remember',
+  'buddy.complete_assignment',
+  'buddy.request_human_approval',
+];
+
+export const REVIEW_BUDDY_OPERATIONS: BuddyOperationName[] = [
+  'buddy.get_current_work',
+  'buddy.get_inbox',
+  'buddy.get_automations',
+  'buddy.remember',
+  'buddy.submit_review',
+  'buddy.request_human_approval',
+];
+
+export function resolveDelegatedBuddyOperations(input: unknown): BuddyOperationName[] {
+  const requested =
+    input === undefined ? DEFAULT_DELEGATED_BUDDY_OPERATIONS : z.array(z.string().min(1)).parse(input);
+  const allowedOperations = requested.map((operation) => {
+    if (!(operation in BuddyOperationInputSchemas)) {
+      throw new Error(`Unknown Buddy operation in delegation policy: ${operation}`);
+    }
+    return operation as BuddyOperationName;
+  });
+  if (!allowedOperations.includes('buddy.complete_assignment')) {
+    throw new Error('Delegated Buddy operations must include buddy.complete_assignment');
+  }
+  return [...new Set(allowedOperations)];
+}
 
 export const BuddyOperationResultSchema = z.object({
   operation: z.string().min(1),
@@ -137,21 +273,215 @@ export class BuddyOperationsService {
   }
 
   execute(name: BuddyOperationName, input: unknown = {}) {
+    if (
+      this.context.allowedOperations &&
+      !this.context.allowedOperations.includes(name)
+    ) {
+      throw new Error(`${name} is not allowed in this delegated conversation`);
+    }
     if (this.context.automationRunId) {
       this.store.assertAutomationOperationAllowed(this.context.automationRunId, name);
     }
     switch (name) {
       case 'buddy.get_current_work': {
         const parsed = BuddyOperationInputSchemas[name].parse(input);
+        const targetBuddyId = parsed.targetBuddyId ?? this.context.buddyId;
+        this.requireReadableBuddy(targetBuddyId);
         return this.result(
           name,
           this.store.listBuddyOwnedProjects({
-            buddy: this.context.buddyId,
+            buddy: targetBuddyId,
             workspace: this.context.workspaceId,
             includeClosed: false,
           }),
           parsed
         );
+      }
+      case 'buddy.get_inbox': {
+        const parsed = BuddyOperationInputSchemas[name].parse(input);
+        const relationships = this.store.listBuddyRelationships(this.context.buddyId) as Array<{
+          from_buddy_id: string;
+          to_buddy_id: string;
+          kind: string;
+        }>;
+        const managedBuddyIds = new Set([this.context.buddyId]);
+        for (const relationship of relationships) {
+          if (
+            relationship.from_buddy_id === this.context.buddyId &&
+            relationship.kind === 'manager'
+          ) {
+            managedBuddyIds.add(relationship.to_buddy_id);
+          }
+          if (
+            relationship.to_buddy_id === this.context.buddyId &&
+            relationship.kind === 'reports_to'
+          ) {
+            managedBuddyIds.add(relationship.from_buddy_id);
+          }
+        }
+        const delegations = this.store.listDelegations({
+          buddy: this.context.buddyId,
+          workspace: this.context.workspaceId,
+        });
+        const reviews = this.store.listReviews({
+          workspace: this.context.workspaceId,
+        }).filter(
+          (review) =>
+            review.reviewer_buddy_id === this.context.buddyId ||
+            (managedBuddyIds.has(review.reviewer_buddy_id) &&
+              managedBuddyIds.has(review.subject_buddy_id))
+        );
+        const automations = [...managedBuddyIds].flatMap((buddyId) =>
+          this.store
+            .listAutomations({ buddy: buddyId })
+            .filter((automation) => automation.workspace_id === this.context.workspaceId)
+        );
+        const delegationOutcomes = delegations
+          .filter(
+            (delegation) =>
+              delegation.from_buddy_id === this.context.buddyId &&
+              ['complete', 'failed', 'cancelled'].includes(delegation.status)
+          )
+          .slice(0, 20);
+        const completionAudits = this.store
+          .listAuditEvents({ workspace: this.context.workspaceId, limit: 200 })
+          .filter((event) => event.operation === 'buddy.complete_assignment');
+        return this.result(
+          name,
+          {
+            assignedDelegations: delegations.filter(
+              (delegation) =>
+                delegation.to_buddy_id === this.context.buddyId &&
+                (delegation.status === 'pending' || delegation.status === 'active')
+            ),
+            delegatedWork: delegations.filter(
+              (delegation) =>
+                delegation.from_buddy_id === this.context.buddyId &&
+                (delegation.status === 'pending' || delegation.status === 'active')
+            ),
+            delegationOutcomes: delegationOutcomes.map((delegation) => ({
+              ...delegation,
+              completionAudit:
+                completionAudits.find(
+                  (event) => event.payload.delegationId === delegation.id
+                ) ?? null,
+            })),
+            assignedReviews: reviews.filter(
+              (review) =>
+                review.reviewer_buddy_id === this.context.buddyId &&
+                review.status !== 'complete' &&
+                review.status !== 'cancelled'
+            ),
+            teamReviewQueue: reviews.filter(
+              (review) => review.status !== 'complete' && review.status !== 'cancelled'
+            ),
+            reviewOutcomes: reviews
+              .filter((review) => review.status === 'complete')
+              .slice(0, 20),
+            pendingApprovals: this.store.listApprovalRequests({
+              workspace: this.context.workspaceId,
+              status: 'pending',
+            }).filter((approval) => managedBuddyIds.has(approval.buddy_id)),
+            blockedProjects: [...managedBuddyIds].flatMap((buddyId) =>
+              this.store
+                .listBuddyOwnedProjects({
+                  buddy: buddyId,
+                  workspace: this.context.workspaceId,
+                  includeClosed: false,
+                })
+                .filter(
+                  (project): project is Record<string, unknown> =>
+                    typeof project === 'object' &&
+                    project !== null &&
+                    (project as { status?: unknown }).status === 'blocked'
+                )
+            ),
+            failedAutomations: automations.flatMap((automation) => {
+              const latest = this.store.listAutomationRuns(automation.id, { limit: 1 })[0];
+              return latest?.status === 'failed'
+                ? [{ automation, latestRun: latest }]
+                : [];
+            }),
+          },
+          parsed
+        );
+      }
+      case 'buddy.get_automations': {
+        const parsed = BuddyOperationInputSchemas[name].parse(input);
+        const targetBuddyId = parsed.targetBuddyId ?? this.context.buddyId;
+        this.requireReadableBuddy(targetBuddyId);
+        return this.result(
+          name,
+          this.store
+            .listAutomations({ buddy: targetBuddyId })
+            .filter((automation) => automation.workspace_id === this.context.workspaceId),
+          parsed
+        );
+      }
+      case 'buddy.set_automation': {
+        const parsed = BuddyOperationInputSchemas[name].parse(input);
+        if (parsed.action === 'create') {
+          const targetBuddyId = parsed.targetBuddyId ?? this.context.buddyId;
+          this.requireManageableBuddy(targetBuddyId);
+          const project = parsed.projectId
+            ? this.requireAutomationProject(parsed.projectId, targetBuddyId)
+            : undefined;
+          let automation = this.store.createAutomation({
+            buddy: targetBuddyId,
+            workspace: this.context.workspaceId,
+            project: project?.id,
+            name: parsed.name,
+            scheduleKind: parsed.scheduleKind,
+            scheduleExpression: parsed.scheduleExpression,
+            timezone: parsed.timezone,
+            jobKind: parsed.jobKind,
+            jobPayload: parsed.jobPayload,
+            policy: parsed.policy,
+            enabled: false,
+          });
+          automation = this.store.updateAutomation(automation.id, {
+            nextRunAt: nextAutomationRunAt(automation, new Date()),
+          });
+          return this.result(
+            name,
+            automation,
+            {
+              ...parsed,
+              targetBuddyId,
+              enabled: false,
+              note: 'Created disabled; owner review is required before enabling.',
+            },
+            project?.buddy_id === this.context.buddyId ? project.id : undefined
+          );
+        }
+
+        const automation = this.store.getAutomation(parsed.automationId);
+        if (!automation) throw new Error('Automation not found');
+        this.requireManageableBuddy(automation.buddy_id);
+        if (automation.workspace_id !== this.context.workspaceId) {
+          throw new Error('Automation is outside the conversation workspace');
+        }
+        if (parsed.action === 'disable') {
+          const disabled = this.store.updateAutomation(automation.id, { enabled: false });
+          return this.result(name, disabled, parsed);
+        }
+        if (automation.enabled) {
+          throw new Error(
+            'Enabled automations must be disabled before an employee can change their definition'
+          );
+        }
+        const { action: _action, automationId: _automationId, ...changes } = parsed;
+        let updated = this.store.updateAutomation(automation.id, changes);
+        if (
+          parsed.scheduleKind !== undefined ||
+          parsed.scheduleExpression !== undefined ||
+          parsed.timezone !== undefined
+        ) {
+          updated = this.store.updateAutomation(updated.id, {
+            nextRunAt: nextAutomationRunAt(updated, new Date()),
+          });
+        }
+        return this.result(name, updated, parsed);
       }
       case 'buddy.new_project': {
         const parsed = BuddyOperationInputSchemas[name].parse(input);
@@ -195,18 +525,27 @@ export class BuddyOperationsService {
         );
       }
       case 'buddy.delegate': {
-        const parsed = BuddyOperationInputSchemas[name].parse(input);
-        const projectId = parsed.projectId ?? this.context.buddyProjectId ?? undefined;
-        if (projectId) this.requireScopedProject(projectId);
+        const parsed = this.prepareDelegation(input);
         const delegation = this.store.createDelegation({
           fromBuddy: this.context.buddyId,
           toBuddy: parsed.toBuddyId,
           workspace: this.context.workspaceId,
-          project: projectId,
+          project: parsed.projectId,
           purpose: parsed.purpose,
           parentConversationId: parsed.parentConversationId,
         });
-        return this.result(name, delegation, parsed, projectId);
+        return this.recordDelegationDispatch(parsed, delegation);
+      }
+      case 'buddy.request_review': {
+        const parsed = this.prepareReviewRequest(input);
+        const review = this.store.createReview({
+          reviewer: parsed.reviewerBuddyId,
+          subject: parsed.subjectBuddyId,
+          workspace: this.context.workspaceId,
+          project: parsed.projectId,
+          evidence: parsed.evidence,
+        });
+        return this.recordReviewDispatch(parsed, review);
       }
       case 'buddy.complete_delegation': {
         const parsed = BuddyOperationInputSchemas[name].parse(input);
@@ -223,6 +562,59 @@ export class BuddyOperationsService {
           outcome: parsed.outcome,
         });
         return this.result(name, updated, parsed, delegation.buddy_project_id ?? undefined);
+      }
+      case 'buddy.complete_assignment': {
+        const parsed = BuddyOperationInputSchemas[name].parse(input);
+        const candidates = parsed.delegationId
+          ? [this.store.getDelegation(parsed.delegationId)].filter(
+              (delegation): delegation is NonNullable<typeof delegation> => delegation !== null
+            )
+          : this.store
+              .listDelegations({
+                buddy: this.context.buddyId,
+                workspace: this.context.workspaceId,
+              })
+              .filter(
+                (delegation) =>
+                  delegation.to_buddy_id === this.context.buddyId &&
+                  delegation.child_conversation_id === this.context.conversationId &&
+                  !['complete', 'failed', 'cancelled'].includes(delegation.status)
+              );
+        if (candidates.length !== 1) {
+          throw new Error(
+            candidates.length === 0
+              ? 'No active delegation is bound to this Buddy conversation'
+              : 'More than one active delegation is bound to this Buddy conversation'
+          );
+        }
+        const delegation = candidates[0];
+        if (
+          delegation.to_buddy_id !== this.context.buddyId ||
+          delegation.workspace_id !== this.context.workspaceId ||
+          delegation.child_conversation_id !== this.context.conversationId
+        ) {
+          throw new Error('Delegation assignment is outside the conversation scope');
+        }
+        if (
+          this.context.buddyProjectId &&
+          delegation.buddy_project_id !== this.context.buddyProjectId
+        ) {
+          throw new Error('Delegation assignment is outside the selected project');
+        }
+        const updated = this.store.updateDelegation(delegation.id, {
+          status: parsed.status,
+          outcome: parsed.outcome,
+        });
+        return this.result(
+          name,
+          updated,
+          {
+            ...parsed,
+            delegationId: delegation.id,
+          },
+          delegation.buddy_project_id ?? undefined,
+          true
+        );
       }
       case 'buddy.submit_review': {
         const parsed = BuddyOperationInputSchemas[name].parse(input);
@@ -274,6 +666,55 @@ export class BuddyOperationsService {
     }
   }
 
+  prepareDelegation(input: unknown): PreparedBuddyDelegation {
+    const parsed = BuddyOperationInputSchemas['buddy.delegate'].parse(input);
+    const allowedOperations = resolveDelegatedBuddyOperations(parsed.allowedOperations);
+    this.requireManageableBuddy(parsed.toBuddyId);
+    // A delegation may be attached to the delegating employee's project for
+    // supervision, but ownership is not transferred to the report.
+    const projectId = parsed.projectId ?? this.context.buddyProjectId ?? undefined;
+    if (projectId) this.requireScopedProject(projectId);
+    return {
+      ...parsed,
+      allowedOperations,
+      projectId,
+      parentConversationId:
+        parsed.parentConversationId ?? this.context.conversationId ?? undefined,
+    };
+  }
+
+  recordDelegationDispatch(input: PreparedBuddyDelegation, data: unknown) {
+    return this.result('buddy.delegate', data, input, input.projectId);
+  }
+
+  prepareReviewRequest(input: unknown): PreparedBuddyReviewRequest {
+    const parsed = BuddyOperationInputSchemas['buddy.request_review'].parse(input);
+    this.requireManageableBuddy(parsed.reviewerBuddyId);
+    this.requireManageableBuddy(parsed.subjectBuddyId);
+    if (parsed.reviewerBuddyId === parsed.subjectBuddyId) {
+      throw new Error('A Buddy cannot review itself');
+    }
+    if (parsed.projectId) {
+      const project = this.store.getBuddyProject(parsed.projectId);
+      if (!project) throw new Error('Buddy project not found');
+      if (
+        project.buddy_id !== parsed.subjectBuddyId ||
+        project.workspace_id !== this.context.workspaceId
+      ) {
+        throw new Error('Review project is outside the reviewed employee scope');
+      }
+    }
+    return {
+      ...parsed,
+      parentConversationId:
+        parsed.parentConversationId ?? this.context.conversationId ?? undefined,
+    };
+  }
+
+  recordReviewDispatch(input: PreparedBuddyReviewRequest, data: unknown) {
+    return this.result('buddy.request_review', data, input, input.projectId, true);
+  }
+
   private requireScopedProject(projectId: string) {
     const project = this.store.getBuddyProject(projectId);
     if (!project) throw new Error('Buddy project not found');
@@ -282,6 +723,74 @@ export class BuddyOperationsService {
       project.workspace_id !== this.context.workspaceId
     ) {
       throw new Error('Buddy project is outside the conversation scope');
+    }
+    return project;
+  }
+
+  private requireManageableBuddy(targetBuddyId: string) {
+    const target = this.store.getBuddy(targetBuddyId);
+    if (!target) throw new Error('Target Buddy not found');
+    const targetWorkspaces = this.store.listBuddyWorkspaces(targetBuddyId) as Array<{ id: string }>;
+    if (!targetWorkspaces.some((workspace) => workspace.id === this.context.workspaceId)) {
+      throw new Error('Target Buddy does not belong to the conversation workspace');
+    }
+    if (targetBuddyId === this.context.buddyId) return target;
+    const relationships = this.store.listBuddyRelationships(this.context.buddyId) as Array<{
+      from_buddy_id: string;
+      to_buddy_id: string;
+      kind: string;
+    }>;
+    const isDirectReport = relationships.some(
+      (relationship) =>
+        (relationship.from_buddy_id === this.context.buddyId &&
+          relationship.to_buddy_id === targetBuddyId &&
+          relationship.kind === 'manager') ||
+        (relationship.from_buddy_id === targetBuddyId &&
+          relationship.to_buddy_id === this.context.buddyId &&
+          relationship.kind === 'reports_to')
+    );
+    if (!isDirectReport) {
+      throw new Error('Target Buddy is not a direct report of this employee');
+    }
+    return target;
+  }
+
+  private requireReadableBuddy(targetBuddyId: string) {
+    try {
+      return this.requireManageableBuddy(targetBuddyId);
+    } catch (error) {
+      const relationships = this.store.listBuddyRelationships(this.context.buddyId) as Array<{
+        from_buddy_id: string;
+        to_buddy_id: string;
+        kind: string;
+      }>;
+      const canReview = relationships.some(
+        (relationship) =>
+          relationship.from_buddy_id === this.context.buddyId &&
+          relationship.to_buddy_id === targetBuddyId &&
+          relationship.kind === 'reviews'
+      );
+      if (!canReview) throw error;
+      const target = this.store.getBuddy(targetBuddyId);
+      if (!target) throw new Error('Target Buddy not found');
+      const targetWorkspaces = this.store.listBuddyWorkspaces(targetBuddyId) as Array<{
+        id: string;
+      }>;
+      if (!targetWorkspaces.some((workspace) => workspace.id === this.context.workspaceId)) {
+        throw new Error('Target Buddy does not belong to the conversation workspace');
+      }
+      return target;
+    }
+  }
+
+  private requireAutomationProject(projectId: string, targetBuddyId: string) {
+    const project = this.store.getBuddyProject(projectId);
+    if (!project) throw new Error('Buddy project not found');
+    if (
+      project.buddy_id !== targetBuddyId ||
+      project.workspace_id !== this.context.workspaceId
+    ) {
+      throw new Error('Automation project is outside the target employee scope');
     }
     return project;
   }

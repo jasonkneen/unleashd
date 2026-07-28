@@ -43,12 +43,17 @@ test('Buddy MCP exposes scoped native tools and enforces completion evidence', a
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [
       'compact_memory',
+      'complete_assignment',
       'complete_delegation',
       'delegate',
+      'get_automations',
       'get_current_work',
+      'get_inbox',
       'new_project',
       'remember',
       'request_human_approval',
+      'request_review',
+      'set_automation',
       'submit_review',
       'update_project',
     ]);
@@ -59,6 +64,13 @@ test('Buddy MCP exposes scoped native tools and enforces completion evidence', a
     });
     assert.equal(current.isError, undefined);
     assert.match(JSON.stringify(current.structuredContent), /Close proof loop/);
+
+    const inbox = await client.callTool({
+      name: 'get_inbox',
+      arguments: {},
+    });
+    assert.equal(inbox.isError, undefined);
+    assert.match(JSON.stringify(inbox.structuredContent), /assignedDelegations/);
 
     const rejected = await client.callTool({
       name: 'update_project',
@@ -100,7 +112,7 @@ test('Buddy MCP exposes scoped native tools and enforces completion evidence', a
     assert.equal(approval.isError, undefined);
     assert.match(JSON.stringify(approval.structuredContent), /"status":"pending"/);
     assert.equal(store.listApprovalRequests({ status: 'pending' }).length, 1);
-    assert.equal(store.listAuditEvents({ buddy: lead.id }).length, 3);
+    assert.equal(store.listAuditEvents({ buddy: lead.id }).length, 4);
   } finally {
     await client.close();
     await server.close();
@@ -110,6 +122,8 @@ test('Buddy MCP exposes scoped native tools and enforces completion evidence', a
 });
 
 test('Codex Buddy MCP configuration binds trusted context outside tool input', () => {
+  const priorApiBase = process.env.UNLEASHD_BUDDY_API_BASE;
+  process.env.UNLEASHD_BUDDY_API_BASE = 'http://127.0.0.1:9999';
   const args = buddyCodexMcpArgs(
     {
       buddyId: 'buddy-1',
@@ -119,11 +133,13 @@ test('Codex Buddy MCP configuration binds trusted context outside tool input', (
       automationRunId: 'run-1',
       delegatedByBuddyId: null,
       parentBuddyConversationId: null,
+      allowedBuddyOperations: ['buddy.get_automations', 'buddy.complete_assignment'],
     },
     'conversation-1',
     {
       command: '/usr/bin/node',
       args: ['/app/server/dist/buddies/mcp-server.js'],
+      cwd: '/app/server',
     }
   );
 
@@ -131,10 +147,16 @@ test('Codex Buddy MCP configuration binds trusted context outside tool input', (
     '-c',
     'mcp_servers.unleashd_buddy.command="/usr/bin/node"',
     '-c',
-    'mcp_servers.unleashd_buddy.args=["/app/server/dist/buddies/mcp-server.js","--buddy","buddy-1","--workspace","workspace-1","--conversation","conversation-1","--project","project-1","--automation-run","run-1"]',
+    'mcp_servers.unleashd_buddy.args=["/app/server/dist/buddies/mcp-server.js","--buddy","buddy-1","--workspace","workspace-1","--conversation","conversation-1","--api-base","http://127.0.0.1:9999","--project","project-1","--automation-run","run-1","--allowed-operation","buddy.get_automations","--allowed-operation","buddy.complete_assignment"]',
     '-c',
     'mcp_servers.unleashd_buddy.enabled=true',
+    '-c',
+    'mcp_servers.unleashd_buddy.required=true',
+    '-c',
+    'mcp_servers.unleashd_buddy.cwd="/app/server"',
   ]);
+  if (priorApiBase === undefined) delete process.env.UNLEASHD_BUDDY_API_BASE;
+  else process.env.UNLEASHD_BUDDY_API_BASE = priorApiBase;
 });
 
 test('stdio Buddy MCP entrypoint reopens durable state with trusted launch scope', async () => {

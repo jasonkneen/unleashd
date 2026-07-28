@@ -6,6 +6,7 @@ import type { ResolvedBuddyConversation } from '../buddies/integration';
 import type { BuddyAutomationConversation } from '../buddies/scheduler';
 import { configFromProviderPreferences } from './config-mapping';
 import type { ConversationConfigService } from './config-service';
+import { INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-store';
 import type {
   ConversationBroadcast,
   ConversationOptions,
@@ -32,7 +33,11 @@ export interface CreateServerBuddyConversationInput {
 export interface BuddyCreationServicePorts {
   configService: Pick<
     ConversationConfigService,
-    'claimInitialMessageDispatch' | 'createOrReplay' | 'setCurrentSession'
+    | 'claimInitialMessageDispatch'
+    | 'completeInitialMessageDispatch'
+    | 'createOrReplay'
+    | 'getRecord'
+    | 'setCurrentSession'
   >;
   resolveBuddyConversation(context: BuddyContext): Promise<ResolvedBuddyConversation>;
   resolveWorkingDirectory(input: string): string;
@@ -80,6 +85,7 @@ export function creationFingerprint(input: CreationFingerprintInput): string {
 
 export function createBuddyCreationService(ports: BuddyCreationServicePorts): BuddyCreationService {
   const logger = ports.logger ?? console;
+  const dispatchRetryTimers = new Map<string, NodeJS.Timeout>();
 
   async function persistCurrentSession(
     conversation: ConversationRuntimeView,
@@ -100,8 +106,67 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
 
   async function dispatchInitialMessageIfPending(conversation: ConversationRuntime): Promise<void> {
     const claimed = await ports.configService.claimInitialMessageDispatch(conversation.id);
+    if (!claimed) {
+      const current = await ports.configService.getRecord(conversation.id);
+      if (
+        current?.creation?.initialMessage &&
+        !current.creation.initialMessageDispatchedAt &&
+        current.creation.initialMessageDispatchClaimedAt
+      ) {
+        scheduleInitialMessageRetry(conversation, current.creation.initialMessageDispatchClaimedAt);
+      }
+      return;
+    }
     const initialMessage = claimed?.creation?.initialMessage;
-    if (initialMessage) conversation.enqueueMessage(initialMessage);
+    const claimToken = claimed?.creation?.initialMessageDispatchClaimToken;
+    if (!initialMessage || !claimToken) return;
+    try {
+      const alreadyVisible = conversation.messages.some(
+        (message) => message.role === 'user' && message.content === initialMessage
+      );
+      if (!alreadyVisible) conversation.enqueueMessage(initialMessage);
+      const completed = await ports.configService.completeInitialMessageDispatch(
+        conversation.id,
+        claimToken
+      );
+      if (!completed) {
+        logger.warn(
+          `[conversation-config] Initial message delivery acknowledgement lost for ${conversation.id}`
+        );
+      }
+      const timer = dispatchRetryTimers.get(conversation.id);
+      if (timer) clearTimeout(timer);
+      dispatchRetryTimers.delete(conversation.id);
+    } catch (error) {
+      logger.warn(
+        `[conversation-config] Initial message enqueue failed for ${conversation.id}; retrying after lease:`,
+        error
+      );
+      scheduleInitialMessageRetry(
+        conversation,
+        claimed.creation?.initialMessageDispatchClaimedAt
+      );
+    }
+  }
+
+  function scheduleInitialMessageRetry(
+    conversation: ConversationRuntime,
+    claimedAt: string | undefined
+  ): void {
+    if (dispatchRetryTimers.has(conversation.id)) return;
+    const claimedAtMs = claimedAt ? Date.parse(claimedAt) : Date.now();
+    const delay = Math.max(0, claimedAtMs + INITIAL_MESSAGE_DISPATCH_LEASE_MS - Date.now()) + 25;
+    const timer = setTimeout(() => {
+      dispatchRetryTimers.delete(conversation.id);
+      void dispatchInitialMessageIfPending(conversation).catch((error) => {
+        logger.warn(
+          `[conversation-config] Initial message retry failed for ${conversation.id}:`,
+          error
+        );
+      });
+    }, delay);
+    timer.unref?.();
+    dispatchRetryTimers.set(conversation.id, timer);
   }
 
   function resolveConfig(resolved: ResolvedBuddyConversation): ConversationConfig {

@@ -120,6 +120,9 @@ export const BuddyContextSchema = z.object({
   // not a provider-native subagent/swarm relationship.
   delegatedByBuddyId: z.string().min(1).nullish(),
   parentBuddyConversationId: z.string().uuid().nullish(),
+  // Delegated conversations can expose only the Buddy state operations
+  // required by the assignment. Provider-native tools are unaffected.
+  allowedBuddyOperations: z.array(z.string().min(1)).min(1).optional(),
 });
 export type BuddyContext = z.infer<typeof BuddyContextSchema>;
 
@@ -127,6 +130,8 @@ export const ConversationCreationMetadataSchema = z.object({
   commandId: z.string().min(1).optional(),
   fingerprint: z.string().min(1).optional(),
   initialMessage: z.string().min(1).optional(),
+  initialMessageDispatchClaimedAt: z.string().datetime().optional(),
+  initialMessageDispatchClaimToken: z.string().min(1).optional(),
   initialMessageDispatchedAt: z.string().datetime().optional(),
   swarmDebugPrefix: z.string().optional(),
   resumedFromConversationId: z.string().uuid().optional(),

@@ -111,7 +111,7 @@ test('employee surface keeps conversation primary and omits project creation UI'
   assert.doesNotMatch(source, />\s*New project\s*</);
 });
 
-test('current project rows expose operational state with Open as their only action', () => {
+test('current project rows expose operational state with one conversation action', () => {
   const source = readFileSync(path.resolve('src/components/BuddiesDashboard.tsx'), 'utf8');
   const start = source.indexOf('<div className="buddy-work-list">');
   const end = source.indexOf('{legacyWork.length > 0', start);
@@ -125,7 +125,10 @@ test('current project rows expose operational state with Open as their only acti
   assert.match(projectRows, /<strong>Todos<\/strong>/);
   assert.match(projectRows, /todoProgress\.done.*todoProgress\.total/s);
   assert.equal(projectRows.match(/<button/g)?.length, 1);
-  assert.match(projectRows, />\s*Open\s*</);
+  assert.match(
+    projectRows,
+    /existingConversation\s*\?\s*'Open conversation'\s*:\s*'Start conversation'/
+  );
   assert.doesNotMatch(projectRows, /<form|<select|onChange=|updateProject/);
 });
 

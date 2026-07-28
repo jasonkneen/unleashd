@@ -276,9 +276,17 @@ test('creation recovery metadata and initial-message delivery marker are durable
 
     const claims = await Promise.all([
       store.claimInitialMessageDispatch(CONVERSATION_ID, new Date('2026-07-28T12:01:00.000Z')),
-      store.claimInitialMessageDispatch(CONVERSATION_ID, new Date('2026-07-28T12:02:00.000Z')),
+      store.claimInitialMessageDispatch(CONVERSATION_ID, new Date('2026-07-28T12:01:01.000Z')),
     ]);
     assert.equal(claims.filter(Boolean).length, 1);
+    const claim = claims.find(Boolean);
+    assert.ok(claim?.creation?.initialMessageDispatchClaimToken);
+    assert.equal(claim?.creation?.initialMessageDispatchedAt, undefined);
+    await store.completeInitialMessageDispatch(
+      CONVERSATION_ID,
+      claim.creation.initialMessageDispatchClaimToken,
+      new Date('2026-07-28T12:01:02.000Z')
+    );
     const afterDispatch = await store.getByConversationId(CONVERSATION_ID);
     assert.ok(afterDispatch?.creation?.initialMessageDispatchedAt);
   });

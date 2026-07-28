@@ -23,6 +23,26 @@ test('scoped Buddy operations close work, remember, delegate, review, and audit'
       name: 'Operator',
       role: 'Execute bounded work',
     });
+    const critic = store.createBuddy({
+      project: workspace.id,
+      name: 'Critic',
+      role: 'Review evidence independently',
+    });
+    store.setBuddyRelationship({
+      fromBuddy: lead.id,
+      toBuddy: operator.id,
+      kind: 'manager',
+    });
+    store.setBuddyRelationship({
+      fromBuddy: lead.id,
+      toBuddy: critic.id,
+      kind: 'manager',
+    });
+    store.setBuddyRelationship({
+      fromBuddy: critic.id,
+      toBuddy: operator.id,
+      kind: 'reviews',
+    });
     const operations = new BuddyOperationsService(store as unknown as BuddiesStorePort, {
       buddyId: lead.id,
       workspaceId: workspace.id,
@@ -81,21 +101,82 @@ test('scoped Buddy operations close work, remember, delegate, review, and audit'
       outcome: 'The proof passed with one required correction.',
     });
     assert.equal((settled.data as { status: string }).status, 'complete');
-
+    const inbox = operations.execute('buddy.get_inbox');
+    assert.deepEqual(
+      (
+        inbox.data as {
+          delegationOutcomes: Array<{ id: string; status: string; outcome: string | null }>;
+        }
+      ).delegationOutcomes.map(({ id, status, outcome }) => ({ id, status, outcome })),
+      [
+        {
+          id: delegationId,
+          status: 'complete',
+          outcome: 'The proof passed with one required correction.',
+        },
+      ]
+    );
+    const prepared = operations.prepareDelegation({
+      toBuddyId: operator.id,
+      purpose: 'Read-only evidence check',
+    });
+    assert.ok(prepared.allowedOperations.includes('buddy.complete_assignment'));
+    assert.ok(!prepared.allowedOperations.includes('buddy.new_project'));
+    const delegatedOperations = new BuddyOperationsService(
+      store as unknown as BuddiesStorePort,
+      {
+        buddyId: operator.id,
+        workspaceId: workspace.id,
+        allowedOperations: prepared.allowedOperations,
+      }
+    );
+    assert.throws(
+      () =>
+        delegatedOperations.execute('buddy.new_project', {
+          title: 'Unrequested project',
+          definitionOfDone: 'Should not be created',
+        }),
+      /not allowed in this delegated conversation/
+    );
     const operatorProject = store.newProject({
       buddy: operator.id,
       workspace: workspace.id,
       title: 'Repair proof',
       definitionOfDone: 'Correction verified',
     });
-    const review = store.createReview({
-      reviewer: lead.id,
-      subject: operator.id,
-      workspace: workspace.id,
-      project: operatorProject.id,
+
+    const requestedReview = operations.execute('buddy.request_review', {
+      reviewerBuddyId: critic.id,
+      subjectBuddyId: operator.id,
+      purpose: 'Independently verify the correction',
+      projectId: operatorProject.id,
     });
-    const submitted = operations.execute('buddy.submit_review', {
-      reviewId: review.id,
+    const reviewId = (requestedReview.data as { id: string }).id;
+    const criticOperations = new BuddyOperationsService(
+      store as unknown as BuddiesStorePort,
+      {
+        buddyId: critic.id,
+        workspaceId: workspace.id,
+      }
+    );
+    assert.deepEqual(
+      (
+        criticOperations.execute('buddy.get_inbox').data as {
+          assignedReviews: Array<{ id: string }>;
+        }
+      ).assignedReviews.map((review) => review.id),
+      [reviewId]
+    );
+    assert.deepEqual(
+      (
+        criticOperations.execute('buddy.get_current_work', {
+          targetBuddyId: operator.id,
+        }).data as Array<{ id: string }>
+      ).map((item) => item.id),
+      [operatorProject.id]
+    );
+    const submitted = criticOperations.execute('buddy.submit_review', {
+      reviewId,
       verdict: 'needs_work',
       score: 65,
       summary: 'The correction is directionally right but not verified.',
@@ -109,6 +190,13 @@ test('scoped Buddy operations close work, remember, delegate, review, and audit'
       requiredActions: ['Close the verification todo with a metric reference.'],
     });
     assert.equal((submitted.data as { status: string }).status, 'complete');
+    const teamInbox = operations.execute('buddy.get_inbox');
+    assert.deepEqual(
+      (teamInbox.data as { reviewOutcomes: Array<{ id: string }> }).reviewOutcomes.map(
+        (review) => review.id
+      ),
+      [reviewId]
+    );
 
     assert.throws(
       () =>
@@ -118,7 +206,7 @@ test('scoped Buddy operations close work, remember, delegate, review, and audit'
         }),
       /outside the conversation scope/
     );
-    assert.equal(store.listAuditEvents({ buddy: lead.id }).length, 7);
+    assert.equal(store.listAuditEvents({ buddy: lead.id }).length, 9);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

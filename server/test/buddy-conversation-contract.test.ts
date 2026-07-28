@@ -187,7 +187,7 @@ test('hidden Buddy briefing is injected exactly once and never on resumed turns'
     buddyBriefing: 'PRIVATE BRIEFING',
     swarmDebugPrefix: 'SWARM DEBUG',
   });
-  assert.match(first, /^<!-- unleashd:buddy-context /);
+  assert.match(first, /^<!-- unleashd:buddy-context-v2 /);
   assert.equal(first.match(/PRIVATE BRIEFING/g)?.length, 1);
   assert.equal(first.includes('unleashd:swarm-prefix'), false);
   assert.match(first, /\n\nStart the campaign\.$/);

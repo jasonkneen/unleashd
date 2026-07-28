@@ -13,6 +13,7 @@ import {
 import { z } from 'zod';
 
 export const CONFIG_STORE_VERSION = 1 as const;
+export const INITIAL_MESSAGE_DISPATCH_LEASE_MS = 15_000;
 
 export { PersistedConversationConfigRecordSchema };
 export type { PersistedConversationConfigRecord };
@@ -404,6 +405,8 @@ export class ConversationConfigStore {
         ...record,
         creation: {
           ...record.creation,
+          initialMessageDispatchClaimedAt: undefined,
+          initialMessageDispatchClaimToken: undefined,
           initialMessageDispatchedAt: dispatchedAt.toISOString(),
         },
         updatedAt: this.now().toISOString(),
@@ -412,14 +415,15 @@ export class ConversationConfigStore {
   }
 
   /**
-   * Atomically claims delivery of the creation message. Exactly one concurrent
-   * caller receives the updated record; later callers receive undefined.
+   * Atomically leases delivery of the creation message. Delivery is
+   * acknowledged separately, so a crashed dispatcher can be recovered.
    */
   async claimInitialMessageDispatch(
     conversationId: string,
-    dispatchedAt = this.now()
+    claimedAt = this.now()
   ): Promise<PersistedConversationConfigRecord | undefined> {
     let claimed = false;
+    const claimToken = randomUUID();
     const record = await this.updateRecord(conversationId, (current) => {
       claimed = false;
       if (
@@ -429,17 +433,55 @@ export class ConversationConfigStore {
       ) {
         return current;
       }
+      const priorClaimedAt = current.creation.initialMessageDispatchClaimedAt;
+      if (
+        priorClaimedAt &&
+        claimedAt.getTime() - Date.parse(priorClaimedAt) < INITIAL_MESSAGE_DISPATCH_LEASE_MS
+      ) {
+        return current;
+      }
       claimed = true;
       return {
         ...current,
         creation: {
           ...current.creation,
-          initialMessageDispatchedAt: dispatchedAt.toISOString(),
+          initialMessageDispatchClaimedAt: claimedAt.toISOString(),
+          initialMessageDispatchClaimToken: claimToken,
         },
-        updatedAt: this.now().toISOString(),
+        updatedAt: claimedAt.toISOString(),
       };
     });
     return claimed ? record : undefined;
+  }
+
+  async completeInitialMessageDispatch(
+    conversationId: string,
+    claimToken: string,
+    dispatchedAt = this.now()
+  ): Promise<PersistedConversationConfigRecord | undefined> {
+    let completed = false;
+    const record = await this.updateRecord(conversationId, (current) => {
+      if (
+        current.status === 'deleted' ||
+        !current.creation?.initialMessage ||
+        current.creation.initialMessageDispatchedAt ||
+        current.creation.initialMessageDispatchClaimToken !== claimToken
+      ) {
+        return current;
+      }
+      completed = true;
+      return {
+        ...current,
+        creation: {
+          ...current.creation,
+          initialMessageDispatchClaimedAt: undefined,
+          initialMessageDispatchClaimToken: undefined,
+          initialMessageDispatchedAt: dispatchedAt.toISOString(),
+        },
+        updatedAt: dispatchedAt.toISOString(),
+      };
+    });
+    return completed ? record : undefined;
   }
 
   async rebuildSessionIndex(): Promise<number> {

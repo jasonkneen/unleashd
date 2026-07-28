@@ -57,6 +57,13 @@ function EmployeeDirectory({
   onOpen: (id: string) => void;
 }) {
   const visibleBuddies = selectDirectoryEmployees(overview);
+  if (visibleBuddies.length === 0) {
+    return (
+      <main className="buddies-directory-content">
+        <p className="buddy-empty">No top-level employees are configured yet.</p>
+      </main>
+    );
+  }
   return (
     <main className="buddies-directory-content">
       <div className="buddy-card-grid">
@@ -67,9 +74,14 @@ function EmployeeDirectory({
             <article
               key={employee.id}
               className="buddy-directory-card"
+              role="link"
+              tabIndex={0}
               onClick={() => onOpen(employee.id)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') onOpen(employee.id);
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onOpen(employee.id);
+                }
               }}
             >
               <div className="buddy-directory-card-info">
@@ -110,7 +122,7 @@ function EmployeeDirectory({
                 <span className={`buddy-presence buddy-presence--${employee.status}`}>
                   {employee.status}
                 </span>
-                <button type="button">Open employee →</button>
+                <span className="buddy-directory-card-link">Open employee →</span>
               </div>
             </article>
           );
@@ -127,6 +139,8 @@ export function BuddiesDashboard() {
   const [employee, setEmployee] = useState<EmployeeRecord | null>(null);
   const [memory, setMemory] = useState<BuddyMemory>(EMPTY_MEMORY);
   const [automations, setAutomations] = useState<BuddyAutomation[]>([]);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [automationError, setAutomationError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<EmployeeTab>('work');
   const [busy, setBusy] = useState<string | null>(null);
@@ -146,14 +160,11 @@ export function BuddiesDashboard() {
     async (signal?: AbortSignal, generation = loadGenerationRef.current) => {
       if (!buddyId) return;
       const encoded = encodeURIComponent(buddyId);
-      const [detail, contextPayload, projectPayload, memoryPayload, automationPayload] =
-        await Promise.all([
-          api<Record<string, unknown>>(`/api/buddies/${encoded}`, { signal }),
-          api<Record<string, unknown>>(`/api/buddies/${encoded}/context`, { signal }),
-          api<unknown>(`/api/buddies/${encoded}/projects?includeClosed=true`, { signal }),
-          api<BuddyMemory>(`/api/buddies/${encoded}/memory`, { signal }),
-          api<unknown>(`/api/buddies/${encoded}/automations`, { signal }),
-        ]);
+      const [detail, contextPayload, projectPayload] = await Promise.all([
+        api<Record<string, unknown>>(`/api/buddies/${encoded}`, { signal }),
+        api<Record<string, unknown>>(`/api/buddies/${encoded}/context`, { signal }),
+        api<unknown>(`/api/buddies/${encoded}/projects?includeClosed=true`, { signal }),
+      ]);
       if (signal?.aborted || generation !== loadGenerationRef.current) return;
       const buddy = (detail.buddy ?? detail) as unknown as Buddy;
       const workspaces = asArray<Workspace>(detail, 'workspaces');
@@ -217,12 +228,6 @@ export function BuddiesDashboard() {
         approvals: asArray<EmployeeRecord['approvals'][number]>(detail, 'approvals'),
       };
       setEmployee(record);
-      setMemory({
-        ...(memoryPayload ?? EMPTY_MEMORY),
-        soul: typeof contextPayload.soul === 'string' ? contextPayload.soul : undefined,
-        soulPath: buddy.soul_path,
-      });
-      setAutomations(asArray<BuddyAutomation>(automationPayload, 'automations'));
       const preferredWorkspace =
         workspaces.find((candidate) =>
           legacyWorkItems.some((item) => item.project_id === candidate.id)
@@ -230,6 +235,39 @@ export function BuddiesDashboard() {
         workspaces.find((candidate) => candidate.slug !== 'buddies') ??
         workspaces[0];
       setSelectedWorkspaceId(preferredWorkspace?.id ?? '');
+    },
+    [buddyId]
+  );
+
+  const loadMemory = useCallback(
+    async (signal?: AbortSignal, generation = loadGenerationRef.current) => {
+      if (!buddyId) return;
+      const encoded = encodeURIComponent(buddyId);
+      const [contextPayload, memoryPayload] = await Promise.all([
+        api<Record<string, unknown>>(`/api/buddies/${encoded}/context`, { signal }),
+        api<BuddyMemory>(`/api/buddies/${encoded}/memory`, { signal }),
+      ]);
+      if (signal?.aborted || generation !== loadGenerationRef.current) return;
+      setMemory({
+        ...(memoryPayload ?? EMPTY_MEMORY),
+        soul: typeof contextPayload.soul === 'string' ? contextPayload.soul : undefined,
+        soulPath: employee?.buddy.soul_path,
+      });
+      setMemoryError(null);
+    },
+    [buddyId, employee?.buddy.soul_path]
+  );
+
+  const loadAutomations = useCallback(
+    async (signal?: AbortSignal, generation = loadGenerationRef.current) => {
+      if (!buddyId) return;
+      const encoded = encodeURIComponent(buddyId);
+      const automationPayload = await api<unknown>(`/api/buddies/${encoded}/automations`, {
+        signal,
+      });
+      if (signal?.aborted || generation !== loadGenerationRef.current) return;
+      setAutomations(asArray<BuddyAutomation>(automationPayload, 'automations'));
+      setAutomationError(null);
     },
     [buddyId]
   );
@@ -242,6 +280,8 @@ export function BuddiesDashboard() {
       setEmployee(null);
       setMemory(EMPTY_MEMORY);
       setAutomations([]);
+      setMemoryError(null);
+      setAutomationError(null);
       setSelectedWorkspaceId('');
     }
     const loading = buddyId
@@ -254,6 +294,26 @@ export function BuddiesDashboard() {
     });
     return () => controller.abort();
   }, [buddyId, loadDirectory, loadEmployee]);
+
+  useEffect(() => {
+    if (!buddyId || !employee || activeTab === 'work' || activeTab === 'conversations') return;
+    const generation = loadGenerationRef.current;
+    const controller = new AbortController();
+    if (activeTab === 'memory') {
+      void loadMemory(controller.signal, generation).catch((cause: unknown) => {
+        if (!controller.signal.aborted) {
+          setMemoryError(cause instanceof Error ? cause.message : String(cause));
+        }
+      });
+    } else {
+      void loadAutomations(controller.signal, generation).catch((cause: unknown) => {
+        if (!controller.signal.aborted) {
+          setAutomationError(cause instanceof Error ? cause.message : String(cause));
+        }
+      });
+    }
+    return () => controller.abort();
+  }, [activeTab, buddyId, employee, loadAutomations, loadMemory]);
 
   const workspace =
     employee?.workspaces.find((item) => item.id === selectedWorkspaceId) ?? employee?.workspaces[0];
@@ -320,7 +380,23 @@ export function BuddiesDashboard() {
     navigate(`/chat/${id}`);
   };
 
-  if (error && !overview && !employee) {
+  const openProjectConversation = (targetWorkspace: Workspace, projectId: string) => {
+    const existing = [...(employee?.conversations ?? [])]
+      .filter((conversation) => conversation.buddy_project_id === projectId)
+      .sort(
+        (left, right) =>
+          new Date(right.last_active_at ?? 0).getTime() -
+          new Date(left.last_active_at ?? 0).getTime()
+      )[0];
+    const conversationId = existing?.conversation_id ?? existing?.unleashd_conversation_id;
+    if (conversationId) {
+      navigate(`/chat/${conversationId}`);
+      return;
+    }
+    talk(targetWorkspace, projectId);
+  };
+
+  if (error && !employee) {
     return (
       <div className="buddies-dashboard buddies-dashboard--centered">
         <div className="buddies-error">{error}</div>
@@ -585,9 +661,16 @@ export function BuddiesDashboard() {
             </div>
             <div className="buddy-work-list">
               {workspaceProjects
-                .filter((project) => project.status !== 'cancelled')
+                .filter((project) => !['done', 'cancelled'].includes(project.status))
                 .map((project) => {
                   const todoProgress = buddyProjectTodoProgress(project);
+                  const existingConversation = employee.conversations.some(
+                    (conversation) =>
+                      conversation.buddy_project_id === project.id &&
+                      Boolean(
+                        conversation.conversation_id ?? conversation.unleashd_conversation_id
+                      )
+                  );
                   return (
                     <article
                       className={`buddy-work-card status-${project.status}`}
@@ -627,9 +710,11 @@ export function BuddiesDashboard() {
                       <button
                         type="button"
                         disabled={!workspace}
-                        onClick={() => workspace && talk(workspace, project.id)}
+                        onClick={() =>
+                          workspace && openProjectConversation(workspace, project.id)
+                        }
                       >
-                        Open
+                        {existingConversation ? 'Open conversation' : 'Start conversation'}
                       </button>
                     </article>
                   );
@@ -699,6 +784,11 @@ export function BuddiesDashboard() {
 
         {activeTab === 'memory' && (
           <section className="buddy-section buddy-memory">
+            {memoryError && (
+              <div className="buddies-error" role="alert">
+                Memory is unavailable: {memoryError}
+              </div>
+            )}
             <div className="buddy-memory-block">
               <span>Soul · {memory.soulPath ?? employee.buddy.soul_path ?? 'Not configured'}</span>
               <pre>
@@ -721,7 +811,10 @@ export function BuddiesDashboard() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ kind: data.get('kind'), content: data.get('content') }),
                   })
-                ).then(() => form.reset());
+                ).then(async () => {
+                  await loadMemory();
+                  form.reset();
+                });
               }}
             >
               <h2>Remember</h2>
@@ -746,17 +839,24 @@ export function BuddiesDashboard() {
         )}
 
         {activeTab === 'automations' && (
-          <BuddyAutomationsTab
-            buddyId={employee.buddy.id}
-            workspaceId={workspace?.id}
-            automations={automations}
-            approvals={employee.approvals ?? []}
-            busy={busy !== null}
-            mutate={mutate}
-            refresh={loadEmployee}
-            onError={setError}
-            onOpenConversation={(conversationId) => navigate(`/chat/${conversationId}`)}
-          />
+          <>
+            {automationError && (
+              <div className="buddies-error" role="alert">
+                Automations are unavailable: {automationError}
+              </div>
+            )}
+            <BuddyAutomationsTab
+              buddyId={employee.buddy.id}
+              workspaceId={workspace?.id}
+              automations={automations}
+              approvals={employee.approvals ?? []}
+              busy={busy !== null}
+              mutate={mutate}
+              refresh={loadAutomations}
+              onError={setError}
+              onOpenConversation={(conversationId) => navigate(`/chat/${conversationId}`)}
+            />
+          </>
         )}
       </main>
       {error && (

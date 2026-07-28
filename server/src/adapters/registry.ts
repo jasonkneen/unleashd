@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { codexTurnInterruptionNotices, extractCodexTurnLifecycle } from './codex-turn-lifecycle';
 import type { DiskAdapter, ParsedSession } from './disk-adapter';
 import {
   CLAUDE_PROJECTS_DIR,
@@ -104,6 +105,15 @@ const codexAdapter: DiskAdapter = {
     if (session.entries.length === 0) return null;
 
     const messages = extractMessagesFromCodexEntries(session.entries);
+    const lifecycle = extractCodexTurnLifecycle(session.entries);
+    for (const notice of codexTurnInterruptionNotices(lifecycle)) {
+      messages.push({
+        role: 'system',
+        content: notice.content,
+        timestamp: notice.timestamp,
+      });
+    }
+    messages.sort((left, right) => left.timestamp.getTime() - right.timestamp.getTime());
 
     return {
       sessionId: session.sessionId,

@@ -1,6 +1,7 @@
 export interface PollCycleResult<TUpdate> {
   updated: Map<string, TUpdate>;
   mtimes: Map<string, number>;
+  deferredDirtyPaths?: ReadonlySet<string>;
 }
 
 export interface ExternalActivityPort {
@@ -45,8 +46,18 @@ export function createFilePoller<TUpdate, TBroadcast>(
   async function pollOnce(): Promise<void> {
     try {
       const activeIdsAtPollStart = ports.collectActiveIds();
-      const { updated, mtimes } = await ports.poll(ports.getMtimes(), activeIdsAtPollStart);
-      ports.setMtimes(mtimes);
+      const previousMtimes = ports.getMtimes();
+      const { updated, mtimes, deferredDirtyPaths } = await ports.poll(
+        previousMtimes,
+        activeIdsAtPollStart
+      );
+      const nextMtimes = new Map(mtimes);
+      for (const dirtyPath of deferredDirtyPaths ?? []) {
+        const previousMtime = previousMtimes.get(dirtyPath);
+        if (previousMtime === undefined) nextMtimes.delete(dirtyPath);
+        else nextMtimes.set(dirtyPath, previousMtime);
+      }
+      ports.setMtimes(nextMtimes);
 
       const activeIds = ports.collectActiveIds();
       for (const activeId of activeIdsAtPollStart) activeIds.add(activeId);

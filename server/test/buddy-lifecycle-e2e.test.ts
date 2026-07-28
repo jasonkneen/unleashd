@@ -79,12 +79,15 @@ test('Buddy closure loop survives restart with work, review, delegation, memory,
     buddyId: lead.id,
     workspaceId: workspace.id,
     buddyProjectId: project.id,
+    allowedBuddyOperations: ['buddy.get_current_work'],
   });
   assert.equal(resolved.context.buddyId, lead.id);
   assert.equal(resolved.workingDirectory, workspaceRoot);
   assert.match(resolved.briefing, /Close GTM work with evidence/);
   assert.match(resolved.briefing, /Adjudicate concierge onboarding proof/);
   assert.match(resolved.briefing, /native `unleashd_buddy` tools/);
+  assert.deepEqual(resolved.context.allowedBuddyOperations, ['buddy.get_current_work']);
+  assert.ok(resolved.briefing.length <= 40_000);
 
   await integration.createLink({
     id: 'lead-conversation',

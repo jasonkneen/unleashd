@@ -1189,6 +1189,9 @@ const SWARM_DEBUG_PREFIX_RE =
 
 const BUDDY_CONTEXT_RE =
   /^<!-- unleashd:buddy-context (.+) -->\n[\s\S]*?\n<!-- \/unleashd:buddy-context -->\n\n/;
+const BUDDY_CONTEXT_V2_HEADER_RE =
+  /^<!-- unleashd:buddy-context-v2 ([A-Za-z0-9_-]+) ([0-9]+) -->\n/;
+const BUDDY_CONTEXT_V2_SUFFIX = '\n<!-- /unleashd:buddy-context-v2 -->\n\n';
 
 /**
  * Recover typed Buddy ownership while removing the hidden first-turn briefing
@@ -1198,6 +1201,30 @@ const BUDDY_CONTEXT_RE =
 export function extractBuddyContext(messages: Message[]): BuddyContext | null {
   const firstUserMsg = messages.find((message) => message.role === 'user');
   if (!firstUserMsg) return null;
+  const v2Header = firstUserMsg.content.match(BUDDY_CONTEXT_V2_HEADER_RE);
+  if (v2Header) {
+    const briefingLength = Number.parseInt(v2Header[2], 10);
+    const briefingStart = v2Header[0].length;
+    const suffixStart = briefingStart + briefingLength;
+    if (
+      !Number.isSafeInteger(briefingLength) ||
+      briefingLength < 0 ||
+      !firstUserMsg.content.startsWith(BUDDY_CONTEXT_V2_SUFFIX, suffixStart)
+    ) {
+      firstUserMsg.content = '[Buddy context recovery failed; hidden briefing removed]';
+      return null;
+    }
+    const visibleStart = suffixStart + BUDDY_CONTEXT_V2_SUFFIX.length;
+    firstUserMsg.content = firstUserMsg.content.slice(visibleStart);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(Buffer.from(v2Header[1], 'base64url').toString('utf8'));
+    } catch {
+      return null;
+    }
+    const parsed = BuddyContextSchema.safeParse(payload);
+    return parsed.success ? parsed.data : null;
+  }
   const match = firstUserMsg.content.match(BUDDY_CONTEXT_RE);
   if (!match) return null;
   let payload: unknown;

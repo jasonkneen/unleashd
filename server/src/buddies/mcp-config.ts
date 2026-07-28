@@ -7,6 +7,14 @@ export const BUDDY_MCP_SERVER_NAME = 'unleashd_buddy';
 export interface BuddyMcpLaunch {
   command: string;
   args: string[];
+  cwd?: string;
+}
+
+function buddyApiBaseUrl(): string {
+  const configured = process.env.UNLEASHD_BUDDY_API_BASE?.trim();
+  if (configured) return configured.replace(/\/+$/, '');
+  const port = process.env.PORT?.trim() || '7489';
+  return `http://127.0.0.1:${port}`;
 }
 
 function tomlString(value: string): string {
@@ -23,6 +31,7 @@ export function resolveBuddyMcpLaunch(): BuddyMcpLaunch {
     return {
       command: process.execPath,
       args: [compiledEntrypoint],
+      cwd: path.resolve(__dirname, '../..'),
     };
   }
 
@@ -30,6 +39,10 @@ export function resolveBuddyMcpLaunch(): BuddyMcpLaunch {
   return {
     command: process.execPath,
     args: ['--import', 'tsx', sourceEntrypoint],
+    // The provider process runs in the Buddy workspace, which is usually a
+    // different repository. Resolve the source loader from Unleashd instead
+    // of asking that workspace to have `tsx` installed.
+    cwd: path.resolve(__dirname, '../..'),
   };
 }
 
@@ -46,6 +59,8 @@ export function buddyCodexMcpArgs(
     context.workspaceId,
     '--conversation',
     conversationId,
+    '--api-base',
+    buddyApiBaseUrl(),
   ];
   if (context.buddyProjectId) {
     args.push('--project', context.buddyProjectId);
@@ -53,12 +68,23 @@ export function buddyCodexMcpArgs(
   if (context.automationRunId) {
     args.push('--automation-run', context.automationRunId);
   }
-  return [
+  for (const operation of context.allowedBuddyOperations ?? []) {
+    args.push('--allowed-operation', operation);
+  }
+  const config = [
     '-c',
     `mcp_servers.${BUDDY_MCP_SERVER_NAME}.command=${tomlString(launch.command)}`,
     '-c',
     `mcp_servers.${BUDDY_MCP_SERVER_NAME}.args=${tomlStringArray(args)}`,
     '-c',
     `mcp_servers.${BUDDY_MCP_SERVER_NAME}.enabled=true`,
+    '-c',
+    // Buddy state tools are part of the employee contract. Failing the turn
+    // is more truthful than silently running without the promised controls.
+    `mcp_servers.${BUDDY_MCP_SERVER_NAME}.required=true`,
   ];
+  if (launch.cwd) {
+    config.push('-c', `mcp_servers.${BUDDY_MCP_SERVER_NAME}.cwd=${tomlString(launch.cwd)}`);
+  }
+  return config;
 }

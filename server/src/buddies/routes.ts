@@ -2,6 +2,10 @@ import type { BuddyContext } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import type { BuddiesStorePort, BuddyAutomation, BuddyAutomationRun } from './contract';
 import { BUDDY_REVIEW_RESULT_INSTRUCTIONS } from './integration';
+import {
+  resolveDelegatedBuddyOperations,
+  REVIEW_BUDDY_OPERATIONS,
+} from './operations';
 
 export interface BuddyConversationView {
   id: string;
@@ -177,8 +181,14 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
   });
 
   app.post('/api/buddies/:buddyId/delegations', async (req: Request, res: Response) => {
-    const { toBuddyId, workspaceId, buddyProjectId, purpose, parentConversationId } =
-      req.body ?? {};
+    const {
+      toBuddyId,
+      workspaceId,
+      buddyProjectId,
+      purpose,
+      parentConversationId,
+      allowedOperations,
+    } = req.body ?? {};
     if (
       typeof toBuddyId !== 'string' ||
       typeof workspaceId !== 'string' ||
@@ -188,47 +198,112 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
       return;
     }
     let delegationId: string | null = null;
+    let dispatchToken: string | null = null;
     try {
+      const delegatedOperations = resolveDelegatedBuddyOperations(allowedOperations);
       const buddies = await getStore();
-      const delegation = buddies.createDelegation({
-        fromBuddy: req.params.buddyId,
-        toBuddy: toBuddyId,
-        workspace: workspaceId,
-        project: typeof buddyProjectId === 'string' ? buddyProjectId : undefined,
-        purpose,
-        parentConversationId:
-          typeof parentConversationId === 'string' ? parentConversationId : undefined,
-      });
+      const relationships = buddies.listBuddyRelationships(req.params.buddyId) as Array<{
+        from_buddy_id: string;
+        to_buddy_id: string;
+        kind: string;
+      }>;
+      const isDirectReport = relationships.some(
+        (relationship) =>
+          (relationship.from_buddy_id === req.params.buddyId &&
+            relationship.to_buddy_id === toBuddyId &&
+            relationship.kind === 'manager') ||
+          (relationship.from_buddy_id === toBuddyId &&
+            relationship.to_buddy_id === req.params.buddyId &&
+            relationship.kind === 'reports_to')
+      );
+      if (!isDirectReport) {
+        throw new Error('Target Buddy is not a direct report of this employee');
+      }
+      const normalizedParent =
+        typeof parentConversationId === 'string' ? parentConversationId : null;
+      const existing = buddies
+        .listDelegations({ buddy: req.params.buddyId, workspace: workspaceId })
+        .find(
+          (candidate) =>
+            candidate.from_buddy_id === req.params.buddyId &&
+            candidate.to_buddy_id === toBuddyId &&
+            candidate.purpose === purpose &&
+            candidate.parent_conversation_id === normalizedParent &&
+            (candidate.status === 'pending' || candidate.status === 'active')
+        );
+      if (existing?.child_conversation_id) {
+        res.status(200).json({ delegation: existing, alreadyDispatched: true });
+        return;
+      }
+      const delegation =
+        existing ??
+        buddies.createDelegation({
+          fromBuddy: req.params.buddyId,
+          toBuddy: toBuddyId,
+          workspace: workspaceId,
+          project: typeof buddyProjectId === 'string' ? buddyProjectId : undefined,
+          purpose,
+          parentConversationId: normalizedParent ?? undefined,
+        });
       delegationId = delegation.id;
+      dispatchToken = createId();
+      const claim = buddies.claimDelegationDispatch(delegation.id, {
+        claimToken: dispatchToken,
+        leaseSeconds: 300,
+      });
+      if (!claim.dispatch_claim_acquired) {
+        if (claim.child_conversation_id) {
+          res.status(200).json({ delegation: claim, alreadyDispatched: true });
+        } else {
+          res.status(409).json({
+            error: 'Delegation dispatch is already claimed by another executor',
+            delegation: claim,
+          });
+        }
+        return;
+      }
       const conversation = await createConversation({
         context: {
           buddyId: toBuddyId,
           workspaceId,
-          buddyProjectId: typeof buddyProjectId === 'string' ? buddyProjectId : null,
+          // The linked project belongs to the delegating manager. The report
+          // returns evidence through the assignment; it does not inherit
+          // mutation authority over the manager's project.
+          buddyProjectId: null,
           delegatedByBuddyId: req.params.buddyId,
           parentBuddyConversationId:
             typeof parentConversationId === 'string' ? parentConversationId : null,
+          allowedBuddyOperations: delegatedOperations,
         },
         commandId: `buddy-delegation-${delegation.id}`,
         initialMessage: [
           `Delegated by Buddy ${req.params.buddyId}.`,
+          `Delegation id: ${delegation.id}.`,
+          typeof buddyProjectId === 'string'
+            ? `Supervising project id: ${buddyProjectId}. The project remains owned by the delegating employee.`
+            : 'No supervising Buddy project was selected.',
           `Purpose: ${purpose}`,
-          'Own this bounded assignment, update durable project/todo state, and report the outcome.',
+          `Allowed Buddy operations: ${delegatedOperations.join(', ')}.`,
+          'Own this bounded assignment within that operation policy.',
+          'When the definition of done is actually satisfied, call complete_assignment with concrete evidence. A completed model turn alone does not complete the assignment.',
         ].join('\n'),
       });
-      const active = buddies.updateDelegation(delegation.id, {
-        status: 'active',
+      const active = buddies.bindDelegationConversation(delegation.id, {
+        claimToken: dispatchToken,
         childConversationId: conversation.id,
       });
       res.status(201).json({ delegation: active, conversation: conversation.toJSON() });
     } catch (error) {
-      if (delegationId) {
-        void getStore().then((store) =>
-          store.updateDelegation(delegationId!, {
-            status: 'failed',
-            outcome: error instanceof Error ? error.message : String(error),
-          })
-        );
+      if (delegationId && dispatchToken) {
+        try {
+          const buddies = await getStore();
+          buddies.failDelegationDispatch(delegationId, {
+            claimToken: dispatchToken,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } catch {
+          // Preserve the original dispatch error; another executor may own the lease.
+        }
       }
       sendError(res, error, 400);
     }
@@ -239,6 +314,107 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
       const buddies = await getStore();
       res.json(buddies.updateDelegation(req.params.delegationId, req.body ?? {}));
     } catch (error) {
+      sendError(res, error, 400);
+    }
+  });
+
+  app.post('/api/buddies/:buddyId/review-requests', async (req: Request, res: Response) => {
+    const {
+      reviewerBuddyId,
+      subjectBuddyId,
+      workspaceId,
+      buddyProjectId,
+      purpose,
+      evidence,
+    } = req.body ?? {};
+    if (
+      typeof reviewerBuddyId !== 'string' ||
+      typeof subjectBuddyId !== 'string' ||
+      typeof workspaceId !== 'string' ||
+      typeof purpose !== 'string'
+    ) {
+      res.status(400).json({
+        error: 'reviewerBuddyId, subjectBuddyId, workspaceId, and purpose are required',
+      });
+      return;
+    }
+    let reviewId: string | null = null;
+    try {
+      const buddies = await getStore();
+      const relationships = buddies.listBuddyRelationships(req.params.buddyId) as Array<{
+        from_buddy_id: string;
+        to_buddy_id: string;
+        kind: string;
+      }>;
+      const manageable = new Set([req.params.buddyId]);
+      for (const relationship of relationships) {
+        if (
+          relationship.from_buddy_id === req.params.buddyId &&
+          relationship.kind === 'manager'
+        ) {
+          manageable.add(relationship.to_buddy_id);
+        }
+        if (
+          relationship.to_buddy_id === req.params.buddyId &&
+          relationship.kind === 'reports_to'
+        ) {
+          manageable.add(relationship.from_buddy_id);
+        }
+      }
+      if (!manageable.has(reviewerBuddyId) || !manageable.has(subjectBuddyId)) {
+        throw new Error('Reviewer and subject must be this employee or a direct report');
+      }
+      if (reviewerBuddyId === subjectBuddyId) throw new Error('A Buddy cannot review itself');
+
+      const conversationId = createId();
+      const review = buddies.createReview({
+        reviewer: reviewerBuddyId,
+        subject: subjectBuddyId,
+        workspace: workspaceId,
+        project: typeof buddyProjectId === 'string' ? buddyProjectId : undefined,
+        conversationId,
+        evidence: Array.isArray(evidence) ? evidence : [],
+      });
+      reviewId = review.id;
+      const conversation = await createConversation({
+        conversationId,
+        context: {
+          buddyId: reviewerBuddyId,
+          workspaceId,
+          buddyProjectId: null,
+          delegatedByBuddyId: req.params.buddyId,
+          parentBuddyConversationId:
+            typeof req.body?.parentConversationId === 'string'
+              ? req.body.parentConversationId
+              : null,
+          allowedBuddyOperations: REVIEW_BUDDY_OPERATIONS,
+        },
+        commandId: `buddy-review-${review.id}`,
+        initialMessage: [
+          `Review requested by Buddy ${req.params.buddyId}.`,
+          `Review id: ${review.id}.`,
+          `Review Buddy ${subjectBuddyId}.`,
+          typeof buddyProjectId === 'string'
+            ? `Reviewed project id: ${buddyProjectId}.`
+            : 'No Buddy project was selected.',
+          `Review purpose: ${purpose}`,
+          `Input evidence: ${JSON.stringify(Array.isArray(evidence) ? evidence : [])}`,
+          `Allowed Buddy operations: ${REVIEW_BUDDY_OPERATIONS.join(', ')}.`,
+          'Use the native submit_review operation with a structured verdict, score, summary, concrete evidence, and required actions.',
+          'The legacy result block below is a compatibility fallback only.',
+          BUDDY_REVIEW_RESULT_INSTRUCTIONS,
+        ].join('\n'),
+      });
+      res.status(201).json({ review, conversation: conversation.toJSON() });
+    } catch (error) {
+      if (reviewId) {
+        try {
+          const buddies = await getStore();
+          buddies.updateReview(reviewId, { status: 'cancelled' });
+        } catch {
+          // Preserve the original dispatch error.
+        }
+      }
       sendError(res, error, 400);
     }
   });
@@ -269,13 +445,17 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
         context: {
           buddyId: req.params.buddyId,
           workspaceId,
-          buddyProjectId: typeof buddyProjectId === 'string' ? buddyProjectId : null,
+          // The reviewed project belongs to the subject, not the reviewer.
+          buddyProjectId: null,
+          allowedBuddyOperations: REVIEW_BUDDY_OPERATIONS,
         },
         commandId: `buddy-review-${review.id}`,
         initialMessage: [
           `Review Buddy ${subjectBuddyId}.`,
+          `Review id: ${review.id}.`,
           `Review purpose: ${purpose}`,
-          'Return a structured verdict, score, summary, and concrete evidence.',
+          'Use the native submit_review operation with a structured verdict, score, summary, concrete evidence, and required actions.',
+          'The legacy result block below is a compatibility fallback only.',
           BUDDY_REVIEW_RESULT_INSTRUCTIONS,
         ].join('\n'),
       });

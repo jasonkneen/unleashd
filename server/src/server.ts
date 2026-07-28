@@ -38,6 +38,7 @@ import { createKnownProjectAuthorizer } from './http/known-projects';
 import { resolveWorkingDirectoryInput } from './http/path-utils';
 import { PersistedServerState } from './http/persisted-state';
 import { registerSearchRoutes } from './http/search-routes';
+import { registerTurnDiagnosticsRoutes } from './http/turn-diagnostics-routes';
 import { registerUploadRoutes } from './http/upload-routes';
 import { registerUsageRoutes } from './http/usage-routes';
 import { ensureLocalDomain } from './lifecycle/local-domain';
@@ -47,6 +48,7 @@ import { runServerStartup } from './lifecycle/startup';
 import { registerStaticClient } from './lifecycle/static-client';
 import { registerMergeRoutes } from './merge/routes';
 import { resolveListenHost } from './network';
+import { TurnAttemptJournal, createJournalTurnAttemptObserver } from './observability';
 import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
 import { getProvider, providers } from './providers';
@@ -84,6 +86,10 @@ const conversationConfigService = new ConversationConfigService({
   },
 });
 const persistedServerState = new PersistedServerState(APP_DATA_DIR, setIgnorePatterns);
+const turnAttemptJournal = new TurnAttemptJournal({
+  directory: path.join(APP_DATA_DIR, 'observability'),
+});
+const turnAttemptObserver = createJournalTurnAttemptObserver(turnAttemptJournal);
 let buddyScheduler: BuddyScheduler | null = null;
 
 const applicationContext = createConversationApplicationContext<ConversationRuntime>({
@@ -156,6 +162,7 @@ const Conversation = createConversationRuntime({
   getConversation: (id) => conversations.get(id),
   readLatestOompaRuntime: readLatestSwarmRuntime,
   createSessionId: uuidv4,
+  turnAttempts: turnAttemptObserver,
 });
 
 registerConversationWebSocket(wss, {
@@ -190,6 +197,7 @@ app.use(express.json({ limit: '50mb' }));
 const UPLOADS_DIR = path.join(APP_DATA_DIR, 'uploads');
 registerUploadRoutes(app, UPLOADS_DIR);
 registerCoreRoutes(app, () => startupAuditResults);
+registerTurnDiagnosticsRoutes(app, turnAttemptJournal);
 
 persistedServerState.registerRoutes(app);
 
@@ -298,7 +306,10 @@ registerShutdownHandlers(
   {
     conversations: () => conversations.values(),
     stopScheduler: () => buddyScheduler?.stop(),
-    flushState: () => persistedServerState.flushUIStateSync(),
+    flushState: async () => {
+      persistedServerState.flushUIStateSync();
+      await turnAttemptJournal.flush();
+    },
     broadcastMessage: (conversationId, content) => {
       applicationContext.broadcast({ type: 'message', conversationId, role: 'system', content });
     },
@@ -345,6 +356,7 @@ void runServerStartup(
     server,
     initialize: async () => {
       startupAuditResults = auditLocalAgents();
+      await turnAttemptJournal.initialize();
       await persistedServerState.initialize();
       await paletteService.initialize();
     },

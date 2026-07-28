@@ -29,6 +29,7 @@ import {
   TURN_MAX_RUNTIME_MS,
   TURN_TIMEOUT_KILL_GRACE_MS,
 } from '../constants/timeouts';
+import type { RuntimeTurnAttemptObserver, TurnTerminalCause } from '../observability';
 import type { ProviderEvent } from '../providers';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
 import {
@@ -107,11 +108,13 @@ export interface ConversationRuntimeDependencies {
   getConversation(id: string): { isRunning: boolean } | undefined;
   readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot;
   createSessionId(): string;
+  turnAttempts?: RuntimeTurnAttemptObserver;
 }
 
 const VERBOSE = process.env.VERBOSE === '1' || process.argv.includes('--verbose');
 const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 const LOG_CONTENT_PREVIEW_CHARS = 140;
+const ATTEMPT_ACTIVITY_INTERVAL_MS = 5_000;
 
 function formatLogPreview(content: string, maxChars = LOG_CONTENT_PREVIEW_CHARS): string {
   return content.replace(/\s+/g, ' ').slice(0, maxChars);
@@ -180,7 +183,7 @@ export interface ConversationRuntime extends EventEmitter, ConversationRuntimeVi
   readonly reasoningEffort: string | undefined;
   sendMessage(content: string): void;
   spawnMergeReviewFork(content: string, forkSourceSessionId: string): void;
-  stop(): void;
+  stop(reason?: 'user_stop' | 'server_restart'): void;
   resetProcess(): void;
   enqueueMessage(content: string): void;
   interruptAndSend(content: string): void;
@@ -197,6 +200,16 @@ export interface ConversationRuntime extends EventEmitter, ConversationRuntimeVi
 
 export type ConversationConstructor = new (options: ConversationOptions) => ConversationRuntime;
 
+const NOOP_TURN_ATTEMPT_OBSERVER: RuntimeTurnAttemptObserver = {
+  queued: () => undefined,
+  starting: () => undefined,
+  running: () => undefined,
+  bindProviderSession: () => undefined,
+  activity: () => undefined,
+  stopping: () => undefined,
+  terminal: () => undefined,
+};
+
 export function buildFirstTurnCliContent(input: {
   content: string;
   messageCount: number;
@@ -211,8 +224,10 @@ export function buildFirstTurnCliContent(input: {
   // prefix reaches the provider.
   if (input.buddyContext !== null) {
     if (!firstUnstartedTurn || input.buddyBriefing === null) return input.content;
-    const serializedContext = JSON.stringify(input.buddyContext);
-    return `<!-- unleashd:buddy-context ${serializedContext} -->\n${input.buddyBriefing}\n<!-- /unleashd:buddy-context -->\n\n${input.content}`;
+    const encodedContext = Buffer.from(JSON.stringify(input.buddyContext), 'utf8').toString(
+      'base64url'
+    );
+    return `<!-- unleashd:buddy-context-v2 ${encodedContext} ${input.buddyBriefing.length} -->\n${input.buddyBriefing}\n<!-- /unleashd:buddy-context-v2 -->\n\n${input.content}`;
   }
   if (input.swarmDebugPrefix !== null && firstUnstartedTurn) {
     return `<!-- unleashd:swarm-prefix -->\n${input.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${input.content}`;
@@ -236,6 +251,7 @@ export function createConversationRuntime(
     getConversation,
     readLatestOompaRuntime,
     createSessionId,
+    turnAttempts = NOOP_TURN_ATTEMPT_OBSERVER,
   } = dependencies;
 
   return class Conversation extends EventEmitter {
@@ -292,14 +308,6 @@ export function createConversationRuntime(
     private _stderrBuffer: string;
     // Tracks whether we received provider stream events for this process run.
     private _sawStdoutEventThisRun: boolean;
-    // When true, close handler is a no-op — resetProcess() handles its own cleanup.
-    // Prevents duplicate broadcasts and spurious dequeue during loop context resets.
-    private _isResetting: boolean;
-    // Sticky flag set alongside _isResetting in resetProcess(). Unlike _isResetting
-    // (which is cleared in the close handler), this stays true until the *next*
-    // spawnForMessage() call. Prevents ghost errors when the consumeEvents iterator
-    // rejects after the close handler has already cleared _isResetting.
-    private _wasResetDuringThisRun: boolean;
     // Start time of the current CLI process run (for duration tracking).
     private _processStartTime = 0;
     // Last provider event timestamp for idle-hang detection.
@@ -321,6 +329,14 @@ export function createConversationRuntime(
     // The close handler checks this to skip redundant work on normal completion, while still
     // running full cleanup on crash/kill/error paths where message_complete never fired.
     private _turnCompletedCleanly = false;
+    private _activeAttemptId: string | null = null;
+    private _nextAttempt: { attemptId: string; queueMessageId?: string } | null = null;
+    private _queuedAttemptIds = new Map<string, string>();
+    private _terminalCauseHint: TurnTerminalCause | null = null;
+    private _stopCause: 'user_stop' | 'server_restart' | null = null;
+    private _lastAttemptActivityAt = 0;
+    private _runToken = 0;
+    private _activeTurnStop: ((signal?: NodeJS.Signals) => void) | null = null;
 
     constructor(opts: ConversationOptions) {
       super();
@@ -377,8 +393,6 @@ export function createConversationRuntime(
       this._hasStartedSession = existingSessionId !== undefined;
       this._stderrBuffer = '';
       this._sawStdoutEventThisRun = false;
-      this._isResetting = false;
-      this._wasResetDuringThisRun = false;
       this._lastSwarmRunId = null;
       this._hasSwarmBaseline = false;
     }
@@ -392,6 +406,57 @@ export function createConversationRuntime(
      *
      * First turn omits resumeSessionId; subsequent turns resume with the captured session ID.
      */
+    private _prepareTurnAttempt(queueMessageId?: string): string {
+      const prepared = this._nextAttempt;
+      this._nextAttempt = null;
+      if (prepared) {
+        this._activeAttemptId = prepared.attemptId;
+        return prepared.attemptId;
+      }
+      const attemptId = crypto.randomUUID();
+      turnAttempts.queued({
+        attemptId,
+        conversationId: this.id,
+        ...(queueMessageId ? { queueMessageId } : {}),
+        providerSessionId: this.sessionId,
+      });
+      this._activeAttemptId = attemptId;
+      return attemptId;
+    }
+
+    private _finishTurnAttempt(
+      state: 'succeeded' | 'failed' | 'cancelled' | 'interrupted',
+      terminalCause: TurnTerminalCause
+    ): void {
+      if (!this._activeAttemptId) return;
+      turnAttempts.terminal({
+        attemptId: this._activeAttemptId,
+        state,
+        terminalCause,
+        providerSessionId: this.sessionId,
+      });
+      for (const [queueMessageId, attemptId] of this._queuedAttemptIds) {
+        if (attemptId === this._activeAttemptId) {
+          this._queuedAttemptIds.delete(queueMessageId);
+        }
+      }
+      this._activeAttemptId = null;
+      this._terminalCauseHint = null;
+      this._stopCause = null;
+    }
+
+    private _cancelQueuedAttempt(queueMessageId: string): void {
+      const attemptId = this._queuedAttemptIds.get(queueMessageId);
+      if (!attemptId) return;
+      turnAttempts.terminal({
+        attemptId,
+        state: 'cancelled',
+        terminalCause: 'user_stop',
+        providerSessionId: this.sessionId,
+      });
+      this._queuedAttemptIds.delete(queueMessageId);
+    }
+
     private spawnForMessage(
       content: string,
       executionConfig: ResolvedExecutionConfig,
@@ -401,6 +466,7 @@ export function createConversationRuntime(
         console.warn(`[${this.id}] Already processing a message, ignoring`);
         return;
       }
+      const runToken = ++this._runToken;
 
       // This session is now being handled locally; clear any stale external flags.
       clearExternalRunningStatus(this.id, this.sessionId);
@@ -417,9 +483,12 @@ export function createConversationRuntime(
       this._stderrBuffer = '';
       this._sawStdoutEventThisRun = false;
       this._turnCompletedCleanly = false;
-      this._wasResetDuringThisRun = false;
+      this._terminalCauseHint = null;
+      this._stopCause = null;
       this._processStartTime = Date.now();
+      this._lastAttemptActivityAt = 0;
       this._primeSwarmBaseline();
+      if (this._activeAttemptId) turnAttempts.starting(this._activeAttemptId);
 
       // Per-provider narrowing: ExecuteCommandRequest is a discriminated union
       // keyed on `harness`. Reasoning effort is a pass-through string — the
@@ -437,28 +506,38 @@ export function createConversationRuntime(
         detached: true,
         debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
       };
-      const turn = executeCommand(
-        executionConfig.provider === 'claude'
-          ? {
-              harness: 'claude',
-              ...baseRequest,
-              reasoningEffort: executionConfig.reasoningEffort,
-            }
-          : executionConfig.provider === 'codex'
+      let turn: ReturnType<typeof executeCommand>;
+      try {
+        turn = executeCommand(
+          executionConfig.provider === 'claude'
             ? {
-                harness: 'codex',
+                harness: 'claude',
                 ...baseRequest,
                 reasoningEffort: executionConfig.reasoningEffort,
-                extraArgs:
-                  this.buddyContext !== null
-                    ? buddyCodexMcpArgs(this.buddyContext, this.id)
-                    : undefined,
               }
-            : { harness: executionConfig.provider, ...baseRequest }
-      );
+            : executionConfig.provider === 'codex'
+              ? {
+                  harness: 'codex',
+                  ...baseRequest,
+                  reasoningEffort: executionConfig.reasoningEffort,
+                  extraArgs:
+                    this.buddyContext !== null
+                      ? buddyCodexMcpArgs(this.buddyContext, this.id)
+                      : undefined,
+                }
+              : { harness: executionConfig.provider, ...baseRequest }
+        );
+      } catch (error) {
+        this._finishTurnAttempt('failed', 'spawn_failed');
+        throw error;
+      }
 
       this.process = turn.child;
+      this._activeTurnStop = turn.stop;
       this.isRunning = true;
+      if (this._activeAttemptId) {
+        turnAttempts.running(this._activeAttemptId, this.sessionId);
+      }
       updateBuddyConversationLink(this, 'active');
       this.emit('buddy-turn-started');
       this._hasStartedSession = true; // Mark session as started for next message
@@ -467,6 +546,7 @@ export function createConversationRuntime(
 
       const consumeEvents = async (): Promise<void> => {
         for await (const event of turn.events) {
+          if (runToken !== this._runToken) return;
           this._noteTurnActivity();
           switch (event.type) {
             case 'session.started': {
@@ -480,6 +560,9 @@ export function createConversationRuntime(
               }
               registerSessionAlias(event.sessionId, this.id);
               await persistCurrentConversationSession(this, event.sessionId);
+              if (this._activeAttemptId) {
+                turnAttempts.bindProviderSession(this._activeAttemptId, event.sessionId);
+              }
               broadcast({
                 type: 'session_bound',
                 conversationId: this.id,
@@ -507,6 +590,7 @@ export function createConversationRuntime(
               break;
             }
             case 'out_of_tokens': {
+              this._terminalCauseHint = 'out_of_tokens';
               this.handleOutput({
                 type: 'error',
                 message: normalizeProviderErrorMessage(event.message),
@@ -514,6 +598,7 @@ export function createConversationRuntime(
               break;
             }
             case 'error': {
+              this._terminalCauseHint = 'provider_error';
               this.handleOutput({
                 type: 'error',
                 message: normalizeProviderErrorMessage(event.message),
@@ -550,17 +635,16 @@ export function createConversationRuntime(
       };
 
       void consumeEvents().catch((err: unknown) => {
-        // Intentional kill from resetProcess(). _isResetting is live during async
-        // close; _wasResetDuringThisRun is sticky and catches late rejections that
-        // arrive after the close handler has already cleared _isResetting.
-        if (this._isResetting || this._wasResetDuringThisRun) return;
+        if (runToken !== this._runToken) return;
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[${this.id}] Event stream error: ${message}`);
+        this._terminalCauseHint = 'provider_error';
         this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(message) });
       });
 
       void turn.completed
         .then(async ({ exitCode, sessionId, reason }) => {
+          if (runToken !== this._runToken) return;
           this._clearTurnWatchdogs();
           if (sessionId && sessionId !== this.sessionId) {
             const oldSessionId = this.sessionId;
@@ -568,6 +652,9 @@ export function createConversationRuntime(
             unregisterSessionAlias(oldSessionId, { keepKnown: true });
             registerSessionAlias(sessionId, this.id);
             await persistCurrentConversationSession(this, sessionId);
+            if (this._activeAttemptId) {
+              turnAttempts.bindProviderSession(this._activeAttemptId, sessionId);
+            }
           }
 
           const durationMs = Date.now() - this._processStartTime;
@@ -575,22 +662,11 @@ export function createConversationRuntime(
             `[${this.id}] Process closed with code ${exitCode} (reason=${reason}) after ${durationMs}ms`
           );
 
-          // resetProcess() handles its own cleanup. If _isResetting, the kill was
-          // intentional (loop context clear) and the loop engine will immediately
-          // call sendMessage() and spawn the next iteration. Skip all cleanup here.
-          // NOTE: _isResetting is cleared HERE (not in resetProcess) because
-          // process.kill() triggers this close handler asynchronously via the
-          // turn.completed promise. Clearing it synchronously in resetProcess()
-          // races: by the time this .then() fires, the flag is already false.
-          if (this._isResetting) {
-            this._isResetting = false;
-            return;
-          }
-
           // message_complete already handled state cleanup and broadcast.
           // Just null the process ref, dequeue, and continue.
           if (this._turnCompletedCleanly) {
             this.process = null;
+            this._activeTurnStop = null;
             this._pendingTaskTools.clear();
             clearExternalRunningStatus(this.id, this.sessionId);
             markLocalCompletionSuppression(this.id, this.sessionId);
@@ -600,6 +676,21 @@ export function createConversationRuntime(
             }
             this.processQueue();
             return;
+          }
+
+          if (reason === 'killed' && this._stopCause) {
+            this._finishTurnAttempt(
+              this._stopCause === 'server_restart' ? 'interrupted' : 'cancelled',
+              this._stopCause
+            );
+          } else if (reason === 'out_of_tokens' || this._terminalCauseHint === 'out_of_tokens') {
+            this._finishTurnAttempt('failed', 'out_of_tokens');
+          } else if (this._terminalCauseHint === 'provider_error') {
+            this._finishTurnAttempt('failed', 'provider_error');
+          } else if (reason === 'killed') {
+            this._finishTurnAttempt('failed', 'process_killed');
+          } else {
+            this._finishTurnAttempt('failed', 'process_exit');
           }
 
           const emitSystemMessage = (content: string): void => {
@@ -658,6 +749,7 @@ export function createConversationRuntime(
           this.isStreaming = false;
           this.isRunning = false;
           this.process = null;
+          this._activeTurnStop = null;
           // Clear pending task tools — message_complete handles the normal path, but
           // kills/crashes skip it, leaving stale entries that accumulate across runs.
           this._pendingTaskTools.clear();
@@ -681,13 +773,16 @@ export function createConversationRuntime(
           this.processQueue();
         })
         .catch((err: unknown) => {
+          if (runToken !== this._runToken) return;
           this._clearTurnWatchdogs();
           const message = err instanceof Error ? err.message : String(err);
           console.error(`[${this.id}] Process completion error: ${message}`);
+          this._finishTurnAttempt('failed', 'process_exit');
           this.handleOutput({ type: 'error', message: normalizeProviderErrorMessage(message) });
           this.isStreaming = false;
           this.isRunning = false;
           this.process = null;
+          this._activeTurnStop = null;
           this._pendingTaskTools.clear();
           this.broadcastStatus();
           updateBuddyConversationLink(this, 'failed');
@@ -695,6 +790,9 @@ export function createConversationRuntime(
           this.emit('buddy-turn-failed', message);
           if (this.queue.length > 0) {
             const removed = this.queue.length;
+            for (const queued of this.queue) {
+              if (queued.status === 'pending') this._cancelQueuedAttempt(queued.id);
+            }
             this.queue = [];
             console.warn(
               `[${this.id}] Cleared ${removed} pending message(s) due to process error to prevent retry loops.`
@@ -1044,6 +1142,22 @@ export function createConversationRuntime(
           // Clear watchdog timers immediately — the turn completed normally.
           // Without this they dangle until process close, risking a spurious timeout.
           this._clearTurnWatchdogs();
+          if (event.reason === 'out_of_tokens' || this._terminalCauseHint === 'out_of_tokens') {
+            this._finishTurnAttempt('failed', 'out_of_tokens');
+          } else if (event.reason === 'error' || this._terminalCauseHint === 'provider_error') {
+            this._finishTurnAttempt('failed', 'provider_error');
+          } else if (event.reason === 'killed') {
+            this._finishTurnAttempt(
+              this._stopCause === 'server_restart'
+                ? 'interrupted'
+                : this._stopCause === 'user_stop'
+                  ? 'cancelled'
+                  : 'failed',
+              this._stopCause ?? 'process_killed'
+            );
+          } else {
+            this._finishTurnAttempt('succeeded', 'provider_complete');
+          }
           // Mark all running sub-agents as complete
           const completedAt = new Date();
 
@@ -1114,7 +1228,6 @@ export function createConversationRuntime(
             .reverse()
             .find((message) => message.role === 'assistant');
           this.emit('buddy-turn-complete', completedAssistant?.content ?? '');
-          settleBuddyDelegation(this, 'complete', completedAssistant?.content);
 
           // Merge feature: if this is a review child, scan the final assistant
           // message for the sentinel `merge_review_docs/REVIEW_DOC_<uuid>.txt`.
@@ -1174,8 +1287,12 @@ export function createConversationRuntime(
         return;
       }
 
+      this._prepareTurnAttempt();
       const executionConfig = this.preflightExecution();
-      if (!executionConfig) return;
+      if (!executionConfig) {
+        this._finishTurnAttempt('failed', 'spawn_failed');
+        return;
+      }
 
       // UI/history retain clean user text. Only the first unstarted provider
       // turn receives a hidden context prefix.
@@ -1284,8 +1401,12 @@ export function createConversationRuntime(
         console.warn(`[${this.id}] spawnMergeReviewFork: already running, ignoring`);
         return;
       }
+      this._prepareTurnAttempt();
       const executionConfig = this.preflightExecution();
-      if (!executionConfig) return;
+      if (!executionConfig) {
+        this._finishTurnAttempt('failed', 'spawn_failed');
+        return;
+      }
       const userMessage: Message = {
         role: 'user',
         content,
@@ -1333,24 +1454,32 @@ export function createConversationRuntime(
       return undefined;
     }
 
-    stop(): void {
+    stop(reason: 'user_stop' | 'server_restart' = 'user_stop'): void {
       this._clearTurnWatchdogs();
       if (!this.process) return;
+      this._stopCause = reason;
+      if (this._activeAttemptId) {
+        turnAttempts.stopping(this._activeAttemptId);
+        if (reason === 'server_restart') {
+          this._finishTurnAttempt('interrupted', 'server_restart');
+        }
+      }
 
       const proc = this.process;
+      const stopTurn = this._activeTurnStop;
       // CRITICAL: Don't set isRunning here. The 'close' handler does that.
       // This ensures atomicity: process exits → state updated → queue dequeued →
       // processQueue() spawns next. If we set state here, processQueue could fire
       // while the old process is still alive, and spawnForMessage's isRunning
       // guard would silently drop the queued message.
-      proc.kill('SIGTERM');
+      stopTurn?.('SIGTERM');
       updateBuddyConversationLink(this, 'cancelled');
       settleBuddyDelegation(this, 'cancelled');
 
       const killTimer = setTimeout(() => {
-        if (proc.exitCode === null && !proc.killed) {
+        if (proc.exitCode === null) {
           console.warn(`[${this.id}] Process did not exit after SIGTERM, sending SIGKILL`);
-          proc.kill('SIGKILL');
+          stopTurn?.('SIGKILL');
         }
       }, 3000);
 
@@ -1359,24 +1488,27 @@ export function createConversationRuntime(
 
     // Reset process for fresh context (used in loop with clearContext).
     // Generates new CLI session ID while keeping conversation ID for UI continuity.
-    // Sets _isResetting so the close handler skips cleanup — we handle it here
-    // because the loop engine immediately spawns the next iteration.
-    // _isResetting stays true until the async close handler (.then on turn.completed)
-    // fires and clears it. Clearing it synchronously here would race: the .then()
-    // callback runs on the next microtask, after this function returns, so it would
-    // see _isResetting=false and run full cleanup (duplicate broadcasts + spurious dequeue).
+    // The per-run token invalidates every late event/completion from the old handle.
     resetProcess(): void {
       this._clearTurnWatchdogs();
       if (this.process) {
-        this._isResetting = true;
-        this._wasResetDuringThisRun = true;
-        this.process.kill();
+        const oldProcess = this.process;
+        const stopTurn = this._activeTurnStop;
+        this._finishTurnAttempt('interrupted', 'process_killed');
+        this._runToken += 1;
+        stopTurn?.('SIGTERM');
+        const killTimer = setTimeout(() => {
+          if (oldProcess.exitCode === null) {
+            console.warn(`[${this.id}] Reset process did not exit after SIGTERM, sending SIGKILL`);
+            stopTurn?.('SIGKILL');
+          }
+        }, TURN_TIMEOUT_KILL_GRACE_MS);
+        oldProcess.once('close', () => clearTimeout(killTimer));
         this.process = null;
+        this._activeTurnStop = null;
         this.isStreaming = false;
         this.isRunning = false;
         this.broadcastStatus();
-        // DO NOT clear _isResetting here — the close handler clears it when it
-        // fires and sees the flag. See the guard in turn.completed.then().
       }
       // Generate new session ID for fresh context
       const oldSessionId = this.sessionId;
@@ -1404,7 +1536,15 @@ export function createConversationRuntime(
 
     private _noteTurnActivity(): void {
       if (!this.isRunning) return;
-      this._lastTurnEventAt = Date.now();
+      const now = Date.now();
+      this._lastTurnEventAt = now;
+      if (
+        this._activeAttemptId &&
+        now - this._lastAttemptActivityAt >= ATTEMPT_ACTIVITY_INTERVAL_MS
+      ) {
+        this._lastAttemptActivityAt = now;
+        turnAttempts.activity(this._activeAttemptId, this.sessionId);
+      }
       this._refreshIdleWatchdog();
       this._pollForNewSwarms();
     }
@@ -1489,6 +1629,7 @@ export function createConversationRuntime(
       );
       this._clearTurnWatchdogs();
       this.handleOutput({ type: 'error', message });
+      this._finishTurnAttempt('failed', 'timeout');
       // Clear busy state now so processQueue() sees isRunning=false and can dequeue.
       // Without this, the close handler's fast path (_turnCompletedCleanly) skips
       // state reset, leaving isRunning=true and stalling the queue permanently.
@@ -1500,11 +1641,12 @@ export function createConversationRuntime(
       this._turnCompletedCleanly = true;
 
       const proc = this.process;
-      proc.kill('SIGTERM');
+      const stopTurn = this._activeTurnStop;
+      stopTurn?.('SIGTERM');
       const killTimer = setTimeout(() => {
-        if (proc.exitCode === null && !proc.killed) {
+        if (proc.exitCode === null) {
           console.warn(`[${this.id}] Timeout kill escalation: sending SIGKILL`);
-          proc.kill('SIGKILL');
+          stopTurn?.('SIGKILL');
         }
       }, TURN_TIMEOUT_KILL_GRACE_MS);
       proc.once('close', () => clearTimeout(killTimer));
@@ -1614,6 +1756,14 @@ export function createConversationRuntime(
         queuedAt: new Date(),
         status: 'pending',
       };
+      const attemptId = crypto.randomUUID();
+      this._queuedAttemptIds.set(msg.id, attemptId);
+      turnAttempts.queued({
+        attemptId,
+        conversationId: this.id,
+        queueMessageId: msg.id,
+        providerSessionId: this.sessionId,
+      });
       this.queue.push(msg);
       console.log(
         `[${this.id}] Queued message id=${msg.id.substring(0, 8)}, queueDepth=${queueDepthBefore}->${this.queue.length}, contentLen=${content.length}, preview="${formatLogPreview(content)}"`
@@ -1631,6 +1781,7 @@ export function createConversationRuntime(
       const hasPendingTasks = pendingQueuedMessages.length > 0;
 
       if (hasPendingTasks) {
+        for (const queued of pendingQueuedMessages) this._cancelQueuedAttempt(queued.id);
         this.queue = this.queue.filter((m) => m.status === 'sending');
         console.log(
           `[${this.id}] interrupt_and_send flushed ${pendingQueuedMessages.length} pending queued message(s)`
@@ -1652,6 +1803,7 @@ export function createConversationRuntime(
       const idx = this.queue.findIndex((m) => m.id === messageId && m.status === 'pending');
       if (idx !== -1) {
         console.log(`[${this.id}] Cancelled queued message: ${messageId.substring(0, 8)}`);
+        this._cancelQueuedAttempt(messageId);
         this.queue.splice(idx, 1);
         this.broadcastQueue();
       }
@@ -1662,6 +1814,9 @@ export function createConversationRuntime(
      */
     clearQueue(): void {
       const before = this.queue.length;
+      for (const queued of this.queue) {
+        if (queued.status === 'pending') this._cancelQueuedAttempt(queued.id);
+      }
       this.queue = this.queue.filter((m) => m.status === 'sending');
       console.log(`[${this.id}] Cleared queue: removed ${before - this.queue.length} messages`);
       this.broadcastQueue();
@@ -1679,6 +1834,18 @@ export function createConversationRuntime(
       if (next.status === 'sending') return; // already in flight
 
       next.status = 'sending';
+      let attemptId = this._queuedAttemptIds.get(next.id);
+      if (!attemptId) {
+        attemptId = crypto.randomUUID();
+        this._queuedAttemptIds.set(next.id, attemptId);
+        turnAttempts.queued({
+          attemptId,
+          conversationId: this.id,
+          queueMessageId: next.id,
+          providerSessionId: this.sessionId,
+        });
+      }
+      this._nextAttempt = { attemptId, queueMessageId: next.id };
       console.log(
         `[${this.id}] processQueue sending id=${next.id.substring(0, 8)}, queueDepth=${this.queue.length}, contentLen=${next.content.length}, preview="${formatLogPreview(next.content)}"`
       );

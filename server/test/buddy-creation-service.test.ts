@@ -42,6 +42,7 @@ test('server Buddy creation persists, registers, broadcasts, links, and dispatch
     readonly provider = 'codex' as const;
     readonly config = createDefaultConversationConfig('codex');
     readonly buddyContext = context;
+    readonly messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
     constructor(options: ConversationOptions) {
       super();
@@ -77,7 +78,29 @@ test('server Buddy creation persists, registers, broadcasts, links, and dispatch
       async claimInitialMessageDispatch() {
         if (claimed) return undefined;
         claimed = true;
-        return { creation: { initialMessage: 'Start here' } };
+        return {
+          creation: {
+            initialMessage: 'Start here',
+            initialMessageDispatchClaimedAt: new Date().toISOString(),
+            initialMessageDispatchClaimToken: 'claim-1',
+          },
+        };
+      },
+      async completeInitialMessageDispatch() {
+        return {
+          creation: {
+            initialMessage: 'Start here',
+            initialMessageDispatchedAt: new Date().toISOString(),
+          },
+        };
+      },
+      async getRecord() {
+        return {
+          creation: {
+            initialMessage: 'Start here',
+            initialMessageDispatchedAt: claimed ? new Date().toISOString() : undefined,
+          },
+        };
       },
       async setCurrentSession() {},
     },

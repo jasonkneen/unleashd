@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { BuddiesStorePort, BuddyAutomation, BuddyAutomationRun } from './contract';
 
 export interface BuddyAutomationConversation {
@@ -201,17 +202,25 @@ export class BuddyScheduler {
     return this.store.updateAutomationRun(run.id, {
       status: 'cancelled',
       error: 'Automation cancelled',
+      ...(run.claim_token ? { claimToken: run.claim_token } : {}),
       ...(nextRunAt ? { nextRunAt } : {}),
     });
   }
 
   async poll(): Promise<void> {
     for (const automation of this.store.listDueAutomations(this.now())) {
+      const claimToken = randomUUID();
       const run = this.store.claimAutomationRun(automation.id, {
         scheduledFor: automation.next_run_at ?? this.now().toISOString(),
+        claimToken,
+        leaseSeconds: automation.policy.max_runtime_seconds + 60,
       });
+      // Older store adapters and focused test doubles predate durable claim
+      // ownership. Undefined keeps that compatibility path; only an explicit
+      // false means another executor owns this occurrence.
+      if (run.claim_acquired === false) continue;
       if (this.activeRuns.has(run.id)) continue;
-      if (run.status === 'running') {
+      if (run.status === 'running' && run.claim_acquired === undefined) {
         const nextRunAt = this.nextRunAt(automation, run);
         this.store.updateAutomationRun(run.id, {
           status: 'failed',
@@ -221,7 +230,7 @@ export class BuddyScheduler {
         continue;
       }
       if (run.status !== 'claimed') continue;
-      void this.execute(automation, run);
+      void this.execute(automation, run, claimToken);
     }
   }
 
@@ -229,16 +238,28 @@ export class BuddyScheduler {
     const automation = this.store.getAutomation(automationId);
     if (!automation) throw new Error(`automation not found: ${automationId}`);
     const scheduledFor = this.now().toISOString();
+    const claimToken = randomUUID();
     const run = this.store.claimAutomationRun(automation.id, {
       scheduledFor,
       idempotencyKey: `${automation.id}:manual:${scheduledFor}`,
+      claimToken,
+      leaseSeconds: automation.policy.max_runtime_seconds + 60,
     });
-    if (run.status === 'claimed' && !this.activeRuns.has(run.id))
-      void this.execute(automation, run);
+    if (
+      run.claim_acquired !== false &&
+      run.status === 'claimed' &&
+      !this.activeRuns.has(run.id)
+    ) {
+      void this.execute(automation, run, claimToken);
+    }
     return run;
   }
 
-  private async execute(automation: BuddyAutomation, claimed: BuddyAutomationRun): Promise<void> {
+  private async execute(
+    automation: BuddyAutomation,
+    claimed: BuddyAutomationRun,
+    claimToken: string
+  ): Promise<void> {
     if (this.activeRuns.has(claimed.id)) return;
     this.activeRuns.add(claimed.id);
     let conversation: BuddyAutomationConversation | null = null;
@@ -249,6 +270,7 @@ export class BuddyScheduler {
       let run = this.store.updateAutomationRun(claimed.id, {
         status: 'running',
         conversationId: conversation.conversationId,
+        claimToken,
       });
       const policy = run.policy ?? automation.policy ?? LEGACY_SAFE_POLICY;
       const policyDeadline = Date.now() + policy.max_runtime_seconds * 1000;
@@ -265,6 +287,7 @@ export class BuddyScheduler {
           status: 'running',
           iteration: 1,
           outcome,
+          claimToken,
         });
       } else if (automation.job_kind === 'sequence') {
         const prompts = (automation.job_payload as { prompts: string[] }).prompts;
@@ -285,6 +308,7 @@ export class BuddyScheduler {
             status: 'running',
             iteration: index + 1,
             outcome,
+            claimToken,
           });
         }
       } else {
@@ -324,6 +348,7 @@ export class BuddyScheduler {
             status: 'running',
             iteration,
             outcome,
+            claimToken,
           });
           if (parseAutomationCompletion(outcome).done) {
             terminationSatisfied = true;
@@ -340,17 +365,24 @@ export class BuddyScheduler {
       this.store.updateAutomationRun(run.id, {
         status: 'complete',
         outcome,
+        claimToken,
         ...(nextRunAt ? { nextRunAt } : {}),
       });
       conversation.finish('complete');
     } catch (error) {
-      if (error instanceof BuddyAutomationCancelledError) return;
+      if (
+        error instanceof BuddyAutomationCancelledError ||
+        this.cancelledRuns.has(claimed.id)
+      ) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`[buddies] Automation ${automation.id} failed: ${message}`);
       const nextRunAt = this.nextRunAt(automation, claimed);
       this.store.updateAutomationRun(claimed.id, {
         status: 'failed',
         error: message,
+        claimToken,
         ...(nextRunAt ? { nextRunAt } : {}),
       });
       conversation?.finish('failed');

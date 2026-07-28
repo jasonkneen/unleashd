@@ -368,6 +368,7 @@ export async function pollForChanges(
   activeIds: Set<string>
 ): Promise<PollResult> {
   const updated = new Map<string, DiscoveredConversation>();
+  const deferredDirtyPaths = new Set<string>();
   // Start fresh — only populate with currently-discovered files.
   // Any path absent from this poll's discovery is deleted on disk and falls out naturally,
   // preventing the map from accumulating dead paths forever.
@@ -422,17 +423,29 @@ export async function pollForChanges(
         // while a process is running; let the next poll pick up the final state.
         if (adapter.provider === 'claude') {
           const sessionId = path.basename(filePath, '.jsonl');
-          if (activeIds.has(sessionId)) continue;
+          if (activeIds.has(sessionId)) {
+            deferredDirtyPaths.add(filePath);
+            continue;
+          }
         } else if (adapter.provider === 'codex') {
           const sessionIdHint = extractCodexSessionIdFromFilename(filePath);
-          if (sessionIdHint && activeIds.has(sessionIdHint)) continue;
+          if (sessionIdHint && activeIds.has(sessionIdHint)) {
+            deferredDirtyPaths.add(filePath);
+            continue;
+          }
         } else if (adapter.provider === 'opencode') {
           const sessionIdHint = path.basename(filePath);
-          if (activeIds.has(sessionIdHint)) continue;
+          if (activeIds.has(sessionIdHint)) {
+            deferredDirtyPaths.add(filePath);
+            continue;
+          }
         } else if (adapter.provider === 'gemini') {
           // Gemini session files are named session-{ts}-{uuid}.json
           const sessionId = path.basename(filePath, '.json');
-          if (activeIds.has(sessionId)) continue;
+          if (activeIds.has(sessionId)) {
+            deferredDirtyPaths.add(filePath);
+            continue;
+          }
         }
 
         // Re-parse the changed session
@@ -443,7 +456,10 @@ export async function pollForChanges(
         const conversation = sessionToConversation(session);
         // null = hidden test conversation ([_HIDE_TEST_]) — dropped at ingestion.
         if (!conversation) continue;
-        if (activeIds.has(conversation.sessionId)) continue;
+        if (activeIds.has(conversation.sessionId)) {
+          deferredDirtyPaths.add(filePath);
+          continue;
+        }
         if (conversation.messages.length === 0) continue;
 
         updated.set(conversation.sessionId, conversation);
@@ -455,5 +471,5 @@ export async function pollForChanges(
     }
   }
 
-  return { updated, mtimes };
+  return { updated, mtimes, deferredDirtyPaths };
 }

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node ../tools/dev-supervisor.mjs --task dev-client",
     "build": "tsc -b && vite build",
     "test:buddy": "node scripts/run-buddy-ui-tests.mjs",
     "preview": "vite preview"
