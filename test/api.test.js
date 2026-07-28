@@ -45,12 +45,16 @@ function startServer({ reuseDataDir = false } = {}) {
     });
 
     let started = false;
+    const startupTimeout = setTimeout(() => {
+      if (!started) reject(new Error('Server failed to start within 15 seconds'));
+    }, 15_000);
 
     serverProcess.stdout.on('data', (data) => {
       const output = data.toString();
       console.log('[Server]', output.trim());
       if (output.includes('Server running') && !started) {
         started = true;
+        clearTimeout(startupTimeout);
         setTimeout(resolve, 500); // Give server async init time (7000+ files parsed)
       }
     });
@@ -59,12 +63,10 @@ function startServer({ reuseDataDir = false } = {}) {
       console.error('[Server Error]', data.toString().trim());
     });
 
-    serverProcess.on('error', reject);
-
-    // Timeout if server doesn't start
-    setTimeout(() => {
-      if (!started) reject(new Error('Server failed to start'));
-    }, 5000);
+    serverProcess.on('error', (error) => {
+      clearTimeout(startupTimeout);
+      reject(error);
+    });
   });
 }
 

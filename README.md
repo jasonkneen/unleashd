@@ -61,6 +61,38 @@ pnpm build
 pnpm start     # serves built client + API on port 7489
 ```
 
+## Buddies (persistent employees)
+
+The Unleashd package includes a versioned `@nbardy/buddies` snapshot; no manual
+`node_modules` symlink is required. Buddy identity, canonical work, memory,
+reporting lines, reviews, and automation runs live in
+`~/.buddies/buddies.sqlite`.
+
+Initialize the Growth Lead team for the Magic Genie and EventMap checkouts:
+
+```bash
+MAGIC_GENIE_ROOT=../magic_genie \
+EVENTMAP_ROOT=../event_calendars \
+node node_modules/@nbardy/buddies/scripts/initialize-growth-lead.js
+```
+
+The initializer is idempotent. Confirm every imported campaign has a canonical
+project with:
+
+```bash
+node node_modules/@nbardy/buddies/bin/buddies.js audit work
+```
+
+Back up the database before migrations or material manual changes:
+
+```bash
+node node_modules/@nbardy/buddies/bin/buddies.js \
+  backup ~/.buddies/backups/buddies-$(date +%Y-%m-%d).sqlite
+```
+
+The store refuses to open a database whose schema is newer than the installed
+library. Restore a backup rather than attempting an in-place downgrade.
+
 ## Supported Agents
 
 | Agent | Disk path read | Live spawn |

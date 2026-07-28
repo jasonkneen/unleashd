@@ -144,6 +144,57 @@
   font-size: 11px;
 }
 
+.buddy-current-summary {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 2fr) minmax(180px, 1fr);
+  margin-bottom: 24px;
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--ai);
+  background: var(--bg-card);
+}
+
+.buddy-current-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px;
+}
+
+.buddy-current-summary > div + div {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.buddy-current-summary span,
+.buddy-stale-warning {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.buddy-current-summary strong {
+  color: var(--text-emphasis);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.buddy-next-action,
+.buddy-blocker {
+  padding: 8px 10px;
+  border-left: 2px solid var(--ai);
+  background: var(--bg-raised-1);
+}
+
+.buddy-blocker {
+  border-left-color: var(--danger);
+}
+
+.buddy-stale-warning {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--warning);
+}
+
 .buddy-directory-card-actions button {
   padding: 8px 18px;
   border: 1px solid color-mix(in srgb, var(--ai) 40%, transparent);
@@ -540,6 +591,15 @@
 }
 
 @media (max-width: 900px) {
+  .buddy-current-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .buddy-current-summary > div + div {
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+
   .buddies-hero {
     align-items: flex-start;
     flex-direction: column;

@@ -8,9 +8,9 @@ import {
   type Buddy,
   type BuddyAutomation,
   type BuddyMemory,
+  type BuddyOverview,
   type BuddyProject,
   type ConversationLink,
-  type Dashboard,
   EMPTY_MEMORY,
   type EmployeeRecord,
   type EmployeeTab,
@@ -45,23 +45,17 @@ function compactPath(path: string | null): string {
 }
 
 function EmployeeDirectory({
-  dashboard,
+  overview,
   onOpen,
 }: {
-  dashboard: Dashboard;
+  overview: BuddyOverview;
   onOpen: (id: string) => void;
 }) {
-  const legacy = dashboard.workItems ?? dashboard.legacyWorkItems ?? [];
-  const topLevelBuddies = dashboard.buddies.filter((employee) => !employee.manager_id);
-  const visibleBuddies = topLevelBuddies.length > 0 ? topLevelBuddies : dashboard.buddies;
+  const visibleBuddies = overview.topLevel.length > 0 ? overview.topLevel : overview.employees;
   return (
     <main className="buddies-directory-content">
       <div className="buddy-card-grid">
-        {visibleBuddies.map((employee) => {
-          const workspaces = employee.workspaces ?? employee.projects ?? [];
-          const work = legacy.filter(
-            (item) => item.buddy_id === employee.id && !['done', 'cancelled'].includes(item.status)
-          );
+        {visibleBuddies.map(({ buddy: employee, workspaces, team, currentWork }) => {
           return (
             <article
               key={employee.id}
@@ -84,22 +78,22 @@ function EmployeeDirectory({
                     ))}
                   </div>
                   <div className="buddy-card-stats">
-                    {(employee.team_size ?? 0) > 0 && (
+                    {team.length > 0 && (
                       <div>
-                        <strong>{employee.team_size}</strong>
+                        <strong>{team.length}</strong>
                         <span>team</span>
                       </div>
                     )}
                     <div>
-                      <strong>{work.length}</strong>
+                      <strong>{currentWork.open}</strong>
                       <span>open</span>
                     </div>
                     <div>
-                      <strong>{work.filter((item) => item.status === 'in_progress').length}</strong>
+                      <strong>{currentWork.active}</strong>
                       <span>active</span>
                     </div>
                     <div>
-                      <strong>{work.filter((item) => item.status === 'blocked').length}</strong>
+                      <strong>{currentWork.blocked}</strong>
                       <span>blocked</span>
                     </div>
                   </div>
@@ -122,7 +116,7 @@ function EmployeeDirectory({
 export function BuddiesDashboard() {
   const navigate = useNavigate();
   const { buddyId } = useParams();
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [overview, setOverview] = useState<BuddyOverview | null>(null);
   const [employee, setEmployee] = useState<EmployeeRecord | null>(null);
   const [memory, setMemory] = useState<BuddyMemory>(EMPTY_MEMORY);
   const [automations, setAutomations] = useState<BuddyAutomation[]>([]);
@@ -134,53 +128,9 @@ export function BuddiesDashboard() {
 
   const loadDirectory = useCallback(
     async (signal?: AbortSignal, generation = loadGenerationRef.current) => {
-      const payload = await api<Dashboard>('/api/buddies', { signal });
-      const buddies = await Promise.all(
-        payload.buddies.map(async (buddy) => {
-          try {
-            const detail = await api<Record<string, unknown>>(
-              `/api/buddies/${encodeURIComponent(buddy.id)}`,
-              { signal }
-            );
-            const relationships = asArray<{
-              from_buddy_id: string;
-              to_buddy_id: string;
-              kind: string;
-            }>(detail, 'relationships');
-            const manager = relationships.find(
-              (relationship) =>
-                (relationship.from_buddy_id === buddy.id && relationship.kind === 'reports_to') ||
-                (relationship.to_buddy_id === buddy.id && relationship.kind === 'manager')
-            );
-            const teamIds = new Set(
-              relationships
-                .filter(
-                  (relationship) =>
-                    (relationship.to_buddy_id === buddy.id && relationship.kind === 'reports_to') ||
-                    (relationship.from_buddy_id === buddy.id && relationship.kind === 'manager')
-                )
-                .map((relationship) =>
-                  relationship.kind === 'reports_to'
-                    ? relationship.from_buddy_id
-                    : relationship.to_buddy_id
-                )
-            );
-            return {
-              ...buddy,
-              manager_id: manager
-                ? manager.kind === 'reports_to'
-                  ? manager.to_buddy_id
-                  : manager.from_buddy_id
-                : null,
-              team_size: teamIds.size,
-            };
-          } catch {
-            return buddy;
-          }
-        })
-      );
+      const payload = await api<BuddyOverview>('/api/buddies/overview', { signal });
       if (signal?.aborted || generation !== loadGenerationRef.current) return;
-      setDashboard({ ...payload, buddies });
+      setOverview(payload);
     },
     []
   );
@@ -307,6 +257,24 @@ export function BuddiesDashboard() {
     () => (employee?.legacyWorkItems ?? []).filter((item) => item.project_id === workspace?.id),
     [employee?.legacyWorkItems, workspace?.id]
   );
+  const primaryProject = useMemo(
+    () =>
+      workspaceProjects.find((project) => project.status === 'in_progress') ??
+      workspaceProjects.find((project) => project.status === 'ready') ??
+      workspaceProjects.find((project) => !['done', 'cancelled'].includes(project.status)),
+    [workspaceProjects]
+  );
+  const latestWorkspaceConversation = useMemo(
+    () =>
+      [...(employee?.conversations ?? [])]
+        .filter((conversation) => conversation.workspace_id === workspace?.id)
+        .sort(
+          (left, right) =>
+            new Date(right.last_active_at ?? 0).getTime() -
+            new Date(left.last_active_at ?? 0).getTime()
+        )[0],
+    [employee?.conversations, workspace?.id]
+  );
 
   const mutate = async (key: string, action: () => Promise<unknown>) => {
     setBusy(key);
@@ -344,17 +312,17 @@ export function BuddiesDashboard() {
     navigate(`/chat/${id}`);
   };
 
-  if (error && !dashboard && !employee) {
+  if (error && !overview && !employee) {
     return (
       <div className="buddies-dashboard buddies-dashboard--centered">
         <div className="buddies-error">{error}</div>
       </div>
     );
   }
-  if (!buddyId && dashboard) {
+  if (!buddyId && overview) {
     return (
       <div className="buddies-dashboard">
-        <EmployeeDirectory dashboard={dashboard} onOpen={(id) => navigate(`/buddies/${id}`)} />
+        <EmployeeDirectory overview={overview} onOpen={(id) => navigate(`/buddies/${id}`)} />
       </div>
     );
   }
@@ -572,38 +540,92 @@ export function BuddiesDashboard() {
               {workspace && <span>{compactPath(workspace.root_path)}</span>}
             </div>
 
+            <div className="buddy-current-summary">
+              <div>
+                <span>Current sprint</span>
+                <strong>
+                  {workspaceProjects.find((project) => project.sprint_name)?.sprint_name ??
+                    'No active sprint'}
+                </strong>
+              </div>
+              <div>
+                <span>Primary next action</span>
+                <strong>
+                  {primaryProject?.next_action ?? 'Choose a next action in conversation'}
+                </strong>
+              </div>
+              <div>
+                <span>Last run</span>
+                <strong>
+                  {latestWorkspaceConversation?.last_active_at
+                    ? new Date(latestWorkspaceConversation.last_active_at).toLocaleString()
+                    : 'No run recorded'}
+                </strong>
+              </div>
+            </div>
+
+            <div className="buddy-section-heading">
+              <h2>Current tasks</h2>
+              <span>
+                {
+                  workspaceProjects.filter(
+                    (project) => !['done', 'cancelled'].includes(project.status)
+                  ).length
+                }{' '}
+                open
+              </span>
+            </div>
             <div className="buddy-work-list">
-              {workspaceProjects.map((project) => (
-                <article className={`buddy-work-card status-${project.status}`} key={project.id}>
-                  <div className="buddy-work-card__heading">
-                    <div>
-                      <span className="campaign-status">{STATUS_LABELS[project.status]}</span>
-                      <h3>{project.title}</h3>
+              {workspaceProjects
+                .filter((project) => !['done', 'cancelled'].includes(project.status))
+                .map((project) => (
+                  <article className={`buddy-work-card status-${project.status}`} key={project.id}>
+                    <div className="buddy-work-card__heading">
+                      <div>
+                        <span className="campaign-status">{STATUS_LABELS[project.status]}</span>
+                        <h3>{project.title}</h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => workspace && talk(workspace, project.id)}
+                      >
+                        Start conversation →
+                      </button>
                     </div>
-                    <button type="button" onClick={() => workspace && talk(workspace, project.id)}>
-                      Start conversation →
-                    </button>
-                  </div>
-                  {project.objective && <p>{project.objective}</p>}
-                  <div className="buddy-project-controls">
-                    <span>{project.definition_of_done}</span>
-                  </div>
-                  <ul className="buddy-todo-list">
-                    {project.todos.map((todo) => (
-                      <li key={todo.id}>
-                        <span className={`buddy-todo-dot status-${todo.status}`} />
-                        <span>{todo.title}</span>
-                        <small>{todo.status.replaceAll('_', ' ')}</small>
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              ))}
+                    {project.objective && <p>{project.objective}</p>}
+                    {project.next_action && (
+                      <p className="buddy-next-action">
+                        <strong>Next:</strong> {project.next_action}
+                      </p>
+                    )}
+                    {project.blocked_reason && (
+                      <p className="buddy-blocker">
+                        <strong>Blocked:</strong> {project.blocked_reason}
+                      </p>
+                    )}
+                    {Date.now() - new Date(project.updated_at).getTime() >
+                      7 * 24 * 60 * 60 * 1000 && (
+                      <span className="buddy-stale-warning">No update in 7+ days</span>
+                    )}
+                    <div className="buddy-project-controls">
+                      <span>{project.definition_of_done}</span>
+                    </div>
+                    <ul className="buddy-todo-list">
+                      {project.todos.map((todo) => (
+                        <li key={todo.id}>
+                          <span className={`buddy-todo-dot status-${todo.status}`} />
+                          <span>{todo.title}</span>
+                          <small>{todo.status.replaceAll('_', ' ')}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
             </div>
 
             {legacyWork.length > 0 && (
               <details className="buddy-legacy">
-                <summary>Imported campaign evidence ({legacyWork.length})</summary>
+                <summary>Import provenance ({legacyWork.length})</summary>
                 {legacyWork.map((item) => (
                   <div key={item.id}>
                     <strong>{item.title}</strong>

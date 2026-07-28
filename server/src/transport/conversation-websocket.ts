@@ -1,0 +1,406 @@
+import type {
+  BuddyContext,
+  ClientMessage,
+  ConversationConfig,
+  ModelId,
+  Provider,
+  UIState,
+} from '@unleashd/shared';
+import { PROTOCOL_INFO, safeParseClientMessage } from '@unleashd/shared';
+import { WebSocket, type WebSocketServer } from 'ws';
+import type {
+  CompletionSuppression,
+  ConversationRegistry,
+  ExternalActivity,
+  SessionTracking,
+} from '../application/context';
+import type { ConversationConfigService } from '../conversations/config-service';
+import type {
+  ConversationBroadcast,
+  ConversationOptions,
+  ConversationRuntime,
+} from '../conversations/runtime';
+import {
+  sendCommandRejected,
+  sendProtocolError,
+  sendToClient,
+  validateWorkingDirectory,
+} from './websocket';
+
+export interface ResolvedBuddyConversation {
+  context: BuddyContext;
+  briefing: string;
+  workingDirectory: string;
+  provider: Provider;
+  model?: ModelId;
+  reasoningEffort?: string;
+}
+
+export interface ConversationWebSocketDependencies {
+  registry: ConversationRegistry<ConversationRuntime>;
+  sessions: SessionTracking;
+  externalActivity: ExternalActivity;
+  completionSuppression: CompletionSuppression;
+  initialLoadComplete: Promise<void>;
+  configService: ConversationConfigService;
+  getUIState(): UIState;
+  getDefaultWorkingDirectory(): string;
+  resolveWorkingDirectory(input: string): string;
+  resolveBuddyConversation(context: BuddyContext): Promise<ResolvedBuddyConversation>;
+  createConversation(options: ConversationOptions): ConversationRuntime;
+  createConversationLink(conversation: ConversationRuntime): Promise<void>;
+  dispatchInitialMessage(conversation: ConversationRuntime): Promise<void>;
+  creationFingerprint(input: {
+    workingDirectory: string;
+    config: ConversationConfig;
+    initialMessage?: string;
+    swarmDebugPrefix?: string;
+    resumedFromConversationId?: string;
+    buddyContext?: BuddyContext;
+  }): string;
+  broadcast(data: ConversationBroadcast): void;
+  broadcastExcept(excludedClient: WebSocket, data: ConversationBroadcast): void;
+  logger?: Pick<Console, 'error' | 'log'>;
+}
+
+export function registerConversationWebSocket(
+  webSocketServer: WebSocketServer,
+  dependencies: ConversationWebSocketDependencies
+): void {
+  webSocketServer.on('connection', (socket) => {
+    const logger = dependencies.logger ?? console;
+    logger.log('New WebSocket connection');
+    sendInitialState(socket, dependencies);
+
+    socket.on('message', async (message) => {
+      let activeCommand: { commandId: string; conversationId?: string } | null = null;
+      try {
+        const parsed: unknown = JSON.parse(message.toString());
+        const result = safeParseClientMessage(parsed);
+        if (!result.success) {
+          rejectInvalidMessage(socket, parsed, result.error.issues, logger);
+          return;
+        }
+
+        const data = result.data;
+        if ('commandId' in data) {
+          activeCommand = {
+            commandId: data.commandId,
+            ...('conversationId' in data ? { conversationId: data.conversationId } : {}),
+          };
+        }
+        logCommand(data, logger);
+
+        switch (data.type) {
+          case 'create_conversation': {
+            let buddyResolution: ResolvedBuddyConversation | null = null;
+            try {
+              buddyResolution = data.buddyContext
+                ? await dependencies.resolveBuddyConversation(data.buddyContext)
+                : null;
+            } catch (error) {
+              sendCommandRejected(socket, {
+                commandId: data.commandId,
+                conversationId: data.conversationId,
+                error: { code: 'create_failed', message: errorMessage(error) },
+              });
+              break;
+            }
+
+            const workingDirectory = dependencies.resolveWorkingDirectory(
+              buddyResolution?.workingDirectory ?? data.workingDirectory
+            );
+            const fingerprint = dependencies.creationFingerprint({
+              workingDirectory,
+              config: data.config,
+              initialMessage: data.initialMessage,
+              swarmDebugPrefix: data.swarmDebugPrefix,
+              resumedFromConversationId: data.resumedFromConversationId,
+              buddyContext: buddyResolution?.context,
+            });
+            const existingConversation = dependencies.registry.get(data.conversationId);
+            if (existingConversation) {
+              try {
+                await dependencies.configService.createOrReplay({
+                  conversationId: data.conversationId,
+                  config: data.config,
+                  workingDirectory,
+                  creation: {
+                    commandId: data.commandId,
+                    fingerprint,
+                    initialMessage: data.initialMessage,
+                    swarmDebugPrefix: data.swarmDebugPrefix,
+                    resumedFromConversationId: data.resumedFromConversationId,
+                    buddyContext: buddyResolution?.context,
+                  },
+                });
+                sendToClient(socket, {
+                  type: 'conversation_created',
+                  commandId: data.commandId,
+                  conversation: existingConversation.toJSON(),
+                });
+                await dependencies.dispatchInitialMessage(existingConversation);
+              } catch {
+                sendCommandRejected(socket, {
+                  commandId: data.commandId,
+                  conversationId: data.conversationId,
+                  error: {
+                    code: 'create_failed',
+                    message: 'Conversation ID already exists with different configuration',
+                  },
+                  authoritativeConversation: existingConversation.toJSON(),
+                });
+              }
+              break;
+            }
+
+            try {
+              const persisted = await dependencies.configService.getRecord(data.conversationId);
+              if (!persisted) {
+                const directoryError = validateWorkingDirectory(workingDirectory);
+                if (directoryError) {
+                  sendCommandRejected(socket, {
+                    commandId: data.commandId,
+                    conversationId: data.conversationId,
+                    error: directoryError,
+                  });
+                  break;
+                }
+              }
+
+              const creation = await dependencies.configService.createOrReplay({
+                conversationId: data.conversationId,
+                config: data.config,
+                workingDirectory,
+                creation: {
+                  commandId: data.commandId,
+                  fingerprint,
+                  initialMessage: data.initialMessage,
+                  swarmDebugPrefix: data.swarmDebugPrefix,
+                  resumedFromConversationId: data.resumedFromConversationId,
+                  buddyContext: buddyResolution?.context,
+                },
+              });
+              const conversation = dependencies.createConversation({
+                id: data.conversationId,
+                workingDirectory: creation.record.workingDirectory ?? workingDirectory,
+                configState: creation.state,
+                existingSessionId: creation.record.currentSession?.sessionId,
+                swarmDebugPrefix: data.swarmDebugPrefix ?? null,
+                resumedFromConversationId: data.resumedFromConversationId ?? null,
+                buddyContext: buddyResolution?.context ?? null,
+                buddyBriefing: buddyResolution?.briefing ?? null,
+              });
+              dependencies.registry.set(conversation);
+              await dependencies.createConversationLink(conversation);
+              sendToClient(socket, {
+                type: 'conversation_created',
+                commandId: data.commandId,
+                conversation: conversation.toJSON(),
+              });
+              dependencies.broadcastExcept(socket, {
+                type: 'conversation_updated',
+                reason: 'status',
+                conversation: conversation.toJSON(),
+              });
+              await dependencies.dispatchInitialMessage(conversation);
+            } catch (error) {
+              sendCommandRejected(socket, {
+                commandId: data.commandId,
+                conversationId: data.conversationId,
+                error: { code: 'create_failed', message: errorMessage(error) },
+              });
+            }
+            break;
+          }
+
+          case 'send_message': {
+            logger.log(
+              `[WS] send_message for ${data.conversationId}: "${data.content.substring(0, 50)}"`
+            );
+            const conversation = dependencies.registry.get(data.conversationId);
+            if (conversation) {
+              logger.log('[WS] Found conversation, calling sendMessage');
+              conversation.sendMessage(data.content);
+            } else {
+              logger.error(`[WS] Conversation not found: ${data.conversationId}`);
+              logger.error(
+                '[WS] Available conversations:',
+                Array.from(dependencies.registry.keys())
+              );
+            }
+            break;
+          }
+
+          case 'stop_conversation':
+            dependencies.registry.get(data.conversationId)?.stop();
+            break;
+
+          case 'delete_conversation': {
+            const conversation = dependencies.registry.get(data.conversationId);
+            const deletedDurably = await dependencies.configService.delete(data.conversationId);
+            if (conversation) {
+              conversation.stop();
+              dependencies.registry.delete(data.conversationId);
+              dependencies.sessions.markDeleted(conversation.sessionId);
+              for (const [sessionId, conversationId] of dependencies.sessions.aliasEntries()) {
+                if (conversationId === conversation.id) {
+                  dependencies.sessions.markDeleted(sessionId);
+                }
+              }
+              dependencies.sessions.unregisterConversationAliases(conversation.id);
+              dependencies.externalActivity.clear(conversation.sessionId, conversation.id);
+              dependencies.completionSuppression.clear(conversation.sessionId, conversation.id);
+            }
+            if (conversation || deletedDurably) {
+              dependencies.broadcast({
+                type: 'conversation_deleted',
+                conversationId: data.conversationId,
+              });
+            }
+            break;
+          }
+
+          case 'set_conversation_config': {
+            const conversation = dependencies.registry.get(data.conversationId);
+            if (!conversation) {
+              sendCommandRejected(socket, {
+                commandId: data.commandId,
+                conversationId: data.conversationId,
+                error: { code: 'conversation_not_found', message: 'Conversation not found' },
+              });
+              break;
+            }
+            const result = await dependencies.configService.update(
+              {
+                config: conversation.config,
+                revision: conversation.configRevision,
+                resolution: conversation.configResolution,
+              },
+              {
+                isRunning: conversation.isRunning,
+                queueDepth: conversation.queue.length,
+                hasStartedSession: conversation.hasStartedSession(),
+              },
+              data
+            );
+            if (!result.ok) {
+              sendCommandRejected(socket, {
+                commandId: data.commandId,
+                conversationId: data.conversationId,
+                error: result.error,
+                authoritativeConversation: conversation.toJSON(),
+              });
+              break;
+            }
+            conversation.applyConfigState(result.value.next);
+            dependencies.broadcast({
+              type: 'conversation_updated',
+              commandId: data.commandId,
+              reason: 'config',
+              conversation: conversation.toJSON(),
+            });
+            break;
+          }
+
+          case 'queue_message':
+            dependencies.registry.get(data.conversationId)?.enqueueMessage(data.content);
+            break;
+          case 'interrupt_and_send':
+            dependencies.registry.get(data.conversationId)?.interruptAndSend(data.content);
+            break;
+          case 'cancel_queued_message':
+            dependencies.registry.get(data.conversationId)?.cancelQueuedMessage(data.messageId);
+            break;
+          case 'clear_queue':
+            dependencies.registry.get(data.conversationId)?.clearQueue();
+            break;
+        }
+      } catch (error) {
+        logger.error('Error handling WebSocket message:', error);
+        if (activeCommand) {
+          sendCommandRejected(socket, {
+            ...activeCommand,
+            error: { code: 'command_failed', message: errorMessage(error) },
+          });
+        } else {
+          sendProtocolError(socket, `Failed to handle message: ${errorMessage(error)}`);
+        }
+      }
+    });
+
+    socket.on('close', () => logger.log('WebSocket connection closed'));
+  });
+}
+
+function sendInitialState(
+  socket: WebSocket,
+  dependencies: ConversationWebSocketDependencies
+): void {
+  void (async () => {
+    await dependencies.initialLoadComplete;
+    if (socket.readyState !== WebSocket.OPEN) return;
+    sendToClient(socket, {
+      type: 'init',
+      conversations: Array.from(dependencies.registry.values(), (conversation) => {
+        const value = conversation.toJSON();
+        if (
+          dependencies.externalActivity.has(conversation.sessionId) ||
+          dependencies.externalActivity.has(conversation.id)
+        ) {
+          value.isRunning = true;
+        }
+        return value;
+      }),
+      defaultCwd: dependencies.getDefaultWorkingDirectory(),
+      uiState: dependencies.getUIState(),
+      protocol: PROTOCOL_INFO,
+    });
+  })();
+}
+
+function rejectInvalidMessage(
+  socket: WebSocket,
+  parsed: unknown,
+  issues: ReadonlyArray<{ path: PropertyKey[]; message: string }>,
+  logger: Pick<Console, 'error'>
+): void {
+  const issueSummary = issues
+    .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+    .join('; ');
+  logger.error(`[WS] Invalid client message: ${issueSummary}`);
+  const commandId =
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    'commandId' in parsed &&
+    typeof parsed.commandId === 'string' &&
+    parsed.commandId.length > 0
+      ? parsed.commandId
+      : null;
+  if (commandId) {
+    sendCommandRejected(socket, {
+      commandId,
+      error: { code: 'invalid_message', message: `Invalid message: ${issueSummary}` },
+    });
+  } else {
+    sendProtocolError(socket, `Invalid message: ${issueSummary}`);
+  }
+}
+
+function logCommand(data: ClientMessage, logger: Pick<Console, 'log'>): void {
+  if (data.type === 'queue_message') {
+    logger.log(
+      `[WS] Received queue_message conversationId=${data.conversationId}, contentLen=${data.content.length}, preview="${formatLogPreview(data.content)}"`
+    );
+    return;
+  }
+  logger.log(`[WS] Received message type: ${data.type}`, JSON.stringify(data).substring(0, 200));
+}
+
+function formatLogPreview(content: string, maximumCharacters = 140): string {
+  return content.replace(/\s+/g, ' ').slice(0, maximumCharacters);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

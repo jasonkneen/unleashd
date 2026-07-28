@@ -9,7 +9,11 @@ export interface BuddyConversationView {
 
 export interface BuddyRouteDependencies {
   getStore(): Promise<BuddiesStorePort>;
-  getScheduler(): { runNow(automationId: string): Promise<BuddyAutomationRun> } | null;
+  getScheduler(): {
+    runNow(automationId: string): Promise<BuddyAutomationRun>;
+    cancel(runId: string): BuddyAutomationRun;
+    health(): { running: boolean; pollIntervalMs: number; activeRunIds: string[] };
+  } | null;
   createConversation(input: {
     context: BuddyContext;
     initialMessage: string;
@@ -37,6 +41,20 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
       res.json(buddies.dashboard());
     } catch (error) {
       sendError(res, error, 500);
+    }
+  });
+
+  app.get('/api/buddies/overview', async (req: Request, res: Response) => {
+    try {
+      const buddies = await getStore();
+      res.json(
+        buddies.overview({
+          recentSince:
+            typeof req.query.recentSince === 'string' ? req.query.recentSince : undefined,
+        })
+      );
+    } catch (error) {
+      sendError(res, error, 400);
     }
   });
 
@@ -314,6 +332,15 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
     }
   });
 
+  app.get('/api/buddies/automations/health', (_req: Request, res: Response) => {
+    const scheduler = getScheduler();
+    if (!scheduler) {
+      res.status(503).json({ error: 'Buddy scheduler is not ready' });
+      return;
+    }
+    res.json(scheduler.health());
+  });
+
   app.post('/api/buddies/:buddyId/automations', async (req: Request, res: Response) => {
     try {
       const buddies = await getStore();
@@ -385,6 +412,19 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
             typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined,
         })
       );
+    } catch (error) {
+      sendError(res, error, 400);
+    }
+  });
+
+  app.post('/api/buddies/automation-runs/:runId/cancel', (req: Request, res: Response) => {
+    try {
+      const scheduler = getScheduler();
+      if (!scheduler) {
+        res.status(503).json({ error: 'Buddy scheduler is not ready' });
+        return;
+      }
+      res.json(scheduler.cancel(req.params.runId));
     } catch (error) {
       sendError(res, error, 400);
     }

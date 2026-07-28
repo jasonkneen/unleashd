@@ -1,0 +1,143 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import type { Server } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import express from 'express';
+import {
+  type SwarmReadModelPorts,
+  registerSwarmReadModelRoutes,
+  synthesizeSwarmRunSummary,
+} from '../src/swarm/read-model-routes';
+
+test('summary synthesis derives worker outcomes from cycles and reviews', async (context) => {
+  const runDirectory = await mkdtemp(path.join(os.tmpdir(), 'swarm-read-model-'));
+  context.after(() => rm(runDirectory, { recursive: true, force: true }));
+  await mkdir(path.join(runDirectory, 'cycles'));
+  await mkdir(path.join(runDirectory, 'reviews'));
+  await writeFile(
+    path.join(runDirectory, 'cycles', 'worker-1.json'),
+    JSON.stringify({
+      'worker-id': 'worker-1',
+      cycle: 1,
+      outcome: 'merged',
+      timestamp: '2026-01-01T00:01:00.000Z',
+    })
+  );
+  await writeFile(
+    path.join(runDirectory, 'reviews', 'worker-1.json'),
+    JSON.stringify({
+      'worker-id': 'worker-1',
+      cycle: 1,
+      verdict: 'approved',
+      timestamp: '2026-01-01T00:02:00.000Z',
+    })
+  );
+
+  const summary = await synthesizeSwarmRunSummary(
+    runDirectory,
+    'swarm-1',
+    {
+      'swarm-id': 'swarm-1',
+      'started-at': '2026-01-01T00:00:00.000Z',
+      pid: 123,
+      workers: [{ id: 'worker-1', harness: 'codex', model: 'gpt-5.6-sol', iterations: 2 }],
+    },
+    { isProcessAlive: () => true, now: () => Date.parse('2026-01-01T00:03:00.000Z') }
+  );
+
+  assert.equal(summary['finished-at'], null);
+  assert.equal(summary['total-completed'], 1);
+  assert.deepEqual(summary.workers, [
+    {
+      id: 'worker-1',
+      harness: 'codex',
+      model: 'gpt-5.6-sol',
+      status: 'running',
+      completed: 1,
+      iterations: 2,
+      merges: 1,
+      rejections: 0,
+      'needs-changes': 0,
+      errors: 0,
+      'review-rounds-total': 1,
+    },
+  ]);
+});
+
+test('read-model routes reject unknown projects before commands or file reads', async (context) => {
+  let commandCalls = 0;
+  const ports: SwarmReadModelPorts = {
+    isUnderKnownProject: () => false,
+    resolveWorkingDirectory: (input) => path.resolve(input),
+    captureSwarmCommand: () => {
+      commandCalls += 1;
+      return 'should not execute';
+    },
+    executeGit: () => {
+      commandCalls += 1;
+      return 'should not execute';
+    },
+    isProcessAlive: () => false,
+    now: Date.now,
+  };
+  const app = express();
+  registerSwarmReadModelRoutes(app, ports);
+  const server = await listen(app);
+  context.after(() => close(server));
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const base = `http://127.0.0.1:${address.port}`;
+
+  const contextResponse = await fetch(
+    `${base}/api/oompa-swarm-context?dir=${encodeURIComponent('/tmp/unknown')}`
+  );
+  const fileResponse = await fetch(
+    `${base}/api/read-file?path=${encodeURIComponent('/tmp/unknown/secret')}`
+  );
+
+  assert.equal(contextResponse.status, 403);
+  assert.equal(fileResponse.status, 403);
+  assert.equal(commandCalls, 0);
+});
+
+test('swarm-new-files rejects run-directory traversal before invoking git', async (context) => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'swarm-project-'));
+  context.after(() => rm(projectRoot, { recursive: true, force: true }));
+  let gitCalls = 0;
+  const app = express();
+  registerSwarmReadModelRoutes(app, {
+    isUnderKnownProject: (candidate) => candidate.startsWith(projectRoot),
+    resolveWorkingDirectory: path.resolve,
+    captureSwarmCommand: () => '',
+    executeGit: () => {
+      gitCalls += 1;
+      return '';
+    },
+    isProcessAlive: () => false,
+    now: Date.now,
+  });
+  const server = await listen(app);
+  context.after(() => close(server));
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/api/swarm-new-files?dir=${encodeURIComponent(projectRoot)}&swarmId=${encodeURIComponent('../outside')}`
+  );
+
+  assert.equal(response.status, 400);
+  assert.equal(gitCalls, 0);
+});
+
+function listen(app: express.Application): Promise<Server> {
+  return new Promise((resolve) => {
+    const server = app.listen(0, '127.0.0.1', () => resolve(server));
+  });
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}

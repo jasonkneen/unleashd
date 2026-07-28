@@ -52,6 +52,7 @@ export interface BuddyTodo {
 export interface BuddyProject {
   id: string;
   workspace_id: string;
+  buddy_id: string;
   title: string;
   objective?: string | null;
   definition_of_done: string;
@@ -59,6 +60,8 @@ export interface BuddyProject {
   priority: number;
   next_action?: string | null;
   blocked_reason?: string | null;
+  sprint_name?: string | null;
+  updated_at: string;
   todos: BuddyTodo[];
 }
 
@@ -128,6 +131,36 @@ export interface Dashboard {
   sprints?: Sprint[];
   workItems?: LegacyWorkItem[];
   legacyWorkItems?: LegacyWorkItem[];
+  buddyOwnedProjects?: BuddyProject[];
+}
+
+export interface BuddyOverviewEmployee {
+  buddy: Buddy;
+  managerId: string | null;
+  workspaces: Workspace[];
+  team: Array<Pick<Buddy, 'id' | 'name' | 'role' | 'status'>>;
+  currentWork: {
+    open: number;
+    active: number;
+    blocked: number;
+    review: number;
+    nextActionMissing: number;
+  };
+}
+
+export interface BuddyOverview {
+  generatedAt: string;
+  employees: BuddyOverviewEmployee[];
+  topLevel: BuddyOverviewEmployee[];
+  recentRuns: Array<{
+    conversationId: string;
+    buddyId: string;
+    buddyName: string;
+    workspaceId: string;
+    workspaceName: string;
+    status: string;
+    lastActiveAt: string;
+  }>;
 }
 
 export interface EmployeeRecord {

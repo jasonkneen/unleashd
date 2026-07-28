@@ -47,6 +47,24 @@ interface BuddySidebarEmployee {
   }>;
 }
 
+interface BuddySidebarRun {
+  conversationId: string;
+  buddyId: string;
+  buddyName: string;
+  workspaceId: string;
+  workspaceName: string;
+  status: string;
+  lastActiveAt: string;
+}
+
+interface BuddySidebarOverview {
+  employees: Array<{
+    buddy: BuddySidebarEmployee;
+    workspaces: Array<{ id: string; name: string }>;
+  }>;
+  recentRuns: BuddySidebarRun[];
+}
+
 function normalizeFolderDirectory(path: string): string {
   const trimmed = path.trim();
   if (!trimmed) return ROOT_PLACEHOLDER;
@@ -263,12 +281,12 @@ export function Sidebar() {
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [buddyDirectory, setBuddyDirectory] = useState<BuddySidebarEmployee[]>([]);
+  const [buddyRecentRuns, setBuddyRecentRuns] = useState<BuddySidebarRun[]>([]);
   const buddyNameById = useMemo(
     () => new Map(buddyDirectory.map((employee) => [employee.id, employee.name])),
     [buddyDirectory]
   );
   const recentBuddyLinks = useMemo(() => {
-    const cutoff = Date.now() - RECENT_CUTOFF_MS;
     const loadedIds = new Set(
       topLevelBuddyConversations.flatMap((conversation) =>
         [conversation.id, conversation.sessionId].filter(
@@ -287,57 +305,41 @@ export function Sidebar() {
       }
     >();
 
-    for (const employee of buddyDirectory) {
-      const workspaces = employee.workspaces ?? employee.projects ?? [];
-      for (const link of employee.conversations ?? []) {
-        const conversationId = link.unleashd_conversation_id ?? link.conversation_id;
-        if (!conversationId || loadedIds.has(conversationId)) continue;
-        const lastActiveAt = link.last_active_at ?? null;
-        if (lastActiveAt && new Date(lastActiveAt).getTime() < cutoff) continue;
-        links.set(conversationId, {
-          conversationId,
-          buddyName: employee.name,
-          workspaceName:
-            workspaces.find((workspace) => workspace.id === link.workspace_id)?.name ?? 'General',
-          status: link.status,
-          lastActiveAt,
-        });
-      }
+    for (const run of buddyRecentRuns) {
+      if (loadedIds.has(run.conversationId)) continue;
+      links.set(run.conversationId, {
+        conversationId: run.conversationId,
+        buddyName: run.buddyName,
+        workspaceName: run.workspaceName,
+        status: run.status,
+        lastActiveAt: run.lastActiveAt,
+      });
     }
 
     return Array.from(links.values()).sort(
       (a, b) => new Date(b.lastActiveAt ?? 0).getTime() - new Date(a.lastActiveAt ?? 0).getTime()
     );
-  }, [buddyDirectory, topLevelBuddyConversations]);
+  }, [buddyRecentRuns, topLevelBuddyConversations]);
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/buddies')
+    fetch('/api/buddies/overview')
       .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then(async (payload: { buddies?: BuddySidebarEmployee[] }) => {
-        const buddies = payload.buddies ?? [];
-        const detailed = await Promise.all(
-          buddies.map(async (buddy) => {
-            try {
-              const response = await fetch(`/api/buddies/${encodeURIComponent(buddy.id)}`);
-              if (!response.ok) return buddy;
-              const detail = (await response.json()) as BuddySidebarEmployee;
-              return {
-                ...buddy,
-                conversations: detail.conversations ?? [],
-                workspaces: detail.workspaces ?? detail.projects ?? buddy.workspaces,
-              };
-            } catch {
-              return buddy;
-            }
-          })
-        );
-        if (!cancelled) setBuddyDirectory(detailed);
+      .then((payload: BuddySidebarOverview) => {
+        if (!cancelled) {
+          setBuddyDirectory(
+            payload.employees.map(({ buddy, workspaces }) => ({ ...buddy, workspaces }))
+          );
+          setBuddyRecentRuns(payload.recentRuns);
+        }
       })
       .catch(() => {
-        if (!cancelled) setBuddyDirectory([]);
+        if (!cancelled) {
+          setBuddyDirectory([]);
+          setBuddyRecentRuns([]);
+        }
       });
     return () => {
       cancelled = true;

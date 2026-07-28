@@ -18,6 +18,33 @@ export interface BuddySchedulerOptions {
   logger?: Pick<Console, 'warn' | 'error'>;
 }
 
+export function parseAutomationCompletion(output: string): {
+  done: boolean;
+  outcome: string | null;
+} {
+  const trimmed = output
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '');
+  try {
+    const value = JSON.parse(trimmed) as {
+      buddyAutomation?: { done?: unknown; outcome?: unknown };
+    };
+    if (typeof value.buddyAutomation?.done !== 'boolean') {
+      return { done: false, outcome: null };
+    }
+    return {
+      done: value.buddyAutomation.done,
+      outcome:
+        typeof value.buddyAutomation.outcome === 'string' ? value.buddyAutomation.outcome : null,
+    };
+  } catch {
+    return { done: false, outcome: null };
+  }
+}
+
+class BuddyAutomationCancelledError extends Error {}
+
 function cronFieldMatches(field: string, value: number, min: number, max: number): boolean {
   return field.split(',').some((part) => {
     const [base, stepText] = part.split('/');
@@ -121,6 +148,8 @@ export class BuddyScheduler {
   private readonly logger: Pick<Console, 'warn' | 'error'>;
   private timer: NodeJS.Timeout | null = null;
   private activeRuns = new Set<string>();
+  private activeConversations = new Map<string, BuddyAutomationConversation>();
+  private cancelledRuns = new Set<string>();
 
   constructor(options: BuddySchedulerOptions) {
     this.store = options.store;
@@ -138,9 +167,34 @@ export class BuddyScheduler {
   }
 
   stop(): void {
-    if (!this.timer) return;
-    clearInterval(this.timer);
+    if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    for (const runId of this.activeRuns) void this.cancel(runId);
+  }
+
+  health() {
+    return {
+      running: this.timer !== null,
+      pollIntervalMs: this.pollIntervalMs,
+      activeRunIds: [...this.activeRuns],
+    };
+  }
+
+  cancel(runId: string): BuddyAutomationRun {
+    const run = this.store.getAutomationRun(runId);
+    if (!run) throw new Error(`automation run not found: ${runId}`);
+    if (['complete', 'failed', 'cancelled'].includes(run.status)) return run;
+    this.cancelledRuns.add(run.id);
+    const conversation = this.activeConversations.get(run.id);
+    conversation?.stop();
+    conversation?.finish('cancelled');
+    const automation = this.store.getAutomation(run.automation_id);
+    const nextRunAt = automation ? this.nextRunAt(automation, run) : undefined;
+    return this.store.updateAutomationRun(run.id, {
+      status: 'cancelled',
+      error: 'Automation cancelled',
+      ...(nextRunAt ? { nextRunAt } : {}),
+    });
   }
 
   async poll(): Promise<void> {
@@ -182,6 +236,8 @@ export class BuddyScheduler {
     let conversation: BuddyAutomationConversation | null = null;
     try {
       conversation = await this.createConversation(automation, claimed);
+      this.activeConversations.set(claimed.id, conversation);
+      this.assertNotCancelled(claimed.id);
       let run = this.store.updateAutomationRun(claimed.id, {
         status: 'running',
         conversationId: conversation.conversationId,
@@ -189,6 +245,7 @@ export class BuddyScheduler {
       let outcome = '';
       if (automation.job_kind === 'prompt') {
         outcome = await conversation.runTurn((automation.job_payload as { prompt: string }).prompt);
+        this.assertNotCancelled(claimed.id);
         run = this.store.updateAutomationRun(run.id, {
           status: 'running',
           iteration: 1,
@@ -198,6 +255,7 @@ export class BuddyScheduler {
         const prompts = (automation.job_payload as { prompts: string[] }).prompts;
         for (let index = 0; index < prompts.length; index += 1) {
           outcome = await conversation.runTurn(prompts[index]);
+          this.assertNotCancelled(claimed.id);
           run = this.store.updateAutomationRun(run.id, {
             status: 'running',
             iteration: index + 1,
@@ -221,16 +279,17 @@ export class BuddyScheduler {
             payload.prompt,
             '',
             `Termination condition: ${payload.termination.condition}`,
-            'When the condition is satisfied, include exactly [BUDDY_AUTOMATION_DONE].',
+            'Return only JSON: {"buddyAutomation":{"done":boolean,"outcome":"brief result"}}.',
             `Iteration ${iteration} of ${payload.termination.max_iterations}.`,
           ].join('\n');
           outcome = await this.runBeforeDeadline(conversation, prompt, deadline);
+          this.assertNotCancelled(claimed.id);
           run = this.store.updateAutomationRun(run.id, {
             status: 'running',
             iteration,
             outcome,
           });
-          if (outcome.includes('[BUDDY_AUTOMATION_DONE]')) {
+          if (parseAutomationCompletion(outcome).done) {
             terminationSatisfied = true;
             break;
           }
@@ -249,6 +308,7 @@ export class BuddyScheduler {
       });
       conversation.finish('complete');
     } catch (error) {
+      if (error instanceof BuddyAutomationCancelledError) return;
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`[buddies] Automation ${automation.id} failed: ${message}`);
       const nextRunAt = this.nextRunAt(automation, claimed);
@@ -261,7 +321,13 @@ export class BuddyScheduler {
       conversation?.stop();
     } finally {
       this.activeRuns.delete(claimed.id);
+      this.activeConversations.delete(claimed.id);
+      this.cancelledRuns.delete(claimed.id);
     }
+  }
+
+  private assertNotCancelled(runId: string): void {
+    if (this.cancelledRuns.has(runId)) throw new BuddyAutomationCancelledError();
   }
 
   private nextRunAt(automation: BuddyAutomation, claimed: BuddyAutomationRun): string | undefined {

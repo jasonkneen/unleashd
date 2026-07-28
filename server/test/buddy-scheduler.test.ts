@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { BuddiesStore } from '@nbardy/buddies';
 import { BuddyContextSchema, ConversationSchema } from '@unleashd/shared';
 import { extractBuddyContext } from '../src/adapters/jsonl';
 import type {
@@ -7,7 +11,11 @@ import type {
   BuddyAutomation,
   BuddyAutomationRun,
 } from '../src/buddies/contract';
-import { BuddyScheduler, nextAutomationRunAt } from '../src/buddies/scheduler';
+import {
+  BuddyScheduler,
+  nextAutomationRunAt,
+  parseAutomationCompletion,
+} from '../src/buddies/scheduler';
 
 function automation(overrides: Partial<BuddyAutomation> = {}): BuddyAutomation {
   return {
@@ -60,6 +68,19 @@ test('cron follows standard OR semantics when day-of-month and weekday are both 
     ),
     '2026-01-12T09:00:00.000Z'
   );
+});
+
+test('automation completion requires structured JSON', () => {
+  assert.deepEqual(
+    parseAutomationCompletion(
+      '```json\n{"buddyAutomation":{"done":true,"outcome":"Campaign is ready."}}\n```'
+    ),
+    { done: true, outcome: 'Campaign is ready.' }
+  );
+  assert.deepEqual(parseAutomationCompletion('[BUDDY_AUTOMATION_DONE]'), {
+    done: false,
+    outcome: null,
+  });
 });
 
 test('Buddy context is typed conversation metadata independent of swarm state', () => {
@@ -153,7 +174,9 @@ test('scheduler executes bounded loop and records each iteration once', async ()
       conversationId: 'conversation-1',
       async runTurn(prompt) {
         prompts.push(prompt);
-        return prompts.length === 2 ? '[BUDDY_AUTOMATION_DONE]' : 'continue';
+        return prompts.length === 2
+          ? '{"buddyAutomation":{"done":true,"outcome":"Ready."}}'
+          : '{"buddyAutomation":{"done":false,"outcome":"Continue."}}';
       },
       stop() {},
       finish() {},
@@ -171,7 +194,7 @@ test('scheduler executes bounded loop and records each iteration once', async ()
   assert.match(prompts[0], /Termination condition: campaign is ready/);
 });
 
-test('scheduler fails a bounded loop that exhausts iterations without its sentinel', async () => {
+test('scheduler fails a bounded loop that exhausts iterations without structured completion', async () => {
   const definition = automation({
     job_kind: 'loop',
     job_payload: {
@@ -326,4 +349,119 @@ test('scheduler fails and advances a run interrupted by process restart', async 
   assert.equal(run.status, 'failed');
   assert.equal(run.error, 'Automation interrupted by scheduler restart');
   assert.equal(recordedNextRunAt, '2026-01-01T01:01:00.000Z');
+});
+
+test('scheduler cancellation stops the active conversation and preserves cancelled state', async () => {
+  const definition = automation({ job_kind: 'prompt', job_payload: { prompt: 'Review now' } });
+  let run: BuddyAutomationRun = {
+    id: 'run-cancel',
+    automation_id: definition.id,
+    scheduled_for: definition.next_run_at!,
+    idempotency_key: 'automation-1:cancel',
+    status: 'claimed',
+    conversation_id: null,
+    iteration: 0,
+    outcome: null,
+    error: null,
+    claimed_at: definition.next_run_at!,
+    started_at: null,
+    ended_at: null,
+  };
+  let resolveTurn: ((value: string) => void) | null = null;
+  let stopped = 0;
+  const finishes: string[] = [];
+  const store = {
+    listDueAutomations: () => [definition],
+    claimAutomationRun: () => run,
+    getAutomationRun: () => run,
+    updateAutomationRun: (_id: string, changes: Partial<BuddyAutomationRun>) => {
+      run = { ...run, ...changes };
+      return run;
+    },
+    getAutomation: () => definition,
+  } as unknown as BuddiesStorePort;
+  const scheduler = new BuddyScheduler({
+    store,
+    now: () => new Date(definition.next_run_at!),
+    createConversation: async () => ({
+      conversationId: 'conversation-cancel',
+      runTurn: () =>
+        new Promise<string>((resolve) => {
+          resolveTurn = resolve;
+        }),
+      stop() {
+        stopped += 1;
+      },
+      finish(status) {
+        finishes.push(status);
+      },
+    }),
+  });
+
+  await scheduler.poll();
+  for (let attempt = 0; attempt < 20 && run.status !== 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(scheduler.health().activeRunIds, [run.id]);
+  assert.equal(scheduler.cancel(run.id).status, 'cancelled');
+  resolveTurn?.('late result');
+  for (let attempt = 0; attempt < 20 && scheduler.health().activeRunIds.length; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(run.status, 'cancelled');
+  assert.equal(stopped, 1);
+  assert.deepEqual(finishes, ['cancelled']);
+  assert.deepEqual(scheduler.health().activeRunIds, []);
+});
+
+test('scheduler recovers an interrupted run from a real SQLite database after restart', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'buddy-scheduler-restart-'));
+  const databasePath = join(directory, 'buddies.sqlite');
+  let store = new BuddiesStore(databasePath);
+  try {
+    const workspace = store.createWorkspace({
+      name: 'Workspace',
+      rootPath: join(directory, 'workspace'),
+    });
+    const buddy = store.createBuddy({
+      project: workspace.id,
+      name: 'Lead',
+      role: 'Own outcomes',
+    });
+    const definition = store.createAutomation({
+      buddy: buddy.id,
+      workspace: workspace.id,
+      name: 'Restart proof',
+      scheduleKind: 'interval',
+      scheduleExpression: '60',
+      jobKind: 'prompt',
+      jobPayload: { prompt: 'Check state.' },
+      nextRunAt: '2026-07-28T00:00:00.000Z',
+    });
+    const claimed = store.claimAutomationRun(definition.id, {
+      scheduledFor: definition.next_run_at!,
+    });
+    store.updateAutomationRun(claimed.id, {
+      status: 'running',
+      conversationId: 'conversation-before-restart',
+    });
+    store.close();
+
+    store = new BuddiesStore(databasePath);
+    const scheduler = new BuddyScheduler({
+      store: store as unknown as BuddiesStorePort,
+      now: () => new Date('2026-07-28T01:00:00.000Z'),
+      createConversation: async () => {
+        throw new Error('restart recovery must not create another conversation');
+      },
+    });
+    await scheduler.poll();
+    const recovered = store.getAutomationRun(claimed.id);
+    assert.equal(recovered.status, 'failed');
+    assert.equal(recovered.error, 'Automation interrupted by scheduler restart');
+    assert.equal(store.getAutomation(definition.id).next_run_at, '2026-07-28T01:01:00.000Z');
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

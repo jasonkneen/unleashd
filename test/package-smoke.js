@@ -46,8 +46,9 @@ const installedPackageRoot = path.join(installRoot, 'node_modules', 'unleashd');
 const installedRequire = createRequire(path.join(installedPackageRoot, 'package.json'));
 const shared = installedRequire('@unleashd/shared');
 const cli = installedRequire('@nbardy/agent-cli');
+const buddiesModule = installedRequire('@nbardy/buddies');
 
-if (!shared.ConversationConfigSchema || !cli.executeCommand) {
+if (!shared.ConversationConfigSchema || !cli.executeCommand || !buddiesModule.BuddiesStore) {
   throw new Error('Compiled package exports are missing');
 }
 
@@ -121,13 +122,8 @@ async function verifyInstalledServer(port) {
   }
 
   const buddies = await requestJson(port, '/api/buddies');
-  if (
-    buddies.status !== 503 ||
-    !String(buddies.body?.error).includes('Buddies integration is unavailable')
-  ) {
-    throw new Error(
-      `Missing optional Buddies package did not return 503: ${JSON.stringify(buddies)}`
-    );
+  if (buddies.status !== 200 || !Array.isArray(buddies.body?.buddies)) {
+    throw new Error(`Bundled Buddies package is unavailable: ${JSON.stringify(buddies)}`);
   }
 }
 

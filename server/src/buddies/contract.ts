@@ -65,9 +65,29 @@ interface BuddySkill {
   mode: string;
 }
 
-interface BuddyDelegation {
+export interface BuddyDelegation {
   id: string;
+  from_buddy_id: string;
+  to_buddy_id: string;
+  workspace_id: string;
+  buddy_project_id: string | null;
   child_conversation_id: string | null;
+  status: string;
+  outcome?: string | null;
+}
+
+export interface BuddyReviewRecord {
+  id: string;
+  reviewer_buddy_id: string;
+  subject_buddy_id: string;
+  workspace_id: string;
+  buddy_project_id: string | null;
+  conversation_id: string | null;
+  status: string;
+  verdict: string | null;
+  score: number | null;
+  summary: string | null;
+  evidence: unknown[];
 }
 
 interface BuddyLegacyWorkItem {
@@ -94,16 +114,23 @@ interface BuddyDetailContext {
 
 export interface BuddiesStorePort {
   dashboard(): unknown;
+  overview(options?: { recentSince?: Date | string }): unknown;
   getBuddy(id: string): BuddyRecord | null;
   listBuddyWorkspaces(buddy: string): unknown[];
   listBuddyOwnedProjects(input: Record<string, unknown>): unknown[];
+  getBuddyProject(id: string): {
+    id: string;
+    buddy_id: string;
+    workspace_id: string;
+    definition_of_done: string;
+  } | null;
   listWorkItems(input: Record<string, unknown>): unknown[];
   listConversationLinks(buddy: string): unknown[];
   listAutomations(input: { buddy: string }): BuddyAutomation[];
   listBuddyRelationships(buddy: string): unknown[];
   listBuddySkills(buddy: string): BuddySkill[];
   listDelegations(input: Record<string, unknown>): BuddyDelegation[];
-  listReviews(input: Record<string, unknown>): unknown[];
+  listReviews(input: Record<string, unknown>): BuddyReviewRecord[];
   getBuddyContext(
     buddy: string,
     input: { workspace?: string; project?: string }
@@ -121,10 +148,14 @@ export interface BuddiesStorePort {
   setBuddyRelationship(input: Record<string, unknown>): unknown;
   assignBuddySkill(input: Record<string, unknown>): unknown;
   createDelegation(input: Record<string, unknown>): BuddyDelegation;
+  getDelegation(id: string): BuddyDelegation | null;
   createReview(input: Record<string, unknown>): { id: string };
+  getReview(id: string): BuddyReviewRecord | null;
   updateReview(id: string, changes: Record<string, unknown>): unknown;
   readBuddyMemory(buddy: string): unknown;
   remember(buddy: string, input: Record<string, unknown>): unknown;
+  compactMemory(buddy: string, input: Record<string, unknown>): unknown;
+  recordAuditEvent(input: Record<string, unknown>): unknown;
   newProject(input: Record<string, unknown>): unknown;
   updateProject(id: string, changes: Record<string, unknown>): unknown;
   createAutomation(input: Record<string, unknown>): BuddyAutomation;
@@ -136,6 +167,7 @@ export interface BuddiesStorePort {
     id: string,
     input?: { scheduledFor?: string; idempotencyKey?: string }
   ): BuddyAutomationRun;
+  getAutomationRun(id: string): BuddyAutomationRun | null;
   updateAutomationRun(
     id: string,
     changes: {
