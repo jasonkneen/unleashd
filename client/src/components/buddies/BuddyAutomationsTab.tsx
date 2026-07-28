@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { asArray, buddyApi } from './api';
 import type { AutomationRun, BuddyApprovalRequest, BuddyAutomation, BuddyMutation } from './types';
+import type { ConversationLink } from './types';
 
 interface BuddyAutomationsTabProps {
   buddyId: string;
@@ -12,6 +13,7 @@ interface BuddyAutomationsTabProps {
   refresh: () => Promise<void>;
   onError: (message: string) => void;
   onOpenConversation: (conversationId: string) => void;
+  automationConversations: ConversationLink[];
 }
 
 export function BuddyAutomationsTab({
@@ -24,6 +26,7 @@ export function BuddyAutomationsTab({
   refresh,
   onError,
   onOpenConversation,
+  automationConversations,
 }: BuddyAutomationsTabProps) {
   const [scheduleKind, setScheduleKind] = useState<BuddyAutomation['schedule_kind']>('interval');
 
@@ -172,6 +175,32 @@ export function BuddyAutomationsTab({
             onOpenConversation={onOpenConversation}
           />
         ))}
+      </div>
+      <div className="buddy-automation-conversations">
+        <h2>Automation conversations</h2>
+        {automationConversations.map((conversation) => {
+          const conversationId =
+            conversation.conversation_id ?? conversation.unleashd_conversation_id;
+          if (!conversationId) return null;
+          return (
+            <button
+              type="button"
+              key={conversation.id ?? conversationId}
+              onClick={() => onOpenConversation(conversationId)}
+            >
+              <span>
+                <strong>Automation run</strong>
+                {conversation.last_active_at
+                  ? new Date(conversation.last_active_at).toLocaleString()
+                  : 'No activity recorded'}
+              </span>
+              <span>Open →</span>
+            </button>
+          );
+        })}
+        {automationConversations.length === 0 && (
+          <p className="buddy-empty">No automation conversations yet.</p>
+        )}
       </div>
     </section>
   );

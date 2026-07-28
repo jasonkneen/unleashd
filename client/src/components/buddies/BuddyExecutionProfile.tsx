@@ -31,11 +31,11 @@ export function BuddyExecutionProfile({
   return (
     <details className="buddy-execution-profile">
       <summary>
-        Execution profile
-        <span>
-          {provider} · {buddy.model || 'provider default'} ·{' '}
-          {buddy.reasoning_effort || 'model default'}
-        </span>
+        <span>Execution</span>
+        <strong>
+          {provider} · {buddy.model || 'default model'} ·{' '}
+          {buddy.reasoning_effort || 'default effort'}
+        </strong>
       </summary>
       {error && <p>Provider catalog unavailable: {error.message}</p>}
       {catalog && (

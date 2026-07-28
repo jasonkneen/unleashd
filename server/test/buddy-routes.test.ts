@@ -60,6 +60,70 @@ test('Buddy overview route forwards the optional cutoff and returns one projecti
   }
 });
 
+test('Buddy detail classifies review and automation conversations for separate UI surfaces', async () => {
+  const app = express();
+  app.use(express.json());
+  const empty = () => [];
+  const store = {
+    getBuddy: () => ({ id: 'buddy-1', name: 'Lead', status: 'active' }),
+    listBuddyWorkspaces: empty,
+    listBuddyOwnedProjects: empty,
+    listWorkItems: empty,
+    listConversationLinks: () => [
+      { id: 'link-general', unleashd_conversation_id: 'conversation-general' },
+      { id: 'link-review', unleashd_conversation_id: 'conversation-review' },
+      { id: 'link-automation', unleashd_conversation_id: 'conversation-automation' },
+    ],
+    listAutomations: () => [{ id: 'automation-1' }],
+    listAutomationRuns: () => [{ conversation_id: 'conversation-automation' }],
+    listBuddyRelationships: empty,
+    listBuddySkills: empty,
+    listDelegations: empty,
+    listReviews: () => [{ conversation_id: 'conversation-review' }],
+    listApprovalRequests: empty,
+  } as unknown as BuddiesStorePort;
+  registerBuddyRoutes(app, {
+    getStore: async () => store,
+    getScheduler: () => null,
+    createConversation: async () => {
+      throw new Error('not used');
+    },
+    sendError(response, error, fallbackStatus) {
+      response
+        .status(fallbackStatus)
+        .json({ error: error instanceof Error ? error.message : String(error) });
+    },
+    getNextAutomationRunAt: () => '2026-07-29T00:00:00.000Z',
+    createId: () => 'test-id',
+  });
+
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('listening', resolve);
+      server.once('error', reject);
+    });
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/buddies/buddy-1`);
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      conversations: Array<{ id: string; kind: string }>;
+    };
+    assert.deepEqual(
+      Object.fromEntries(body.conversations.map((conversation) => [conversation.id, conversation.kind])),
+      {
+        'link-general': 'conversation',
+        'link-review': 'review',
+        'link-automation': 'automation',
+      }
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
+});
+
 test('human approval routes list pending requests and persist one terminal owner decision', async () => {
   const root = mkdtempSync(join(tmpdir(), 'buddy-approval-routes-'));
   const store = new BuddiesStore(':memory:');

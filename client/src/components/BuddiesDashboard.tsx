@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { BuddyAutomationsTab } from './buddies/BuddyAutomationsTab';
@@ -144,6 +144,7 @@ export function BuddiesDashboard() {
   const [automationError, setAutomationError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<EmployeeTab>('work');
+  const [showReviewConversations, setShowReviewConversations] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
@@ -284,6 +285,7 @@ export function BuddiesDashboard() {
       setMemoryError(null);
       setAutomationError(null);
       setSelectedWorkspaceId('');
+      setShowReviewConversations(false);
     }
     const loading = buddyId
       ? loadEmployee(controller.signal, generation)
@@ -332,6 +334,28 @@ export function BuddiesDashboard() {
       workspaceProjects.find((project) => project.status === 'ready') ??
       workspaceProjects.find((project) => !['done', 'cancelled'].includes(project.status)),
     [workspaceProjects]
+  );
+  const visibleConversations = useMemo(
+    () =>
+      (employee?.conversations ?? []).filter(
+        (conversation) =>
+          conversation.kind !== 'automation' &&
+          (showReviewConversations || conversation.kind !== 'review')
+      ),
+    [employee?.conversations, showReviewConversations]
+  );
+  const reviewConversationCount = useMemo(
+    () =>
+      (employee?.conversations ?? []).filter((conversation) => conversation.kind === 'review')
+        .length,
+    [employee?.conversations]
+  );
+  const automationConversations = useMemo(
+    () =>
+      (employee?.conversations ?? []).filter(
+        (conversation) => conversation.kind === 'automation'
+      ),
+    [employee?.conversations]
   );
   const latestWorkspaceConversation = useMemo(
     () =>
@@ -434,10 +458,61 @@ export function BuddiesDashboard() {
           <div className="buddy-avatar" aria-hidden="true">
             {initials(employee.buddy.name)}
           </div>
-          <div>
-            <div className="buddy-eyebrow">Persistent employee</div>
-            <h1>{employee.buddy.name}</h1>
+          <div className="buddy-identity-copy">
+            <div className="buddy-identity-title">
+              <h1>{employee.buddy.name}</h1>
+              <span>{employee.buddy.status}</span>
+            </div>
             <p>{employee.buddy.role}</p>
+            <div className="buddy-identity-meta">
+              <span>
+                Reports to <strong>{employee.manager?.name ?? 'Owner'}</strong>
+              </span>
+              {employee.directReports.length > 0 ? (
+                <details className="buddy-report-menu">
+                  <summary>
+                    <strong>{employee.directReports.length}</strong>{' '}
+                    {employee.directReports.length === 1 ? 'report' : 'reports'}
+                  </summary>
+                  <div>
+                    {employee.directReports.map((report) => (
+                      <Link to={`/buddies/${report.id}`} key={report.id}>
+                        <strong>{report.name}</strong>
+                        <span>{report.role ?? 'Direct report'} →</span>
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              ) : (
+                <span>
+                  <strong>0</strong> reports
+                </span>
+              )}
+              <span
+                title={
+                  employee.skills.length > 0
+                    ? employee.skills.map((skill) => skill.name).join(', ')
+                    : 'No structured skills'
+                }
+              >
+                <strong>{employee.skills.length}</strong>{' '}
+                {employee.skills.length === 1 ? 'skill' : 'skills'}
+              </span>
+              <BuddyExecutionProfile
+                key={`${employee.buddy.id}:${employee.buddy.provider}:${employee.buddy.model}:${employee.buddy.reasoning_effort}`}
+                buddy={employee.buddy}
+                busy={busy !== null}
+                onSave={(profile) =>
+                  mutate('profile', () =>
+                    api(`/api/buddies/${encodeURIComponent(employee.buddy.id)}/profile`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(profile),
+                    })
+                  )
+                }
+              />
+            </div>
           </div>
         </div>
         {workspace && (
@@ -448,46 +523,6 @@ export function BuddiesDashboard() {
       </header>
 
       <main className="buddies-content">
-        <BuddyExecutionProfile
-          key={`${employee.buddy.id}:${employee.buddy.provider}:${employee.buddy.model}:${employee.buddy.reasoning_effort}`}
-          buddy={employee.buddy}
-          busy={busy !== null}
-          onSave={(profile) =>
-            mutate('profile', () =>
-              api(`/api/buddies/${encodeURIComponent(employee.buddy.id)}/profile`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(profile),
-              })
-            )
-          }
-        />
-        <section className="buddy-org-strip" aria-label="Employee capabilities and reporting line">
-          <div>
-            <span>Reports to</span>
-            <strong>{employee.manager?.name ?? 'Owner'}</strong>
-          </div>
-          <div>
-            <span>Direct reports</span>
-            <strong>{employee.directReports.length}</strong>
-          </div>
-          <div className="buddy-skill-list">
-            <span>Skills</span>
-            <div>
-              {employee.skills.length > 0 ? (
-                employee.skills.map((skill) => (
-                  <span key={skill.name} title={skill.instruction_path ?? undefined}>
-                    {skill.name}
-                    {skill.mode ? ` · ${skill.mode}` : ''}
-                  </span>
-                ))
-              ) : (
-                <small>No structured skills recorded</small>
-              )}
-            </div>
-          </div>
-        </section>
-
         {employee.directReports.length > 0 && workspace && (
           <details className="buddy-lead-tools">
             <summary>Lead tools · delegate and review reports</summary>
@@ -755,19 +790,44 @@ export function BuddiesDashboard() {
         {activeTab === 'conversations' && (
           <section className="buddy-section">
             <div className="buddy-section-heading">
-              <h2>Conversations</h2>
-              {workspace && (
-                <button type="button" onClick={() => talk(workspace)}>
-                  Start conversation
-                </button>
-              )}
+              <div>
+                <h2>Conversations</h2>
+                <span>Direct and project conversations</span>
+              </div>
+              <div className="buddy-conversation-controls">
+                {reviewConversationCount > 0 && (
+                  <button
+                    type="button"
+                    className={showReviewConversations ? 'active' : ''}
+                    aria-pressed={showReviewConversations}
+                    onClick={() => setShowReviewConversations((current) => !current)}
+                  >
+                    {showReviewConversations ? 'Hide' : 'Include'} reviews (
+                    {reviewConversationCount})
+                  </button>
+                )}
+                {workspace && (
+                  <button type="button" onClick={() => talk(workspace)}>
+                    Start conversation
+                  </button>
+                )}
+              </div>
             </div>
             <div className="buddy-record-list">
-              {employee.conversations.map((link) => (
-                <article key={link.id ?? link.conversation_id ?? link.unleashd_conversation_id}>
+              {visibleConversations.map((link) => {
+                const conversationId = link.conversation_id ?? link.unleashd_conversation_id;
+                if (!conversationId) return null;
+                return (
+                  <Link
+                    className="buddy-conversation-card"
+                    to={`/chat/${conversationId}`}
+                    key={link.id ?? conversationId}
+                  >
                   <div>
                     <strong>
-                      {link.buddy_project_id
+                      {link.kind === 'review'
+                        ? 'Employee review'
+                        : link.buddy_project_id
                         ? (employee.projects.find((project) => project.id === link.buddy_project_id)
                             ?.title ?? 'Project conversation')
                         : 'General conversation'}
@@ -779,19 +839,12 @@ export function BuddiesDashboard() {
                         : 'No activity recorded'}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    disabled={!link.conversation_id && !link.unleashd_conversation_id}
-                    onClick={() =>
-                      navigate(`/chat/${link.conversation_id ?? link.unleashd_conversation_id}`)
-                    }
-                  >
-                    Open →
-                  </button>
-                </article>
-              ))}
-              {employee.conversations.length === 0 && (
-                <p className="buddy-empty">No linked conversations yet.</p>
+                  <span className="buddy-conversation-card__action">Open →</span>
+                  </Link>
+                );
+              })}
+              {visibleConversations.length === 0 && (
+                <p className="buddy-empty">No direct conversations yet.</p>
               )}
             </div>
           </section>
@@ -870,6 +923,7 @@ export function BuddiesDashboard() {
               refresh={loadAutomations}
               onError={setError}
               onOpenConversation={(conversationId) => navigate(`/chat/${conversationId}`)}
+              automationConversations={automationConversations}
             />
           </>
         )}

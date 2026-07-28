@@ -73,6 +73,7 @@ export interface ConversationLink {
   buddy_project_id?: string | null;
   status: string;
   last_active_at?: string | null;
+  kind?: 'conversation' | 'review' | 'automation';
 }
 
 export interface BuddyMemory {

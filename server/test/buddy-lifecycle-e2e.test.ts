@@ -66,6 +66,11 @@ test('Buddy closure loop survives restart with work, review, delegation, memory,
       },
     ],
   });
+  store.remember(lead.id, {
+    kind: 'journal',
+    content:
+      'Failed attempt: destination evidence was stale. Next attempt must refresh the audit first.',
+  });
 
   const integration = createBuddiesIntegration({
     getConversation: () => undefined,
@@ -85,9 +90,21 @@ test('Buddy closure loop survives restart with work, review, delegation, memory,
   assert.equal(resolved.workingDirectory, workspaceRoot);
   assert.match(resolved.briefing, /Close GTM work with evidence/);
   assert.match(resolved.briefing, /Adjudicate concierge onboarding proof/);
+  assert.match(resolved.briefing, /Recent journal excerpts/);
+  assert.match(resolved.briefing, /destination evidence was stale/);
+  assert.match(resolved.briefing, /SOUL_CHANGE_PROPOSAL/);
   assert.match(resolved.briefing, /native `unleashd_buddy` tools/);
   assert.deepEqual(resolved.context.allowedBuddyOperations, ['buddy.get_current_work']);
   assert.ok(resolved.briefing.length <= 40_000);
+
+  const automationResolved = await integration.resolveConversation({
+    buddyId: lead.id,
+    workspaceId: workspace.id,
+    automationRunId: 'automation-run-1',
+    allowedBuddyOperations: ['buddy.get_current_work', 'buddy.remember'],
+  });
+  assert.match(automationResolved.briefing, /AUTOMATION AUTHORITY/);
+  assert.match(automationResolved.briefing, /CLI compatibility fallback is prohibited/);
 
   await integration.createLink({
     id: 'lead-conversation',

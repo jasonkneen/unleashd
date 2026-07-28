@@ -70,6 +70,15 @@ The Unleashd package includes a versioned `@nbardy/buddies` snapshot; no manual
 reporting lines, reviews, and automation runs live in
 `~/.buddies/buddies.sqlite`.
 
+Each Buddy also has a private curated `MEMORY.md` plus append-only journal
+notes. Unleashd injects the bounded curated summary and recent journal excerpts
+into the first turn of each Buddy conversation. The `remember` operation
+records material outcomes, failures, durable decisions, and reusable lessons;
+`compact_memory` reconciles repetitive or stale history with source
+references. `BUDDY_SOUL.md` remains a stable, owner-reviewed behavior and
+authority contract: Buddies may record `SOUL_CHANGE_PROPOSAL` journal entries,
+but cannot silently rewrite their own Soul.
+
 Initialize the Growth Lead team for the Magic Genie and EventMap checkouts:
 
 ```bash

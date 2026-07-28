@@ -124,17 +124,50 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
         res.status(404).json({ error: 'Buddy not found' });
         return;
       }
+      const automations = buddies.listAutomations({ buddy: buddy.id });
+      const reviews = buddies.listReviews({ buddy: buddy.id });
+      const reviewConversationIds = new Set(
+        reviews
+          .map((review) => review.conversation_id)
+          .filter((conversationId): conversationId is string => Boolean(conversationId))
+      );
+      const automationConversationIds = new Set(
+        automations.flatMap((automation) =>
+          buddies
+            .listAutomationRuns(automation.id)
+            .map((run) => run.conversation_id)
+            .filter((conversationId): conversationId is string => Boolean(conversationId))
+        )
+      );
+      const conversations = buddies.listConversationLinks(buddy.id).map((value) => {
+        const conversation = value as Record<string, unknown>;
+        const conversationId =
+          typeof conversation.unleashd_conversation_id === 'string'
+            ? conversation.unleashd_conversation_id
+            : typeof conversation.conversation_id === 'string'
+              ? conversation.conversation_id
+              : null;
+        return {
+          ...conversation,
+          kind:
+            conversationId && automationConversationIds.has(conversationId)
+              ? 'automation'
+              : conversationId && reviewConversationIds.has(conversationId)
+                ? 'review'
+                : 'conversation',
+        };
+      });
       res.json({
         buddy,
         workspaces: buddies.listBuddyWorkspaces(buddy.id),
         projects: buddies.listBuddyOwnedProjects({ buddy: buddy.id, includeClosed: true }),
         legacyWorkItems: buddies.listWorkItems({ buddy: buddy.id, includeClosed: true }),
-        conversations: buddies.listConversationLinks(buddy.id),
-        automations: buddies.listAutomations({ buddy: buddy.id }),
+        conversations,
+        automations,
         relationships: buddies.listBuddyRelationships(buddy.id),
         skills: buddies.listBuddySkills(buddy.id),
         delegations: buddies.listDelegations({ buddy: buddy.id }),
-        reviews: buddies.listReviews({ buddy: buddy.id }),
+        reviews,
         approvals: buddies.listApprovalRequests({ buddy: buddy.id }),
       });
     } catch (error) {

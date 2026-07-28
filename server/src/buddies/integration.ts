@@ -10,6 +10,8 @@ const BUDDY_BRIEFING_MAX_CHARACTERS = 40_000;
 const BUDDY_SOUL_MAX_CHARACTERS = 12_000;
 const BUDDY_SKILLS_MAX_CHARACTERS = 12_000;
 const BUDDY_MEMORY_MAX_CHARACTERS = 6_000;
+const BUDDY_MEMORY_SUMMARY_MAX_CHARACTERS = 4_200;
+const BUDDY_MEMORY_JOURNAL_MAX_CHARACTERS = 1_800;
 const BUDDY_WORK_MAX_CHARACTERS = 8_000;
 export const BUDDY_REVIEW_RESULT_START = '<!-- unleashd:buddy-review-result -->';
 export const BUDDY_REVIEW_RESULT_END = '<!-- /unleashd:buddy-review-result -->';
@@ -210,6 +212,9 @@ export function createBuddiesIntegration(dependencies: BuddiesIntegrationDepende
       requested.allowedBuddyOperations?.length
         ? `Allowed Buddy operations: ${requested.allowedBuddyOperations.join(', ')}.`
         : 'Buddy operations are scoped by the trusted conversation context.',
+      requested.automationRunId
+        ? 'AUTOMATION AUTHORITY: the allowed Buddy operations are an absolute boundary. Do not invoke the buddies CLI, HTTP routes, direct database access, or filesystem edits to Buddy state. If a needed operation is absent or denied, record the exact blocker and stop that state transition.'
+        : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -228,13 +233,19 @@ export function createBuddiesIntegration(dependencies: BuddiesIntegrationDepende
       'BUDDY MEMORY',
       boundedText(
         detail.memory.summary || '(No curated memory yet.)',
-        BUDDY_MEMORY_MAX_CHARACTERS
+        Math.min(BUDDY_MEMORY_SUMMARY_MAX_CHARACTERS, BUDDY_MEMORY_MAX_CHARACTERS)
       ),
       detail.memory.recentJournal.length
-        ? `Recent journal pointers:\n${detail.memory.recentJournal
-            .slice(0, 8)
-            .map((entry: { path: string }) => `- ${path.basename(entry.path)}`)
-            .join('\n')}`
+        ? boundedText(
+            `Recent journal excerpts:\n${detail.memory.recentJournal
+              .slice(0, 3)
+              .map(
+                (entry: { path: string; content: string }) =>
+                  `\n### ${path.basename(entry.path)}\n${entry.content.trim()}`
+              )
+              .join('\n')}`,
+            BUDDY_MEMORY_JOURNAL_MAX_CHARACTERS
+          )
         : 'No recent journal entries.',
       '',
       'CURRENT SPRINT / OWNED WORK',
@@ -259,9 +270,16 @@ export function createBuddiesIntegration(dependencies: BuddiesIntegrationDepende
       'Those tools are already bound to this employee, workspace, and selected project.',
       'Never pass identity through prose, edit the Buddies SQLite database directly, or substitute filesystem notes for project state.',
       'Use get_inbox and get_current_work before choosing work; use new_project/update_project for authoritative work; use remember for durable personal handoffs.',
+      'Use remember(kind="journal") after material work, a failed attempt, a durable decision, or a lesson that should change the next run. Record the outcome, evidence pointer, lesson, and next attempt; do not copy the transcript or large evidence.',
+      'Use remember(kind="curated") only for stable facts, owner preferences, durable decisions, and repeated lessons likely to matter across future conversations.',
+      'Use compact_memory when journal history becomes repetitive, stale, or contradictory; preserve source references and prefer a dry run before replacement.',
+      'BUDDY_SOUL.md is a stable behavior and authority contract, not self-editing memory. Do not rewrite it. If repeated evidence suggests a change, record a journal entry beginning SOUL_CHANGE_PROPOSAL for Lead or owner review.',
       'Completing work requires concrete evidence. External sends, spend, publishing, and deployment require request_human_approval first.',
       'An approval request records pending intent only. Stop after requesting it; do not treat the request itself as authorization.',
-      'If this provider cannot expose the native tools, the `buddies` CLI is a compatibility fallback.',
+      'If native Buddy tools are present, a missing or denied operation is an authority boundary; never use the CLI, HTTP, database, or files to bypass it.',
+      requested.automationRunId
+        ? 'CLI compatibility fallback is prohibited for this automation run.'
+        : 'If this provider cannot expose any native Buddy tools, the `buddies` CLI is a compatibility fallback only for operations already authorized by the conversation scope.',
     ].join('\n');
     const middleBudget = Math.max(
       0,
