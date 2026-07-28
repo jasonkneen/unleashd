@@ -3,6 +3,7 @@
  */
 
 const WebSocket = require('ws');
+const { randomUUID } = require('node:crypto');
 
 console.log('=== Testing Multi-Turn WebSocket Conversation ===\n');
 
@@ -28,9 +29,15 @@ ws.on('message', (data) => {
     case 'init':
       ws.send(
         JSON.stringify({
-          type: 'new_conversation',
+          type: 'create_conversation',
+          commandId: randomUUID(),
+          conversationId: randomUUID(),
           workingDirectory: process.cwd(),
-          provider: 'claude',
+          config: {
+            provider: 'claude',
+            model: { mode: 'default' },
+            reasoning: { mode: 'default' },
+          },
         })
       );
       break;

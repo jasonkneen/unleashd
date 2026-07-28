@@ -94,29 +94,38 @@ export function SubAgentPanel({ subAgents, workingDirectory }: SubAgentPanelProp
       onMouseLeave={handleMouseLeave}
     >
       {/* Header - always visible */}
-      <div
+      <button
+        type="button"
         className="subagent-header"
         onClick={toggleExpanded}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            toggleExpanded();
-          }
-        }}
+        aria-expanded={isExpanded}
       >
         <span className={`subagent-indicator ${runningCount > 0 ? 'running' : 'done'}`} />
         <span className="subagent-summary">
           {runningCount > 0 ? (
             <>
-              Running {runningCount} sub-agent session{runningCount !== 1 ? 's' : ''}...
+              <strong>{runningCount}</strong> sub-agent{runningCount !== 1 ? 's' : ''} running
             </>
           ) : (
-            <>Sub-agent sessions completed</>
+            <>Sub-agents completed</>
           )}
         </span>
-        <span className="subagent-shortcut">(ctrl+o to {isExpanded ? 'collapse' : 'expand'})</span>
-      </div>
+        <span className="subagent-shortcut">Ctrl+O</span>
+        <svg
+          className={`subagent-chevron${isExpanded ? ' expanded' : ''}`}
+          aria-hidden="true"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
 
       {/* Tree view - collapsible with CSS transition */}
       <div className={`subagent-tree-wrapper ${isExpanded ? 'expanded' : ''}`}>

@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 import {
+  BuddyContextSchema,
   ConfigErrorSchema,
   ConfigResolutionSchema,
   ConversationConfigPatchSchema,
@@ -19,12 +20,12 @@ import {
   encodeLegacyCodexCompositeModel,
 } from './legacy/codex-composite-model.js';
 import {
-  type Provider,
   PROVIDER_IDS,
   PROVIDER_METADATA,
   PROVIDER_OPTIONS,
-  ProviderSchema,
+  type Provider,
   type ProviderMetadata,
+  ProviderSchema,
   getProviderMetadata,
 } from './provider-catalog.js';
 
@@ -594,11 +595,12 @@ export const ConversationSchema = z.object({
   // Pass-through string: value is whatever the target CLI accepts (see
   // CLAUDE_EFFORT_LEVELS / CODEX_EFFORT_LEVELS). Other providers leave it undefined.
   reasoningEffort: z.string().optional(),
-  // V2 configuration aggregate. Optional only during the compatibility release;
-  // new server-owned conversations always include all three fields.
-  config: ConversationConfigSchema.optional(),
-  configRevision: z.number().int().nonnegative().optional(),
-  configResolution: ConfigResolutionSchema.optional(),
+  // Canonical configuration authority for every server-owned conversation.
+  // Disk discoveries use DiscoveredConversation until server hydration resolves
+  // provider defaults and produces this complete snapshot.
+  config: ConversationConfigSchema,
+  configRevision: z.number().int().nonnegative(),
+  configResolution: ConfigResolutionSchema,
   // Provider-reported observation; never configuration authority.
   reportedModel: z.string().nullish(),
   subAgents: z.array(SubAgentSchema).default([]), // Active/recent sub-agents
@@ -632,6 +634,10 @@ export const ConversationSchema = z.object({
   // UI sees clean user content; CLI process gets the prefix + content.
   // Stays on the object so toJSON() includes it for client rendering.
   swarmDebugPrefix: z.string().nullish(),
+  // Persistent employee ownership. This is intentionally independent of all
+  // Oompa/swarm fields: a Buddy conversation is an ordinary provider thread
+  // with durable employee context.
+  buddyContext: BuddyContextSchema.nullish(),
 
   // Merge feature metadata. Parent threads that aggregate review docs from
   // forked children set mergeParentMeta; forked children set mergeChildMeta.
@@ -658,6 +664,13 @@ export const ConversationSchema = z.object({
 });
 
 export type Conversation = z.infer<typeof ConversationSchema>;
+export type DiscoveredConversation = Omit<
+  Conversation,
+  'id' | 'sessionId' | 'config' | 'configRevision' | 'configResolution'
+> & {
+  /** Opaque provider-owned identity. Never use as the application conversation ID. */
+  sessionId: string;
+};
 
 // =============================================================================
 // Merge feature — provider fork capability
@@ -805,20 +818,6 @@ export interface SwarmRun {
 // Client → Server Messages
 // =============================================================================
 
-export const NewConversationMessageSchema = z.object({
-  type: z.literal('new_conversation'),
-  id: z.string().uuid().optional(), // Client-generated UUID for optimistic insert
-  workingDirectory: z.string().optional(),
-  provider: ProviderSchema.optional(), // Defaults to 'claude' when not specified
-  model: ModelIdSchema.optional(), // Provider-specific model (undefined = provider default)
-  // undefined = apply provider/model default; null = explicitly pass no effort flag.
-  reasoningEffort: z.string().nullable().optional(),
-  swarmDebugPrefix: z.string().optional(), // Debug prefix prepended to first CLI message
-  resumedFromConversationId: z.string().uuid().optional(),
-});
-
-export type NewConversationMessage = z.infer<typeof NewConversationMessageSchema>;
-
 export const CreateConversationCommandSchema = z.object({
   type: z.literal('create_conversation'),
   commandId: z.string().min(1),
@@ -828,6 +827,7 @@ export const CreateConversationCommandSchema = z.object({
   initialMessage: z.string().min(1).optional(),
   swarmDebugPrefix: z.string().optional(),
   resumedFromConversationId: z.string().uuid().optional(),
+  buddyContext: BuddyContextSchema.optional(),
 });
 export type CreateConversationCommand = z.infer<typeof CreateConversationCommandSchema>;
 
@@ -861,32 +861,6 @@ export const DeleteConversationMessageSchema = z.object({
 });
 
 export type DeleteConversationMessage = z.infer<typeof DeleteConversationMessageSchema>;
-
-export const SetModelMessageSchema = z.object({
-  type: z.literal('set_model'),
-  conversationId: z.string().uuid(),
-  model: ModelIdSchema.optional(),
-});
-
-export type SetModelMessage = z.infer<typeof SetModelMessageSchema>;
-
-export const SetProviderMessageSchema = z.object({
-  type: z.literal('set_provider'),
-  conversationId: z.string().uuid(),
-  provider: ProviderSchema,
-});
-
-export type SetProviderMessage = z.infer<typeof SetProviderMessageSchema>;
-
-export const SetReasoningEffortMessageSchema = z.object({
-  type: z.literal('set_reasoning_effort'),
-  conversationId: z.string().uuid(),
-  // null = clear the effort (server stores undefined, CLI gets no flag). Otherwise
-  // a pass-through string the target CLI accepts; rejected by isEffortValidForProvider.
-  value: z.string().nullable(),
-});
-
-export type SetReasoningEffortMessage = z.infer<typeof SetReasoningEffortMessageSchema>;
 
 // Queue Messages (Client → Server)
 export const QueueMessageSchema = z.object({
@@ -923,13 +897,9 @@ export type ClearQueueMessage = z.infer<typeof ClearQueueMessageSchema>;
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   CreateConversationCommandSchema,
   SetConversationConfigCommandSchema,
-  NewConversationMessageSchema,
   SendMessageMessageSchema,
   StopConversationMessageSchema,
   DeleteConversationMessageSchema,
-  SetProviderMessageSchema,
-  SetModelMessageSchema,
-  SetReasoningEffortMessageSchema,
   QueueMessageSchema,
   InterruptAndSendMessageSchema,
   CancelQueuedMessageSchema,
@@ -974,11 +944,7 @@ export type ProtocolInfo = z.infer<typeof ProtocolInfoSchema>;
 
 export const PROTOCOL_INFO: ProtocolInfo = {
   version: 2,
-  capabilities: [
-    'conversation_config',
-    'conversation_updated',
-    'structured_command_errors',
-  ],
+  capabilities: ['conversation_config', 'conversation_updated', 'structured_command_errors'],
 };
 
 export const InitMessageSchema = z.object({
@@ -989,15 +955,14 @@ export const InitMessageSchema = z.object({
   loading: z.boolean().optional(),
   /** UI preferences synced from server (~/.agent-viewer/ui-state.json) */
   uiState: UIStateSchema.optional(),
-  /** V2 protocol information; optional while legacy clients remain supported. */
-  protocol: ProtocolInfoSchema.optional(),
+  protocol: ProtocolInfoSchema,
 });
 
 export type InitMessage = z.infer<typeof InitMessageSchema>;
 
 export const ConversationCreatedEventSchema = z.object({
   type: z.literal('conversation_created'),
-  commandId: z.string().min(1).optional(),
+  commandId: z.string().min(1),
   conversation: ConversationSchema,
 });
 export type ConversationCreatedEvent = z.infer<typeof ConversationCreatedEventSchema>;

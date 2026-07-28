@@ -1,26 +1,17 @@
 {
   "planner": {
     "model": "codex:gpt-5.3-codex:high",
-    "prompt": [
-      "oompa/bug-audit/prompts/base.md",
-      "oompa/bug-audit/prompts/planner.md"
-    ],
+    "prompt": ["oompa/bug-audit/prompts/base.md", "oompa/bug-audit/prompts/planner.md"],
     "max_pending": 18
   },
   "reviewer": {
     "model": "claude:opus",
-    "prompt": [
-      "oompa/bug-audit/prompts/base.md",
-      "oompa/bug-audit/prompts/reviewer.md"
-    ]
+    "prompt": ["oompa/bug-audit/prompts/base.md", "oompa/bug-audit/prompts/reviewer.md"]
   },
   "workers": [
     {
       "model": "codex:gpt-5.3-codex:medium",
-      "prompt": [
-        "oompa/bug-audit/prompts/base.md",
-        "oompa/bug-audit/prompts/auditor-codex.md"
-      ],
+      "prompt": ["oompa/bug-audit/prompts/base.md", "oompa/bug-audit/prompts/auditor-codex.md"],
       "max_cycle": 8,
       "count": 3,
       "can_plan": false,
@@ -28,10 +19,7 @@
     },
     {
       "model": "claude:opus",
-      "prompt": [
-        "oompa/bug-audit/prompts/base.md",
-        "oompa/bug-audit/prompts/auditor-opus.md"
-      ],
+      "prompt": ["oompa/bug-audit/prompts/base.md", "oompa/bug-audit/prompts/auditor-opus.md"],
       "max_cycle": 4,
       "count": 1,
       "can_plan": false,

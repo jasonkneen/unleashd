@@ -1,4 +1,6 @@
 import {
+  type BuddyContext,
+  BuddyContextSchema,
   type ConversationConfig,
   ConversationConfigSchema,
   type CreateConversationCommand,
@@ -11,6 +13,8 @@ import { PENDING_CONVERSATIONS_KEY } from '../stores/uiStore';
 import { activeConversationIdAtom, pendingCreationsAtom, sendFnAtom } from './conversations';
 import { jotaiStore } from './store';
 
+export type { BuddyContext } from '@unleashd/shared';
+
 export interface PersistedPendingCreation {
   commandId: string;
   conversationId: string;
@@ -20,6 +24,7 @@ export interface PersistedPendingCreation {
   swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
   initialMessage?: string;
+  buddyContext?: BuddyContext;
   error?: string;
 }
 
@@ -34,6 +39,7 @@ export interface CreateConversationArgs {
   swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
   initialMessage?: string;
+  buddyContext?: BuddyContext;
 }
 
 const PENDING_CREATION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -92,8 +98,14 @@ function parsePersistedPendingCreation(value: unknown): PersistedPendingCreation
         : undefined,
     initialMessage:
       typeof candidate.initialMessage === 'string' ? candidate.initialMessage : undefined,
+    buddyContext: parseBuddyContext(candidate.buddyContext),
     error: typeof candidate.error === 'string' ? candidate.error : undefined,
   };
+}
+
+function parseBuddyContext(value: unknown): BuddyContext | undefined {
+  const parsed = BuddyContextSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function migrateLegacyPendingConversation(value: unknown): PersistedPendingCreation | null {
@@ -194,6 +206,7 @@ function sendCreateCommand(creation: Omit<PersistedPendingCreation, 'createdAt' 
     initialMessage: creation.initialMessage,
     swarmDebugPrefix: creation.swarmDebugPrefix,
     resumedFromConversationId: creation.resumedFromConversationId,
+    buddyContext: creation.buddyContext,
   };
   jotaiStore.get(sendFnAtom).send(command);
 }
@@ -202,49 +215,7 @@ export function resendPendingCreation(creation: PersistedPendingCreation): void 
   if (!creation.error) sendCreateCommand(creation);
 }
 
-export function createConversation(args: CreateConversationArgs): string;
-/** @deprecated Use the object-argument overload with a ConversationConfig. */
-export function createConversation(
-  workingDirectory: string,
-  provider?: Provider,
-  model?: ModelId,
-  swarmDebugPrefix?: string,
-  resumedFromConversationId?: string,
-  reasoningEffort?: string | null
-): string;
-export function createConversation(
-  argsOrWorkingDirectory: CreateConversationArgs | string,
-  legacyProvider: Provider = 'claude',
-  legacyModel?: ModelId,
-  legacySwarmDebugPrefix?: string,
-  legacyResumedFromConversationId?: string,
-  legacyReasoningEffort?: string | null
-): string {
-  const normalizedLegacyModel =
-    typeof argsOrWorkingDirectory === 'string'
-      ? normalizeModelId(legacyProvider, legacyModel)
-      : undefined;
-  const args: CreateConversationArgs =
-    typeof argsOrWorkingDirectory === 'string'
-      ? {
-          workingDirectory: argsOrWorkingDirectory,
-          config: {
-            provider: legacyProvider,
-            model: normalizedLegacyModel
-              ? { mode: 'explicit', modelId: normalizedLegacyModel }
-              : { mode: 'default' },
-            reasoning:
-              legacyReasoningEffort === null
-                ? { mode: 'disabled' }
-                : legacyReasoningEffort === undefined
-                  ? { mode: 'default' }
-                  : { mode: 'explicit', effort: legacyReasoningEffort },
-          },
-          swarmDebugPrefix: legacySwarmDebugPrefix,
-          resumedFromConversationId: legacyResumedFromConversationId,
-        }
-      : argsOrWorkingDirectory;
-
+export function createConversation(args: CreateConversationArgs): string {
   const conversationId = crypto.randomUUID();
   const commandId = crypto.randomUUID();
   const workingDirectory = normalizeWorkingDirectory(args.workingDirectory);
@@ -258,16 +229,19 @@ export function createConversation(
     swarmDebugPrefix: args.swarmDebugPrefix,
     resumedFromConversationId: args.resumedFromConversationId,
     initialMessage: args.initialMessage,
+    buddyContext: args.buddyContext,
   };
 
   jotaiStore.set(
     pendingCreationsAtom,
     produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
       draft.set(conversationId, {
+        kind: 'create_conversation',
         commandId,
         conversationId,
         workingDirectory,
         config: args.config,
+        buddyContext: args.buddyContext,
         createdAt,
       });
     })

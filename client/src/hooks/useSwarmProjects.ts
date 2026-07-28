@@ -14,34 +14,35 @@ export interface SwarmProjectEntry {
  */
 export function useSwarmProjects(pollMs = 15_000): SwarmProjectEntry[] {
   const [projects, setProjects] = useState<SwarmProjectEntry[]>([]);
-  const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), pollMs);
-    return () => clearInterval(id);
-  }, [pollMs]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchProjects = async () => {
+    let controller: AbortController | null = null;
+    const fetchProjects = async (): Promise<void> => {
+      controller?.abort();
+      const requestController = new AbortController();
+      controller = requestController;
       try {
         const response = await fetch('/api/swarm-projects', {
-          signal: controller.signal,
+          signal: requestController.signal,
         });
         if (!response.ok) return;
         const data = (await response.json()) as { projects: SwarmProjectEntry[] };
+        if (requestController.signal.aborted) return;
         setProjects(data.projects);
       } catch {
-        if (!controller.signal.aborted) {
+        if (!requestController.signal.aborted) {
           setProjects([]);
         }
       }
     };
 
     void fetchProjects();
-    return () => controller.abort();
-  }, [tick]);
+    const intervalId = setInterval(() => void fetchProjects(), pollMs);
+    return () => {
+      clearInterval(intervalId);
+      controller?.abort();
+    };
+  }, [pollMs]);
 
   return projects;
 }

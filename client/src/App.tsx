@@ -1,4 +1,3 @@
-import type { ServerMessage } from '@unleashd/shared';
 import { Provider, useAtomValue } from 'jotai';
 import { useEffect, useRef } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -6,8 +5,8 @@ import { handleMessage, setSendFn, setWsStatus } from './atoms/actions';
 import { allConversationsAtom, conversationsAtom } from './atoms/conversations';
 import { mergeModeAtom } from './atoms/mergeAtoms';
 import { jotaiStore } from './atoms/store';
-import { Chat } from './components/Chat';
 import { BuddiesDashboard } from './components/BuddiesDashboard';
+import { Chat } from './components/Chat';
 import { ConfigDropdown } from './components/ConfigDropdown';
 import { Gallery } from './components/Gallery';
 import { MergeModal } from './components/MergeModal';
@@ -20,7 +19,6 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { initSettings } from './stores/settingsStore';
 import { useUIStore } from './stores/uiStore';
 import './App.css';
-import { AgentAuditOverlay } from './components/AgentAuditOverlay';
 
 /**
  * Connects the useWebSocket hook to the Jotai atom store.
@@ -28,7 +26,7 @@ import { AgentAuditOverlay } from './components/AgentAuditOverlay';
  */
 function useWebSocketBridge() {
   const wsUrl = `ws://${window.location.host}/ws`;
-  const { send, status } = useWebSocket<ServerMessage>(wsUrl, handleMessage);
+  const { send, status } = useWebSocket(wsUrl, handleMessage);
 
   useEffect(() => {
     setSendFn(send);
@@ -110,7 +108,6 @@ function App() {
   return (
     <Provider store={jotaiStore}>
       <BrowserRouter>
-        <AgentAuditOverlay />
         <Routes>
           <Route path="/robot" element={<RobotLoader />} />
           <Route path="/*" element={<AppLayout />} />

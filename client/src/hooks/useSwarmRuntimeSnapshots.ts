@@ -25,15 +25,6 @@ export function useSwarmRuntimeSnapshots(
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, OompaRuntimeSnapshot>>(
     {}
   );
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!enabled || normalizedProjectRoots.length === 0) {
-      return;
-    }
-    const id = setInterval(() => setTick((tick) => tick + 1), pollMs);
-    return () => clearInterval(id);
-  }, [enabled, normalizedProjectRoots.length, pollMs]);
 
   useEffect(() => {
     if (!enabled) {
@@ -46,9 +37,12 @@ export function useSwarmRuntimeSnapshots(
       return;
     }
 
-    const controller = new AbortController();
+    let controller: AbortController | null = null;
 
     const fetchRuntimeSnapshots = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const requestController = controller;
       const entries = await Promise.all(
         normalizedProjectRoots.map(async (projectRoot) => {
           // Server requires an absolute path. Skip relative paths (e.g. Gemini
@@ -61,7 +55,7 @@ export function useSwarmRuntimeSnapshots(
             const response = await fetch(
               `/api/swarm-runtime?dir=${encodeURIComponent(projectRoot)}`,
               {
-                signal: controller.signal,
+                signal: requestController.signal,
               }
             );
             if (!response.ok) {
@@ -70,13 +64,13 @@ export function useSwarmRuntimeSnapshots(
             const snapshot = (await response.json()) as OompaRuntimeSnapshot;
             return { projectRoot, snapshot };
           } catch {
-            if (controller.signal.aborted) return null;
+            if (requestController.signal.aborted) return null;
             return { projectRoot, snapshot: makeUnavailable('Failed to load runtime snapshot') };
           }
         })
       );
 
-      if (controller.signal.aborted) return;
+      if (requestController.signal.aborted) return;
       const next: Record<string, OompaRuntimeSnapshot> = {};
       for (const entry of entries) {
         if (!entry) continue;
@@ -86,8 +80,12 @@ export function useSwarmRuntimeSnapshots(
     };
 
     void fetchRuntimeSnapshots();
-    return () => controller.abort();
-  }, [enabled, normalizedProjectRoots, tick]);
+    const intervalId = setInterval(() => void fetchRuntimeSnapshots(), pollMs);
+    return () => {
+      clearInterval(intervalId);
+      controller?.abort();
+    };
+  }, [enabled, normalizedProjectRoots, pollMs]);
 
   return runtimeSnapshots;
 }

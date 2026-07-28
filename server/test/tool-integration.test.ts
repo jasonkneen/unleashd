@@ -1,6 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import test from 'node:test';
 import { executeCommand } from '@nbardy/agent-cli';
 import { parseJsonlFile } from '../src/adapters/jsonl';
@@ -16,7 +16,7 @@ async function runTest() {
   const testDir = path.join(os.tmpdir(), 'tool-integration-test');
   fs.mkdirSync(testDir, { recursive: true });
 
-  const sessionId = 'test-session-' + Date.now();
+  const sessionId = `test-session-${Date.now()}`;
   console.log(`[TEST] Starting session: ${sessionId}`);
 
   // Create a mock stream
@@ -50,29 +50,37 @@ async function runTest() {
         streamText += event.text;
       }
     }
-    
+
     await turn.completed;
     return { sessionId: currentSessionId, text: turnText };
   };
 
   // Turn 1
-  const turn1 = await runTurn("Use the run_shell_command tool to run bash -c 'echo \"hello world\"'");
+  const turn1 = await runTurn(
+    'Use the run_shell_command tool to run bash -c \'echo "hello world"\''
+  );
   console.log(`[TEST] Turn 1 stream text:\n${turn1.text}\n`);
-  
+
   // Turn 2
   const turn2 = await runTurn("Now write 'tree' to file.sh using a shell command", turn1.sessionId);
   console.log(`[TEST] Turn 2 stream text:\n${turn2.text}\n`);
 
   // Turn 3
-  const turn3 = await runTurn("Now run cat file.sh using a shell command", turn1.sessionId);
+  const turn3 = await runTurn('Now run cat file.sh using a shell command', turn1.sessionId);
   console.log(`[TEST] Turn 3 stream text:\n${turn3.text}\n`);
 
   // Now, parse from disk
   const b64Path = Buffer.from(testDir).toString('base64');
-  const sessionFile = path.join(os.homedir(), '.claude', 'projects', b64Path, `${turn1.sessionId}.jsonl`);
-  
+  const sessionFile = path.join(
+    os.homedir(),
+    '.claude',
+    'projects',
+    b64Path,
+    `${turn1.sessionId}.jsonl`
+  );
+
   console.log(`[TEST] Parsing session from disk: ${sessionFile}`);
-  
+
   // Ensure the file was written
   await wait(1000);
 
@@ -81,20 +89,25 @@ async function runTest() {
   }
 
   const session = await parseJsonlFile(sessionFile);
-  
-  const allAssistantMessages = session.messages.filter(m => m.role === 'assistant').map(m => m.content).join('\\n');
-  
+
+  const allAssistantMessages = session.messages
+    .filter((m) => m.role === 'assistant')
+    .map((m) => m.content)
+    .join('\\n');
+
   console.log('\\n--- PARSED FROM DISK ---');
   console.log(allAssistantMessages);
-  
+
   console.log('\\n--- STREAMED ---');
   console.log(streamText);
-  
+
   // Verify tools were formatted using the new standard!
   if (!allAssistantMessages.includes('⚡ run_shell_command')) {
-    throw new Error('Parsed disk output did not contain the formatted tool string "⚡ run_shell_command"');
+    throw new Error(
+      'Parsed disk output did not contain the formatted tool string "⚡ run_shell_command"'
+    );
   }
-  
+
   console.log('[TEST] SUCCESS! Disk parsing matches expected format.');
 }
 

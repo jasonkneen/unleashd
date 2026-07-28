@@ -24,11 +24,13 @@ import {
   streamingAtomFamily,
 } from '../atoms/conversations';
 import { allMergeChildrenSettledAtomFamily } from '../atoms/mergeAtoms';
+import type { BuddyContext } from '../atoms/pending-creations';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
 import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
+import { BuddyConvoHeader } from './BuddyConvoHeader';
 import { ConversationConfigPicker } from './ConversationConfigPicker';
 import { MergeProgressStrip } from './MergeProgressStrip';
 import { PromptPalette } from './PromptPalette';
@@ -54,6 +56,17 @@ interface PendingFile {
 }
 
 const EMPTY_PENDING: PendingFile[] = [];
+
+function readBuddyContext(value: unknown): BuddyContext | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const context = (value as { buddyContext?: unknown }).buddyContext;
+  if (!context || typeof context !== 'object') return undefined;
+  const candidate = context as Partial<BuddyContext>;
+  if (typeof candidate.buddyId !== 'string' || typeof candidate.workspaceId !== 'string') {
+    return undefined;
+  }
+  return candidate as BuddyContext;
+}
 
 /**
  * Returns a live-updating "time ago" string for a Date.
@@ -392,6 +405,7 @@ export function Chat() {
   }, [conversation, streamingText]);
 
   const swarmDebugPrefix = conversation?.swarmDebugPrefix;
+  const buddyContext = readBuddyContext(conversation);
   const messageGroups = useMemo((): MessageGroup[] => {
     const prefix = swarmDebugPrefix;
     const groups: MessageGroup[] = [];
@@ -429,19 +443,7 @@ export function Chat() {
     return buildUnifiedSubAgents(conversation, childSessionConversations);
   }, [conversation, childSessionConversations]);
 
-  const conversationConfig = useMemo<ConversationConfig | null>(() => {
-    if (!conversation) return null;
-    if (conversation.config) return conversation.config;
-    return {
-      provider: conversation.provider,
-      model: conversation.model
-        ? { mode: 'explicit', modelId: conversation.model }
-        : { mode: 'default' },
-      reasoning: conversation.reasoningEffort
-        ? { mode: 'explicit', effort: conversation.reasoningEffort }
-        : { mode: 'disabled' },
-    };
-  }, [conversation]);
+  const conversationConfig = conversation?.config ?? null;
 
   const threadCopyText = useMemo(() => {
     if (!conversation) return '';
@@ -641,7 +643,7 @@ export function Chat() {
                     onClick={() => {
                       setConversationConfig({
                         conversationId: conversation.id,
-                        expectedRevision: conversation.configRevision ?? 0,
+                        expectedRevision: conversation.configRevision,
                         patch: { kind: 'replace', config: headerConfigDraft },
                       });
                       setConfigPickerOpen(false);
@@ -735,26 +737,30 @@ export function Chat() {
         </div>
       </div>
 
-      {unifiedSubAgents.length > 0 && (
-        <SubAgentPanel
-          subAgents={unifiedSubAgents}
-          workingDirectory={conversation.workingDirectory}
-        />
-      )}
-
       {conversation.mergeParentMeta && <MergeProgressStrip parentId={conversation.id} />}
 
-      {conversation.resumedFromConversationId && (
-        <div className="resume-thread-container">
-          <ResumeThreadWidget
-            sourceConversationId={conversation.resumedFromConversationId}
-            sourceConversation={resumedFromConversation}
-          />
+      {(unifiedSubAgents.length > 0 || conversation.resumedFromConversationId) && (
+        <div
+          className={`thread-context${unifiedSubAgents.length > 0 && conversation.resumedFromConversationId ? ' thread-context--combined' : ''}`}
+        >
+          {unifiedSubAgents.length > 0 && (
+            <SubAgentPanel
+              subAgents={unifiedSubAgents}
+              workingDirectory={conversation.workingDirectory}
+            />
+          )}
+          {conversation.resumedFromConversationId && (
+            <ResumeThreadWidget
+              sourceConversationId={conversation.resumedFromConversationId}
+              sourceConversation={resumedFromConversation}
+            />
+          )}
         </div>
       )}
 
       {conversation.messages.length === 0 ? (
         <div className="messages-container">
+          {buddyContext && <BuddyConvoHeader context={buddyContext} />}
           {conversation.swarmDebugPrefix && (
             <div style={{ paddingBottom: '24px' }}>
               <SwarmConvoPrefix
@@ -784,6 +790,7 @@ export function Chat() {
             workingDirectory={conversation.workingDirectory}
             swarmDebugPrefix={conversation.swarmDebugPrefix}
             swarmId={conversation.swarmId ?? null}
+            buddyContext={buddyContext}
           />
           {isStreaming && (
             <div className="typing-indicator-overlay">

@@ -5,9 +5,7 @@ const cursorProvider: Provider = {
   name: 'cursor',
 
   listModels(): ModelInfo[] {
-    return [
-      { id: 'composer-2', displayName: 'Composer 2', isDefault: true },
-    ];
+    return [{ id: 'composer-2', displayName: 'Composer 2', isDefault: true }];
   },
 };
 

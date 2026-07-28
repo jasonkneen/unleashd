@@ -1,0 +1,157 @@
+export type WorkStatus =
+  | 'backlog'
+  | 'ready'
+  | 'in_progress'
+  | 'blocked'
+  | 'review'
+  | 'done'
+  | 'cancelled';
+
+export type TodoStatus = 'open' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
+export type EmployeeTab = 'work' | 'conversations' | 'memory' | 'automations';
+
+export interface Workspace {
+  id: string;
+  slug?: string;
+  name: string;
+  root_path: string;
+  assignment_role?: string | null;
+}
+
+export interface Sprint {
+  id: string;
+  project_id?: string;
+  workspace_id?: string;
+  name: string;
+  goal: string | null;
+  status: string;
+}
+
+export interface LegacyWorkItem {
+  id: string;
+  project_id: string;
+  buddy_id: string | null;
+  title: string;
+  status: WorkStatus;
+  priority: number;
+  next_action: string | null;
+  blocked_reason: string | null;
+  definition_of_done: string;
+  source_path: string | null;
+}
+
+export interface BuddyTodo {
+  id: string;
+  title: string;
+  status: TodoStatus;
+  definition_of_done?: string | null;
+  next_action?: string | null;
+  blocked_reason?: string | null;
+}
+
+export interface BuddyProject {
+  id: string;
+  workspace_id: string;
+  title: string;
+  objective?: string | null;
+  definition_of_done: string;
+  status: WorkStatus;
+  priority: number;
+  next_action?: string | null;
+  blocked_reason?: string | null;
+  todos: BuddyTodo[];
+}
+
+export interface ConversationLink {
+  id?: string;
+  conversation_id?: string;
+  unleashd_conversation_id?: string | null;
+  workspace_id?: string | null;
+  buddy_project_id?: string | null;
+  status: string;
+  last_active_at?: string | null;
+}
+
+export interface BuddyMemory {
+  soulPath?: string | null;
+  soul?: string;
+  summary: string;
+  recentJournal: Array<{ path: string; content: string }>;
+}
+
+export interface AutomationRun {
+  id: string;
+  status: string;
+  scheduled_for: string;
+  outcome?: string | null;
+  error?: string | null;
+  conversation_id?: string | null;
+}
+
+export interface BuddyAutomation {
+  id: string;
+  name: string;
+  workspace_id?: string | null;
+  buddy_project_id?: string | null;
+  schedule_kind: 'cron' | 'interval';
+  schedule_expression: string;
+  timezone: string;
+  job_kind: 'prompt' | 'sequence' | 'loop';
+  job_payload: Record<string, unknown>;
+  enabled: boolean;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  runs?: AutomationRun[];
+}
+
+export interface Buddy {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+  manager_id?: string | null;
+  team_size?: number;
+  soul_path: string | null;
+  memory_path: string | null;
+  provider: string | null;
+  model?: string | null;
+  reasoning_effort: string | null;
+  projects?: Workspace[];
+  workspaces?: Workspace[];
+  conversations?: ConversationLink[];
+}
+
+export interface Dashboard {
+  projects?: Workspace[];
+  workspaces?: Workspace[];
+  buddies: Buddy[];
+  sprints?: Sprint[];
+  workItems?: LegacyWorkItem[];
+  legacyWorkItems?: LegacyWorkItem[];
+}
+
+export interface EmployeeRecord {
+  buddy: Buddy;
+  workspaces: Workspace[];
+  sprints: Sprint[];
+  projects: BuddyProject[];
+  legacyWorkItems: LegacyWorkItem[];
+  conversations: ConversationLink[];
+  skills: Array<{ name: string; mode?: string; instruction_path?: string | null }>;
+  manager: { id: string; name: string; role?: string } | null;
+  directReports: Array<{ id: string; name: string; role?: string }>;
+  reviews: Array<{
+    id: string;
+    subject_buddy_id: string;
+    subject_buddy_name?: string;
+    reviewer_role?: string;
+    evidence: unknown[];
+    verdict: string | null;
+    summary: string | null;
+    created_at?: string;
+  }>;
+}
+
+export type BuddyMutation = (key: string, action: () => Promise<unknown>) => Promise<void>;
+
+export const EMPTY_MEMORY: BuddyMemory = { summary: '', recentJournal: [] };

@@ -4,8 +4,8 @@ import { createMergeConversations } from '../atoms/actions';
 import { defaultCwdAtom } from '../atoms/conversations';
 import { mergeModeAtom, mergeSelectionAtom } from '../atoms/mergeAtoms';
 import {
-  createDefaultDraft,
   type ConversationConfigDraft,
+  createDefaultDraft,
 } from '../domain/conversation-config-draft';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { ConversationConfigPicker } from './ConversationConfigPicker';
@@ -23,8 +23,7 @@ export function MergeModal({ onComplete }: { onComplete: (parentId: string) => v
   const [parentConfig, setParentConfig] = useState<ConversationConfigDraft>(() =>
     createDefaultDraft('claude')
   );
-  const { catalog, isLoading: isCatalogLoading, error: catalogError, retry } =
-    useProviderCatalog();
+  const { catalog, isLoading: isCatalogLoading, error: catalogError, retry } = useProviderCatalog();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [workingDirectory, setWorkingDirectory] = useState(defaultCwd);

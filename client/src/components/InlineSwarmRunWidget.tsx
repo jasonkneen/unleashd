@@ -10,7 +10,7 @@ interface InlineSwarmRunWidgetProps {
 export function InlineSwarmRunWidget({ workingDirectory }: InlineSwarmRunWidgetProps) {
   const navigate = useNavigate();
   const snapshots = useSwarmRuntimeSnapshots(useMemo(() => [workingDirectory], [workingDirectory]));
-  
+
   const snapshot = snapshots[workingDirectory];
   const run = snapshot?.run;
 
@@ -20,7 +20,11 @@ export function InlineSwarmRunWidget({ workingDirectory }: InlineSwarmRunWidgetP
 
   if (!run) {
     return (
-      <div className="inline-swarm-run inline-swarm-run--empty" onClick={handleClick} role="button" tabIndex={0}>
+      <button
+        type="button"
+        className="inline-swarm-run inline-swarm-run--empty"
+        onClick={handleClick}
+      >
         <div className="inline-swarm-run-content">
           <div className="inline-swarm-run-header">
             <span className="inline-swarm-label">▶️ oompa run</span>
@@ -30,7 +34,7 @@ export function InlineSwarmRunWidget({ workingDirectory }: InlineSwarmRunWidgetP
             </div>
           </div>
         </div>
-      </div>
+      </button>
     );
   }
 
@@ -40,7 +44,11 @@ export function InlineSwarmRunWidget({ workingDirectory }: InlineSwarmRunWidgetP
   const done = run.doneWorkers ?? 0;
 
   return (
-    <div className={`inline-swarm-run ${isRunning ? 'running' : 'completed'}`} onClick={handleClick} role="button" tabIndex={0}>
+    <button
+      type="button"
+      className={`inline-swarm-run ${isRunning ? 'running' : 'completed'}`}
+      onClick={handleClick}
+    >
       <div className="inline-swarm-run-content">
         <div className="inline-swarm-run-header">
           <span className="inline-swarm-label">🚀 SWARM RUN</span>
@@ -67,6 +75,6 @@ export function InlineSwarmRunWidget({ workingDirectory }: InlineSwarmRunWidgetP
           </div>
         </div>
       </div>
-    </div>
+    </button>
   );
 }

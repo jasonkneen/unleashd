@@ -122,7 +122,7 @@
   z-index: 100;
   flex-direction: column;
   gap: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
 
@@ -869,9 +869,15 @@
   letter-spacing: 0.5px;
   color: var(--text-muted);
 }
-.task-pending { color: var(--warning); }
-.task-new { color: var(--text-secondary); }
-.task-completed { color: var(--success); }
+.task-pending {
+  color: var(--warning);
+}
+.task-new {
+  color: var(--text-secondary);
+}
+.task-completed {
+  color: var(--success);
+}
 
 .run-stat-cycles {
   align-items: flex-end;

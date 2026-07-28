@@ -4,11 +4,11 @@ import { buildCommand } from '@nbardy/agent-cli';
 import {
   CODEX_MODEL_REGISTRY,
   CodexModelSchema,
+  CreateConversationCommandSchema,
   DEFAULT_CODEX_MODEL_ID,
   ModelIdSchema,
   NO_CODEX_THINKING,
-  NewConversationMessageSchema,
-  SetModelMessageSchema,
+  SetConversationConfigCommandSchema,
   defaultReasoningEffortForProvider,
   fromCodexModelId,
   isModelIdValidForProvider,
@@ -78,7 +78,7 @@ test('ModelIdSchema is an opaque wire string; provider catalogs enforce compatib
   assert.equal(ModelIdSchema.safeParse('').success, false);
 });
 
-test('NewConversationMessage canonical codex shape: base model + separate reasoningEffort', () => {
+test('CreateConversationCommand carries canonical model and reasoning selections', () => {
   for (const model of [
     'gpt-5.6-sol',
     'gpt-5.6-terra',
@@ -89,18 +89,23 @@ test('NewConversationMessage canonical codex shape: base model + separate reason
     'gpt-5.3-codex-spark',
   ]) {
     for (const reasoningEffort of ['medium', 'high', 'xhigh'] as const) {
-      const result = NewConversationMessageSchema.safeParse({
-        type: 'new_conversation',
-        provider: 'codex',
-        model,
-        reasoningEffort,
+      const result = CreateConversationCommandSchema.safeParse({
+        type: 'create_conversation',
+        commandId: `create-${model}-${reasoningEffort}`,
+        conversationId: '550e8400-e29b-41d4-a716-446655440000',
+        workingDirectory: '/tmp',
+        config: {
+          provider: 'codex',
+          model: { mode: 'explicit', modelId: model },
+          reasoning: { mode: 'explicit', effort: reasoningEffort },
+        },
       });
       assert.equal(result.success, true, `${model}+${reasoningEffort} should be accepted`);
     }
   }
 });
 
-test('SetModelMessage structurally accepts opaque non-empty model IDs', () => {
+test('SetConversationConfigCommand structurally accepts opaque non-empty model IDs', () => {
   for (const model of [
     'gpt-5.6-sol',
     'gpt-5.6-terra',
@@ -110,10 +115,12 @@ test('SetModelMessage structurally accepts opaque non-empty model IDs', () => {
     'gpt-5.4-mini',
     'gpt-5.3-codex-spark',
   ]) {
-    const result = SetModelMessageSchema.safeParse({
-      type: 'set_model',
+    const result = SetConversationConfigCommandSchema.safeParse({
+      type: 'set_conversation_config',
+      commandId: `set-${model}`,
       conversationId: '550e8400-e29b-41d4-a716-446655440000',
-      model,
+      expectedRevision: 0,
+      patch: { kind: 'set_model', model: { mode: 'explicit', modelId: model } },
     });
     assert.equal(result.success, true, `${model} should be accepted`);
   }
@@ -236,23 +243,35 @@ test('reasoning defaults follow the selected provider and Codex model', () => {
   assert.equal(defaultReasoningEffortForProvider('gemini'), undefined);
 });
 
-test('new conversation distinguishes provider default from explicit no-effort', () => {
-  const defaultResult = NewConversationMessageSchema.safeParse({
-    type: 'new_conversation',
-    provider: 'codex',
-    model: 'gpt-5.6-sol',
+test('create command distinguishes provider default from explicit no-effort', () => {
+  const base = {
+    type: 'create_conversation' as const,
+    commandId: 'create-default-test',
+    conversationId: '550e8400-e29b-41d4-a716-446655440000',
+    workingDirectory: '/tmp',
+  };
+  const defaultResult = CreateConversationCommandSchema.safeParse({
+    ...base,
+    config: {
+      provider: 'codex',
+      model: { mode: 'explicit', modelId: 'gpt-5.6-sol' },
+      reasoning: { mode: 'default' },
+    },
   });
-  const noEffortResult = NewConversationMessageSchema.safeParse({
-    type: 'new_conversation',
-    provider: 'codex',
-    model: 'gpt-5.6-sol',
-    reasoningEffort: null,
+  const noEffortResult = CreateConversationCommandSchema.safeParse({
+    ...base,
+    commandId: 'create-disabled-test',
+    config: {
+      provider: 'codex',
+      model: { mode: 'explicit', modelId: 'gpt-5.6-sol' },
+      reasoning: { mode: 'disabled' },
+    },
   });
 
   assert.equal(defaultResult.success, true);
   assert.equal(noEffortResult.success, true);
-  if (defaultResult.success) assert.equal(defaultResult.data.reasoningEffort, undefined);
-  if (noEffortResult.success) assert.equal(noEffortResult.data.reasoningEffort, null);
+  if (defaultResult.success) assert.equal(defaultResult.data.config.reasoning.mode, 'default');
+  if (noEffortResult.success) assert.equal(noEffortResult.data.config.reasoning.mode, 'disabled');
 });
 
 // =============================================================================

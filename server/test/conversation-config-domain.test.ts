@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ClientMessageSchema,
   CommandRejectedEventSchema,
   type ConversationConfig,
+  ConversationCreatedEventSchema,
   ConversationUpdatedEventSchema,
   CreateConversationCommandSchema,
+  InitMessageSchema,
   ProviderCatalogSchema,
   SetConversationConfigCommandSchema,
   applyConversationConfigPatch,
@@ -255,5 +258,44 @@ test('v2 command and event schemas preserve correlation and revisions', () => {
       error: { code: 'revision_conflict', message: 'stale revision' },
     }).success,
     true
+  );
+});
+
+test('v2 client schema rejects every removed v1 command', () => {
+  const conversationId = '550e8400-e29b-41d4-a716-446655440000';
+  for (const message of [
+    { type: 'new_conversation', id: conversationId, provider: 'codex' },
+    { type: 'set_model', conversationId, model: 'gpt-5.6-sol' },
+    { type: 'set_provider', conversationId, provider: 'claude' },
+    { type: 'set_reasoning_effort', conversationId, value: 'high' },
+  ]) {
+    assert.equal(ClientMessageSchema.safeParse(message).success, false, message.type);
+  }
+});
+
+test('v2 creation acknowledgement requires command correlation', () => {
+  assert.equal(
+    ConversationCreatedEventSchema.safeParse({
+      type: 'conversation_created',
+      conversation: {
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        messages: [],
+        isRunning: false,
+        createdAt: new Date(),
+        workingDirectory: '/tmp',
+      },
+    }).success,
+    false
+  );
+});
+
+test('v2 init requires explicit protocol metadata', () => {
+  assert.equal(
+    InitMessageSchema.safeParse({
+      type: 'init',
+      conversations: [],
+      defaultCwd: '/tmp',
+    }).success,
+    false
   );
 });

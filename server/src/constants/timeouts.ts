@@ -14,10 +14,7 @@ export const HOT_RELOAD_FORCE_EXIT_GRACE_MS = readPositiveIntEnv(
   3_000
 );
 export const TURN_IDLE_TIMEOUT_MS = readPositiveIntEnv('CWV_TURN_IDLE_TIMEOUT_MS', 10 * 60_000);
-export const TURN_MAX_RUNTIME_MS = readPositiveIntEnv(
-  'CWV_TURN_MAX_RUNTIME_MS',
-  24 * 60 * 60_000
-);
+export const TURN_MAX_RUNTIME_MS = readPositiveIntEnv('CWV_TURN_MAX_RUNTIME_MS', 24 * 60 * 60_000);
 export const TURN_TIMEOUT_KILL_GRACE_MS = readPositiveIntEnv(
   'CWV_TURN_TIMEOUT_KILL_GRACE_MS',
   5_000

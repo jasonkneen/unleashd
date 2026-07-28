@@ -286,7 +286,11 @@ function GitLogPanel({ projectRoot }: { projectRoot: string }) {
 
   return (
     <div className={`swarm-bottom-panel ${isCollapsed ? 'collapsed' : ''}`}>
-      <button className="swarm-panel-header swarm-panel-toggle" onClick={() => setIsCollapsed((c) => !c)}>
+      <button
+        type="button"
+        className="swarm-panel-header swarm-panel-toggle"
+        onClick={() => setIsCollapsed((c) => !c)}
+      >
         <span className="panel-toggle-icon">{isCollapsed ? '▶' : '▼'}</span>
         Recent Commits
       </button>
@@ -343,24 +347,24 @@ function OompaConfigPanel({ projectRoot }: { projectRoot: string }) {
 
       setExpandedPrompts((prev) => new Map(prev).set(promptPath, 'Loading...'));
 
-      const absolutePath = promptPath.startsWith('/')
-        ? promptPath
-        : `${projectRoot}/${promptPath}`;
+      const absolutePath = promptPath.startsWith('/') ? promptPath : `${projectRoot}/${promptPath}`;
       fetch(`/api/read-file?path=${encodeURIComponent(absolutePath)}`)
         .then((res) => res.json())
         .then((data: { content: string }) =>
           setExpandedPrompts((p) => new Map(p).set(promptPath, data.content))
         )
-        .catch(() =>
-          setExpandedPrompts((p) => new Map(p).set(promptPath, '(failed to load)'))
-        );
+        .catch(() => setExpandedPrompts((p) => new Map(p).set(promptPath, '(failed to load)')));
     },
     [projectRoot, expandedPrompts]
   );
 
   return (
     <div className={`swarm-bottom-panel ${isCollapsed ? 'collapsed' : ''}`}>
-      <button className="swarm-panel-header swarm-panel-toggle" onClick={() => setIsCollapsed((c) => !c)}>
+      <button
+        type="button"
+        className="swarm-panel-header swarm-panel-toggle"
+        onClick={() => setIsCollapsed((c) => !c)}
+      >
         <span className="panel-toggle-icon">{isCollapsed ? '▶' : '▼'}</span>
         Swarm Config
       </button>
@@ -439,7 +443,7 @@ function SwarmRunsPanel({
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [projectRoot]);
+  }, [projectRoot, selectedRunId, setSelectedRunId]);
 
   // Fetch reviews when a run is selected
   useEffect(() => {
@@ -477,6 +481,7 @@ function SwarmRunsPanel({
       <div className="runs-selector">
         {runs.map((r) => (
           <button
+            type="button"
             key={r.swarmId}
             className={`run-selector-btn ${r.swarmId === selectedRunId ? 'active' : ''}`}
             onClick={() => setSelectedRunId(r.swarmId)}
@@ -729,7 +734,7 @@ export function SwarmDetail() {
       swarmDebugPrefix: prefix,
     });
     navigate(`/chat/${id}`);
-  }, [projectRoot, effectiveRunId, runtimeSnapshot, createConversation, navigate]);
+  }, [projectRoot, effectiveRunId, runtimeSnapshot, navigate]);
 
   // Filter workers belonging to this project, build exec groups with paired reviews/fixes.
   // Reviews/fixes are matched to exec workers by time proximity within the same swarmId.
@@ -862,7 +867,11 @@ export function SwarmDetail() {
     return (
       <div className="swarm-detail">
         <div className="swarm-detail-header">
-          <button className="back-to-gallery-btn" onClick={() => navigate('/workers')}>
+          <button
+            type="button"
+            className="back-to-gallery-btn"
+            onClick={() => navigate('/workers')}
+          >
             &#8592; Swarm Projects Overview
           </button>
           <h2>No project selected</h2>
@@ -875,14 +884,17 @@ export function SwarmDetail() {
     <div className="swarm-detail">
       {/* Header */}
       <div className="swarm-detail-header">
-        <button className="back-to-gallery-btn" onClick={() => navigate('/workers')}>
+        <button type="button" className="back-to-gallery-btn" onClick={() => navigate('/workers')}>
           &#8592; Swarm Projects Overview
         </button>
         <div className="swarm-detail-title-block">
-          <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', fontWeight: 500 }}>{displayPath}</h2>
+          <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', fontWeight: 500 }}>
+            {displayPath}
+          </h2>
         </div>
         <div className="swarm-detail-header-stats">
           <button
+            type="button"
             className="swarm-debug-btn"
             onClick={handleStartDebugConversation}
             title="Start a debug conversation about this swarm"
@@ -890,7 +902,9 @@ export function SwarmDetail() {
             Debug Conversation
           </button>
           <div className="swarm-run-controls">
-            <div className={`state-badge swarm-header-badge state-${displayRunning > 0 ? 'running' : 'idle'}`}>
+            <div
+              className={`state-badge swarm-header-badge state-${displayRunning > 0 ? 'running' : 'idle'}`}
+            >
               <div className="state-indicator" />
               <span className="state-label">
                 {displayRunning > 0 ? `${displayRunning} running` : 'All idle'}
@@ -898,109 +912,131 @@ export function SwarmDetail() {
             </div>
             {displayRunning > 0 && confirmAction === null && (
               <div className="swarm-run-actions">
-              <button
+                <button
+                  type="button"
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    border: '1px solid var(--warning, #b58900)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--warning, #b58900)',
+                  }}
+                  title="Stop swarm gracefully (finish current cycle)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSignalError(null);
+                    setConfirmAction('stop');
+                  }}
+                >
+                  Stop
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    border: '1px solid var(--danger, #dc322f)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--danger, #dc322f)',
+                  }}
+                  title="Kill swarm immediately (SIGKILL)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSignalError(null);
+                    setConfirmAction('kill');
+                  }}
+                >
+                  Kill
+                </button>
+              </div>
+            )}
+            {confirmAction !== null && (
+              <div
                 style={{
-                  padding: '3px 10px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  border: '1px solid var(--warning, #b58900)',
-                  background: 'var(--bg-card)',
-                  color: 'var(--warning, #b58900)',
-                }}
-                title="Stop swarm gracefully (finish current cycle)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSignalError(null);
-                  setConfirmAction('stop');
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginLeft: '8px',
+                  fontSize: '12px',
                 }}
               >
-                Stop
-              </button>
-              <button
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  border: '1px solid var(--danger, #dc322f)',
-                  background: 'var(--bg-card)',
-                  color: 'var(--danger, #dc322f)',
-                }}
-                title="Kill swarm immediately (SIGKILL)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSignalError(null);
-                  setConfirmAction('kill');
-                }}
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  {confirmAction === 'stop'
+                    ? 'Stop swarm? Workers will finish their current cycle.'
+                    : 'Kill swarm immediately? This will forcibly terminate all workers.'}
+                </span>
+                <button
+                  type="button"
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: `1px solid ${confirmAction === 'kill' ? 'var(--danger, #dc322f)' : 'var(--warning, #b58900)'}`,
+                    background:
+                      confirmAction === 'kill'
+                        ? 'var(--danger, #dc322f)'
+                        : 'var(--warning, #b58900)',
+                    color: 'var(--bg-card)',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const action = confirmAction;
+                    setConfirmAction(null);
+                    sendSwarmSignal(projectRoot, action)
+                      .then((r) => {
+                        if (!r.ok) setSignalError(`${action} failed: ${r.message}`);
+                      })
+                      .catch((err: Error) => setSignalError(`${action} failed: ${err.message}`));
+                  }}
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-secondary)',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmAction(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {signalError && (
+              <span
+                style={{ fontSize: '11px', color: 'var(--danger, #dc322f)', marginLeft: '8px' }}
               >
-                Kill
-              </button>
-            </div>
-          )}
-          {confirmAction !== null && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '8px', fontSize: '12px' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>
-                {confirmAction === 'stop'
-                  ? 'Stop swarm? Workers will finish their current cycle.'
-                  : 'Kill swarm immediately? This will forcibly terminate all workers.'}
+                {signalError}
               </span>
-              <button
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  border: `1px solid ${confirmAction === 'kill' ? 'var(--danger, #dc322f)' : 'var(--warning, #b58900)'}`,
-                  background: confirmAction === 'kill' ? 'var(--danger, #dc322f)' : 'var(--warning, #b58900)',
-                  color: 'var(--bg-card)',
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const action = confirmAction;
-                  setConfirmAction(null);
-                  sendSwarmSignal(projectRoot, action)
-                    .then((r) => {
-                      if (!r.ok) setSignalError(`${action} failed: ${r.message}`);
-                    })
-                    .catch((err: Error) => setSignalError(`${action} failed: ${err.message}`));
-                }}
-              >
-                Confirm
-              </button>
-              <button
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  border: '1px solid var(--border-subtle)',
-                  background: 'var(--bg-card)',
-                  color: 'var(--text-secondary)',
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirmAction(null);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-          {signalError && (
-            <span style={{ fontSize: '11px', color: 'var(--danger, #dc322f)', marginLeft: '8px' }}>
-              {signalError}
-            </span>
-          )}
+            )}
           </div>
           <div className="swarm-info-btn-wrap">
-            <button className="swarm-info-btn" aria-label="Project stats">ⓘ</button>
+            <button type="button" className="swarm-info-btn" aria-label="Project stats">
+              ⓘ
+            </button>
             <div className="swarm-info-tooltip">
-              <span>{runtimeTotalWorkers} workers · {allWorkers.length} sessions ({workCount} exec, {reviewCount} review, {fixCount} fix)</span>
+              <span>
+                {runtimeTotalWorkers} workers · {allWorkers.length} sessions ({workCount} exec,{' '}
+                {reviewCount} review, {fixCount} fix)
+              </span>
               {earliestCreated && <span>Started {formatTimeAgo(earliestCreated)}</span>}
             </div>
           </div>
@@ -1010,12 +1046,14 @@ export function SwarmDetail() {
       {/* Tab bar */}
       <div className="swarm-tabs">
         <button
+          type="button"
           className={`swarm-tab ${activeTab === 'workers' ? 'active' : ''}`}
           onClick={() => setActiveTab('workers')}
         >
           Workers ({allWorkers.length})
         </button>
         <button
+          type="button"
           className={`swarm-tab ${activeTab === 'runs' ? 'active' : ''}`}
           onClick={() => setActiveTab('runs')}
         >

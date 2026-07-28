@@ -152,6 +152,26 @@ function send(ws, data) {
   ws.send(JSON.stringify(data));
 }
 
+function createConversationCommand(overrides = {}) {
+  const provider = overrides.provider ?? 'claude';
+  return {
+    type: 'create_conversation',
+    commandId: crypto.randomUUID(),
+    conversationId: crypto.randomUUID(),
+    workingDirectory: overrides.workingDirectory ?? process.cwd(),
+    config: {
+      provider,
+      model: overrides.model ? { mode: 'explicit', modelId: overrides.model } : { mode: 'default' },
+      reasoning:
+        overrides.reasoningEffort === null
+          ? { mode: 'disabled' }
+          : overrides.reasoningEffort
+            ? { mode: 'explicit', effort: overrides.reasoningEffort }
+            : { mode: 'default' },
+    },
+  };
+}
+
 // Test runner
 async function runTests() {
   console.log('\n🧪 Starting API Tests\n');
@@ -306,7 +326,7 @@ async function runTests() {
       const ws = await createConnection();
       await waitForMessage(ws, 'init');
 
-      send(ws, { type: 'new_conversation' });
+      send(ws, createConversationCommand());
       const msg = await waitForMessage(ws, 'conversation_created');
 
       if (!msg.conversation) throw new Error('Missing conversation');
@@ -321,10 +341,7 @@ async function runTests() {
       const ws = await createConnection();
       await waitForMessage(ws, 'init');
 
-      send(ws, {
-        type: 'new_conversation',
-        workingDirectory: '/tmp',
-      });
+      send(ws, createConversationCommand({ workingDirectory: '/tmp' }));
       const msg = await waitForMessage(ws, 'conversation_created');
 
       if (msg.conversation.workingDirectory !== '/tmp') {
@@ -338,12 +355,14 @@ async function runTests() {
       const ws = await createConnection();
       await waitForMessage(ws, 'init');
 
-      send(ws, {
-        type: 'new_conversation',
-        workingDirectory: '/tmp',
-        provider: 'codex',
-        model: 'gpt-5.6-terra',
-      });
+      send(
+        ws,
+        createConversationCommand({
+          workingDirectory: '/tmp',
+          provider: 'codex',
+          model: 'gpt-5.6-terra',
+        })
+      );
       const defaulted = await waitForMessage(ws, 'conversation_created');
       if (defaulted.conversation.reasoningEffort !== 'xhigh') {
         throw new Error(
@@ -351,13 +370,15 @@ async function runTests() {
         );
       }
 
-      send(ws, {
-        type: 'new_conversation',
-        workingDirectory: '/tmp',
-        provider: 'codex',
-        model: 'gpt-5.6-sol',
-        reasoningEffort: null,
-      });
+      send(
+        ws,
+        createConversationCommand({
+          workingDirectory: '/tmp',
+          provider: 'codex',
+          model: 'gpt-5.6-sol',
+          reasoningEffort: null,
+        })
+      );
       const noReasoning = await waitForMessage(ws, 'conversation_created');
       if (noReasoning.conversation.reasoningEffort !== undefined) {
         throw new Error(
@@ -375,14 +396,16 @@ async function runTests() {
       await waitForMessage(ws2, 'init');
 
       const createOnFirstClient = waitForMessage(ws1, 'conversation_created');
-      const createOnSecondClient = waitForMessage(ws2, 'conversation_created');
-      send(ws1, {
-        type: 'new_conversation',
-        workingDirectory: '/tmp',
-        provider: 'codex',
-        model: 'gpt-5.6-sol',
-        reasoningEffort: 'minimal',
-      });
+      const createOnSecondClient = waitForMessage(ws2, 'conversation_updated');
+      send(
+        ws1,
+        createConversationCommand({
+          workingDirectory: '/tmp',
+          provider: 'codex',
+          model: 'gpt-5.6-sol',
+          reasoningEffort: 'minimal',
+        })
+      );
       const [created, createdOnSecond] = await Promise.all([
         createOnFirstClient,
         createOnSecondClient,
@@ -391,12 +414,14 @@ async function runTests() {
         throw new Error('Second client received the wrong created conversation');
       }
 
-      const updateOnSecondClient = waitForMessage(ws2, 'conversation_created');
+      const updateOnSecondClient = waitForMessage(ws2, 'conversation_updated');
 
       send(ws1, {
-        type: 'set_provider',
+        type: 'set_conversation_config',
+        commandId: crypto.randomUUID(),
         conversationId: created.conversation.id,
-        provider: 'claude',
+        expectedRevision: 0,
+        patch: { kind: 'set_provider', provider: 'claude' },
       });
       const updated = await updateOnSecondClient;
       if (updated.conversation.provider !== 'claude') {
@@ -437,14 +462,11 @@ async function runTests() {
       const ws = await createConnection();
       await waitForMessage(ws, 'init');
 
-      send(ws, {
-        type: 'new_conversation',
-        workingDirectory: '/nonexistent/path/12345',
-      });
-      const msg = await waitForMessage(ws, 'error');
+      send(ws, createConversationCommand({ workingDirectory: '/nonexistent/path/12345' }));
+      const msg = await waitForMessage(ws, 'command_rejected');
 
-      if (!msg.message.includes('No matching folder')) {
-        throw new Error(`Expected 'No matching folder' error, got: ${msg.message}`);
+      if (!msg.error.message.includes('No matching folder')) {
+        throw new Error(`Expected 'No matching folder' error, got: ${msg.error.message}`);
       }
 
       ws.close();
@@ -456,7 +478,7 @@ async function runTests() {
       await waitForMessage(ws, 'init');
 
       // Create first
-      send(ws, { type: 'new_conversation' });
+      send(ws, createConversationCommand());
       const created = await waitForMessage(ws, 'conversation_created');
       const convId = created.conversation.id;
 
@@ -480,7 +502,7 @@ async function runTests() {
       const init1 = await waitForMessage(ws1, 'init');
 
       // Create conversation on ws1
-      send(ws1, { type: 'new_conversation' });
+      send(ws1, createConversationCommand());
       await waitForMessage(ws1, 'conversation_created');
 
       // Connect ws2 and check it sees the conversation
@@ -498,7 +520,7 @@ async function runTests() {
     // Test: Upload rejects path traversal in conversationId
     await test('Upload rejects path traversal in conversationId', async () => {
       const http = require('node:http');
-      const boundary = '----TestBoundary' + Date.now();
+      const boundary = `----TestBoundary${Date.now()}`;
       const body = [
         `--${boundary}`,
         'Content-Disposition: form-data; name="conversationId"',
@@ -526,7 +548,9 @@ async function runTests() {
           },
           (res) => {
             let data = '';
-            res.on('data', (chunk) => (data += chunk));
+            res.on('data', (chunk) => {
+              data += chunk;
+            });
             res.on('end', () => resolve({ status: res.statusCode, body: data }));
           }
         );
@@ -548,9 +572,31 @@ async function runTests() {
       // Send a message missing required fields
       send(ws, { type: 'send_message' }); // missing conversationId and content
       // Server should not crash — verify by sending a valid message after
-      send(ws, { type: 'new_conversation' });
+      send(ws, createConversationCommand());
       const msg = await waitForMessage(ws, 'conversation_created');
       if (!msg.conversation.id) throw new Error('Server crashed after malformed message');
+
+      ws.close();
+    });
+
+    await test('Malformed correlated command returns a structured rejection', async () => {
+      const ws = await createConnection();
+      await waitForMessage(ws, 'init');
+      const commandId = crypto.randomUUID();
+
+      send(ws, {
+        type: 'create_conversation',
+        commandId,
+        conversationId: crypto.randomUUID(),
+        workingDirectory: '/tmp',
+      });
+      const rejected = await waitForMessage(ws, 'command_rejected');
+      if (rejected.commandId !== commandId) {
+        throw new Error(`Expected rejection for ${commandId}, got ${rejected.commandId}`);
+      }
+      if (rejected.error?.code !== 'invalid_message') {
+        throw new Error(`Expected invalid_message, got ${rejected.error?.code}`);
+      }
 
       ws.close();
     });
@@ -560,10 +606,7 @@ async function runTests() {
       const ws = await createConnection();
       await waitForMessage(ws, 'init');
 
-      send(ws, {
-        type: 'new_conversation',
-        workingDirectory: '/tmp',
-      });
+      send(ws, createConversationCommand({ workingDirectory: '/tmp' }));
       const created = await waitForMessage(ws, 'conversation_created');
       const convId = created.conversation.id;
 
@@ -599,7 +642,7 @@ async function runTests() {
       const baseCount = init1.conversations.length;
 
       // Create then delete
-      send(ws1, { type: 'new_conversation' });
+      send(ws1, createConversationCommand());
       const created = await waitForMessage(ws1, 'conversation_created');
       const convId = created.conversation.id;
 

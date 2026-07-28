@@ -24,6 +24,7 @@ export function setConversationConfig({
         }
       }
       draft.set(commandId, {
+        kind: 'set_conversation_config',
         commandId,
         conversationId,
         baseRevision: expectedRevision,

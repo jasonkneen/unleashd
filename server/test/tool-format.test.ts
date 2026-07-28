@@ -19,8 +19,8 @@ test('formatToolUse detects oompa launch through bash -c wrapper', () => {
 
 test('formatToolUse detects oompa launch across command chains and paths', () => {
   const cases = [
-    `echo pre && env FOO=bar oompa swarm oompa/oompa.spark4.json`,
-    `/usr/local/bin/oompa run oompa/oompa.spark4.json; echo done`,
+    'echo pre && env FOO=bar oompa swarm oompa/oompa.spark4.json',
+    '/usr/local/bin/oompa run oompa/oompa.spark4.json; echo done',
     `sh -c "env -u A -u B /opt/bin/oompa swarm oompa/oompa.spark4.json"`,
   ];
 
@@ -36,10 +36,7 @@ test('formatToolUse detects oompa launch across command chains and paths', () =>
 test('formatToolUse does not mark non-launch oompa commands as launch', () => {
   const line = formatToolUse('shell', { command: 'oompa status' });
   assert.ok(!line.includes('oompa run ::'), `Should not classify as oompa run launch: ${line}`);
-  assert.ok(
-    !line.includes('oompa swarm ::'),
-    `Should not classify as oompa swarm launch: ${line}`
-  );
+  assert.ok(!line.includes('oompa swarm ::'), `Should not classify as oompa swarm launch: ${line}`);
 });
 
 test('formatToolUse does not mark oompa dry-run or help commands as launch', () => {

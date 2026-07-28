@@ -57,7 +57,9 @@ function mergeNativeSubAgentWithChild(nativeAgent: SubAgent, child: Conversation
     description:
       nativeAgent.description && !nativeAgent.description.startsWith('Running ')
         ? nativeAgent.description
-        : (childDescription ? `[${getProviderMetadata(child.provider).label}] ${childDescription}` : nativeAgent.description),
+        : childDescription
+          ? `[${getProviderMetadata(child.provider).label}] ${childDescription}`
+          : nativeAgent.description,
     currentAction: nativeAgent.currentAction ?? childCurrentAction,
     completedAt: nativeAgent.completedAt ?? childCompletedAt,
   };

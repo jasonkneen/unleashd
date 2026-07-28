@@ -139,9 +139,12 @@ export function PathAutocomplete({
   }, [fuzzyMatches, fsSuggestions, recentDirectorySet]);
 
   const shouldShowCreateOption = isCreatablePath(value) && !isValidPath && value.trim().length > 0;
-  const shouldShowNoMatchMessage = Boolean(value.trim() && fuzzyMatches.length === 0 && orderedFsSuggestions.length === 0 && !isLoading);
+  const shouldShowNoMatchMessage = Boolean(
+    value.trim() && fuzzyMatches.length === 0 && orderedFsSuggestions.length === 0 && !isLoading
+  );
   const createSuggestionIndex = fuzzyMatches.length + orderedFsSuggestions.length;
-  const totalCount = fuzzyMatches.length + orderedFsSuggestions.length + (shouldShowCreateOption ? 1 : 0);
+  const totalCount =
+    fuzzyMatches.length + orderedFsSuggestions.length + (shouldShowCreateOption ? 1 : 0);
 
   // Fetch filesystem suggestions from the server
   const fetchFsSuggestions = useCallback(async (path: string) => {
@@ -163,8 +166,9 @@ export function PathAutocomplete({
       if (requestId !== fsRequestIdRef.current) return;
       setFsSuggestions([]);
     } finally {
-      if (requestId !== fsRequestIdRef.current) return;
-      setIsLoading(false);
+      if (requestId === fsRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -324,7 +328,9 @@ export function PathAutocomplete({
   };
 
   /** Resolve the selected index to a path from the combined list (fuzzy first, then fs). */
-  const getSelectedAction = (index: number): { type: 'path'; path: string } | { type: 'create' } | null => {
+  const getSelectedAction = (
+    index: number
+  ): { type: 'path'; path: string } | { type: 'create' } | null => {
     if (index < fuzzyMatches.length) {
       return { type: 'path', path: fuzzyMatches[index].path };
     }
@@ -409,6 +415,7 @@ export function PathAutocomplete({
   }, [showSuggestions, totalCount, selectedIndex]);
 
   // Scroll selected item into view
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex selects a new DOM node via the class applied during render.
   useEffect(() => {
     if (showSuggestions && totalCount > 0) {
       const selectedElement = document.querySelector('.path-suggestion-item.selected');
@@ -447,6 +454,7 @@ export function PathAutocomplete({
               >
                 <span className="path-recent-icon">
                   <svg
+                    aria-hidden="true"
                     width="14"
                     height="14"
                     viewBox="0 0 24 24"
@@ -488,6 +496,7 @@ export function PathAutocomplete({
               >
                 <span className="path-folder-icon">
                   <svg
+                    aria-hidden="true"
                     width="14"
                     height="14"
                     viewBox="0 0 24 24"
@@ -517,6 +526,7 @@ export function PathAutocomplete({
             >
               <span className="path-create-icon">
                 <svg
+                  aria-hidden="true"
                   width="14"
                   height="14"
                   viewBox="0 0 24 24"
@@ -535,7 +545,6 @@ export function PathAutocomplete({
               <span className="path-suggestion-path">{value.trim()}</span>
             </div>
           ) : null}
-
         </div>
       )}
     </div>

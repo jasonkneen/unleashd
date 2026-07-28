@@ -1,5 +1,5 @@
-import { create } from 'zustand';
 import type { UIState } from '@unleashd/shared';
+import { create } from 'zustand';
 
 // =============================================================================
 // UI Store — Pure in-memory state, synced to server
@@ -252,9 +252,11 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).then((res) => {
-        if (!res.ok) console.warn(`[UI State] Sync failed: ${res.status} ${res.statusText}`);
-      }).catch((err) => console.warn('[UI State] Sync error:', err));
+      })
+        .then((res) => {
+          if (!res.ok) console.warn(`[UI State] Sync failed: ${res.status} ${res.statusText}`);
+        })
+        .catch((err) => console.warn('[UI State] Sync error:', err));
     }, 500);
   },
 }));

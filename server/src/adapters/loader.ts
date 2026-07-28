@@ -9,9 +9,9 @@
  *   Phase 2 — parseFile() in parallel with bounded concurrency, emit batches.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import type { Conversation } from '@unleashd/shared';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import type { DiscoveredConversation } from '@unleashd/shared';
 import { shouldIgnoreWorkingDirectory } from '../config';
 import type { DiskAdapter, LoadProgressCallback, LoadResult, PollResult } from './disk-adapter';
 import { sessionToConversation } from './disk-adapter';
@@ -67,10 +67,9 @@ async function discoverAll(adapters: DiskAdapter[]): Promise<DiscoveredFile[]> {
               const mtimeMs = await getOpenCodeSessionMtime(filePath, OPENCODE_PART_DIR);
               if (mtimeMs <= 0) return null;
               return { filePath, mtimeMs, adapter };
-            } else {
-              const stat = await fs.promises.stat(filePath);
-              return { filePath, mtimeMs: stat.mtimeMs, adapter };
             }
+            const stat = await fs.promises.stat(filePath);
+            return { filePath, mtimeMs: stat.mtimeMs, adapter };
           } catch {
             // File may have been deleted between discoverFiles() and stat()
             return null;
@@ -126,7 +125,7 @@ async function forEachWithConcurrency<T>(
 interface ParsedResult {
   filePath: string;
   mtimeMs: number;
-  conversation: Conversation | null;
+  conversation: DiscoveredConversation | null;
   parseTimeMs: number;
 }
 
@@ -192,20 +191,13 @@ export async function loadAllConversations(
     batchSize?: number;
   } = {}
 ): Promise<LoadResult> {
-  const {
-    onProgress,
-    limit,
-    offset = 0,
-    concurrency = 10,
-    batchSize = 50,
-  } = options;
+  const { onProgress, limit, offset = 0, concurrency = 10, batchSize = 50 } = options;
 
   const normalizedConcurrency =
     Number.isFinite(concurrency) && concurrency > 0 ? Math.floor(concurrency) : 10;
   const normalizedBatchSize =
     Number.isFinite(batchSize) && batchSize > 0 ? Math.floor(batchSize) : 50;
-  const normalizedOffset =
-    Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
+  const normalizedOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
   const normalizedLimit =
     typeof limit === 'number' && Number.isFinite(limit) && limit > 0
       ? Math.floor(limit)
@@ -218,7 +210,9 @@ export async function loadAllConversations(
   const discoverTimeMs = performance.now() - discoverStart;
 
   const startIndex = Math.min(normalizedOffset, files.length);
-  const endIndex = normalizedLimit ? Math.min(startIndex + normalizedLimit, files.length) : files.length;
+  const endIndex = normalizedLimit
+    ? Math.min(startIndex + normalizedLimit, files.length)
+    : files.length;
   const filesToParse = files.slice(startIndex, endIndex);
 
   console.log(
@@ -229,16 +223,16 @@ export async function loadAllConversations(
   // When onProgress is provided, the caller handles placement (e.g. into the server's
   // conversations Map), so we skip building a redundant conversations Map here —
   // avoids doubling peak memory by holding two copies of every parsed conversation.
-  const conversations = onProgress ? null : new Map<string, Conversation>();
+  const conversations = onProgress ? null : new Map<string, DiscoveredConversation>();
   const mtimes = new Map<string, number>();
 
   // Running accumulators for parse timing — avoids allocating a 1500-element array
   // just to compute summary stats that are immediately discarded after logging.
-  let parseTimeMin = Number.POSITIVE_INFINITY,
-    parseTimeMax = 0,
-    parseTimeSum = 0,
-    parseTimeCount = 0;
-  let batchBuffer: Conversation[] = [];
+  let parseTimeMin = Number.POSITIVE_INFINITY;
+  let parseTimeMax = 0;
+  let parseTimeSum = 0;
+  let parseTimeCount = 0;
+  let batchBuffer: DiscoveredConversation[] = [];
   let filesProcessed = 0;
   let conversationCount = 0;
 
@@ -255,7 +249,7 @@ export async function loadAllConversations(
     parseTimeCount++;
 
     if (result.conversation) {
-      conversations?.set(result.conversation.id, result.conversation);
+      conversations?.set(result.conversation.sessionId, result.conversation);
       batchBuffer.push(result.conversation);
       conversationCount++;
     }
@@ -316,7 +310,7 @@ export async function pollForChanges(
   prevMtimes: Map<string, number>,
   activeIds: Set<string>
 ): Promise<PollResult> {
-  const updated = new Map<string, Conversation>();
+  const updated = new Map<string, DiscoveredConversation>();
   // Start fresh — only populate with currently-discovered files.
   // Any path absent from this poll's discovery is deleted on disk and falls out naturally,
   // preventing the map from accumulating dead paths forever.
@@ -392,10 +386,10 @@ export async function pollForChanges(
         const conversation = sessionToConversation(session);
         // null = hidden test conversation ([_HIDE_TEST_]) — dropped at ingestion.
         if (!conversation) continue;
-        if (activeIds.has(conversation.id)) continue;
+        if (activeIds.has(conversation.sessionId)) continue;
         if (conversation.messages.length === 0) continue;
 
-        updated.set(conversation.id, conversation);
+        updated.set(conversation.sessionId, conversation);
       } catch (error: unknown) {
         console.warn(
           `[Poll] Failed to parse ${adapter.provider} session: ${path.basename(filePath)} (${error instanceof Error ? error.message : error})`

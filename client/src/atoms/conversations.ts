@@ -1,4 +1,5 @@
 import type {
+  BuddyContext,
   ClientMessage,
   Conversation,
   ConversationConfig,
@@ -19,15 +20,18 @@ import { getConversationLastActivity } from '../utils/time';
 export const conversationsAtom = atom(new Map<string, Conversation>());
 
 export interface PendingConversationCreation {
+  kind: 'create_conversation';
   commandId: string;
   conversationId: string;
   workingDirectory: string;
   config: ConversationConfig;
+  buddyContext?: BuddyContext;
   createdAt: Date;
   error?: string;
 }
 
 export interface PendingConfigCommand {
+  kind: 'set_conversation_config';
   commandId: string;
   conversationId: string;
   baseRevision: number;

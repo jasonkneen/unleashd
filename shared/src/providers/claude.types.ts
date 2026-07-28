@@ -323,7 +323,7 @@ export function parseClaudeCliOutput(jsonLine: string): ClaudeCliOutput {
   }
 
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new ClaudeParseError('Expected JSON object, got: ' + typeof parsed, parsed);
+    throw new ClaudeParseError(`Expected JSON object, got: ${typeof parsed}`, parsed);
   }
 
   const obj = parsed as Record<string, unknown>;
@@ -384,7 +384,7 @@ export function parseClaudeCliOutputStream(output: string): ClaudeCliOutput[] {
  */
 export function formatClaudeCliInput(text: string): string {
   // Claude CLI expects plain text followed by newline
-  return text + '\n';
+  return `${text}\n`;
 }
 
 /**

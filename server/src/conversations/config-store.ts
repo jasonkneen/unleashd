@@ -316,6 +316,31 @@ export class ConversationConfigStore {
     });
   }
 
+  /**
+   * Replace an application-owned conversation ID while preserving provider
+   * session bindings. Used to migrate legacy records that stored an opaque
+   * provider session ID as their application identity.
+   */
+  async rekeyConversation(
+    conversationId: string,
+    replacementConversationId: string
+  ): Promise<PersistedConversationConfigRecord> {
+    const existing = await this.getByConversationId(conversationId);
+    if (!existing) throw new Error(`Conversation config not found: ${conversationId}`);
+    if (await this.getByConversationId(replacementConversationId)) {
+      throw new ConfigRevisionConflictError(-1, 0);
+    }
+
+    await this.purge(conversationId);
+    const replacement = { ...existing, conversationId: replacementConversationId };
+    try {
+      return await this.save(replacement, 'missing');
+    } catch (error) {
+      await this.save(existing, 'missing');
+      throw error;
+    }
+  }
+
   async setCurrentSession(
     conversationId: string,
     currentSession: SessionBinding

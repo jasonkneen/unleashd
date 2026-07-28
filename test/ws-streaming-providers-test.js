@@ -6,6 +6,7 @@
  */
 
 const WebSocket = require('ws');
+const { randomUUID } = require('node:crypto');
 
 const providersToTest = ['gemini', 'codex', 'claude'];
 let currentProviderIndex = 0;
@@ -57,9 +58,15 @@ function runNextTest() {
       case 'init':
         ws.send(
           JSON.stringify({
-            type: 'new_conversation',
+            type: 'create_conversation',
+            commandId: randomUUID(),
+            conversationId: randomUUID(),
             workingDirectory: process.cwd(),
-            provider: provider,
+            config: {
+              provider,
+              model: { mode: 'default' },
+              reasoning: { mode: 'default' },
+            },
           })
         );
         break;

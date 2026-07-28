@@ -1,7 +1,7 @@
 import { exec, execSync } from 'node:child_process';
 import net from 'node:net';
-import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
+import react from '@vitejs/plugin-react';
 import { type ViteDevServer, defineConfig } from 'vite';
 
 const DEV_CLIENT_PORT = 7489;
@@ -12,11 +12,7 @@ const SETUP_SCRIPT = fileURLToPath(new URL('../tools/setup-domain.sh', import.me
 
 function openInBrowser(url: string) {
   const startCmd =
-    process.platform === 'darwin'
-      ? 'open'
-      : process.platform === 'win32'
-        ? 'start'
-        : 'xdg-open';
+    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
   exec(`${startCmd} ${url}`);
 }
 

@@ -23,22 +23,22 @@
      ========================================= */
 
   /* Structural tones (default: Solarized Dark — overridden by applyPalette()) */
-  --theme-bg-canvas: #002b36;   /* Outermost background (darkest in dark mode, lightest in light) */
-  --theme-bg-surface: #073642;  /* Surface / raised background (one step toward text) */
-  --theme-text-muted: #586e75;  /* Muted text, comments */
+  --theme-bg-canvas: #002b36; /* Outermost background (darkest in dark mode, lightest in light) */
+  --theme-bg-surface: #073642; /* Surface / raised background (one step toward text) */
+  --theme-text-muted: #586e75; /* Muted text, comments */
   --theme-text-subtle: #657b83; /* Secondary text */
-  --theme-text-body: #839496;   /* Primary body text */
+  --theme-text-body: #839496; /* Primary body text */
   --theme-text-bright: #93a1a1; /* Emphasized text */
 
   /* Semantic intent colors */
-  --theme-primary: #6c71c4;  /* Send button, focus glows */
-  --theme-user: #268bd2;     /* User messages, active nav */
-  --theme-ai: #2aa198;       /* Assistant messages */
-  --theme-success: #859900;  /* Completed states */
-  --theme-warning: #b58900;  /* Warnings, system alerts */
-  --theme-queue: #cb4b16;    /* Queued, inline code, pending */
-  --theme-danger: #dc322f;   /* Errors, interrupt */
-  --theme-meta: #d33682;     /* AI model badges, special */
+  --theme-primary: #6c71c4; /* Send button, focus glows */
+  --theme-user: #268bd2; /* User messages, active nav */
+  --theme-ai: #2aa198; /* Assistant messages */
+  --theme-success: #859900; /* Completed states */
+  --theme-warning: #b58900; /* Warnings, system alerts */
+  --theme-queue: #cb4b16; /* Queued, inline code, pending */
+  --theme-danger: #dc322f; /* Errors, interrupt */
+  --theme-meta: #d33682; /* AI model badges, special */
 
   /* =========================================
      POLARITY POLES — auto-set by applyPalette() via data-theme-mode.

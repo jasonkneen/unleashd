@@ -1,9 +1,4 @@
-import type {
-  Conversation,
-  SwarmReviewLog,
-  SwarmRunLog,
-  SwarmRunSummary,
-} from '@unleashd/shared';
+import type { Conversation, SwarmReviewLog, SwarmRunLog, SwarmRunSummary } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -131,7 +126,8 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
 
   // Build timeline data from run summary and reviews
   const { timelines, timeRange, isEstimated } = useMemo(() => {
-    if (!runData.summary) return { timelines: [], timeRange: { start: 0, end: 0, duration: 0 }, isEstimated: false };
+    if (!runData.summary)
+      return { timelines: [], timeRange: { start: 0, end: 0, duration: 0 }, isEstimated: false };
 
     const summary = runData.summary;
     const reviews = runData.reviews || [];
@@ -570,6 +566,7 @@ export function SwarmAnalytics() {
   }, [rawWorkersByProject, promotedSet]);
 
   // Reset auto-selection flag when project changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the project transition itself resets this mutable guard.
   useEffect(() => {
     hasAutoSelected.current = false;
   }, [selectedProject]);
@@ -649,7 +646,7 @@ export function SwarmAnalytics() {
       {/* Header */}
       <div className="swarm-analytics-header">
         <div className="header-left">
-          <button className="back-btn" onClick={() => navigate('/workers')}>
+          <button type="button" className="back-btn" onClick={() => navigate('/workers')}>
             ← Swarm Dashboard
           </button>
           <h2>Swarm Analytics</h2>
@@ -703,6 +700,7 @@ export function SwarmAnalytics() {
                     })
                     .map((run) => (
                       <button
+                        type="button"
                         key={run.swarmId}
                         className={`run-tab ${selectedSwarmId === run.swarmId ? 'active' : ''}`}
                         onClick={() => setSelectedSwarmId(run.swarmId)}

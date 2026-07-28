@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCommand } from '@nbardy/agent-cli';
 import {
+  CreateConversationCommandSchema,
   ModelIdSchema,
-  NewConversationMessageSchema,
-  SetModelMessageSchema,
+  SetConversationConfigCommandSchema,
   isModelIdValidForProvider,
 } from '../../shared/src/index';
 import { sessionToConversation } from '../src/adapters/disk-adapter';
@@ -15,18 +15,29 @@ const conversationId = '550e8400-e29b-41d4-a716-446655440000';
 test('shared model schemas accept practical OpenCode ids', () => {
   assert.equal(ModelIdSchema.safeParse('opencode/big-pickle').success, true);
   assert.equal(
-    NewConversationMessageSchema.safeParse({
-      type: 'new_conversation',
-      provider: 'opencode',
-      model: 'opencode/big-pickle',
+    CreateConversationCommandSchema.safeParse({
+      type: 'create_conversation',
+      commandId: 'create-opencode',
+      conversationId,
+      workingDirectory: '/tmp',
+      config: {
+        provider: 'opencode',
+        model: { mode: 'explicit', modelId: 'opencode/big-pickle' },
+        reasoning: { mode: 'default' },
+      },
     }).success,
     true
   );
   assert.equal(
-    SetModelMessageSchema.safeParse({
-      type: 'set_model',
+    SetConversationConfigCommandSchema.safeParse({
+      type: 'set_conversation_config',
+      commandId: 'set-opencode-model',
       conversationId,
-      model: 'opencode/big-pickle',
+      expectedRevision: 0,
+      patch: {
+        kind: 'set_model',
+        model: { mode: 'explicit', modelId: 'opencode/big-pickle' },
+      },
     }).success,
     true
   );

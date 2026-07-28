@@ -10,8 +10,6 @@ const proc = spawn('claude', ['--verbose', '--output-format=stream-json'], {
   cwd: process.cwd(),
 });
 
-const messageCount = 0;
-
 proc.stdout.on('data', (data) => {
   console.log('[stdout]', data.toString().substring(0, 300));
 });

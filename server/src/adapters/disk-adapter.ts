@@ -11,9 +11,15 @@
  *   sessionToConversation(ParsedSession) → Conversation | null  (null = hidden)
  */
 
-import type { Conversation, Message, Provider, SubAgent } from '@unleashd/shared';
+import type {
+  Conversation,
+  DiscoveredConversation,
+  Message,
+  Provider,
+  SubAgent,
+} from '@unleashd/shared';
 import { ModelIdSchema, fromCodexModelId, isModelIdValidForProvider } from '@unleashd/shared';
-import { extractSwarmDebugPrefix, extractWorkerMetadata } from './jsonl';
+import { extractBuddyContext, extractSwarmDebugPrefix, extractWorkerMetadata } from './jsonl';
 
 // =============================================================================
 // Normalized session output — all adapters produce this before conversion
@@ -57,17 +63,17 @@ export interface DiskAdapter {
 // =============================================================================
 
 export interface LoadResult {
-  conversations: Map<string, Conversation>;
+  conversations: Map<string, DiscoveredConversation>;
   mtimes: Map<string, number>; // filepath → mtime ms
 }
 
 export interface PollResult {
-  updated: Map<string, Conversation>; // changed or new conversations
+  updated: Map<string, DiscoveredConversation>; // changed or new conversations
   mtimes: Map<string, number>; // full updated mtime index
 }
 
 export type LoadProgressCallback = (
-  batch: Conversation[],
+  batch: DiscoveredConversation[],
   progress: { loaded: number; total: number }
 ) => void | Promise<void>;
 
@@ -84,10 +90,11 @@ export type LoadProgressCallback = (
  * jsonlSessionToConversation / codexSessionToConversation / openCodeSessionToConversation /
  * geminiSessionToConversation functions that previously existed in jsonl.ts.
  */
-export function sessionToConversation(session: ParsedSession): Conversation | null {
+export function sessionToConversation(session: ParsedSession): DiscoveredConversation | null {
   // Both extractors mutate messages (strip markers from first user message).
-  // extractSwarmDebugPrefix runs first: its sentinel wraps the prefix block at the
-  // very top of the CLI message, before any oompa/hide tags.
+  // Buddy and swarm metadata have independent sentinels. Buddy extraction runs
+  // first because its hidden block is outermost for a Buddy's first turn.
+  const buddyContext = extractBuddyContext(session.messages);
   const swarmDebugPrefix = extractSwarmDebugPrefix(session.messages);
   const worker = extractWorkerMetadata(session.messages);
   if (worker.isHidden) return null;
@@ -98,7 +105,6 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
   const { model: recoveredModel, reasoningEffort } = recoverModelAndEffort(session);
 
   return {
-    id: session.sessionId,
     sessionId: session.sessionId,
     messages: session.messages,
     isRunning: false,
@@ -118,6 +124,7 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
     parentConversationId: session.parentSessionId ?? null,
     modelName: session.model !== 'unknown' ? session.model : null,
     swarmDebugPrefix: swarmDebugPrefix ?? null,
+    buddyContext,
   };
 }
 

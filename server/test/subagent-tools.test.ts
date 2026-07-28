@@ -42,10 +42,7 @@ test('normalizeCodexSubagentStatus folds codex runtime states into shared UI sta
 });
 
 test('getCodexSubagentCurrentAction prefers child messages and otherwise returns human-readable fallbacks', () => {
-  assert.equal(
-    getCodexSubagentCurrentAction('wait', 'completed', 'SUBAGENTS_OK'),
-    'SUBAGENTS_OK'
-  );
+  assert.equal(getCodexSubagentCurrentAction('wait', 'completed', 'SUBAGENTS_OK'), 'SUBAGENTS_OK');
   assert.equal(
     getCodexSubagentCurrentAction('spawn_agent', 'pending_init', null),
     'Pending initialization'

@@ -8,9 +8,9 @@
 import type { ModelInfo, Provider as ProviderName } from '@unleashd/shared';
 import claudeProvider from './claude';
 import codexProvider from './codex';
+import cursorProvider from './cursor';
 import geminiProvider from './gemini';
 import opencodeProvider from './opencode';
-import cursorProvider from './cursor';
 
 /**
  * Unified event types consumed by conversation state handling.

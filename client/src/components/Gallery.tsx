@@ -126,7 +126,9 @@ export function Gallery({ filter }: GalleryProps = {}) {
 
   // Filter temp directories and sort folders by most recent conversation (not alphabetical)
   const folders = useMemo(() => {
-    const nonTemp = allFolders.filter((folder) => !isTempDirectory(folder) && !isWorktreeDirectory(folder));
+    const nonTemp = allFolders.filter(
+      (folder) => !isTempDirectory(folder) && !isWorktreeDirectory(folder)
+    );
 
     // Build a map of folder -> most recent conversation date
     const folderRecency = new Map<string, number>();
@@ -247,7 +249,8 @@ export function Gallery({ filter }: GalleryProps = {}) {
   const isWorkersView = filter === 'workers';
 
   const getSectionKey = useCallback(
-    (projection: Exclude<ProjectProjection, 'done'>, directory: string) => `${projection}:${directory}`,
+    (projection: Exclude<ProjectProjection, 'done'>, directory: string) =>
+      `${projection}:${directory}`,
     []
   );
 
@@ -382,12 +385,15 @@ export function Gallery({ filter }: GalleryProps = {}) {
       const isCollapsed = collapsedProjects.has(group.directory);
       const isExpanded = expandedProjects.has(group.directory);
       const doneConversationsForSection =
-        projection === 'done' ? EMPTY_CONVERSATIONS : getDoneConversationsForSection(projection, group.directory);
-      const sectionKey =
-        projection === 'done' ? null : getSectionKey(projection, group.directory);
+        projection === 'done'
+          ? EMPTY_CONVERSATIONS
+          : getDoneConversationsForSection(projection, group.directory);
+      const sectionKey = projection === 'done' ? null : getSectionKey(projection, group.directory);
       const showDoneInSection = sectionKey ? Boolean(showDoneBySection[sectionKey]) : false;
       const sectionConversations = showDoneInSection
-        ? [...group.conversations, ...doneConversationsForSection].sort(compareConversationsByCreatedAtDesc)
+        ? [...group.conversations, ...doneConversationsForSection].sort(
+            compareConversationsByCreatedAtDesc
+          )
         : group.conversations;
       const totalCount = sectionConversations.length;
       const hiddenCount = totalCount - CONVERSATIONS_PER_PROJECT;
@@ -402,7 +408,9 @@ export function Gallery({ filter }: GalleryProps = {}) {
           className={[
             'project-section',
             sectionClassName,
-            projection !== 'done' && doneConversationsForSection.length > 0 ? 'has-done-toggle' : '',
+            projection !== 'done' && doneConversationsForSection.length > 0
+              ? 'has-done-toggle'
+              : '',
           ]
             .filter(Boolean)
             .join(' ')}
@@ -432,7 +440,9 @@ export function Gallery({ filter }: GalleryProps = {}) {
                   toggleSectionDoneVisibility(projection, group.directory);
                 }}
               >
-                {showDoneInSection ? 'Hide done' : `Show ${doneConversationsForSection.length} done`}
+                {showDoneInSection
+                  ? 'Hide done'
+                  : `Show ${doneConversationsForSection.length} done`}
               </button>
             )}
           </div>

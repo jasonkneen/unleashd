@@ -50,6 +50,15 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", "dist", ".git", "*.min.js", "public"]
+    "ignore": [
+      "node_modules",
+      "dist",
+      ".git",
+      "*.min.js",
+      "public",
+      "runs",
+      "vendor/agent-cli-tool/manual_tests/runs",
+      "shared/src/generated"
+    ]
   }
 }

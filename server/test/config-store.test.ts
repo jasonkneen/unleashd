@@ -65,6 +65,27 @@ test('config store round-trips durable selection intent and resolves session bin
   });
 });
 
+test('config store rekeys opaque legacy application IDs without losing session identity', async () => {
+  await withStore(async (store) => {
+    const opaqueId = 'ses_native-provider-id';
+    await store.create({
+      conversationId: opaqueId,
+      currentSession: { provider: 'opencode', sessionId: opaqueId },
+      config: { ...CONFIG, provider: 'opencode' },
+      provenance: 'legacy_inferred',
+    });
+
+    const migrated = await store.rekeyConversation(opaqueId, CONVERSATION_ID);
+
+    assert.equal(migrated.conversationId, CONVERSATION_ID);
+    assert.equal(await store.getByConversationId(opaqueId), undefined);
+    assert.equal(
+      (await store.findBySession('opencode', opaqueId))?.conversationId,
+      CONVERSATION_ID
+    );
+  });
+});
+
 test('legacy v1 records parse as active without inventing a current session', () => {
   const parsed = PersistedConversationConfigRecordSchema.parse({
     version: 1,

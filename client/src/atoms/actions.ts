@@ -2,14 +2,11 @@ import type {
   ClientMessage,
   Conversation,
   ConversationConfig,
-  ModelId,
-  Provider,
   QueuedMessage,
   ServerMessage,
 } from '@unleashd/shared';
 import { enableMapSet, produce } from 'immer';
 import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
-import { setConversationConfig } from './config-actions';
 import {
   activeConversationIdAtom,
   conversationsAtom,
@@ -119,7 +116,7 @@ export function setActiveConversationId(id: string | null): void {
 /**
  * Merge feature: POST /api/conversations/merge. Server mints the parent id
  * and per-child ids/review UUIDs, creates everything, spawns forks, then
- * broadcasts conversation_created + merge_child_status events. Returns the
+ * broadcasts conversations_updated + merge_child_status events. Returns the
  * parent id so the caller can navigate to the new thread.
  */
 export async function createMergeConversations(args: {
@@ -161,46 +158,21 @@ export function stopConversation(conversationId: string): void {
   send({ type: 'stop_conversation', conversationId });
 }
 
+/**
+ * End all work on a conversation. WebSocket messages are processed in order,
+ * so pending work is cleared before the active provider process is stopped.
+ */
+export function endConversation(conversationId: string): void {
+  const conv = jotaiStore.get(conversationsAtom).get(conversationId);
+  if (!conv) return;
+  send({ type: 'clear_queue', conversationId });
+  send({ type: 'stop_conversation', conversationId });
+}
+
 export function interruptAndSend(conversationId: string, content: string): void {
   const conv = jotaiStore.get(conversationsAtom).get(conversationId);
   if (!conv) return;
   send({ type: 'interrupt_and_send', conversationId, content });
-}
-
-/** @deprecated Prefer setConversationConfig from config-actions. */
-export function setModel(conversationId: string, model: ModelId): void {
-  const conversation = jotaiStore.get(conversationsAtom).get(conversationId);
-  if (!conversation) return;
-  setConversationConfig({
-    conversationId,
-    expectedRevision: conversation.configRevision ?? 0,
-    patch: { kind: 'set_model', model: { mode: 'explicit', modelId: model } },
-  });
-}
-
-/** @deprecated Prefer setConversationConfig from config-actions. */
-export function setProvider(conversationId: string, provider: Provider): void {
-  const conversation = jotaiStore.get(conversationsAtom).get(conversationId);
-  if (!conversation) return;
-  setConversationConfig({
-    conversationId,
-    expectedRevision: conversation.configRevision ?? 0,
-    patch: { kind: 'set_provider', provider },
-  });
-}
-
-/** @deprecated Prefer setConversationConfig from config-actions. */
-export function setReasoningEffort(conversationId: string, value: string | null): void {
-  const conversation = jotaiStore.get(conversationsAtom).get(conversationId);
-  if (!conversation) return;
-  setConversationConfig({
-    conversationId,
-    expectedRevision: conversation.configRevision ?? 0,
-    patch: {
-      kind: 'set_reasoning',
-      reasoning: value === null ? { mode: 'disabled' } : { mode: 'explicit', effort: value },
-    },
-  });
 }
 
 export function queueMessage(conversationId: string, content: string): void {
@@ -247,10 +219,12 @@ export function handleMessage(data: ServerMessage): void {
           removePendingConversation(pc.conversationId, pc.commandId);
         } else {
           pendingState.set(pc.conversationId, {
+            kind: 'create_conversation',
             commandId: pc.commandId,
             conversationId: pc.conversationId,
             workingDirectory: normalizeWorkingDirectory(pc.workingDirectory),
             config: pc.config,
+            buddyContext: pc.buddyContext,
             createdAt: new Date(pc.createdAt),
             error: pc.error,
           });
@@ -294,17 +268,12 @@ export function handleMessage(data: ServerMessage): void {
       jotaiStore.set(
         pendingCreationsAtom,
         produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
-          draft.delete(data.conversation.id);
+          const pending = draft.get(data.conversation.id);
+          if (pending?.kind === 'create_conversation' && pending.commandId === data.commandId) {
+            draft.delete(data.conversation.id);
+          }
         })
       );
-      if (data.commandId) {
-        jotaiStore.set(
-          pendingConfigCommandsAtom,
-          produce(jotaiStore.get(pendingConfigCommandsAtom), (draft) => {
-            draft.delete(data.commandId as string);
-          })
-        );
-      }
       break;
     }
 
@@ -342,23 +311,32 @@ export function handleMessage(data: ServerMessage): void {
         );
       }
       const message = data.error.message;
-      markPendingCreationRejected(data.commandId, message);
-      jotaiStore.set(
-        pendingConfigCommandsAtom,
-        produce(jotaiStore.get(pendingConfigCommandsAtom), (draft) => {
-          const pending = draft.get(data.commandId);
-          if (pending) pending.error = message;
-        })
+      const pendingConfig = jotaiStore.get(pendingConfigCommandsAtom).get(data.commandId);
+      if (pendingConfig?.kind === 'set_conversation_config') {
+        jotaiStore.set(
+          pendingConfigCommandsAtom,
+          produce(jotaiStore.get(pendingConfigCommandsAtom), (draft) => {
+            const pending = draft.get(data.commandId);
+            if (pending?.kind === 'set_conversation_config') pending.error = message;
+          })
+        );
+        break;
+      }
+
+      const pendingCreation = Array.from(jotaiStore.get(pendingCreationsAtom).values()).find(
+        (creation) =>
+          creation.kind === 'create_conversation' && creation.commandId === data.commandId
       );
-      jotaiStore.set(
-        pendingCreationsAtom,
-        produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
-          const pending = Array.from(draft.values()).find(
-            (creation) => creation.commandId === data.commandId
-          );
-          if (pending) pending.error = message;
-        })
-      );
+      if (pendingCreation) {
+        markPendingCreationRejected(data.commandId, message);
+        jotaiStore.set(
+          pendingCreationsAtom,
+          produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
+            const pending = draft.get(pendingCreation.conversationId);
+            if (pending?.kind === 'create_conversation') pending.error = message;
+          })
+        );
+      }
       break;
     }
 

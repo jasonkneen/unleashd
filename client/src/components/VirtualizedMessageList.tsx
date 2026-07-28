@@ -1,5 +1,5 @@
-import type { Message } from '@unleashd/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import type { Message } from '@unleashd/shared';
 import type { Break, Root, Text } from 'mdast';
 import type { ComponentPropsWithoutRef } from 'react';
 import {
@@ -17,11 +17,13 @@ import type { Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import type { Plugin } from 'unified';
+import type { BuddyContext } from '../atoms/pending-creations';
 import {
   ASK_USER_QUESTION_RE,
   AskUserQuestionWidget,
   parseAskUserQuestion,
 } from './AskUserQuestion';
+import { BuddyConvoHeader } from './BuddyConvoHeader';
 import { FilePreview, getPreviewType, getPreviewableLocalHref } from './FilePreview';
 import { InlineSwarmRunWidget } from './InlineSwarmRunWidget';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
@@ -506,17 +508,20 @@ function splitWidgets(content: string): ContentSegment[] {
   // Create a fresh regex with `g` flag for multi-match .exec() loop —
   // avoids stale lastIndex on the module-level ASK_USER_QUESTION_RE singleton
   // (same pattern as OOMPA_RUN_TOOL_FRAGMENT_RE below).
-  const askUserRe = new RegExp(ASK_USER_QUESTION_RE.source, ASK_USER_QUESTION_RE.flags + 'g');
-  let match: RegExpExecArray | null;
-  while ((match = askUserRe.exec(content)) !== null) {
+  const askUserRe = new RegExp(ASK_USER_QUESTION_RE.source, `${ASK_USER_QUESTION_RE.flags}g`);
+  let match = askUserRe.exec(content);
+  while (match !== null) {
     matches.push({ type: 'ask_user_question', index: match.index, length: match[0].length, match });
+    match = askUserRe.exec(content);
   }
 
   // Create a fresh regex with `g` flag for multi-match .exec() loop —
   // avoids stale lastIndex on the module-level OOMPA_RUN_TOOL_FRAGMENT_RE singleton.
   const oompaRunGlobal = new RegExp(OOMPA_RUN_TOOL_FRAGMENT_RE.source, 'gi');
-  while ((match = oompaRunGlobal.exec(content)) !== null) {
+  match = oompaRunGlobal.exec(content);
+  while (match !== null) {
     matches.push({ type: 'oompa_run', index: match.index, length: match[0].length, match });
+    match = oompaRunGlobal.exec(content);
   }
 
   matches.sort((a, b) => a.index - b.index);
@@ -669,6 +674,7 @@ interface VirtualizedMessageListProps {
   workingDirectory: string;
   swarmDebugPrefix?: string | null;
   swarmId?: string | null;
+  buddyContext?: BuddyContext;
 }
 
 // Estimate height based on content — rough approximation before measurement
@@ -697,20 +703,23 @@ export function VirtualizedMessageList({
   workingDirectory,
   swarmDebugPrefix,
   swarmId,
+  buddyContext,
 }: VirtualizedMessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const stickyBottomRef = useRef(true);
   // Track conversation ID to detect switches
   const prevConversationIdRef = useRef<string | null>(null);
 
-  const totalItems = messageGroups.length + (swarmDebugPrefix ? 1 : 0);
+  const contextItemCount = (buddyContext ? 1 : 0) + (swarmDebugPrefix ? 1 : 0);
+  const totalItems = messageGroups.length + contextItemCount;
 
   const virtualizer = useVirtualizer({
     count: totalItems,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
-      if (swarmDebugPrefix && index === 0) return 80; // Estimate for SwarmConvoPrefix
-      const groupIndex = swarmDebugPrefix ? index - 1 : index;
+      if (buddyContext && index === 0) return 88;
+      if (swarmDebugPrefix && index === (buddyContext ? 1 : 0)) return 80;
+      const groupIndex = index - contextItemCount;
       return estimateGroupSize(messageGroups[groupIndex]);
     },
     overscan: 3,
@@ -814,7 +823,26 @@ export function VirtualizedMessageList({
           }}
         >
           {items.map((virtualItem) => {
-            if (swarmDebugPrefix && virtualItem.index === 0) {
+            if (buddyContext && virtualItem.index === 0) {
+              return (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <BuddyConvoHeader context={buddyContext} />
+                </div>
+              );
+            }
+
+            if (swarmDebugPrefix && virtualItem.index === (buddyContext ? 1 : 0)) {
               return (
                 <div
                   key={virtualItem.key}
@@ -835,7 +863,7 @@ export function VirtualizedMessageList({
               );
             }
 
-            const groupIndex = swarmDebugPrefix ? virtualItem.index - 1 : virtualItem.index;
+            const groupIndex = virtualItem.index - contextItemCount;
             const group = messageGroups[groupIndex];
             const isLastGroup = groupIndex === messageGroups.length - 1;
 

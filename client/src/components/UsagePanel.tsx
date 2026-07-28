@@ -169,6 +169,7 @@ export function UsagePanel({ onClose }: Props) {
           <h2>Usage</h2>
           <button type="button" className="close-btn" onClick={onClose}>
             <svg
+              aria-hidden="true"
               width="18"
               height="18"
               viewBox="0 0 24 24"

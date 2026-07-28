@@ -26,7 +26,7 @@ export function auditLocalAgents(): AuditResult[] {
       const binPath = resolveBinary(config.binary);
       console.log(`✅ [${name.toUpperCase()}] Installed: ${binPath}`);
       results.push({ name, binary: config.binary, installed: true, path: binPath });
-    } catch (e) {
+    } catch {
       console.log(`⍌ [${name.toUpperCase()}] NOT FOUND`);
       console.log(`   Expected binary: '${config.binary}'`);
       allGood = false;
@@ -35,7 +35,7 @@ export function auditLocalAgents(): AuditResult[] {
   }
 
   console.log('\n==========================================================\n');
-  
+
   if (!allGood) {
     console.log('Note: You can still run Orchestral, but missing agents');
     console.log('will fail when you attempt to route tasks to them.\n');

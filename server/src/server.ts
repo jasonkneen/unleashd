@@ -1,4 +1,3 @@
-let startupAuditResults: any[] = [];
 import { type ChildProcess, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -9,13 +8,12 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import type {
+  BuddyContext,
   ConfigResolution,
-  ConfigError,
-  Conversation as ConversationData,
   ConversationConfig,
-  ConversationConfigPatch,
   ConversationConfigState,
-  GeneralCommandError,
+  Conversation as ConversationData,
+  DiscoveredConversation,
   Message,
   ModelId,
   OompaCycle,
@@ -29,21 +27,14 @@ import type {
   ResolvedExecutionConfig,
   ServerMessage,
   SubAgent,
-  UIState,
 } from '@unleashd/shared';
 import {
+  ConversationConfigSchema,
   FORK_CAPABLE_PROVIDERS,
   PROTOCOL_INFO,
-  UIStateSchema,
   buildMergeReviewPrompt,
-  ConversationConfigSchema,
   createDefaultConversationConfig,
-  defaultReasoningEffortForProvider,
-  effortLevelsForProvider,
-  isEffortValidForProvider,
-  isModelIdValidForProvider,
   mergeReviewDocPath,
-  modelValidationHint,
   normalizeModelId,
   providerSupportsFork,
   safeParseClientMessage,
@@ -65,7 +56,7 @@ type MergeChildMeta = {
 };
 import { executeCommand } from '@nbardy/agent-cli';
 import express, { type Request, type Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
+import { validate as isUuid, v4 as uuidv4 } from 'uuid';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadAllConversations, pollForChanges } from './adapters/loader';
 import { formatToolUse, isCompletionOnlyToolUse } from './adapters/tool-format';
@@ -83,13 +74,20 @@ import {
   TURN_IDLE_TIMEOUT_MS,
   TURN_MAX_RUNTIME_MS,
   TURN_TIMEOUT_KILL_GRACE_MS,
-  USAGE_CACHE_TTL_MS,
 } from './constants/timeouts';
 import {
   ConversationConfigService,
   ConversationTombstonedError,
+  type HydratedConversationConfig,
 } from './conversations/config-service';
 import { ConversationConfigStore } from './conversations/config-store';
+import { registerFilesystemRoutes } from './http/filesystem-routes';
+import { isPathWithin, resolveWorkingDirectoryInput } from './http/path-utils';
+import { PersistedServerState } from './http/persisted-state';
+import { registerSearchRoutes } from './http/search-routes';
+import { registerUploadRoutes } from './http/upload-routes';
+import { registerUsageRoutes } from './http/usage-routes';
+import { resolveListenHost } from './network';
 import { type ProviderEvent, getProvider, providers } from './providers';
 import {
   createProviderCatalog,
@@ -104,9 +102,28 @@ import {
   isTerminalSubagentStatus,
   normalizeCodexSubagentStatus,
 } from './subagent-tools';
+import {
+  sendCommandRejected,
+  sendProtocolError,
+  sendToClient,
+  validateWorkingDirectory,
+} from './transport/websocket';
 
-import multer from 'multer';
 import { auditLocalAgents } from './audit.js';
+import type {
+  BuddiesModule,
+  BuddiesStorePort,
+  BuddyAutomation,
+  BuddyAutomationRun,
+} from './buddies/contract';
+import { registerBuddyRoutes } from './buddies/routes';
+import {
+  type BuddyAutomationConversation,
+  BuddyScheduler,
+  nextAutomationRunAt,
+} from './buddies/scheduler';
+
+let startupAuditResults: ReturnType<typeof auditLocalAgents> = [];
 
 const VERBOSE = process.env.VERBOSE === '1' || process.argv.includes('--verbose');
 
@@ -128,9 +145,10 @@ const conversationConfigService = new ConversationConfigService({
     resolve: async (config) => resolveConfigAgainstProviderCatalog(config),
   },
 });
-let buddiesStorePromise:
-  | Promise<InstanceType<(typeof import('@nbardy/buddies'))['BuddiesStore']>>
-  | null = null;
+const persistedServerState = new PersistedServerState(APP_DATA_DIR, setIgnorePatterns);
+const BUDDIES_PACKAGE_NAME: string = '@nbardy/buddies';
+let buddiesStorePromise: Promise<BuddiesStorePort> | null = null;
+let buddyScheduler: BuddyScheduler | null = null;
 
 class BuddiesUnavailableError extends Error {
   constructor(cause: unknown) {
@@ -143,8 +161,14 @@ class BuddiesUnavailableError extends Error {
 }
 
 function getBuddiesStore() {
-  buddiesStorePromise ??= import('@nbardy/buddies').then(
-    ({ BuddiesStore }) => new BuddiesStore(),
+  buddiesStorePromise ??= import(BUDDIES_PACKAGE_NAME).then(
+    (loadedModule: unknown) => {
+      const { BuddiesStore } = loadedModule as BuddiesModule;
+      if (typeof BuddiesStore !== 'function') {
+        throw new Error('The Buddies package does not export BuddiesStore');
+      }
+      return new BuddiesStore();
+    },
     (error) => {
       throw new BuddiesUnavailableError(error);
     }
@@ -155,6 +179,169 @@ function getBuddiesStore() {
 function sendBuddiesError(res: Response, error: unknown, fallbackStatus: number): void {
   const status = error instanceof BuddiesUnavailableError ? 503 : fallbackStatus;
   res.status(status).json({ error: error instanceof Error ? error.message : String(error) });
+}
+
+type ResolvedBuddyConversation = {
+  context: BuddyContext;
+  briefing: string;
+  workingDirectory: string;
+  provider: ProviderName;
+  model?: ModelId;
+  reasoningEffort?: string;
+};
+
+async function resolveBuddyConversation(
+  requested: BuddyContext
+): Promise<ResolvedBuddyConversation> {
+  const buddies = await getBuddiesStore();
+  const detail = buddies.getBuddyContext(requested.buddyId, {
+    workspace: requested.workspaceId,
+    project: requested.buddyProjectId ?? undefined,
+  });
+  if (!detail.workspace) throw new Error('Buddy workspace not found');
+  if (detail.buddy.status !== 'active') {
+    throw new Error(`Buddy is ${detail.buddy.status}; only active Buddies can start conversations`);
+  }
+  if (requested.legacyWorkItemId) {
+    const legacy = buddies.getWorkItem(requested.legacyWorkItemId);
+    if (
+      !legacy ||
+      legacy.buddy_id !== detail.buddy.id ||
+      legacy.project_id !== detail.workspace.id
+    ) {
+      throw new Error('Legacy work item does not belong to this Buddy and workspace');
+    }
+  }
+  if (requested.delegatedByBuddyId) {
+    buddies.getBuddyContext(requested.delegatedByBuddyId, {
+      workspace: detail.workspace.id,
+    });
+    if (requested.parentBuddyConversationId) {
+      const parent = conversations.get(requested.parentBuddyConversationId);
+      if (
+        !parent?.buddyContext ||
+        parent.buddyContext.buddyId !== requested.delegatedByBuddyId ||
+        parent.buddyContext.workspaceId !== detail.workspace.id
+      ) {
+        throw new Error('Parent Buddy conversation does not match the delegating Buddy scope');
+      }
+    }
+  }
+  const context: BuddyContext = {
+    buddyId: detail.buddy.id,
+    workspaceId: detail.workspace.id,
+    buddyProjectId: detail.project?.id ?? null,
+    legacyWorkItemId: requested.legacyWorkItemId ?? null,
+    automationRunId: requested.automationRunId ?? null,
+    delegatedByBuddyId: requested.delegatedByBuddyId ?? null,
+    parentBuddyConversationId: requested.parentBuddyConversationId ?? null,
+  };
+  const skillBriefings = detail.skills.map((skill) => {
+    if (skill.mode !== 'always') {
+      return `${skill.name} (on demand; instructions: ${skill.instruction_path})`;
+    }
+    try {
+      return `${skill.name} (always)\n${fs.readFileSync(skill.instruction_path, 'utf8')}`;
+    } catch {
+      return `${skill.name} (always; instructions unavailable at ${skill.instruction_path})`;
+    }
+  });
+  const briefing = [
+    `You are ${detail.buddy.name}, the ${detail.buddy.role} Buddy.`,
+    `Workspace: ${detail.workspace.name} (${detail.workspace.root_path})`,
+    '',
+    'BUDDY_SOUL.md',
+    detail.soul || '(No Buddy soul has been configured.)',
+    '',
+    'RELATIONSHIPS AND SKILLS',
+    JSON.stringify(detail.relationships, null, 2),
+    ...skillBriefings,
+    '',
+    'BUDDY MEMORY',
+    detail.memory.summary || '(No curated memory yet.)',
+    ...detail.memory.recentJournal.map(
+      (entry: { path: string; content: string }) =>
+        `\nRecent journal ${path.basename(entry.path)}\n${entry.content}`
+    ),
+    '',
+    'CURRENT SPRINT / OWNED WORK',
+    JSON.stringify(
+      {
+        sprint: detail.sprint,
+        selectedProject: detail.project,
+        projects: detail.projects,
+        legacyWorkItems: detail.legacyWorkItems,
+      },
+      null,
+      2
+    ),
+    '',
+    'BUDDY OPERATIONS',
+    'Use the `buddies` CLI for durable employee state; never edit its SQLite database directly.',
+    'The public operations are new_project, update_project, and remember.',
+    'Close, cancel, block, or reopen project todos through an atomic `buddies project update` call.',
+    'Write durable personal handoffs through `buddies remember`.',
+  ].join('\n');
+  return {
+    context,
+    briefing,
+    workingDirectory: detail.workspace.root_path,
+    provider: (detail.buddy.provider || 'codex') as ProviderName,
+    model: detail.buddy.model || undefined,
+    reasoningEffort: detail.buddy.reasoning_effort || undefined,
+  };
+}
+
+function updateBuddyConversationLink(
+  conversation: Conversation,
+  status: 'active' | 'complete' | 'failed' | 'cancelled'
+): void {
+  if (!conversation.buddyContext) return;
+  void getBuddiesStore()
+    .then((buddies) =>
+      buddies.updateConversationLink(conversation.id, {
+        status,
+        providerSessionId: conversation.sessionId,
+      })
+    )
+    .catch((error) =>
+      console.warn(`[buddies] Failed to update conversation ${conversation.id}:`, error)
+    );
+}
+
+function settleBuddyDelegation(
+  conversation: Conversation,
+  status: 'complete' | 'failed' | 'cancelled',
+  outcome?: string
+): void {
+  if (!conversation.buddyContext?.delegatedByBuddyId) return;
+  void getBuddiesStore()
+    .then((buddies) => {
+      const delegation = buddies
+        .listDelegations({ buddy: conversation.buddyContext!.buddyId })
+        .find((item) => item.child_conversation_id === conversation.id);
+      if (!delegation) return;
+      buddies.updateDelegation(delegation.id, { status, outcome });
+    })
+    .catch((error) =>
+      console.warn(`[buddies] Failed to settle delegation for ${conversation.id}:`, error)
+    );
+}
+
+async function createBuddyConversationLink(conversation: Conversation): Promise<void> {
+  const context = conversation.buddyContext;
+  if (!context) return;
+  const buddies = await getBuddiesStore();
+  buddies.linkConversation({
+    buddy: context.buddyId,
+    workspace: context.workspaceId,
+    project: context.buddyProjectId ?? undefined,
+    workItem: context.legacyWorkItemId ?? undefined,
+    provider: conversation.provider,
+    providerSessionId: conversation.sessionId,
+    unleashdConversationId: conversation.id,
+    status: 'active',
+  });
 }
 
 // Store active conversations
@@ -186,10 +373,9 @@ const sessionAliasToConversationId = new Map<string, string>();
 // Track initial load readiness. Resolved immediately at startup so WebSocket
 // handlers can send init right away. Conversations stream in progressively
 // via conversations_updated as batches are parsed from disk.
-let initialLoadComplete: Promise<void>;
-let resolveInitialLoad: () => void;
-// Initialize the promise (resolved by startServer after loadExistingConversations)
-initialLoadComplete = new Promise((resolve) => {
+let resolveInitialLoad!: () => void;
+// Resolved by startServer after loadExistingConversations.
+const initialLoadComplete = new Promise<void>((resolve) => {
   resolveInitialLoad = resolve;
 });
 
@@ -222,21 +408,7 @@ type BroadcastData = ServerMessage | ChunkData | MessageCompleteData | MessageDa
 // Helper Functions
 // =============================================================================
 
-interface SearchResult {
-  conversationId: string;
-  messageIndex: number;
-  role: 'user' | 'assistant' | 'system';
-  snippet: string;
-  workingDirectory: string;
-  timestampMs: number;
-}
-
-const SEARCH_SNIPPET_RADIUS = 60; // chars before/after match to show
-const MIN_SEARCH_QUERY_LENGTH = 2;
-const SEARCH_MAX_RESULTS = 50;
-const SEARCH_HARD_RESULT_LIMIT = 200;
 const LOG_CONTENT_PREVIEW_CHARS = 140;
-const HOME_DIR = os.homedir();
 const STARTUP_INITIAL_LOAD_LIMIT = readPositiveIntEnv('CWV_STARTUP_INITIAL_LOAD_LIMIT', 500);
 const STARTUP_PARSE_CONCURRENCY = readPositiveIntEnv('CWV_STARTUP_PARSE_CONCURRENCY', 16);
 const STARTUP_LOAD_BATCH_SIZE = readPositiveIntEnv('CWV_STARTUP_BATCH_SIZE', 100);
@@ -253,44 +425,6 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 
 function formatLogPreview(content: string, maxChars = LOG_CONTENT_PREVIEW_CHARS): string {
   return content.replace(/\s+/g, ' ').slice(0, maxChars);
-}
-
-function expandHomeAlias(inputPath: string): string {
-  if (inputPath === '~') return HOME_DIR;
-  if (inputPath.startsWith('~/')) return path.join(HOME_DIR, inputPath.slice(2));
-  if (path.sep === '\\' && inputPath.startsWith('~\\')) {
-    return path.join(HOME_DIR, inputPath.slice(2));
-  }
-  if (inputPath.startsWith('~')) {
-    return inputPath.replace(/^~/, HOME_DIR);
-  }
-  return inputPath;
-}
-
-function normalizeDirectoryInput(inputPath: string): string {
-  const trimmed = inputPath.trim();
-  if (!trimmed) return '';
-  return path.normalize(expandHomeAlias(trimmed));
-}
-
-function resolveWorkingDirectoryInput(
-  inputPath: string | null | undefined,
-  fallback = process.cwd()
-): string {
-  const normalized = normalizeDirectoryInput(inputPath ?? '');
-  const resolved = path.resolve(normalized || fallback);
-  const root = path.parse(resolved).root;
-  if (resolved === root) return resolved;
-  return resolved.replace(/[\\/]+$/, '');
-}
-
-function displayPathWithHomeAlias(resolvedPath: string, useHomeAlias: boolean): string {
-  if (!useHomeAlias) return resolvedPath;
-  if (resolvedPath === HOME_DIR) return '~';
-  if (resolvedPath.startsWith(`${HOME_DIR}${path.sep}`)) {
-    return `~${resolvedPath.slice(HOME_DIR.length)}`;
-  }
-  return resolvedPath;
 }
 
 function registerSessionAlias(sessionId: string | null | undefined, conversationId: string): void {
@@ -374,64 +508,18 @@ function broadcastToAll(data: BroadcastData): void {
   });
 }
 
-function sendToClient(ws: WebSocket, data: ServerMessage): void {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
-  }
-}
-
-function sendLegacyError(ws: WebSocket, message: string): void {
-  sendToClient(ws, { type: 'error', message });
-}
-
-function validateWorkingDirectory(workingDirectory: string): GeneralCommandError | undefined {
-  try {
-    return fs.statSync(workingDirectory).isDirectory()
-      ? undefined
-      : { code: 'invalid_directory', message: 'Path is not a directory' };
-  } catch {
-    return {
-      code: 'invalid_directory',
-      message: `No matching folder: ${workingDirectory}`,
-    };
-  }
-}
-
-function sendCommandRejected(
-  ws: WebSocket,
-  input: {
-    commandId: string;
-    conversationId?: string;
-    error: ConfigError | GeneralCommandError;
-    authoritativeConversation?: ConversationData;
-  }
-): void {
-  sendToClient(ws, {
-    type: 'command_rejected',
-    commandId: input.commandId,
-    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-    error: input.error,
-    ...(input.authoritativeConversation
-      ? { authoritativeConversation: input.authoritativeConversation }
-      : {}),
+function broadcastToAllExcept(excludedClient: WebSocket, data: BroadcastData): void {
+  const payload = JSON.stringify(data);
+  wss.clients.forEach((client) => {
+    if (client !== excludedClient && client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
   });
 }
 
 function stripAnsi(value: string): string {
-  return value.replace(/\x1B\[[0-9;]*m/g, '');
-}
-
-function buildSearchSnippet(content: string, query: string): string {
-  const lowerContent = content.toLowerCase();
-  const lowerQuery = query.toLowerCase();
-  const matchIndex = lowerContent.indexOf(lowerQuery);
-  if (matchIndex === -1) return content.substring(0, 120);
-
-  const start = Math.max(0, matchIndex - SEARCH_SNIPPET_RADIUS);
-  const end = Math.min(content.length, matchIndex + query.length + SEARCH_SNIPPET_RADIUS);
-  const prefix = start > 0 ? '...' : '';
-  const suffix = end < content.length ? '...' : '';
-  return prefix + content.substring(start, end) + suffix;
+  const ansiEscapeSequence = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+  return value.replace(ansiEscapeSequence, '');
 }
 
 function stderrSnippet(value: string, maxLength = 400): string {
@@ -457,11 +545,13 @@ function normalizeProviderErrorMessage(message: string): string {
 // Process Spawning Mutex
 // =============================================================================
 // Prevents concurrent CLI executions from fighting over token refresh logic on startup.
-const globalSpawnMutex = {
+const _globalSpawnMutex = {
   queue: Promise.resolve(),
   lock: function () {
     let resolve!: () => void;
-    const next = new Promise<void>((r) => (resolve = r));
+    const next = new Promise<void>((setResolved) => {
+      resolve = setResolved;
+    });
     const current = this.queue;
     this.queue = this.queue.then(() => next);
     return { wait: current, release: resolve };
@@ -514,15 +604,16 @@ interface ConversationOptions {
   resumedFromConversationId?: string | null;
   modelName?: string | null;
   swarmDebugPrefix?: string | null;
+  buddyContext?: BuddyContext | null;
+  buddyBriefing?: string | null;
   mergeParentMeta?: MergeParentMeta | null;
   mergeChildMeta?: MergeChildMeta | null;
 }
 
-function configFromLegacyOptions(input: {
+function configFromProviderPreferences(input: {
   provider: ProviderName;
   model?: ModelId;
   reasoningEffort?: string | null;
-  applyReasoningDefault: boolean;
 }): ConversationConfig {
   const normalizedModel = normalizeModelId(input.provider, input.model);
   return {
@@ -536,9 +627,7 @@ function configFromLegacyOptions(input: {
         ? { mode: 'disabled' }
         : input.reasoningEffort !== undefined
           ? { mode: 'explicit', effort: input.reasoningEffort }
-          : input.applyReasoningDefault
-            ? { mode: 'default' }
-            : { mode: 'disabled' },
+          : { mode: 'default' },
   };
 }
 
@@ -575,6 +664,10 @@ class Conversation extends EventEmitter {
   // Debug prefix for swarm conversations — prepended to first CLI message.
   // Stays on the object (never cleared) so toJSON() includes it for client rendering.
   swarmDebugPrefix: string | null;
+  buddyContext: BuddyContext | null;
+  // Hidden first-turn context. Never serialized to clients; the typed
+  // buddyContext is the durable/UI-facing metadata.
+  private _buddyBriefing: string | null;
   // Merge feature: set on a "parent" thread that aggregates review docs from
   // N forked children. Children have mergeChildMeta instead.
   mergeParentMeta: MergeParentMeta | null;
@@ -637,6 +730,8 @@ class Conversation extends EventEmitter {
       resumedFromConversationId = null,
       modelName = null,
       swarmDebugPrefix = null,
+      buddyContext = null,
+      buddyBriefing = null,
       mergeParentMeta = null,
       mergeChildMeta = null,
     } = opts;
@@ -663,6 +758,8 @@ class Conversation extends EventEmitter {
     this.resumedFromConversationId = resumedFromConversationId;
     this.modelName = modelName;
     this.swarmDebugPrefix = swarmDebugPrefix;
+    this.buddyContext = buddyContext;
+    this._buddyBriefing = buddyBriefing;
     this.mergeParentMeta = mergeParentMeta;
     this.mergeChildMeta = mergeChildMeta;
     this.subAgents = [];
@@ -718,8 +815,8 @@ class Conversation extends EventEmitter {
 
     // Per-provider narrowing: ExecuteCommandRequest is a discriminated union
     // keyed on `harness`. Reasoning effort is a pass-through string — the
-    // `set_reasoning_effort` / `new_conversation` validation rejects any level
-    // not accepted by the target provider before we get here. Submodule
+    // Configuration validation rejects any level not accepted by the target
+    // provider before we get here. The submodule
     // harness wraps the string in the correct CLI flag.
     const baseRequest = {
       mode: 'conversation' as const,
@@ -750,6 +847,8 @@ class Conversation extends EventEmitter {
 
     this.process = turn.child;
     this.isRunning = true;
+    updateBuddyConversationLink(this, 'active');
+    this.emit('buddy-turn-started');
     this._hasStartedSession = true; // Mark session as started for next message
     this._startTurnWatchdogs();
     this.broadcastStatus();
@@ -792,7 +891,7 @@ class Conversation extends EventEmitter {
             break;
           }
           case 'turn.complete': {
-            this.handleOutput({ type: 'message_complete', reason: event.reason as any });
+            this.handleOutput({ type: 'message_complete', reason: event.reason });
             break;
           }
           case 'out_of_tokens': {
@@ -955,6 +1054,9 @@ class Conversation extends EventEmitter {
         clearExternalRunningStatus(this.id, this.sessionId);
         markLocalCompletionSuppression(this.id, this.sessionId);
         this.broadcastStatus();
+        updateBuddyConversationLink(this, reason === 'killed' ? 'cancelled' : 'failed');
+        settleBuddyDelegation(this, reason === 'killed' ? 'cancelled' : 'failed', reason);
+        this.emit('buddy-turn-failed', reason);
         // Dequeue the "sending" message (completed or crashed) and process next.
         // This is the SINGLE code path for dequeue — not split between
         // message_complete and close. Handles both success and crash.
@@ -976,6 +1078,9 @@ class Conversation extends EventEmitter {
         this.process = null;
         this._pendingTaskTools.clear();
         this.broadcastStatus();
+        updateBuddyConversationLink(this, 'failed');
+        settleBuddyDelegation(this, 'failed', message);
+        this.emit('buddy-turn-failed', message);
         if (this.queue.length > 0) {
           const removed = this.queue.length;
           this.queue = [];
@@ -1390,6 +1495,12 @@ class Conversation extends EventEmitter {
         // Signal to the close handler that cleanup already happened.
         // Close handler will skip redundant state changes and broadcasts.
         this._turnCompletedCleanly = true;
+        updateBuddyConversationLink(this, 'active');
+        const completedAssistant = [...this.messages]
+          .reverse()
+          .find((message) => message.role === 'assistant');
+        this.emit('buddy-turn-complete', completedAssistant?.content ?? '');
+        settleBuddyDelegation(this, 'complete', completedAssistant?.content);
 
         // Merge feature: if this is a review child, scan the final assistant
         // message for the sentinel `merge_review_docs/REVIEW_DOC_<uuid>.txt`.
@@ -1431,10 +1542,11 @@ class Conversation extends EventEmitter {
         break;
       }
 
-      default:
+      default: {
         // TypeScript exhaustive check - this should never happen
         const _exhaustive: never = event;
         throw new Error(`Unhandled event type: ${JSON.stringify(_exhaustive)}`);
+      }
     }
   }
 
@@ -1458,6 +1570,10 @@ class Conversation extends EventEmitter {
     let cliContent = content;
     if (this.swarmDebugPrefix !== null && this.messages.length === 0) {
       cliContent = `<!-- unleashd:swarm-prefix -->\n${this.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${content}`;
+    }
+    if (this.buddyContext !== null && this._buddyBriefing !== null && this.messages.length === 0) {
+      const serializedContext = JSON.stringify(this.buddyContext);
+      cliContent = `<!-- unleashd:buddy-context ${serializedContext} -->\n${this._buddyBriefing}\n<!-- /unleashd:buddy-context -->\n\n${cliContent}`;
     }
 
     // Merge feature: on the very first user send of a merge parent thread,
@@ -1616,6 +1732,8 @@ class Conversation extends EventEmitter {
     // while the old process is still alive, and spawnForMessage's isRunning
     // guard would silently drop the queued message.
     proc.kill('SIGTERM');
+    updateBuddyConversationLink(this, 'cancelled');
+    settleBuddyDelegation(this, 'cancelled');
 
     const killTimer = setTimeout(() => {
       if (proc.exitCode === null && !proc.killed) {
@@ -2037,6 +2155,7 @@ class Conversation extends EventEmitter {
       resumedFromConversationId: this.resumedFromConversationId,
       modelName: this.modelName,
       swarmDebugPrefix: this.swarmDebugPrefix,
+      buddyContext: this.buddyContext,
       mergeParentMeta: this.mergeParentMeta,
       mergeChildMeta: this.mergeChildMeta,
     };
@@ -2066,6 +2185,7 @@ function creationFingerprint(input: {
   initialMessage?: string;
   swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
+  buddyContext?: BuddyContext;
 }): string {
   return crypto
     .createHash('sha256')
@@ -2076,6 +2196,7 @@ function creationFingerprint(input: {
         initialMessage: input.initialMessage ?? null,
         swarmDebugPrefix: input.swarmDebugPrefix ?? null,
         resumedFromConversationId: input.resumedFromConversationId ?? null,
+        buddyContext: input.buddyContext ?? null,
       })
     )
     .digest('hex');
@@ -2085,6 +2206,140 @@ async function dispatchCreationMessageIfPending(conversation: Conversation): Pro
   const claimed = await conversationConfigService.claimInitialMessageDispatch(conversation.id);
   const initialMessage = claimed?.creation?.initialMessage;
   if (initialMessage) conversation.enqueueMessage(initialMessage);
+}
+
+async function createAutomationConversation(
+  automation: BuddyAutomation,
+  run: BuddyAutomationRun
+): Promise<BuddyAutomationConversation> {
+  if (!automation.workspace_id) {
+    throw new Error('Automation must have one workspace scope before it can run');
+  }
+  const resolved = await resolveBuddyConversation({
+    buddyId: automation.buddy_id,
+    workspaceId: automation.workspace_id,
+    buddyProjectId: automation.buddy_project_id,
+    automationRunId: run.id,
+  });
+  if (!(resolved.provider in providers)) {
+    throw new Error(`Buddy provider is unavailable: ${resolved.provider}`);
+  }
+  const model = normalizeModelId(resolved.provider, resolved.model);
+  const config = configFromProviderPreferences({
+    provider: resolved.provider,
+    model,
+    reasoningEffort: resolved.reasoningEffort,
+  });
+  const conversationId = uuidv4();
+  const workingDirectory = resolveWorkingDirectoryInput(resolved.workingDirectory);
+  const fingerprint = creationFingerprint({
+    workingDirectory,
+    config,
+    buddyContext: resolved.context,
+  });
+  const creation = await conversationConfigService.createOrReplay({
+    conversationId,
+    config,
+    workingDirectory,
+    creation: {
+      commandId: `buddy-automation-${run.id}`,
+      fingerprint,
+      buddyContext: resolved.context,
+    },
+  });
+  const conversation = new Conversation({
+    id: conversationId,
+    workingDirectory,
+    configState: creation.state,
+    buddyContext: resolved.context,
+    buddyBriefing: resolved.briefing,
+  });
+  conversations.set(conversation.id, conversation);
+  await createBuddyConversationLink(conversation);
+  broadcastToAll({
+    type: 'conversations_updated',
+    conversations: [conversation.toJSON()],
+  });
+
+  return {
+    conversationId,
+    runTurn(prompt: string) {
+      return new Promise<string>((resolve, reject) => {
+        const onComplete = (output: string) => {
+          cleanup();
+          resolve(output);
+        };
+        const onFailure = (reason: string) => {
+          cleanup();
+          reject(new Error(reason || 'Buddy automation turn failed'));
+        };
+        const cleanup = () => {
+          conversation.off('buddy-turn-complete', onComplete);
+          conversation.off('buddy-turn-failed', onFailure);
+        };
+        conversation.once('buddy-turn-complete', onComplete);
+        conversation.once('buddy-turn-failed', onFailure);
+        conversation.sendMessage(prompt);
+      });
+    },
+    stop() {
+      conversation.stop();
+    },
+    finish(status) {
+      updateBuddyConversationLink(conversation, status);
+    },
+  };
+}
+
+async function createServerBuddyConversation(input: {
+  context: BuddyContext;
+  initialMessage: string;
+  commandId: string;
+  conversationId?: string;
+}): Promise<Conversation> {
+  const resolved = await resolveBuddyConversation(input.context);
+  if (!(resolved.provider in providers)) {
+    throw new Error(`Buddy provider is unavailable: ${resolved.provider}`);
+  }
+  const config = configFromProviderPreferences({
+    provider: resolved.provider,
+    model: normalizeModelId(resolved.provider, resolved.model),
+    reasoningEffort: resolved.reasoningEffort,
+  });
+  const conversationId = input.conversationId ?? uuidv4();
+  const workingDirectory = resolveWorkingDirectoryInput(resolved.workingDirectory);
+  const fingerprint = creationFingerprint({
+    workingDirectory,
+    config,
+    initialMessage: input.initialMessage,
+    buddyContext: resolved.context,
+  });
+  const creation = await conversationConfigService.createOrReplay({
+    conversationId,
+    config,
+    workingDirectory,
+    creation: {
+      commandId: input.commandId,
+      fingerprint,
+      initialMessage: input.initialMessage,
+      buddyContext: resolved.context,
+    },
+  });
+  const conversation = new Conversation({
+    id: conversationId,
+    workingDirectory,
+    configState: creation.state,
+    buddyContext: resolved.context,
+    buddyBriefing: resolved.briefing,
+  });
+  conversations.set(conversation.id, conversation);
+  await createBuddyConversationLink(conversation);
+  broadcastToAll({
+    type: 'conversations_updated',
+    conversations: [conversation.toJSON()],
+  });
+  await dispatchCreationMessageIfPending(conversation);
+  return conversation;
 }
 
 // =============================================================================
@@ -2115,12 +2370,13 @@ wss.on('connection', (ws: WebSocket) => {
         return json;
       }),
       defaultCwd: process.cwd(),
-      uiState: getActiveUIState(),
+      uiState: persistedServerState.getUIState(),
       protocol: PROTOCOL_INFO,
     });
   })();
 
   ws.on('message', async (message: Buffer | string) => {
+    let activeCommand: { commandId: string; conversationId?: string } | null = null;
     try {
       const parsed = JSON.parse(message.toString());
       const result = safeParseClientMessage(parsed);
@@ -2129,10 +2385,31 @@ wss.on('connection', (ws: WebSocket) => {
           .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
           .join('; ');
         console.error(`[WS] Invalid client message: ${issueSummary}`);
-        sendLegacyError(ws, `Invalid message: ${issueSummary}`);
+        const commandId =
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          'commandId' in parsed &&
+          typeof parsed.commandId === 'string' &&
+          parsed.commandId.length > 0
+            ? parsed.commandId
+            : null;
+        if (commandId) {
+          sendCommandRejected(ws, {
+            commandId,
+            error: { code: 'invalid_message', message: `Invalid message: ${issueSummary}` },
+          });
+        } else {
+          sendProtocolError(ws, `Invalid message: ${issueSummary}`);
+        }
         return;
       }
       const data = result.data;
+      if ('commandId' in data) {
+        activeCommand = {
+          commandId: data.commandId,
+          ...('conversationId' in data ? { conversationId: data.conversationId } : {}),
+        };
+      }
       if (data.type === 'queue_message') {
         console.log(
           `[WS] Received queue_message conversationId=${data.conversationId}, contentLen=${data.content.length}, preview="${formatLogPreview(data.content)}"`
@@ -2144,53 +2421,34 @@ wss.on('connection', (ws: WebSocket) => {
         );
       }
 
-      const applyLegacyConfigPatch = async (
-        conv: Conversation,
-        patch: ConversationConfigPatch
-      ): Promise<boolean> => {
-        const result = await conversationConfigService.update(
-          {
-            config: conv.config,
-            revision: conv.configRevision,
-            resolution: conv.configResolution,
-          },
-          {
-            isRunning: conv.isRunning,
-            queueDepth: conv.queue.length,
-            hasStartedSession: conv.hasStartedSession(),
-          },
-          {
-            conversationId: conv.id,
-            commandId: `legacy-${uuidv4()}`,
-            expectedRevision: conv.configRevision,
-            patch,
-          }
-        );
-        if (!result.ok) {
-          sendLegacyError(ws, result.error.message);
-          broadcastToAll({
-            type: 'conversation_created',
-            conversation: conv.toJSON(),
-          });
-          return false;
-        }
-        conv.applyConfigState(result.value.next);
-        broadcastToAll({
-          type: 'conversation_created',
-          conversation: conv.toJSON(),
-        });
-        return true;
-      };
-
       switch (data.type) {
         case 'create_conversation': {
-          const workingDir = resolveWorkingDirectoryInput(data.workingDirectory);
+          let buddyResolution: ResolvedBuddyConversation | null = null;
+          try {
+            buddyResolution = data.buddyContext
+              ? await resolveBuddyConversation(data.buddyContext)
+              : null;
+          } catch (error) {
+            sendCommandRejected(ws, {
+              commandId: data.commandId,
+              conversationId: data.conversationId,
+              error: {
+                code: 'create_failed',
+                message: error instanceof Error ? error.message : String(error),
+              },
+            });
+            break;
+          }
+          const workingDir = resolveWorkingDirectoryInput(
+            buddyResolution?.workingDirectory ?? data.workingDirectory
+          );
           const fingerprint = creationFingerprint({
             workingDirectory: workingDir,
             config: data.config,
             initialMessage: data.initialMessage,
             swarmDebugPrefix: data.swarmDebugPrefix,
             resumedFromConversationId: data.resumedFromConversationId,
+            buddyContext: buddyResolution?.context,
           });
           const existingConversation = conversations.get(data.conversationId);
           if (existingConversation) {
@@ -2205,6 +2463,7 @@ wss.on('connection', (ws: WebSocket) => {
                   initialMessage: data.initialMessage,
                   swarmDebugPrefix: data.swarmDebugPrefix,
                   resumedFromConversationId: data.resumedFromConversationId,
+                  buddyContext: buddyResolution?.context,
                 },
               });
               sendToClient(ws, {
@@ -2251,6 +2510,7 @@ wss.on('connection', (ws: WebSocket) => {
                 initialMessage: data.initialMessage,
                 swarmDebugPrefix: data.swarmDebugPrefix,
                 resumedFromConversationId: data.resumedFromConversationId,
+                buddyContext: buddyResolution?.context,
               },
             });
             const conv = new Conversation({
@@ -2260,11 +2520,19 @@ wss.on('connection', (ws: WebSocket) => {
               existingSessionId: creation.record.currentSession?.sessionId,
               swarmDebugPrefix: data.swarmDebugPrefix ?? null,
               resumedFromConversationId: data.resumedFromConversationId ?? null,
+              buddyContext: buddyResolution?.context ?? null,
+              buddyBriefing: buddyResolution?.briefing ?? null,
             });
             conversations.set(conv.id, conv);
-            broadcastToAll({
+            await createBuddyConversationLink(conv);
+            sendToClient(ws, {
               type: 'conversation_created',
               commandId: data.commandId,
+              conversation: conv.toJSON(),
+            });
+            broadcastToAllExcept(ws, {
+              type: 'conversation_updated',
+              reason: 'status',
               conversation: conv.toJSON(),
             });
             await dispatchCreationMessageIfPending(conv);
@@ -2279,95 +2547,17 @@ wss.on('connection', (ws: WebSocket) => {
           break;
         }
 
-        case 'new_conversation': {
-          // Use client-provided UUID if present (optimistic insert), otherwise generate one
-          const id = data.id || uuidv4();
-          // Resolve input consistently across WS and REST path endpoints.
-          // Keeps '/' valid while normalizing '/foo/bar/' to '/foo/bar'.
-          const workingDir = resolveWorkingDirectoryInput(data.workingDirectory);
-          const provider = data.provider || 'claude'; // Support 'claude', 'codex', or 'opencode'
-          const model = normalizeModelId(provider, data.model); // Provider-specific model (undefined = provider default)
-          const swarmDebugPrefix = data.swarmDebugPrefix ?? null;
-          const resumedFromConversationId = data.resumedFromConversationId ?? null;
-
-          // Validate provider against the registry — no manual list needed
-          if (!(provider in providers)) {
-            sendLegacyError(
-              ws,
-              `Invalid provider: ${provider}. Must be one of: ${Object.keys(providers).join(', ')}.`
-            );
-            return;
-          }
-
-          if (!isModelIdValidForProvider(provider, model)) {
-            sendLegacyError(
-              ws,
-              `Invalid model '${model}' for provider '${provider}'. Expected ${modelValidationHint(provider)}.`
-            );
-            return;
-          }
-
-          // Validate directory exists and is accessible
-          const legacyDirectoryError = validateWorkingDirectory(workingDir);
-          if (legacyDirectoryError) {
-            sendLegacyError(ws, legacyDirectoryError.message);
-            return;
-          }
-
-          // Reject reasoning levels the selected provider doesn't accept
-          // (claude has no 'minimal'; codex includes 'minimal' through 'ultra').
-          if (
-            data.reasoningEffort !== undefined &&
-            !isEffortValidForProvider(provider, data.reasoningEffort)
-          ) {
-            sendLegacyError(
-              ws,
-              `Reasoning effort '${data.reasoningEffort}' is not accepted by provider '${provider}'. Valid: ${effortLevelsForProvider(provider).join(', ') || '(none — provider has no reasoning flag)'}.`
-            );
-            return;
-          }
-
-          const requestedConfig = configFromLegacyOptions({
-            provider,
-            model,
-            reasoningEffort: data.reasoningEffort,
-            applyReasoningDefault: true,
-          });
-          const configState = await conversationConfigService.create({
-            conversationId: id,
-            config: requestedConfig,
-            workingDirectory: workingDir,
-          });
-          const conv = new Conversation({
-            id,
-            workingDirectory: workingDir,
-            configState,
-            swarmDebugPrefix,
-            resumedFromConversationId,
-          });
-
-          conversations.set(id, conv);
-
-          // No need to start - we spawn per message now
-
-          broadcastToAll({
-            type: 'conversation_created',
-            conversation: conv.toJSON(),
-          });
-          break;
-        }
-
         case 'send_message': {
           console.log(
             `[WS] send_message for ${data.conversationId}: "${data.content.substring(0, 50)}"`
           );
           const conversation = conversations.get(data.conversationId);
           if (conversation) {
-            console.log(`[WS] Found conversation, calling sendMessage`);
+            console.log('[WS] Found conversation, calling sendMessage');
             conversation.sendMessage(data.content);
           } else {
             console.error(`[WS] Conversation not found: ${data.conversationId}`);
-            console.error(`[WS] Available conversations:`, Array.from(conversations.keys()));
+            console.error('[WS] Available conversations:', Array.from(conversations.keys()));
           }
           break;
         }
@@ -2448,45 +2638,6 @@ wss.on('connection', (ws: WebSocket) => {
           break;
         }
 
-        case 'set_model': {
-          const conv = conversations.get(data.conversationId);
-          if (conv) {
-            const normalizedModel = normalizeModelId(conv.provider, data.model);
-            await applyLegacyConfigPatch(conv, {
-              kind: 'set_model',
-              model:
-                normalizedModel === undefined
-                  ? { mode: 'default' }
-                  : { mode: 'explicit', modelId: normalizedModel },
-            });
-          }
-          break;
-        }
-
-        case 'set_reasoning_effort': {
-          const conv = conversations.get(data.conversationId);
-          if (!conv) break;
-          await applyLegacyConfigPatch(conv, {
-            kind: 'set_reasoning',
-            reasoning:
-              data.value === null
-                ? { mode: 'disabled' }
-                : { mode: 'explicit', effort: data.value },
-          });
-          break;
-        }
-
-        case 'set_provider': {
-          const conv = conversations.get(data.conversationId);
-          if (conv) {
-            await applyLegacyConfigPatch(conv, {
-              kind: 'set_provider',
-              provider: data.provider,
-            });
-          }
-          break;
-        }
-
         case 'queue_message': {
           const conv = conversations.get(data.conversationId);
           if (conv) {
@@ -2521,6 +2672,15 @@ wss.on('connection', (ws: WebSocket) => {
       }
     } catch (e) {
       console.error('Error handling WebSocket message:', e);
+      const message = e instanceof Error ? e.message : String(e);
+      if (activeCommand) {
+        sendCommandRejected(ws, {
+          ...activeCommand,
+          error: { code: 'command_failed', message },
+        });
+      } else {
+        sendProtocolError(ws, `Failed to handle message: ${message}`);
+      }
     }
   });
 
@@ -2539,236 +2699,14 @@ wss.on('connection', (ws: WebSocket) => {
 // conversation histories. Matches client uploads already sized in MB.
 app.use(express.json({ limit: '50mb' }));
 
-// File upload API — saves files to disk and returns absolute paths
-// CLI agents (Claude, Codex) run on the same machine and can read these paths directly.
 const UPLOADS_DIR = path.join(APP_DATA_DIR, 'uploads');
-
-const uploadStorage = multer.diskStorage({
-  destination: (req, _file, cb) => {
-    const conversationId = req.body.conversationId as string;
-    if (!conversationId) {
-      cb(new Error('conversationId is required'), '');
-      return;
-    }
-    const dir = path.join(UPLOADS_DIR, conversationId);
-    // Guard against path traversal — conversationId must not escape UPLOADS_DIR
-    const resolved = path.resolve(dir);
-    if (!resolved.startsWith(path.resolve(UPLOADS_DIR) + path.sep)) {
-      cb(new Error('Invalid conversationId'), '');
-      return;
-    }
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (_req, file, cb) => {
-    const sanitized = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    cb(null, `${Date.now()}_${sanitized}`);
-  },
-});
-
-const upload = multer({
-  storage: uploadStorage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB per file
-});
-
-app.post('/api/upload', upload.array('files', 20), (req: Request, res: Response) => {
-  const files = req.files as Express.Multer.File[];
-  if (!files || files.length === 0) {
-    res.status(400).json({ error: 'No files provided' });
-    return;
-  }
-
-  const result = files.map((f) => ({
-    originalName: f.originalname,
-    absolutePath: f.path,
-    mimeType: f.mimetype,
-    size: f.size,
-  }));
-
-  console.log(
-    `[Upload] ${files.length} file(s) saved:`,
-    result.map((r) => r.absolutePath)
-  );
-  res.json({ files: result });
-});
-
-// Settings API - stored in ~/.agent-viewer/settings.json
-const SETTINGS_DIR = APP_DATA_DIR;
-const SETTINGS_FILE = path.join(SETTINGS_DIR, 'settings.json');
-
-interface Settings {
-  colorPalette: string;
-  // workingDirectory patterns to hide from all UI views.
-  // No "*" → prefix match; contains "*" → glob (e.g. "/tmp/gemini_workspace_*").
-  ignore: string[];
-}
-
-const DEFAULT_SETTINGS: Settings = {
-  colorPalette: 'solarized',
-  ignore: [],
-};
-
-// =============================================================================
-// Settings Cache — initialized once at startup, updated on POST
-// =============================================================================
-
-let settingsCache: Settings | null = null;
-
-/**
- * Initialize settings cache from disk. Called once at startup.
- * Throws if the file exists but is malformed (fail eagerly).
- */
-async function initSettingsCache(): Promise<void> {
-  try {
-    const data = await fs.promises.readFile(SETTINGS_FILE, 'utf-8');
-    settingsCache = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
-    console.log('Settings loaded from disk');
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      // File doesn't exist — use defaults
-      settingsCache = { ...DEFAULT_SETTINGS };
-      console.log('Settings file not found, using defaults');
-    } else {
-      throw new Error(`Failed to load settings: ${(e as Error).message}`);
-    }
-  }
-  setIgnorePatterns(settingsCache?.ignore ?? []);
-}
-
-/**
- * Get settings from cache. Throws if cache not initialized (programming error).
- */
-function getSettings(): Settings {
-  if (!settingsCache) {
-    throw new Error('Settings cache not initialized — call initSettingsCache() at startup');
-  }
-  return settingsCache;
-}
-
-/**
- * Update settings cache and write to disk asynchronously.
- * Cache is updated immediately; disk write is fire-and-forget with error logging.
- */
-function writeSettingsAsync(settings: Settings): void {
-  settingsCache = settings;
-  setIgnorePatterns(settings.ignore ?? []);
-
-  // Fire-and-forget disk write
-  (async () => {
-    try {
-      await fs.promises.mkdir(SETTINGS_DIR, { recursive: true });
-      await fs.promises.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
-    } catch (e) {
-      console.error('Error saving settings to disk:', e);
-    }
-  })();
-}
+registerUploadRoutes(app, UPLOADS_DIR);
 
 app.get('/api/audit', (_req: Request, res: Response) => {
   res.json(startupAuditResults);
 });
 
-app.get('/api/settings', (_req: Request, res: Response) => {
-  res.json(getSettings());
-});
-
-// =============================================================================
-// UI State Cache — server-synced preferences from ~/.agent-viewer/ui-state.json
-// =============================================================================
-
-const UI_STATE_FILE = path.join(SETTINGS_DIR, 'ui-state.json');
-
-let uiStateCache: { [key: string]: unknown } = {};
-let uiStateSyncTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * Initialize UI state cache from disk. Called once at startup.
- * File is optional — missing file defaults to empty object (schema provides defaults).
- */
-async function initUIStateCache(): Promise<void> {
-  try {
-    const data = await fs.promises.readFile(UI_STATE_FILE, 'utf-8');
-    uiStateCache = JSON.parse(data);
-    console.log('UI state loaded from disk');
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      // File doesn't exist — start with empty object (schema provides defaults)
-      uiStateCache = {};
-      console.log('UI state file not found, using defaults');
-    } else {
-      console.warn(`Failed to load UI state: ${(e as Error).message}`);
-      uiStateCache = {};
-    }
-  }
-}
-
-/**
- * Get UI state from cache. Returns object (or {} if cache not initialized).
- */
-/**
- * Return UI state from cache. No pruning — conversations load progressively
- * after the WebSocket init fires, so pruning against an incomplete `conversations`
- * Map would silently drop valid doneConversations / lastSeenMessageIndex entries.
- * The client tolerates stale keys harmlessly (they reference IDs that don't render).
- */
-function getActiveUIState(): UIState {
-  return UIStateSchema.parse(uiStateCache);
-}
-
-/**
- * Update UI state cache and write to disk asynchronously.
- * Merges partial updates into the existing state. Disk file keeps ALL entries
- * (including stale) so nothing is lost across server restarts — getActiveUIState
- * filters at read time.
- */
-function setUIState(partial: { [key: string]: unknown }): void {
-  uiStateCache = { ...uiStateCache, ...partial };
-
-  // Fire-and-forget disk write with debounce
-  if (uiStateSyncTimer) {
-    clearTimeout(uiStateSyncTimer);
-  }
-  uiStateSyncTimer = setTimeout(async () => {
-    uiStateSyncTimer = null;
-    try {
-      await fs.promises.mkdir(SETTINGS_DIR, { recursive: true });
-      await fs.promises.writeFile(UI_STATE_FILE, JSON.stringify(uiStateCache, null, 2));
-    } catch (e) {
-      console.error('Error saving UI state to disk:', e);
-    }
-  }, 500);
-}
-
-/**
- * Flush any pending debounced UI state write synchronously.
- * Called from signal handlers before process.exit() to avoid losing state
- * that was updated in the last 500ms debounce window.
- */
-function flushUIStateSync(): void {
-  if (uiStateSyncTimer) {
-    clearTimeout(uiStateSyncTimer);
-    uiStateSyncTimer = null;
-    try {
-      fs.mkdirSync(SETTINGS_DIR, { recursive: true });
-      fs.writeFileSync(UI_STATE_FILE, JSON.stringify(uiStateCache, null, 2));
-    } catch (e) {
-      console.error('Error flushing UI state on shutdown:', e);
-    }
-  }
-}
-
-app.get('/api/ui-state', (_req: Request, res: Response) => {
-  res.json(getActiveUIState());
-});
-
-// Body limit raised from default 100kb — lastSeenMessageIndex grows with conversation count
-// and was causing silent 413 rejections once the payload crossed ~100KB.
-app.post('/api/ui-state', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
-  setUIState(req.body);
-  res.json({ ok: true });
-});
+persistedServerState.registerRoutes(app);
 
 // Model list API — returns ModelInfo[] for the given provider.
 // Used by the Sidebar model dropdown to show available models per provider.
@@ -2776,64 +2714,13 @@ app.get('/api/provider-catalog', (_req: Request, res: Response) => {
   res.json(createProviderCatalog());
 });
 
-// Buddies owns durable employee/work state. Unleashd only exposes it and links
-// its provider conversations back to the owning Buddy/work item.
-app.get('/api/buddies', async (_req: Request, res: Response) => {
-  try {
-    const buddies = await getBuddiesStore();
-    res.json(buddies.dashboard());
-  } catch (error) {
-    sendBuddiesError(res, error, 500);
-  }
-});
-
-app.post('/api/buddies/conversation-links', async (req: Request, res: Response) => {
-  try {
-    const { buddyId, projectId, workItemId, conversationId, provider = 'codex' } = req.body ?? {};
-    if (
-      typeof buddyId !== 'string' ||
-      typeof projectId !== 'string' ||
-      typeof conversationId !== 'string'
-    ) {
-      res.status(400).json({ error: 'buddyId, projectId, and conversationId are required' });
-      return;
-    }
-    const buddies = await getBuddiesStore();
-    const assigned = buddies
-      .listBuddyProjects(buddyId)
-      .some((project) => project.id === projectId);
-    if (!assigned) {
-      res.status(400).json({ error: 'Buddy is not assigned to this project' });
-      return;
-    }
-    const link = buddies.linkConversation({
-      buddy: buddyId,
-      workItem: typeof workItemId === 'string' ? workItemId : undefined,
-      provider,
-      unleashdConversationId: conversationId,
-    });
-    res.status(201).json(link);
-  } catch (error) {
-    sendBuddiesError(res, error, 400);
-  }
-});
-
-app.patch('/api/buddies/work-items/:id', async (req: Request, res: Response) => {
-  try {
-    const { status, blockedReason, nextAction } = req.body ?? {};
-    if (typeof status !== 'string') {
-      res.status(400).json({ error: 'status is required' });
-      return;
-    }
-    const buddies = await getBuddiesStore();
-    const workItem = buddies.updateWorkItemStatus(req.params.id, status as never, {
-      blockedReason: typeof blockedReason === 'string' ? blockedReason : undefined,
-      nextAction: typeof nextAction === 'string' ? nextAction : undefined,
-    });
-    res.json(workItem);
-  } catch (error) {
-    sendBuddiesError(res, error, 400);
-  }
+registerBuddyRoutes(app, {
+  getStore: getBuddiesStore,
+  getScheduler: () => buddyScheduler,
+  createConversation: createServerBuddyConversation,
+  sendError: sendBuddiesError,
+  getNextAutomationRunAt: nextAutomationRunAt,
+  createId: uuidv4,
 });
 
 app.get('/api/models', (req: Request, res: Response) => {
@@ -2848,274 +2735,17 @@ app.get('/api/models', (req: Request, res: Response) => {
   res.json(provider.listModels());
 });
 
-// Search across all messages.
-// Used by SearchPalette to fetch message-level matches without loading every
-// conversation into client state.
-app.get('/api/search', (req: Request, res: Response) => {
-  const rawQuery = req.query.q;
-  const filterDirectory = (
-    typeof req.query.filterDirectory === 'string' ? req.query.filterDirectory : ''
-  ).trim();
-  const rawLimit = Number(req.query.limit);
+registerSearchRoutes(app, () => conversations.values());
 
-  const limit =
-    Number.isInteger(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, SEARCH_HARD_RESULT_LIMIT)
-      : SEARCH_MAX_RESULTS;
-
-  if (typeof rawQuery !== 'string') {
-    res.status(400).json({ error: 'q is required' });
-    return;
-  }
-
-  const query = rawQuery.trim();
-  if (query.length < MIN_SEARCH_QUERY_LENGTH) {
-    res.json({ query, results: [] });
-    return;
-  }
-
-  const lowerQuery = query.toLowerCase();
-  const matches: SearchResult[] = [];
-
-  for (const conversation of conversations.values()) {
-    if (filterDirectory && !conversation.workingDirectory.startsWith(filterDirectory)) continue;
-
-    for (let i = 0; i < conversation.messages.length; i++) {
-      const message = conversation.messages[i];
-      const content = message.content;
-
-      if (!content.toLowerCase().includes(lowerQuery)) continue;
-
-      matches.push({
-        conversationId: conversation.id,
-        messageIndex: i,
-        role: message.role,
-        snippet: buildSearchSnippet(content, query),
-        workingDirectory: conversation.workingDirectory,
-        timestampMs: new Date(message.timestamp).getTime(),
-      });
-    }
-  }
-
-  matches.sort((a, b) => b.timestampMs - a.timestampMs);
-  const response = matches.slice(0, limit).map((match) => ({
-    conversationId: match.conversationId,
-    messageIndex: match.messageIndex,
-    role: match.role,
-    snippet: match.snippet,
-    workingDirectory: match.workingDirectory,
-    timestamp: new Date(match.timestampMs).toISOString(),
-  }));
-
-  res.json({ query, results: response });
+registerFilesystemRoutes(app, {
+  uploadsDirectory: UPLOADS_DIR,
+  isUnderKnownProject,
 });
-
-// Path autocomplete API - returns directory listings for a given path
-// Used by the PathAutocomplete component in the new conversation dialog
-app.get('/api/paths', async (req: Request, res: Response) => {
-  const inputPath = typeof req.query.path === 'string' ? req.query.path : '';
-  const trimmedInput = inputPath.trim();
-  const useHomeAlias = trimmedInput.startsWith('~');
-
-  // Handle empty path - return home directory contents
-  if (!trimmedInput) {
-    try {
-      const entries = await fs.promises.readdir(HOME_DIR, { withFileTypes: true });
-      const results = entries
-        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-        .slice(0, 20)
-        .map((entry) => ({
-          name: entry.name,
-          path: path.join(HOME_DIR, entry.name),
-          isDirectory: true,
-        }));
-      res.json(results);
-    } catch {
-      res.json([]);
-    }
-    return;
-  }
-
-  const normalizedPath = normalizeDirectoryInput(trimmedInput);
-  if (!normalizedPath) {
-    res.json([]);
-    return;
-  }
-  const partialSegment = path.basename(normalizedPath);
-  const includeHidden = partialSegment.startsWith('.');
-
-  // Check if the path exists and is a directory
-  try {
-    const stats = await fs.promises.stat(normalizedPath);
-    if (stats.isDirectory()) {
-      // Path is a complete directory - list its contents
-      const entries = await fs.promises.readdir(normalizedPath, { withFileTypes: true });
-      const results = entries
-        .filter((entry) => entry.isDirectory() && (includeHidden || !entry.name.startsWith('.')))
-        .slice(0, 20)
-        .map((entry) => ({
-          name: entry.name,
-          path: displayPathWithHomeAlias(path.join(normalizedPath, entry.name), useHomeAlias),
-          isDirectory: true,
-        }));
-      res.json(results);
-      return;
-    }
-  } catch {
-    // Path doesn't exist as-is, try parent directory with partial match
-  }
-
-  // Path might be partial - get parent directory and filter
-  const parentDir = path.dirname(normalizedPath);
-  const partial = partialSegment.toLowerCase();
-
-  try {
-    const stats = await fs.promises.stat(parentDir);
-    if (stats.isDirectory()) {
-      const entries = await fs.promises.readdir(parentDir, { withFileTypes: true });
-      const results = entries
-        .filter(
-          (entry) =>
-            entry.isDirectory() &&
-            (includeHidden || !entry.name.startsWith('.')) &&
-            entry.name.toLowerCase().startsWith(partial)
-        )
-        .slice(0, 20)
-        .map((entry) => ({
-          name: entry.name,
-          path: displayPathWithHomeAlias(path.join(parentDir, entry.name), useHomeAlias),
-          isDirectory: true,
-        }));
-      res.json(results);
-      return;
-    }
-  } catch {
-    // Parent directory doesn't exist either
-  }
-
-  // Return empty array for invalid paths
-  res.json([]);
-});
-
-// Validate if a path exists and is a directory (used by PathAutocomplete validation)
-app.get('/api/validate-path', async (req: Request, res: Response) => {
-  const inputPath = typeof req.query.path === 'string' ? req.query.path : '';
-  const trimmedInput = inputPath.trim();
-
-  if (!trimmedInput) {
-    res.json({ valid: false, error: 'Empty path' });
-    return;
-  }
-
-  const normalizedPath = normalizeDirectoryInput(trimmedInput);
-  const resolvedPath = path.resolve(normalizedPath);
-
-  try {
-    const stats = await fs.promises.stat(resolvedPath);
-    if (stats.isDirectory()) {
-      res.json({
-        valid: true,
-        path: displayPathWithHomeAlias(resolvedPath, trimmedInput.startsWith('~')),
-      });
-    } else {
-      res.json({ valid: false, error: 'Path is not a directory' });
-    }
-  } catch {
-    res.json({ valid: false, error: 'No matching folder' });
-  }
-});
-
-// Create a directory (used by PathAutocomplete's "Create folder" option)
-app.post('/api/mkdir', express.json(), async (req: Request, res: Response) => {
-  const dirPath = typeof req.body?.path === 'string' ? req.body.path : '';
-  const trimmedInput = dirPath.trim();
-  if (!trimmedInput) {
-    res.status(400).json({ error: 'Missing path' });
-    return;
-  }
-
-  const normalizedPath = normalizeDirectoryInput(trimmedInput);
-  const resolvedPath = path.resolve(normalizedPath);
-
-  try {
-    await fs.promises.mkdir(resolvedPath, { recursive: true });
-    res.json({
-      path: displayPathWithHomeAlias(resolvedPath, trimmedInput.startsWith('~')),
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to create directory';
-    res.status(500).json({ error: message });
-  }
-});
-
-// Serve local files over HTTP so the browser can display them
-// (browsers block file:// links from http:// origins)
-app.get('/api/files', (req: Request, res: Response) => {
-  const filePath = req.query.path as string;
-  if (!filePath || !filePath.startsWith('/')) {
-    res.status(400).json({ error: 'Absolute path required' });
-    return;
-  }
-
-  const resolved = path.resolve(filePath);
-  if (resolved !== path.normalize(filePath)) {
-    res.status(400).json({ error: 'Path traversal rejected' });
-    return;
-  }
-
-  // Security: only serve files under known conversation directories or the uploads dir
-  if (!isUnderKnownProject(resolved) && !resolved.startsWith(UPLOADS_DIR + path.sep)) {
-    res.status(403).json({ error: 'Path not under any known project' });
-    return;
-  }
-
-  res.sendFile(resolved, (err) => {
-    if (err && !res.headersSent) {
-      res.status(404).json({ error: 'File not found' });
-    }
-  });
-});
-
-// Serve local files via URL path so relative assets (videos, CSS, images)
-// resolve naturally from the HTML file's directory.
-// e.g. /api/serve/Users/nick/project/report.html
-//      → relative <video src="video.mp4"> resolves to /api/serve/Users/nick/project/video.mp4
-app.get('/api/serve/*', (req: Request, res: Response) => {
-  // Express wildcard: everything after /api/serve/
-  const rawPath = '/' + req.params[0];
-  const resolved = path.resolve(rawPath);
-
-  if (resolved !== path.normalize(rawPath)) {
-    res.status(400).json({ error: 'Path traversal rejected' });
-    return;
-  }
-
-  if (!isUnderKnownProject(resolved) && !resolved.startsWith(UPLOADS_DIR + path.sep)) {
-    res.status(403).json({ error: 'Path not under any known project' });
-    return;
-  }
-
-  res.sendFile(resolved, (err) => {
-    if (err && !res.headersSent) {
-      res.status(404).json({ error: 'File not found' });
-    }
-  });
-});
-
-// =============================================================================
-// Swarm Dashboard APIs — git log, oompa config, and file reading for the
-// /workers detail view. These are one-shot REST queries (not streaming).
-//
-// SECURITY: Endpoints that return file/diff data restrict access to
-// directories known to the server as conversation working directories.
-// /api/oompa-swarm-context intentionally accepts any existing local directory
-// so users can start a first swarm before a conversation already exists there.
-// =============================================================================
 
 /** Check if a resolved path is within any known conversation directory. */
 function isUnderKnownProject(resolved: string): boolean {
   for (const conv of conversations.values()) {
-    if (resolved.startsWith(path.resolve(conv.workingDirectory))) return true;
+    if (isPathWithin(conv.workingDirectory, resolved)) return true;
   }
   return false;
 }
@@ -3125,10 +2755,6 @@ type OompaRunDir = {
   path: string;
   mtimeMs: number;
 };
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function safeReadJson(filePath: string): Record<string, unknown> | null {
   try {
@@ -3326,11 +2952,11 @@ function readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot {
     // Legacy compat: old runs used 'iteration' instead of 'cycle'
     const cycleNum =
       cycle.cycle ??
-      ((cycle as unknown as Record<string, unknown>)['iteration'] as number | undefined) ??
+      ((cycle as unknown as Record<string, unknown>).iteration as number | undefined) ??
       0;
     const existingNum =
       existing?.cycle ??
-      ((existing as unknown as Record<string, unknown>)?.['iteration'] as number | undefined) ??
+      ((existing as unknown as Record<string, unknown>)?.iteration as number | undefined) ??
       0;
     if (!existing || cycleNum > existingNum) {
       latestCycleByWorker.set(wid, cycle);
@@ -4291,12 +3917,6 @@ app.get('/api/read-file', (req: Request, res: Response) => {
   res.json({ content });
 });
 
-app.post('/api/settings', (req: Request, res: Response) => {
-  const settings = { ...getSettings(), ...req.body };
-  writeSettingsAsync(settings);
-  res.json(settings);
-});
-
 // =============================================================================
 // Merge API — fork N source conversations, aggregate review docs into a parent
 // =============================================================================
@@ -4322,16 +3942,7 @@ app.post('/api/settings', (req: Request, res: Response) => {
 app.post('/api/conversations/merge', express.json(), async (req: Request, res: Response) => {
   const body = req.body ?? {};
   const parsedParentConfig = ConversationConfigSchema.safeParse(body.parentConfig);
-  const legacyParentProvider = body.parentProvider as ProviderName | undefined;
-  const parentConfig = parsedParentConfig.success
-    ? parsedParentConfig.data
-    : legacyParentProvider && providers[legacyParentProvider]
-      ? configFromLegacyOptions({
-          provider: legacyParentProvider,
-          model: body.parentModel as ModelId | undefined,
-          applyReasoningDefault: true,
-        })
-      : undefined;
+  const parentConfig = parsedParentConfig.success ? parsedParentConfig.data : undefined;
   const sourceIds = body.sourceIds as string[] | undefined;
   const workingDirectory = body.workingDirectory as string | undefined;
 
@@ -4438,7 +4049,10 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
     },
   });
   conversations.set(parentId, parent);
-  broadcastToAll({ type: 'conversation_created', conversation: parent.toJSON() });
+  broadcastToAll({
+    type: 'conversations_updated',
+    conversations: [parent.toJSON()],
+  });
 
   // Create each child conversation and immediately spawn the review fork.
   // Each child inherits the source's provider + model + cwd so the forked
@@ -4462,7 +4076,10 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
       },
     });
     conversations.set(child.id, child);
-    broadcastToAll({ type: 'conversation_created', conversation: child.toJSON() });
+    broadcastToAll({
+      type: 'conversations_updated',
+      conversations: [child.toJSON()],
+    });
 
     const prompt = buildMergeReviewPrompt(meta.reviewUuid);
     try {
@@ -4855,7 +4472,7 @@ ${
           }
         }
       } catch (parseErr) {
-        console.error(`[generate-palette] Raw stdout (first 500 chars):`, stdout.substring(0, 500));
+        console.error('[generate-palette] Raw stdout (first 500 chars):', stdout.substring(0, 500));
         const msg = parseErr instanceof Error ? parseErr.message : 'Unknown parse error';
         sendError(500, `Failed to parse palette from ${providerName} response: ${msg}`);
         return;
@@ -4901,7 +4518,7 @@ ${
           await fs.promises.writeFile(filePath, JSON.stringify(stored, null, 2));
           console.log(`[generate-palette] Saved palette to ${filePath}`);
         } catch (writeErr) {
-          console.error(`[generate-palette] Failed to save palette file:`, writeErr);
+          console.error('[generate-palette] Failed to save palette file:', writeErr);
           delete paletteCache[key];
         }
       })();
@@ -4919,567 +4536,7 @@ ${
   })();
 });
 
-// =============================================================================
-// GET /api/usage — Aggregate token usage from Claude + Codex + OpenCode sessions.
-//
-// Reads persisted files on disk, sums token counts, and computes approximate cost.
-// Claude: ~/.claude/projects/**/*.jsonl → assistant entries with message.usage
-// Codex:  ~/.codex/sessions/**/*.jsonl  → event_msg with payload.type=token_count
-// OpenCode: ~/.local/share/opencode/storage/message/{session-id}/*.json
-//
-// Query params:
-//   ?days=N  — only include sessions from the last N days (default: 30)
-// =============================================================================
-
-interface UsageEntry {
-  sessionId: string;
-  provider: ProviderName;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  costUsd: number;
-  date: string; // YYYY-MM-DD
-}
-
-// Approximate pricing per 1M tokens (as of early 2026).
-// Claude: input $3, output $15, cache read $0.30, cache write $3.75
-// Codex: input $2.50, output $10
-function estimateCost(
-  provider: ProviderName,
-  input: number,
-  output: number,
-  cacheRead: number,
-  cacheWrite: number
-): number {
-  if (provider === 'claude') {
-    return (input * 3 + output * 15 + cacheRead * 0.3 + cacheWrite * 3.75) / 1_000_000;
-  }
-  // Codex/OpenAI and OpenCode (provider-backed model pricing can vary by backend).
-  // Gemini mirrors Codex-like pricing here until token billing data is emitted per-provider.
-  return (input * 2.5 + output * 10) / 1_000_000;
-}
-
-// Per-session cached usage data so we don't re-read unchanged files.
-// Maps filePath → { mtimeMs, data }. Survives across requests.
-const usageFileCache = new Map<
-  string,
-  { mtimeMs: number; data: UsageEntry & { timestampedTokens: { ts: number; tokens: number }[] } }
->();
-const openCodeUsageCache = new Map<
-  string,
-  { mtimeMs: number; data: UsageEntry & { lastTimestampMs: number } }
->();
-
-// Full response cache — avoids re-aggregating when nothing changed.
-// Key is `days` param. Invalidated after USAGE_CACHE_TTL_MS.
-interface RateLimit {
-  label: string;
-  usedPercent: number;
-  windowMinutes: number;
-  resetsAt: number | null;
-  tokenCount?: number;
-}
-interface UsageResponse {
-  totalCostUsd: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalSessions: number;
-  days: number;
-  daily: {
-    date: string;
-    inputTokens: number;
-    outputTokens: number;
-    costUsd: number;
-    sessions: number;
-  }[];
-  topSessions: UsageEntry[];
-  rateLimits: Record<ProviderName, RateLimit[]>;
-}
-const usageResponseCache = new Map<number, { time: number; data: UsageResponse }>();
-// Parse a single Claude JSONL file. Returns cached result if mtime unchanged.
-function parseClaudeSession(
-  filePath: string,
-  stat: fs.Stats
-): UsageEntry & { timestampedTokens: { ts: number; tokens: number }[] } {
-  const cached = usageFileCache.get(filePath);
-  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.data;
-
-  const sessionId = path.basename(filePath, '.jsonl');
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  let model = 'unknown';
-  const timestampedTokens: { ts: number; tokens: number }[] = [];
-
-  const content = fs.readFileSync(filePath, 'utf-8');
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line);
-      if (entry.type === 'assistant' && entry.message?.usage) {
-        const u = entry.message.usage;
-        const inTok = u.input_tokens ?? 0;
-        const outTok = u.output_tokens ?? 0;
-        inputTokens += inTok;
-        outputTokens += outTok;
-        cacheRead += u.cache_read_input_tokens ?? 0;
-        cacheWrite += u.cache_creation_input_tokens ?? 0;
-        if (entry.message.model && model === 'unknown') {
-          model = entry.message.model;
-        }
-        if (entry.timestamp) {
-          timestampedTokens.push({
-            ts: new Date(entry.timestamp).getTime(),
-            tokens: inTok + outTok,
-          });
-        }
-      }
-    } catch {
-      /* skip malformed lines */
-    }
-  }
-
-  const date = stat.mtime.toISOString().slice(0, 10);
-  const data: UsageEntry & { timestampedTokens: { ts: number; tokens: number }[] } = {
-    sessionId,
-    provider: 'claude',
-    model,
-    inputTokens,
-    outputTokens,
-    cacheReadTokens: cacheRead,
-    cacheWriteTokens: cacheWrite,
-    costUsd: estimateCost('claude', inputTokens, outputTokens, cacheRead, cacheWrite),
-    date,
-    timestampedTokens,
-  };
-  usageFileCache.set(filePath, { mtimeMs: stat.mtimeMs, data });
-  return data;
-}
-
-function parseOpenCodeSessionUsage(
-  sessionDirPath: string
-): (UsageEntry & { lastTimestampMs: number }) | null {
-  const messageFiles = fs.readdirSync(sessionDirPath).filter((f) => f.endsWith('.json'));
-  if (messageFiles.length === 0) {
-    return null;
-  }
-
-  let maxMtimeMs = 0;
-  for (const file of messageFiles) {
-    try {
-      const stat = fs.statSync(path.join(sessionDirPath, file));
-      if (stat.mtimeMs > maxMtimeMs) {
-        maxMtimeMs = stat.mtimeMs;
-      }
-    } catch {
-      // File may disappear between readdir and stat/read.
-    }
-  }
-
-  const cached = openCodeUsageCache.get(sessionDirPath);
-  if (cached && cached.mtimeMs === maxMtimeMs) {
-    return cached.data;
-  }
-
-  const sessionId = path.basename(sessionDirPath);
-  let model = 'unknown';
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheReadTokens = 0;
-  let cacheWriteTokens = 0;
-  let costUsd = 0;
-  let lastTimestampMs = 0;
-  let hasUsage = false;
-
-  for (const file of messageFiles) {
-    const filePath = path.join(sessionDirPath, file);
-    try {
-      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      if (parsed?.role !== 'assistant') {
-        continue;
-      }
-
-      const inTok = typeof parsed?.tokens?.input === 'number' ? parsed.tokens.input : 0;
-      const outTok = typeof parsed?.tokens?.output === 'number' ? parsed.tokens.output : 0;
-      const cacheRead =
-        typeof parsed?.tokens?.cache?.read === 'number' ? parsed.tokens.cache.read : 0;
-      const cacheWrite =
-        typeof parsed?.tokens?.cache?.write === 'number' ? parsed.tokens.cache.write : 0;
-      const messageCost = typeof parsed?.cost === 'number' ? parsed.cost : 0;
-
-      inputTokens += inTok;
-      outputTokens += outTok;
-      cacheReadTokens += cacheRead;
-      cacheWriteTokens += cacheWrite;
-      costUsd += messageCost;
-
-      if (inTok + outTok + cacheRead + cacheWrite > 0 || messageCost > 0) {
-        hasUsage = true;
-      }
-
-      const providerID = typeof parsed?.providerID === 'string' ? parsed.providerID : null;
-      const modelID = typeof parsed?.modelID === 'string' ? parsed.modelID : null;
-      if (model === 'unknown') {
-        if (providerID && modelID) model = `${providerID}/${modelID}`;
-        else if (modelID) model = modelID;
-        else if (providerID) model = providerID;
-      }
-
-      const completedTs = typeof parsed?.time?.completed === 'number' ? parsed.time.completed : 0;
-      const createdTs = typeof parsed?.time?.created === 'number' ? parsed.time.created : 0;
-      const ts = Math.max(completedTs, createdTs);
-      if (ts > lastTimestampMs) {
-        lastTimestampMs = ts;
-      }
-    } catch {
-      // Skip malformed/unreadable message file.
-    }
-  }
-
-  if (!hasUsage) {
-    return null;
-  }
-
-  if (costUsd === 0) {
-    costUsd = estimateCost(
-      'opencode',
-      inputTokens,
-      outputTokens,
-      cacheReadTokens,
-      cacheWriteTokens
-    );
-  }
-
-  const fallbackTs = maxMtimeMs > 0 ? maxMtimeMs : Date.now();
-  const date = new Date(lastTimestampMs > 0 ? lastTimestampMs : fallbackTs)
-    .toISOString()
-    .slice(0, 10);
-
-  const data: UsageEntry & { lastTimestampMs: number } = {
-    sessionId,
-    provider: 'opencode',
-    model,
-    inputTokens,
-    outputTokens,
-    cacheReadTokens,
-    cacheWriteTokens,
-    costUsd,
-    date,
-    lastTimestampMs: lastTimestampMs > 0 ? lastTimestampMs : fallbackTs,
-  };
-
-  openCodeUsageCache.set(sessionDirPath, { mtimeMs: maxMtimeMs, data });
-  return data;
-}
-
-app.get('/api/usage', async (_req: Request, res: Response) => {
-  const days = Math.min(Math.max(Number.parseInt(String(_req.query.days)) || 30, 1), 365);
-
-  // Check response cache
-  const cached = usageResponseCache.get(days);
-  if (cached && Date.now() - cached.time < USAGE_CACHE_TTL_MS) {
-    res.json(cached.data);
-    return;
-  }
-
-  // Response cache expired (or missing) — clear per-file caches so entries for
-  // deleted files don't accumulate unboundedly across requests.
-  usageFileCache.clear();
-  openCodeUsageCache.clear();
-
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  const cutoffMs = cutoff.getTime();
-  const now = Date.now();
-  const fiveHoursAgo = now - 5 * 60 * 60 * 1000;
-  const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-
-  const entries: UsageEntry[] = [];
-  let claude5hTokens = 0;
-  let claudeWeeklyTokens = 0;
-
-  // --- Claude sessions (single pass: usage entries + rate limit token counts) ---
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-  try {
-    const projectDirs = fs
-      .readdirSync(claudeDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => path.join(claudeDir, d.name));
-
-    for (const projDir of projectDirs) {
-      const jsonlFiles = fs.readdirSync(projDir).filter((f) => f.endsWith('.jsonl'));
-      for (const file of jsonlFiles) {
-        const filePath = path.join(projDir, file);
-        const stat = fs.statSync(filePath);
-        // Skip files older than both the query window AND the 7-day rate-limit window
-        if (stat.mtimeMs < cutoffMs && stat.mtimeMs < sevenDaysAgo) continue;
-
-        const data = parseClaudeSession(filePath, stat);
-
-        // Usage entry (for the requested days window)
-        if (stat.mtimeMs >= cutoffMs && data.inputTokens + data.outputTokens > 0) {
-          entries.push(data);
-        }
-
-        // Rate limit token counts (5h + 7d windows)
-        for (const { ts, tokens } of data.timestampedTokens) {
-          if (ts >= sevenDaysAgo) claudeWeeklyTokens += tokens;
-          if (ts >= fiveHoursAgo) claude5hTokens += tokens;
-        }
-      }
-    }
-  } catch {
-    /* ~/.claude/projects may not exist */
-  }
-
-  // --- Codex sessions (single pass: usage entries + rate limits from most recent) ---
-  const codexDir = path.join(os.homedir(), '.codex', 'sessions');
-  const rateLimits = {} as Record<ProviderName, RateLimit[]>;
-  for (const provider of Object.keys(providers) as ProviderName[]) {
-    rateLimits[provider] = [];
-  }
-  let newestCodexFile = '';
-  let newestCodexMtime = 0;
-
-  try {
-    const years = fs.readdirSync(codexDir, { withFileTypes: true }).filter((d) => d.isDirectory());
-    for (const year of years) {
-      const months = fs
-        .readdirSync(path.join(codexDir, year.name), { withFileTypes: true })
-        .filter((d) => d.isDirectory());
-      for (const month of months) {
-        const dayDirs = fs
-          .readdirSync(path.join(codexDir, year.name, month.name), { withFileTypes: true })
-          .filter((d) => d.isDirectory());
-        for (const day of dayDirs) {
-          const dateStr = `${year.name}-${month.name}-${day.name}`;
-          const dateMs = new Date(dateStr).getTime();
-          // Skip entire day dirs that are too old for BOTH usage and rate limits
-          if (dateMs < cutoffMs && dateMs < sevenDaysAgo) continue;
-
-          const dayPath = path.join(codexDir, year.name, month.name, day.name);
-          const files = fs.readdirSync(dayPath).filter((f) => f.endsWith('.jsonl'));
-          for (const file of files) {
-            const filePath = path.join(dayPath, file);
-            const stat = fs.statSync(filePath);
-
-            // Track most recent for rate limits
-            if (stat.mtimeMs > newestCodexMtime) {
-              newestCodexMtime = stat.mtimeMs;
-              newestCodexFile = filePath;
-            }
-
-            // Only parse for usage if within the query window
-            if (dateMs < cutoffMs) continue;
-
-            const sessionId = file.replace('.jsonl', '');
-            let inputTokens = 0;
-            let outputTokens = 0;
-
-            const content = fs.readFileSync(filePath, 'utf-8');
-            for (const line of content.split('\n')) {
-              if (!line.trim()) continue;
-              try {
-                const entry = JSON.parse(line);
-                if (
-                  entry.type === 'event_msg' &&
-                  entry.payload?.type === 'token_count' &&
-                  entry.payload.info?.total_token_usage
-                ) {
-                  const u = entry.payload.info.total_token_usage;
-                  inputTokens = u.input_tokens ?? 0;
-                  outputTokens = u.output_tokens ?? 0;
-                }
-              } catch {
-                /* skip malformed lines */
-              }
-            }
-
-            if (inputTokens + outputTokens > 0) {
-              entries.push({
-                sessionId,
-                provider: 'codex',
-                model: 'codex',
-                inputTokens,
-                outputTokens,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                costUsd: estimateCost('codex', inputTokens, outputTokens, 0, 0),
-                date: dateStr,
-              });
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    /* ~/.codex/sessions may not exist */
-  }
-
-  // --- OpenCode sessions (single pass: assistant message token usage from local storage) ---
-  const openCodeMessageDir = path.join(
-    os.homedir(),
-    '.local',
-    'share',
-    'opencode',
-    'storage',
-    'message'
-  );
-  try {
-    const openCodeSessionDirs = fs
-      .readdirSync(openCodeMessageDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => path.join(openCodeMessageDir, d.name));
-
-    for (const sessionDirPath of openCodeSessionDirs) {
-      const usage = parseOpenCodeSessionUsage(sessionDirPath);
-      if (!usage) {
-        continue;
-      }
-
-      if (usage.lastTimestampMs < cutoffMs) {
-        continue;
-      }
-
-      entries.push({
-        sessionId: usage.sessionId,
-        provider: usage.provider,
-        model: usage.model,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cacheReadTokens: usage.cacheReadTokens,
-        cacheWriteTokens: usage.cacheWriteTokens,
-        costUsd: usage.costUsd,
-        date: usage.date,
-      });
-    }
-  } catch {
-    /* ~/.local/share/opencode/storage/message may not exist */
-  }
-
-  // Extract rate limits from the most recent Codex session file
-  if (newestCodexFile) {
-    try {
-      const content = fs.readFileSync(newestCodexFile, 'utf-8');
-      const lines = content.split('\n').filter((l) => l.trim());
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try {
-          const entry = JSON.parse(lines[i]);
-          if (entry.type === 'event_msg' && entry.payload?.rate_limits) {
-            const r = entry.payload.rate_limits;
-            if (r.primary) {
-              rateLimits.codex.push({
-                label: `${r.primary.window_minutes / 60}h limit`,
-                usedPercent: r.primary.used_percent,
-                windowMinutes: r.primary.window_minutes,
-                resetsAt: r.primary.resets_at ?? null,
-              });
-            }
-            if (r.secondary) {
-              rateLimits.codex.push({
-                label: 'Weekly limit',
-                usedPercent: r.secondary.used_percent,
-                windowMinutes: r.secondary.window_minutes,
-                resetsAt: r.secondary.resets_at ?? null,
-              });
-            }
-            break;
-          }
-        } catch {
-          /* skip */
-        }
-      }
-    } catch {
-      /* file may have been deleted */
-    }
-  }
-
-  // Claude rate limits from timestamped tokens (already computed in single pass above)
-  if (claude5hTokens > 0 || claudeWeeklyTokens > 0) {
-    rateLimits.claude.push({
-      label: '5h window',
-      usedPercent: 0,
-      windowMinutes: 300,
-      resetsAt: null,
-      tokenCount: claude5hTokens,
-    });
-    rateLimits.claude.push({
-      label: 'Weekly',
-      usedPercent: 0,
-      windowMinutes: 10080,
-      resetsAt: null,
-      tokenCount: claudeWeeklyTokens,
-    });
-  }
-
-  // Aggregate by day
-  const byDay = new Map<
-    string,
-    { inputTokens: number; outputTokens: number; costUsd: number; sessions: number }
-  >();
-  let totalCost = 0;
-  let totalInput = 0;
-  let totalOutput = 0;
-
-  for (const e of entries) {
-    totalCost += e.costUsd;
-    totalInput += e.inputTokens;
-    totalOutput += e.outputTokens;
-
-    const existing = byDay.get(e.date);
-    if (existing) {
-      existing.inputTokens += e.inputTokens;
-      existing.outputTokens += e.outputTokens;
-      existing.costUsd += e.costUsd;
-      existing.sessions += 1;
-    } else {
-      byDay.set(e.date, {
-        inputTokens: e.inputTokens,
-        outputTokens: e.outputTokens,
-        costUsd: e.costUsd,
-        sessions: 1,
-      });
-    }
-  }
-
-  const daily = Array.from(byDay.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, data]) => ({ date, ...data }));
-
-  const sortedEntries = [...entries].sort((a, b) => b.costUsd - a.costUsd);
-  const topSessions = sortedEntries.slice(0, 20);
-
-  // Keep provider tabs useful even when one provider's sessions are lower-cost.
-  const orderedProviders = Object.keys(providers) as ProviderName[];
-  for (const provider of orderedProviders) {
-    if (topSessions.some((entry) => entry.provider === provider)) {
-      continue;
-    }
-    const providerTopSession = sortedEntries.find((entry) => entry.provider === provider);
-    if (providerTopSession) {
-      topSessions.push(providerTopSession);
-    }
-  }
-  topSessions.sort((a, b) => b.costUsd - a.costUsd);
-
-  const response: UsageResponse = {
-    totalCostUsd: totalCost,
-    totalInputTokens: totalInput,
-    totalOutputTokens: totalOutput,
-    totalSessions: entries.length,
-    days,
-    daily,
-    topSessions,
-    rateLimits,
-  };
-
-  usageResponseCache.set(days, { time: Date.now(), data: response });
-  res.json(response);
-});
-
+registerUsageRoutes(app, Object.keys(providers) as ProviderName[]);
 // Serve static files from client build
 const clientDist = path.join(__dirname, '../../client/dist');
 app.use(express.static(clientDist));
@@ -5543,17 +4600,19 @@ function clearSigtermDrainTimers(): void {
 
 process.on('SIGINT', () => {
   console.log('SIGINT — killing child processes and shutting down...');
+  buddyScheduler?.stop();
   for (const conv of conversations.values()) {
     if (conv.process) {
       conv.process.kill('SIGKILL');
     }
   }
-  flushUIStateSync();
+  persistedServerState.flushUIStateSync();
   process.exit();
 });
 
 process.on('SIGTERM', () => {
-  flushUIStateSync();
+  buddyScheduler?.stop();
+  persistedServerState.flushUIStateSync();
   const activeRuns = getActiveConversationRuns();
   if (activeRuns.length === 0) {
     console.log('SIGTERM — no active turns, exiting for restart');
@@ -5604,6 +4663,7 @@ const LOCAL_DOMAIN = 'unleashd.localhost';
 const LOCAL_HTTP_PORT = 80;
 const PORT =
   process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
+const LISTEN_HOST = resolveListenHost();
 const SETUP_SCRIPT = path.join(__dirname, '../../tools/setup-domain.sh');
 
 function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void): void {
@@ -5705,12 +4765,22 @@ function killProcessOnPort(port: number): boolean {
  * Hydrate a server-side Conversation instance from shared ConversationData.
  * Used by both initial load (progressive batches) and file polling (new sessions).
  */
-async function hydrateConversation(convData: ConversationData): Promise<Conversation | null> {
-  const sessionId = convData.id;
-  let hydratedConfig;
+async function hydrateConversation(convData: DiscoveredConversation): Promise<Conversation | null> {
+  const sessionId = convData.sessionId;
+  const existingRecord = await conversationConfigStore.findBySession(convData.provider, sessionId);
+  let candidateConversationId =
+    existingRecord?.conversationId ?? (isUuid(sessionId) ? sessionId : uuidv4());
+  if (existingRecord?.status === 'active' && !isUuid(existingRecord.conversationId)) {
+    candidateConversationId = uuidv4();
+    await conversationConfigStore.rekeyConversation(
+      existingRecord.conversationId,
+      candidateConversationId
+    );
+  }
+  let hydratedConfig: HydratedConversationConfig;
   try {
     hydratedConfig = await conversationConfigService.hydrate({
-      conversationId: sessionId,
+      conversationId: candidateConversationId,
       sessionBindings: [{ provider: convData.provider, sessionId }],
       currentSession: { provider: convData.provider, sessionId },
       workingDirectory: convData.workingDirectory,
@@ -5759,6 +4829,7 @@ async function hydrateConversation(convData: ConversationData): Promise<Conversa
     modelName: convData.modelName ?? null,
     mergeParentMeta: convData.mergeParentMeta ?? null,
     mergeChildMeta: convData.mergeChildMeta ?? null,
+    buddyContext: convData.buddyContext ?? hydratedConfig.record.creation?.buddyContext ?? null,
   });
   conversation.messages = convData.messages;
   conversation.createdAt = convData.createdAt;
@@ -5826,6 +4897,12 @@ async function loadExistingConversations(): Promise<void> {
           source: 'external_session',
         },
       });
+      const recoveredBuddy = record.creation?.buddyContext
+        ? await resolveBuddyConversation(record.creation.buddyContext).catch((error) => {
+            console.warn(`[buddies] Could not rebuild ${record.conversationId} briefing:`, error);
+            return null;
+          })
+        : null;
       const recovered = new Conversation({
         id: record.conversationId,
         workingDirectory: record.workingDirectory,
@@ -5833,6 +4910,8 @@ async function loadExistingConversations(): Promise<void> {
         existingSessionId: record.currentSession?.sessionId,
         swarmDebugPrefix: record.creation?.swarmDebugPrefix ?? null,
         resumedFromConversationId: record.creation?.resumedFromConversationId ?? null,
+        buddyContext: recoveredBuddy?.context ?? record.creation?.buddyContext ?? null,
+        buddyBriefing: recoveredBuddy?.briefing ?? null,
       });
       conversations.set(recovered.id, recovered);
       await dispatchCreationMessageIfPending(recovered);
@@ -5930,7 +5009,7 @@ function isOpenCodeSessionLike(sessionId: string): boolean {
  */
 function findBootstrapMatch(
   sessionId: string,
-  convData: ConversationData
+  convData: DiscoveredConversation
 ): Conversation | undefined {
   const importedLastUser = getLastUserMessageContent(convData.messages);
   if (!importedLastUser) return undefined;
@@ -6026,19 +5105,20 @@ function startFilePolling(): void {
         if (isLocalCompletionSuppressed(sessionId, now)) continue;
 
         const existingConversation = findConversationByCurrentSessionId(sessionId);
-        const conversationId = existingConversation?.id ?? sessionId;
 
         // File changed and we didn't cause it — refresh the "last seen" timestamp
         if (!externallyRunning.has(sessionId)) {
           // Newly detected external activity
           if (VERBOSE)
             console.log(`[Poll] External activity detected: ${sessionId.substring(0, 8)}`);
-          broadcastToAll({
-            type: 'status',
-            conversationId,
-            isRunning: true,
-            isStreaming: false, // External activity — we don't know if streaming, but safe default
-          });
+          if (existingConversation) {
+            broadcastToAll({
+              type: 'status',
+              conversationId: existingConversation.id,
+              isRunning: true,
+              isStreaming: false, // External activity — we don't know if streaming, but safe default
+            });
+          }
         }
         externallyRunning.set(sessionId, now);
       }
@@ -6053,15 +5133,16 @@ function startFilePolling(): void {
         if (now - lastSeen >= EXTERNAL_GRACE_MS) {
           externallyRunning.delete(sessionId);
           const existingConversation = findConversationByCurrentSessionId(sessionId);
-          const conversationId = existingConversation?.id ?? sessionId;
           if (VERBOSE)
             console.log(`[Poll] External activity stopped: ${sessionId.substring(0, 8)}`);
-          broadcastToAll({
-            type: 'status',
-            conversationId,
-            isRunning: false,
-            isStreaming: false,
-          });
+          if (existingConversation) {
+            broadcastToAll({
+              type: 'status',
+              conversationId: existingConversation.id,
+              isRunning: false,
+              isStreaming: false,
+            });
+          }
         }
       }
 
@@ -6119,6 +5200,7 @@ function startFilePolling(): void {
             convData.parentConversationId ?? null
           );
           existing.resumedFromConversationId = convData.resumedFromConversationId ?? null;
+          existing.buddyContext = convData.buddyContext ?? existing.buddyContext;
           // Native session files report runtime facts; they do not own user
           // selection intent. Keep the durable config intact and record only
           // the provider-observed model.
@@ -6166,9 +5248,18 @@ async function startServer(): Promise<void> {
   startupAuditResults = auditLocalAgents();
 
   // Initialize caches before opening the port
-  await initSettingsCache();
-  await initUIStateCache();
+  await persistedServerState.initialize();
   await initPaletteCache();
+  try {
+    buddyScheduler = new BuddyScheduler({
+      store: await getBuddiesStore(),
+      createConversation: createAutomationConversation,
+    });
+    buddyScheduler.start();
+    console.log('Buddy scheduler started');
+  } catch (error) {
+    console.warn('[buddies] Scheduler unavailable:', error);
+  }
 
   const portNumber = typeof PORT === 'string' ? Number.parseInt(PORT, 10) : PORT;
   let isPortAvailable = await checkPort(portNumber);
@@ -6189,7 +5280,7 @@ async function startServer(): Promise<void> {
           console.error(`\n✗ Port ${PORT} still in use. Try manually or use a different port.`);
           process.exit(1);
         }
-        console.log(`✓ Done\n`);
+        console.log('✓ Done\n');
       } else {
         process.exit(1);
       }
@@ -6198,13 +5289,13 @@ async function startServer(): Promise<void> {
       console.log(
         `  1. Kill manually: lsof -i :${PORT} | grep LISTEN | awk '{print $2}' | xargs kill -9`
       );
-      console.log(`  2. Use different port: PORT=3001 pnpm dev:server\n`);
+      console.log('  2. Use different port: PORT=3001 pnpm dev:server\n');
       process.exit(1);
     }
   }
 
   // Start listening FIRST so the Vite proxy can connect immediately.
-  server.listen(portNumber, () => {
+  server.listen(portNumber, LISTEN_HOST, () => {
     const isDevelopment = process.env.NODE_ENV === 'development';
     const domainUrl = `http://${LOCAL_DOMAIN}`;
     const fallbackUrl = isDevelopment
@@ -6218,14 +5309,14 @@ async function startServer(): Promise<void> {
         console.log(`Server running on http://localhost:${portNumber} (frontend on ${startUrl})`);
         return;
       }
-      console.log(`Server running on ${startUrl} (backend on port ${portNumber})`);
+      console.log(`Server running on ${startUrl} (backend on ${LISTEN_HOST}:${portNumber})`);
       const startCmd =
         process.platform === 'darwin'
           ? 'open'
           : process.platform === 'win32'
             ? 'start'
             : 'xdg-open';
-      require('child_process').exec(`${startCmd} ${startUrl}`);
+      require('node:child_process').exec(`${startCmd} ${startUrl}`);
     });
   });
 

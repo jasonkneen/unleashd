@@ -6,43 +6,39 @@
    ============================================================================= */
 
 .subagent-panel {
-  background: transparent;
-  border: none;
-  border-left: 2px solid color-mix(in srgb, var(--text-emphasis) 18%, transparent);
-  border-radius: 0;
-  margin: 0 0 4px 0;
-  padding-left: 14px;
+  background: color-mix(in srgb, var(--bg-panel) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  border-radius: 4px;
+  margin: 0;
   font-family: var(--font-mono);
   font-size: 13px;
-  position: relative; /* Anchor for floating tree */
+  overflow: hidden;
 }
 
-/* Header - clickable to expand/collapse, balanced padding.
-   Negative left margin + padding cancels panel's padding-left so
-   hover highlight extends flush to the left border. */
+/* Header - clickable to expand/collapse. */
 .subagent-header {
+  width: 100%;
+  border: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px 8px 14px;
-  margin-left: -14px;
+  padding: 9px 12px;
   cursor: pointer;
   user-select: none;
   background: transparent;
-  transition: background 0.15s;
-}
-
-.subagent-panel:has(.subagent-tree-wrapper.expanded) .subagent-header {
-  border-bottom-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  transition: background 0.15s ease;
 }
 
 .subagent-header:hover {
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  background: color-mix(in srgb, var(--text-emphasis) 4%, transparent);
 }
 
-.subagent-header:focus {
+.subagent-header:focus-visible {
   outline: none;
-  background: color-mix(in srgb, var(--primary) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 55%, transparent);
 }
 
 /* Status indicator dot */
@@ -75,43 +71,50 @@
 /* Summary text */
 .subagent-summary {
   color: var(--text-emphasis);
-  font-weight: 500;
+  font-weight: 400;
   flex: 1;
+}
+
+.subagent-summary strong {
+  color: var(--success-bright);
+  font-weight: 650;
 }
 
 /* Shortcut hint */
 .subagent-shortcut {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
+  opacity: 0.68;
 }
 
-/* Tree view wrapper — floats above content, doesn't push layout.
-   Uses opacity + transform for smooth appear/disappear. */
+.subagent-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.subagent-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+/* Tree stays in document flow so it never covers resumed-thread context or messages. */
 .subagent-tree-wrapper {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-subtle);
-  border-radius: 2px;
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--bg-darkest) 50%, transparent);
+  max-height: 0;
   opacity: 0;
-  transform: translateY(-4px);
-  pointer-events: none;
-  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+  overflow: hidden;
+  border-top: 1px solid transparent;
+  transition: max-height 0.22s ease, opacity 0.16s ease, border-color 0.16s ease;
 }
 
 .subagent-tree-wrapper.expanded {
+  max-height: 320px;
   opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
+  border-top-color: color-mix(in srgb, var(--border-subtle) 65%, transparent);
 }
 
 /* Tree view container */
 .subagent-tree {
-  padding: 8px 14px 12px 14px;
+  padding: 7px 12px 10px;
   max-height: 300px;
   overflow-y: auto;
 }
@@ -275,4 +278,10 @@
 .subagent-item:has(.subagent-status.completed):hover,
 .subagent-item:has(.subagent-status.error):hover {
   opacity: 1;
+}
+
+@media (max-width: 700px) {
+  .subagent-shortcut {
+    display: none;
+  }
 }

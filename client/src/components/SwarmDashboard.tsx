@@ -120,10 +120,7 @@ export function SwarmDashboard() {
         sessions: [],
         workerCount: runtimeRun?.totalWorkers ?? 0,
         runningCount: runtimeRun?.activeWorkers ?? 0,
-        idleCount: Math.max(
-          (runtimeRun?.totalWorkers ?? 0) - (runtimeRun?.activeWorkers ?? 0),
-          0
-        ),
+        idleCount: Math.max((runtimeRun?.totalWorkers ?? 0) - (runtimeRun?.activeWorkers ?? 0), 0),
         runCount: runtimeRun?.runCount ?? 1,
         latestActivity: undefined,
         accentColor: getProjectColor(discovered.projectRoot),
@@ -144,7 +141,7 @@ export function SwarmDashboard() {
     return (
       <div className="swarm-dashboard">
         <div className="swarm-dashboard-header">
-          <button className="back-to-gallery-btn" onClick={() => navigate('/')}>
+          <button type="button" className="back-to-gallery-btn" onClick={() => navigate('/')}>
             &#8592; Gallery
           </button>
           <h2>Swarm Dashboard</h2>
@@ -162,7 +159,7 @@ export function SwarmDashboard() {
   return (
     <div className="swarm-dashboard">
       <div className="swarm-dashboard-header">
-        <button className="back-to-gallery-btn" onClick={() => navigate('/')}>
+        <button type="button" className="back-to-gallery-btn" onClick={() => navigate('/')}>
           &#8592; Gallery
         </button>
         <h2>Swarm Dashboard</h2>
@@ -216,6 +213,7 @@ export function SwarmDashboard() {
                 <span className="swarm-time-ago">{formatTimeAgo(project.latestActivity)}</span>
               )}
               <button
+                type="button"
                 className="swarm-open-btn"
                 onClick={(e) => {
                   e.stopPropagation();

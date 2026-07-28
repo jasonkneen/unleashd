@@ -41,7 +41,7 @@ function sendMessage(prompt) {
               const text = json.message?.content?.[0]?.text || '';
               console.log(`[assistant] ${text.substring(0, 100)}`);
             }
-          } catch (e) {
+          } catch {
             // Ignore parse errors for partial lines
           }
         });
@@ -59,7 +59,7 @@ function sendMessage(prompt) {
     proc.on('error', reject);
 
     // Send the prompt and close stdin
-    proc.stdin.write(prompt + '\n');
+    proc.stdin.write(`${prompt}\n`);
     proc.stdin.end();
   });
 }

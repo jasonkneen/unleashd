@@ -1,6 +1,6 @@
-import * as os from 'os';
-import * as path from 'path';
-import * as fs from 'fs';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { DiskAdapter, ParsedSession } from './disk-adapter';
 import {
   CLAUDE_PROJECTS_DIR,
@@ -32,10 +32,12 @@ const GEMINI_SANDBOX_DIR = path.join(os.homedir(), '.gemini-sandbox');
 async function discoverGeminiSandboxDirs(): Promise<string[]> {
   try {
     const entries = await fs.promises.readdir(GEMINI_SANDBOX_DIR, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isDirectory())
-      // Gemini CLI stores sessions under $GEMINI_CLI_HOME/.gemini/tmp/, not $GEMINI_CLI_HOME/tmp/
-      .map((e) => path.join(GEMINI_SANDBOX_DIR, e.name, '.gemini', 'tmp'));
+    return (
+      entries
+        .filter((e) => e.isDirectory())
+        // Gemini CLI stores sessions under $GEMINI_CLI_HOME/.gemini/tmp/, not $GEMINI_CLI_HOME/tmp/
+        .map((e) => path.join(GEMINI_SANDBOX_DIR, e.name, '.gemini', 'tmp'))
+    );
   } catch {
     return [];
   }

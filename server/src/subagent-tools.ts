@@ -82,7 +82,9 @@ export function getSubagentDescription(
 
 // Tool events carry `_phase` of 'started' or 'completed'. Anything else is
 // rejected so callers can treat undefined as "no phase info".
-export function getToolUsePhase(input: Record<string, unknown>): 'started' | 'completed' | undefined {
+export function getToolUsePhase(
+  input: Record<string, unknown>
+): 'started' | 'completed' | undefined {
   const phase = input._phase;
   return phase === 'started' || phase === 'completed' ? phase : undefined;
 }

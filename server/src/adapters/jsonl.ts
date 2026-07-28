@@ -11,11 +11,12 @@
  * - Gemini:   ~/.gemini/tmp/{project}/chats/session-*.json
  */
 
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import * as readline from 'readline';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import * as readline from 'node:readline';
 import type {
+  BuddyContext,
   CodexSessionEntry,
   JsonlAssistantEntry,
   JsonlEntry,
@@ -27,6 +28,7 @@ import type {
   Provider,
   SubAgent,
 } from '@unleashd/shared';
+import { BuddyContextSchema } from '@unleashd/shared';
 import {
   isCodexAgentMessageEvent,
   isCodexResponseMessage,
@@ -37,8 +39,8 @@ import {
   isJsonlToolUseBlock,
   isJsonlUserEntry,
 } from '@unleashd/shared';
-import { formatToolResult, formatToolUse } from './tool-format';
 import { getSubagentDescription, isSubagentSpawnTool } from '../subagent-tools';
+import { formatToolUse } from './tool-format';
 
 /** Canonicalize a directory path: resolve `.`/`..` and strip trailing slashes
  *  so "/foo/bar/" and "/foo/bar" group as the same project. Always returns absolute path. */
@@ -770,14 +772,15 @@ function extractUserContent(entry: JsonlUserEntry): string {
         // Include a short indicator for tool results
         // Claude API allows tool_result content to be a string OR an array of content blocks.
         const rawContent = block.content;
-        const toolContent = typeof rawContent === 'string'
-          ? rawContent
-          : Array.isArray(rawContent)
-            ? (rawContent as Array<{type?: string; text?: string}>)
-                .filter(b => b.type === 'text')
-                .map(b => b.text ?? '')
-                .join('')
-            : String(rawContent);
+        const toolContent =
+          typeof rawContent === 'string'
+            ? rawContent
+            : Array.isArray(rawContent)
+              ? (rawContent as Array<{ type?: string; text?: string }>)
+                  .filter((b) => b.type === 'text')
+                  .map((b) => b.text ?? '')
+                  .join('')
+              : String(rawContent);
         if (toolContent.length > 200) {
           textParts.push(`[Tool result: ${toolContent.substring(0, 200)}...]`);
         } else {
@@ -838,7 +841,8 @@ export function extractMessagesFromEntries(entries: JsonlEntry[]): Message[] {
       if (content) {
         const completedAt = parseTimestamp(entry.timestamp) ?? new Date();
         // Fallback to completedAt if no previous message exists
-        const startedAt = messages.length > 0 ? messages[messages.length - 1].timestamp : completedAt;
+        const startedAt =
+          messages.length > 0 ? messages[messages.length - 1].timestamp : completedAt;
         messages.push({
           role: 'assistant',
           content,
@@ -919,7 +923,8 @@ export function extractMessagesFromCodexEntries(entries: CodexSessionEntry[]): M
         const content = entry.payload.message;
         if (content) {
           const completedAt = parseTimestamp(entry.timestamp) ?? new Date();
-          const startedAt = messages.length > 0 ? messages[messages.length - 1].timestamp : completedAt;
+          const startedAt =
+            messages.length > 0 ? messages[messages.length - 1].timestamp : completedAt;
           messages.push({
             role: 'assistant',
             content,
@@ -1181,6 +1186,31 @@ export function extractWorkerMetadata(messages: Message[]): WorkerMetadata {
  */
 const SWARM_DEBUG_PREFIX_RE =
   /^<!-- unleashd:swarm-prefix -->\n([\s\S]*?)\n<!-- \/unleashd:swarm-prefix -->\n\n/;
+
+const BUDDY_CONTEXT_RE =
+  /^<!-- unleashd:buddy-context (.+) -->\n[\s\S]*?\n<!-- \/unleashd:buddy-context -->\n\n/;
+
+/**
+ * Recover typed Buddy ownership while removing the hidden first-turn briefing
+ * from the user-visible transcript. The marker stores metadata only; identity,
+ * memory, and work state are deliberately rebuilt for new conversations.
+ */
+export function extractBuddyContext(messages: Message[]): BuddyContext | null {
+  const firstUserMsg = messages.find((message) => message.role === 'user');
+  if (!firstUserMsg) return null;
+  const match = firstUserMsg.content.match(BUDDY_CONTEXT_RE);
+  if (!match) return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+  const parsed = BuddyContextSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  firstUserMsg.content = firstUserMsg.content.slice(match[0].length);
+  return parsed.data;
+}
 
 export function extractSwarmDebugPrefix(messages: Message[]): string | null {
   const firstUserMsg = messages.find((m) => m.role === 'user');

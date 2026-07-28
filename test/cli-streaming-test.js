@@ -49,14 +49,14 @@ setTimeout(() => {
   // Try format 1: Simple message object
   const msg = JSON.stringify({ type: 'user', content: 'Say "hello streaming"' });
   console.log(`\n[stdin] Sending: ${msg}\n`);
-  proc.stdin.write(msg + '\n');
+  proc.stdin.write(`${msg}\n`);
 }, 1000);
 
 // Send second message
 setTimeout(() => {
   const msg = JSON.stringify({ type: 'user', content: 'What did you just say?' });
   console.log(`\n[stdin] Sending: ${msg}\n`);
-  proc.stdin.write(msg + '\n');
+  proc.stdin.write(`${msg}\n`);
 }, 10000);
 
 // End after 20 seconds

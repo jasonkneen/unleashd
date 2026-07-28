@@ -110,6 +110,19 @@ export type ConversationSessionBinding = z.infer<typeof ConversationSessionBindi
 export const ConversationLifecycleStatusSchema = z.enum(['active', 'deleted']);
 export type ConversationLifecycleStatus = z.infer<typeof ConversationLifecycleStatusSchema>;
 
+export const BuddyContextSchema = z.object({
+  buddyId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  buddyProjectId: z.string().min(1).nullish(),
+  legacyWorkItemId: z.string().min(1).nullish(),
+  automationRunId: z.string().min(1).nullish(),
+  // Set only for Buddy-to-Buddy work. This is employee delegation metadata,
+  // not a provider-native subagent/swarm relationship.
+  delegatedByBuddyId: z.string().min(1).nullish(),
+  parentBuddyConversationId: z.string().uuid().nullish(),
+});
+export type BuddyContext = z.infer<typeof BuddyContextSchema>;
+
 export const ConversationCreationMetadataSchema = z.object({
   commandId: z.string().min(1).optional(),
   fingerprint: z.string().min(1).optional(),
@@ -117,6 +130,7 @@ export const ConversationCreationMetadataSchema = z.object({
   initialMessageDispatchedAt: z.string().datetime().optional(),
   swarmDebugPrefix: z.string().optional(),
   resumedFromConversationId: z.string().uuid().optional(),
+  buddyContext: BuddyContextSchema.optional(),
 });
 export type ConversationCreationMetadata = z.infer<typeof ConversationCreationMetadataSchema>;
 

@@ -1,8 +1,9 @@
+import { type ServerMessage, safeParseServerMessage } from '@unleashd/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Status = 'connecting' | 'connected' | 'disconnected';
 
-export function useWebSocket<T = unknown>(url: string, onMessage: (data: T) => void) {
+export function useWebSocket(url: string, onMessage: (data: ServerMessage) => void) {
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -31,8 +32,12 @@ export function useWebSocket<T = unknown>(url: string, onMessage: (data: T) => v
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        onMessageRef.current(data);
+        const parsed = safeParseServerMessage(JSON.parse(event.data));
+        if (!parsed.success) {
+          console.error('Rejected invalid WebSocket server message:', parsed.error.issues);
+          return;
+        }
+        onMessageRef.current(parsed.data);
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e);
       }

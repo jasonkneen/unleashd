@@ -13,7 +13,6 @@ const uniqueMarker = uuidv4();
 let createdConversationId = null;
 const receivedConversations = new Map();
 let isComplete = false;
-let testTimeout;
 
 ws.on('open', () => {
   console.log('[WS] Connected');
@@ -32,9 +31,15 @@ ws.on('message', (data) => {
 
       ws.send(
         JSON.stringify({
-          type: 'new_conversation',
+          type: 'create_conversation',
+          commandId: uuidv4(),
+          conversationId: uuidv4(),
           workingDirectory: process.cwd(),
-          provider: 'codex',
+          config: {
+            provider: 'codex',
+            model: { mode: 'default' },
+            reasoning: { mode: 'default' },
+          },
         })
       );
       break;
@@ -106,7 +111,7 @@ ws.on('error', (err) => {
 });
 
 // Timeout after 45 seconds
-testTimeout = setTimeout(() => {
+const testTimeout = setTimeout(() => {
   console.log('\\n[TIMEOUT] Test timed out');
   ws.close();
   process.exit(1);

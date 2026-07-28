@@ -299,9 +299,7 @@ export function parseCodexOutput(jsonString: string): CodexOutput {
         : 'undefined';
 
     throw new CodexParseError(
-      `Unknown or invalid Codex CLI output type: "${typeField}". ` +
-        `Expected one of: start, message, tool_call, tool_result, end, done. ` +
-        `Validation errors: ${result.error.message}`,
+      `Unknown or invalid Codex CLI output type: "${typeField}". Expected one of: start, message, tool_call, tool_result, end, done. Validation errors: ${result.error.message}`,
       jsonString,
       result.error
     );
