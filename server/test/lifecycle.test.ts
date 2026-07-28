@@ -69,6 +69,55 @@ test('file poller delegates application updates and external status through port
   assert.equal(external.has('session-1'), true);
 });
 
+test('file poller coalesces overlapping cycles', async () => {
+  let resolvePoll:
+    | ((result: { updated: Map<string, string>; mtimes: Map<string, number> }) => void)
+    | undefined;
+  let pollCalls = 0;
+  const poller = createFilePoller<string, string>(
+    { intervalMs: 5_000, externalGraceMs: 30_000, verbose: false },
+    {
+      getMtimes: () => new Map(),
+      setMtimes: () => undefined,
+      collectActiveIds: () => new Set(),
+      poll: async () => {
+        pollCalls += 1;
+        return await new Promise((resolve) => {
+          resolvePoll = resolve;
+        });
+      },
+      pruneCompletionSuppressions: () => undefined,
+      isCompletionSuppressed: () => false,
+      externalActivity: {
+        entries: () => new Map<string, number>().entries(),
+        has: () => false,
+        set: () => undefined,
+        delete: () => undefined,
+      },
+      findConversationId: () => undefined,
+      broadcastStatus: () => undefined,
+      applyUpdate: async () => null,
+      broadcastUpdates: () => undefined,
+      pruneTracking: () => undefined,
+    }
+  );
+
+  const first = poller.runOnce();
+  const second = poller.runOnce();
+  assert.equal(first, second);
+  assert.equal(pollCalls, 1);
+
+  assert.ok(resolvePoll);
+  resolvePoll({ updated: new Map(), mtimes: new Map() });
+  await Promise.all([first, second]);
+
+  const third = poller.runOnce();
+  assert.equal(pollCalls, 2);
+  assert.ok(resolvePoll);
+  resolvePoll({ updated: new Map(), mtimes: new Map() });
+  await third;
+});
+
 test('port guard kills an approved listener and verifies release', async () => {
   const calls: string[] = [];
   let checks = 0;

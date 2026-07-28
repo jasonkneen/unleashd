@@ -40,6 +40,8 @@ export function createFilePoller<TUpdate, TBroadcast>(
   options: FilePollerOptions,
   ports: FilePollerPorts<TUpdate, TBroadcast>
 ): FilePoller {
+  let inFlight: Promise<void> | null = null;
+
   async function pollOnce(): Promise<void> {
     try {
       const activeIdsAtPollStart = ports.collectActiveIds();
@@ -93,10 +95,21 @@ export function createFilePoller<TUpdate, TBroadcast>(
     }
   }
 
+  function runOnce(): Promise<void> {
+    if (inFlight) return inFlight;
+
+    const cycle = pollOnce();
+    const trackedCycle = cycle.finally(() => {
+      if (inFlight === trackedCycle) inFlight = null;
+    });
+    inFlight = trackedCycle;
+    return trackedCycle;
+  }
+
   return {
-    runOnce: pollOnce,
+    runOnce,
     start() {
-      return setInterval(() => void pollOnce(), options.intervalMs);
+      return setInterval(() => void runOnce(), options.intervalMs);
     },
   };
 }

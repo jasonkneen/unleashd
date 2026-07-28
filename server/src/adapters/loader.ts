@@ -26,8 +26,11 @@ import { OPENCODE_PART_DIR, getOpenCodeSessionMtime } from './registry';
 interface DiscoveredFile {
   filePath: string;
   mtimeMs: number;
+  sizeBytes: number;
   adapter: DiskAdapter;
 }
+
+const DEFAULT_MAX_IN_FLIGHT_PARSE_BYTES = 256 * 1024 * 1024;
 
 // =============================================================================
 // Phase 1 — discover all files across all adapters, sorted by mtime desc
@@ -66,10 +69,13 @@ async function discoverAll(adapters: DiskAdapter[]): Promise<DiscoveredFile[]> {
               // for mtime ordering; the real mtime is computed as a composite below.
               const mtimeMs = await getOpenCodeSessionMtime(filePath, OPENCODE_PART_DIR);
               if (mtimeMs <= 0) return null;
-              return { filePath, mtimeMs, adapter };
+              // OpenCode sessions are directories whose parser reads many small
+              // files. Charge a small non-zero weight; JSONL files are the
+              // dominant peak-memory risk and have an exact stat size below.
+              return { filePath, mtimeMs, sizeBytes: 1, adapter };
             }
             const stat = await fs.promises.stat(filePath);
-            return { filePath, mtimeMs: stat.mtimeMs, adapter };
+            return { filePath, mtimeMs: stat.mtimeMs, sizeBytes: stat.size, adapter };
           } catch {
             // File may have been deleted between discoverFiles() and stat()
             return null;
@@ -103,14 +109,42 @@ async function discoverAll(adapters: DiskAdapter[]): Promise<DiscoveredFile[]> {
 async function forEachWithConcurrency<T>(
   items: T[],
   concurrency: number,
+  maxInFlightWeight: number,
+  getWeight: (item: T) => number,
   fn: (item: T) => Promise<void>
 ): Promise<void> {
   let nextIndex = 0;
+  let availableWeight = maxInFlightWeight;
+  const waiters: Array<{ weight: number; resolve: () => void }> = [];
+
+  function drainWaiters(): void {
+    while (waiters.length > 0 && waiters[0].weight <= availableWeight) {
+      const waiter = waiters.shift();
+      if (!waiter) return;
+      availableWeight -= waiter.weight;
+      waiter.resolve();
+    }
+  }
+
+  async function acquire(weight: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      waiters.push({ weight, resolve });
+      drainWaiters();
+    });
+  }
 
   async function worker(): Promise<void> {
     while (nextIndex < items.length) {
       const index = nextIndex++;
-      await fn(items[index]);
+      const item = items[index];
+      const weight = Math.min(maxInFlightWeight, Math.max(1, Math.ceil(getWeight(item))));
+      await acquire(weight);
+      try {
+        await fn(item);
+      } finally {
+        availableWeight += weight;
+        drainWaiters();
+      }
     }
   }
 
@@ -189,14 +223,28 @@ export async function loadAllConversations(
     offset?: number;
     concurrency?: number;
     batchSize?: number;
+    maxInFlightParseBytes?: number;
+    adapters?: readonly DiskAdapter[];
   } = {}
 ): Promise<LoadResult> {
-  const { onProgress, limit, offset = 0, concurrency = 10, batchSize = 50 } = options;
+  const {
+    onProgress,
+    limit,
+    offset = 0,
+    concurrency = 10,
+    batchSize = 50,
+    maxInFlightParseBytes = DEFAULT_MAX_IN_FLIGHT_PARSE_BYTES,
+    adapters = diskAdapters,
+  } = options;
 
   const normalizedConcurrency =
     Number.isFinite(concurrency) && concurrency > 0 ? Math.floor(concurrency) : 10;
   const normalizedBatchSize =
     Number.isFinite(batchSize) && batchSize > 0 ? Math.floor(batchSize) : 50;
+  const normalizedMaxInFlightParseBytes =
+    Number.isFinite(maxInFlightParseBytes) && maxInFlightParseBytes > 0
+      ? Math.floor(maxInFlightParseBytes)
+      : DEFAULT_MAX_IN_FLIGHT_PARSE_BYTES;
   const normalizedOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
   const normalizedLimit =
     typeof limit === 'number' && Number.isFinite(limit) && limit > 0
@@ -206,7 +254,7 @@ export async function loadAllConversations(
   // Phase 1: Discover all files (sorted by mtime descending)
   const discoverStart = performance.now();
   console.log('Discovering persisted conversation files...');
-  const files = await discoverAll(diskAdapters);
+  const files = await discoverAll([...adapters]);
   const discoverTimeMs = performance.now() - discoverStart;
 
   const startIndex = Math.min(normalizedOffset, files.length);
@@ -216,7 +264,7 @@ export async function loadAllConversations(
   const filesToParse = files.slice(startIndex, endIndex);
 
   console.log(
-    `Discovered ${files.length} persisted conversation sources in ${discoverTimeMs.toFixed(0)}ms (sorted by mtime), parsing ${filesToParse.length} with concurrency=${normalizedConcurrency}...`
+    `Discovered ${files.length} persisted conversation sources in ${discoverTimeMs.toFixed(0)}ms (sorted by mtime), parsing ${filesToParse.length} with concurrency=${normalizedConcurrency}, in-flight source budget=${Math.ceil(normalizedMaxInFlightParseBytes / 1024 / 1024)}MB...`
   );
 
   // Phase 2: Parse files in parallel with batched progress callbacks.
@@ -224,7 +272,11 @@ export async function loadAllConversations(
   // conversations Map), so we skip building a redundant conversations Map here —
   // avoids doubling peak memory by holding two copies of every parsed conversation.
   const conversations = onProgress ? null : new Map<string, DiscoveredConversation>();
-  const mtimes = new Map<string, number>();
+  // The mtime index is a discovery baseline, not a list of hydrated files.
+  // Recording every source is what makes `limit` a real hydration cap: omitted
+  // history must not look "new" to the first poll and trigger an accidental
+  // full-history parse.
+  const mtimes = new Map(files.map((file) => [file.filePath, file.mtimeMs]));
 
   // Running accumulators for parse timing — avoids allocating a 1500-element array
   // just to compute summary stats that are immediately discarded after logging.
@@ -238,32 +290,37 @@ export async function loadAllConversations(
 
   const parseStart = performance.now();
 
-  await forEachWithConcurrency(filesToParse, normalizedConcurrency, async (file) => {
-    const result = await parseOneFile(file);
-    if (result.mtimeMs > 0) mtimes.set(result.filePath, result.mtimeMs);
+  await forEachWithConcurrency(
+    filesToParse,
+    normalizedConcurrency,
+    normalizedMaxInFlightParseBytes,
+    (file) => file.sizeBytes,
+    async (file) => {
+      const result = await parseOneFile(file);
 
-    const t = result.parseTimeMs;
-    if (t < parseTimeMin) parseTimeMin = t;
-    if (t > parseTimeMax) parseTimeMax = t;
-    parseTimeSum += t;
-    parseTimeCount++;
+      const t = result.parseTimeMs;
+      if (t < parseTimeMin) parseTimeMin = t;
+      if (t > parseTimeMax) parseTimeMax = t;
+      parseTimeSum += t;
+      parseTimeCount++;
 
-    if (result.conversation) {
-      conversations?.set(result.conversation.sessionId, result.conversation);
-      batchBuffer.push(result.conversation);
-      conversationCount++;
+      if (result.conversation) {
+        conversations?.set(result.conversation.sessionId, result.conversation);
+        batchBuffer.push(result.conversation);
+        conversationCount++;
+      }
+
+      filesProcessed++;
+
+      if (onProgress && batchBuffer.length >= normalizedBatchSize) {
+        // Detach the full batch before awaiting the consumer. Other parser
+        // workers may complete while hydration is in progress.
+        const batch = batchBuffer;
+        batchBuffer = [];
+        await onProgress(batch, { loaded: filesProcessed, total: filesToParse.length });
+      }
     }
-
-    filesProcessed++;
-
-    if (onProgress && batchBuffer.length >= normalizedBatchSize) {
-      // Detach the full batch before awaiting the consumer. Other parser
-      // workers may complete while hydration is in progress.
-      const batch = batchBuffer;
-      batchBuffer = [];
-      await onProgress(batch, { loaded: filesProcessed, total: filesToParse.length });
-    }
-  });
+  );
 
   // Emit any remaining conversations in the final batch
   if (onProgress && batchBuffer.length > 0) {
