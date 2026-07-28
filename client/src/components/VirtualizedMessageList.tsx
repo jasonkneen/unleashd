@@ -1,7 +1,17 @@
 import type { Message } from '@unleashd/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Break, Root, Text } from 'mdast';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ComponentPropsWithoutRef } from 'react';
+import {
+  isValidElement,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import Markdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -234,12 +244,110 @@ function getCodeText(children: unknown): string | null {
   return null;
 }
 
+function getRawCodeText(children: unknown): string | null {
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const rawCode = getRawCodeText(child);
+      if (rawCode) return rawCode;
+    }
+    return null;
+  }
+
+  if (!isValidElement<Record<string, unknown>>(children)) return null;
+
+  const rawCode = children.props['data-raw-code'];
+  if (typeof rawCode === 'string' && rawCode.length > 0) return rawCode;
+
+  return getRawCodeText(children.props.children);
+}
+
+function CodeBlockFrame({
+  children,
+  rawCode,
+  ...preProps
+}: ComponentPropsWithoutRef<'pre'> & { rawCode: string | null }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    };
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (!rawCode) return;
+
+    try {
+      await navigator.clipboard.writeText(rawCode);
+      setCopied(true);
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.warn('[VirtualizedMessageList] Failed to copy code block:', error);
+    }
+  }, [rawCode]);
+
+  return (
+    <div className="message-code-block">
+      {rawCode && (
+        <button
+          type="button"
+          className={`message-code-copy-btn${copied ? ' copied' : ''}`}
+          onClick={handleCopy}
+          title={copied ? 'Copied' : 'Copy code'}
+          aria-label={copied ? 'Code copied' : 'Copy code'}
+        >
+          {copied ? (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          ) : (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          )}
+        </button>
+      )}
+      <pre {...preProps}>{children}</pre>
+    </div>
+  );
+}
+
 // -- Markdown component overrides ---------------------------------------------
 // Factory returns a stable Components object keyed on `workingDirectory` so
 // react-markdown doesn't re-mount on every render. Relative file paths are
 // resolved against workingDirectory; absolute paths pass through unchanged.
 function makeMarkdownComponents(workingDirectory: string): Components {
   return {
+    pre({ children, ...rest }) {
+      return (
+        <CodeBlockFrame rawCode={getRawCodeText(children)} {...rest}>
+          {children}
+        </CodeBlockFrame>
+      );
+    },
     a({ href, children, ...rest }) {
       const previewableLocalHref = href ? getPreviewableLocalHref(href) : null;
       if (previewableLocalHref) {
@@ -261,21 +369,22 @@ function makeMarkdownComponents(workingDirectory: string): Components {
     },
     // Thin dispatcher: classify once, switch exhaustively, zero work in cases.
     code({ children, className, ...rest }) {
-      const text = getCodeText(children)?.trim() ?? null;
+      const rawText = getCodeText(children);
+      const text = rawText?.trim() ?? null;
       const content = classifyCodeContent(text, className);
 
       switch (content.kind) {
         case 'empty':
         case 'plain_code':
           return (
-            <code className={className} {...rest}>
+            <code className={className} data-raw-code={rawText ?? undefined} {...rest}>
               {children}
             </code>
           );
 
         case 'syntax_highlighted':
           return (
-            <code className={content.className} {...rest}>
+            <code className={content.className} data-raw-code={rawText ?? undefined} {...rest}>
               {children}
             </code>
           );
@@ -288,7 +397,7 @@ function makeMarkdownComponents(workingDirectory: string): Components {
           // all-or-nothing: if ANY line wasn't a valid path, the ENTIRE block
           // lost FilePreview functionality.
           return (
-            <code className={className} {...rest}>
+            <code className={className} data-raw-code={rawText ?? undefined} {...rest}>
               {content.entries.map((entry, i) => (
                 <span key={i}>
                   {entry.kind === 'file_path' ? (
@@ -321,18 +430,25 @@ function makeMarkdownComponents(workingDirectory: string): Components {
             }
           }
           return (
-            <a href={content.url} target="_blank" rel="noopener noreferrer">
+            <a
+              href={content.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-raw-code={rawText ?? undefined}
+            >
               <code {...rest}>{children}</code>
             </a>
           );
 
         case 'single_file_path':
           return (
-            <FilePreview
-              path={content.path}
-              type={content.type}
-              workingDirectory={workingDirectory}
-            />
+            <span data-raw-code={rawText ?? undefined}>
+              <FilePreview
+                path={content.path}
+                type={content.type}
+                workingDirectory={workingDirectory}
+              />
+            </span>
           );
       }
     },

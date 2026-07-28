@@ -1,10 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import test from 'node:test';
 import { executeCommand } from '@nbardy/agent-cli';
 import { parseJsonlFile } from '../src/adapters/jsonl';
 
-async function wait(ms: number) {
+const liveToolIntegrationEnabled = process.env.UNLEASHD_LIVE_TOOL_INTEGRATION === '1';
+
+async function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -95,4 +98,8 @@ async function runTest() {
   console.log('[TEST] SUCCESS! Disk parsing matches expected format.');
 }
 
-runTest().catch(console.error);
+test(
+  'live Claude tool output matches the persisted session parser',
+  { skip: !liveToolIntegrationEnabled },
+  runTest
+);

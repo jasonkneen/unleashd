@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Conversation } from '@unleashd/shared';
+import { shouldIgnoreWorkingDirectory } from '../config';
 import type { DiskAdapter, LoadProgressCallback, LoadResult, PollResult } from './disk-adapter';
 import { sessionToConversation } from './disk-adapter';
 import { extractCodexSessionIdFromFilename } from './jsonl';
@@ -139,6 +140,12 @@ async function parseOneFile(file: DiscoveredFile): Promise<ParsedResult> {
       return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation: null, parseTimeMs };
     }
 
+    // Drop sessions whose workingDirectory matches a user-configured ignore pattern
+    // (~/.agent-viewer/config.json — see server/src/config.ts).
+    if (shouldIgnoreWorkingDirectory(session.workingDirectory)) {
+      return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation: null, parseTimeMs };
+    }
+
     const conversation = sessionToConversation(session);
 
     // null = hidden test conversation ([_HIDE_TEST_]) or empty messages — drop at ingestion.
@@ -225,14 +232,6 @@ export async function loadAllConversations(
   const conversations = onProgress ? null : new Map<string, Conversation>();
   const mtimes = new Map<string, number>();
 
-  // Add ALL discovered files to the mtimes map immediately, so file watcher tracks them
-  // even if they are older and skipped during the initial parsing phase.
-  for (const file of files) {
-    if (file.mtimeMs > 0) {
-      mtimes.set(file.filePath, file.mtimeMs);
-    }
-  }
-
   // Running accumulators for parse timing — avoids allocating a 1500-element array
   // just to compute summary stats that are immediately discarded after logging.
   let parseTimeMin = Number.POSITIVE_INFINITY,
@@ -247,6 +246,7 @@ export async function loadAllConversations(
 
   await forEachWithConcurrency(filesToParse, normalizedConcurrency, async (file) => {
     const result = await parseOneFile(file);
+    if (result.mtimeMs > 0) mtimes.set(result.filePath, result.mtimeMs);
 
     const t = result.parseTimeMs;
     if (t < parseTimeMin) parseTimeMin = t;
@@ -263,14 +263,17 @@ export async function loadAllConversations(
     filesProcessed++;
 
     if (onProgress && batchBuffer.length >= normalizedBatchSize) {
-      onProgress(batchBuffer, { loaded: filesProcessed, total: filesToParse.length });
+      // Detach the full batch before awaiting the consumer. Other parser
+      // workers may complete while hydration is in progress.
+      const batch = batchBuffer;
       batchBuffer = [];
+      await onProgress(batch, { loaded: filesProcessed, total: filesToParse.length });
     }
   });
 
   // Emit any remaining conversations in the final batch
   if (onProgress && batchBuffer.length > 0) {
-    onProgress(batchBuffer, { loaded: filesProcessed, total: filesToParse.length });
+    await onProgress(batchBuffer, { loaded: filesProcessed, total: filesToParse.length });
   }
 
   const parseTimeMs = performance.now() - parseStart;
@@ -384,6 +387,7 @@ export async function pollForChanges(
         // Re-parse the changed session
         const session = await adapter.parseFile(filePath);
         if (!session) continue;
+        if (shouldIgnoreWorkingDirectory(session.workingDirectory)) continue;
 
         const conversation = sessionToConversation(session);
         // null = hidden test conversation ([_HIDE_TEST_]) — dropped at ingestion.

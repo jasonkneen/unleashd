@@ -7,6 +7,7 @@ import { allConversationsAtom, conversationsAtom } from './atoms/conversations';
 import { mergeModeAtom } from './atoms/mergeAtoms';
 import { jotaiStore } from './atoms/store';
 import { Chat } from './components/Chat';
+import { BuddiesDashboard } from './components/BuddiesDashboard';
 import { ConfigDropdown } from './components/ConfigDropdown';
 import { Gallery } from './components/Gallery';
 import { MergeModal } from './components/MergeModal';
@@ -90,6 +91,8 @@ function AppLayout() {
             <Routes>
               <Route path="/" element={<Gallery />} />
               <Route path="/done" element={<Gallery filter="done" />} />
+              <Route path="/buddies" element={<BuddiesDashboard />} />
+              <Route path="/buddies/:buddyId" element={<BuddiesDashboard />} />
               <Route path="/workers" element={<SwarmDashboard />} />
               <Route path="/workers/detail" element={<SwarmDetail />} />
               <Route path="/workers/analytics" element={<SwarmAnalytics />} />

@@ -9,7 +9,13 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import type {
+  ConfigResolution,
+  ConfigError,
   Conversation as ConversationData,
+  ConversationConfig,
+  ConversationConfigPatch,
+  ConversationConfigState,
+  GeneralCommandError,
   Message,
   ModelId,
   OompaCycle,
@@ -20,16 +26,24 @@ import type {
   OompaWorkerStatus,
   Provider as ProviderName,
   QueuedMessage,
+  ResolvedExecutionConfig,
   ServerMessage,
   SubAgent,
+  UIState,
 } from '@unleashd/shared';
 import {
   FORK_CAPABLE_PROVIDERS,
+  PROTOCOL_INFO,
+  UIStateSchema,
   buildMergeReviewPrompt,
+  ConversationConfigSchema,
+  createDefaultConversationConfig,
+  defaultReasoningEffortForProvider,
   effortLevelsForProvider,
-  fromCodexModelId,
   isEffortValidForProvider,
+  isModelIdValidForProvider,
   mergeReviewDocPath,
+  modelValidationHint,
   normalizeModelId,
   providerSupportsFork,
   safeParseClientMessage,
@@ -55,6 +69,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadAllConversations, pollForChanges } from './adapters/loader';
 import { formatToolUse, isCompletionOnlyToolUse } from './adapters/tool-format';
+import { setIgnorePatterns } from './config';
 import {
   EXTERNAL_GRACE_MS,
   FILE_POLL_INTERVAL_MS,
@@ -70,8 +85,16 @@ import {
   TURN_TIMEOUT_KILL_GRACE_MS,
   USAGE_CACHE_TTL_MS,
 } from './constants/timeouts';
+import {
+  ConversationConfigService,
+  ConversationTombstonedError,
+} from './conversations/config-service';
+import { ConversationConfigStore } from './conversations/config-store';
 import { type ProviderEvent, getProvider, providers } from './providers';
-import { isModelIdValidForProvider, modelValidationHint } from './providers/model-validation';
+import {
+  createProviderCatalog,
+  resolveConfigAgainstProviderCatalog,
+} from './providers/catalog-service';
 import {
   extractCodexCollabToolInput,
   getCodexSubagentCurrentAction,
@@ -90,6 +113,49 @@ const VERBOSE = process.env.VERBOSE === '1' || process.argv.includes('--verbose'
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+const APP_DATA_DIR = path.resolve(
+  process.env.UNLEASHD_DATA_DIR ?? path.join(os.homedir(), '.agent-viewer')
+);
+const conversationConfigStore = new ConversationConfigStore({
+  appDataRoot: APP_DATA_DIR,
+  logger: {
+    warn: (warning) => console.warn('[conversation-config]', warning),
+  },
+});
+const conversationConfigService = new ConversationConfigService({
+  store: conversationConfigStore,
+  resolver: {
+    resolve: async (config) => resolveConfigAgainstProviderCatalog(config),
+  },
+});
+let buddiesStorePromise:
+  | Promise<InstanceType<(typeof import('@nbardy/buddies'))['BuddiesStore']>>
+  | null = null;
+
+class BuddiesUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'Buddies integration is unavailable. Install the optional @nbardy/buddies package to enable it.',
+      { cause }
+    );
+    this.name = 'BuddiesUnavailableError';
+  }
+}
+
+function getBuddiesStore() {
+  buddiesStorePromise ??= import('@nbardy/buddies').then(
+    ({ BuddiesStore }) => new BuddiesStore(),
+    (error) => {
+      throw new BuddiesUnavailableError(error);
+    }
+  );
+  return buddiesStorePromise;
+}
+
+function sendBuddiesError(res: Response, error: unknown, fallbackStatus: number): void {
+  const status = error instanceof BuddiesUnavailableError ? 503 : fallbackStatus;
+  res.status(status).json({ error: error instanceof Error ? error.message : String(error) });
+}
 
 // Store active conversations
 const conversations = new Map<string, Conversation>();
@@ -308,6 +374,49 @@ function broadcastToAll(data: BroadcastData): void {
   });
 }
 
+function sendToClient(ws: WebSocket, data: ServerMessage): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  }
+}
+
+function sendLegacyError(ws: WebSocket, message: string): void {
+  sendToClient(ws, { type: 'error', message });
+}
+
+function validateWorkingDirectory(workingDirectory: string): GeneralCommandError | undefined {
+  try {
+    return fs.statSync(workingDirectory).isDirectory()
+      ? undefined
+      : { code: 'invalid_directory', message: 'Path is not a directory' };
+  } catch {
+    return {
+      code: 'invalid_directory',
+      message: `No matching folder: ${workingDirectory}`,
+    };
+  }
+}
+
+function sendCommandRejected(
+  ws: WebSocket,
+  input: {
+    commandId: string;
+    conversationId?: string;
+    error: ConfigError | GeneralCommandError;
+    authoritativeConversation?: ConversationData;
+  }
+): void {
+  sendToClient(ws, {
+    type: 'command_rejected',
+    commandId: input.commandId,
+    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    error: input.error,
+    ...(input.authoritativeConversation
+      ? { authoritativeConversation: input.authoritativeConversation }
+      : {}),
+  });
+}
+
 function stripAnsi(value: string): string {
   return value.replace(/\x1B\[[0-9;]*m/g, '');
 }
@@ -395,10 +504,8 @@ const globalSpawnMutex = {
 interface ConversationOptions {
   id: string;
   workingDirectory?: string | null;
-  provider?: ProviderName;
+  configState: ConversationConfigState;
   existingSessionId?: string;
-  model?: ModelId;
-  reasoningEffort?: string;
   isWorker?: boolean;
   swarmId?: string | null;
   workerId?: string | null;
@@ -411,12 +518,28 @@ interface ConversationOptions {
   mergeChildMeta?: MergeChildMeta | null;
 }
 
-// Canonical reasoning-effort default per provider. Claude and Codex are the
-// only providers with an effort flag today; others stay undefined forever.
-function defaultReasoningEffortForProvider(provider: ProviderName): string | undefined {
-  if (provider === 'claude') return 'high';
-  if (provider === 'codex') return 'xhigh';
-  return undefined;
+function configFromLegacyOptions(input: {
+  provider: ProviderName;
+  model?: ModelId;
+  reasoningEffort?: string | null;
+  applyReasoningDefault: boolean;
+}): ConversationConfig {
+  const normalizedModel = normalizeModelId(input.provider, input.model);
+  return {
+    ...createDefaultConversationConfig(input.provider),
+    model:
+      normalizedModel === undefined
+        ? { mode: 'default' }
+        : { mode: 'explicit', modelId: normalizedModel },
+    reasoning:
+      input.reasoningEffort === null
+        ? { mode: 'disabled' }
+        : input.reasoningEffort !== undefined
+          ? { mode: 'explicit', effort: input.reasoningEffort }
+          : input.applyReasoningDefault
+            ? { mode: 'default' }
+            : { mode: 'disabled' },
+  };
 }
 
 class Conversation extends EventEmitter {
@@ -430,10 +553,9 @@ class Conversation extends EventEmitter {
   isStreaming: boolean;
   createdAt: Date;
   workingDirectory: string;
-  provider: ProviderName;
-  model: ModelId | undefined; // Provider-specific base model identifier (e.g. 'opus', 'gpt-5.4')
-  // Standalone reasoning level for claude + codex. Undefined for providers without reasoning.
-  reasoningEffort: string | undefined;
+  config: ConversationConfig;
+  configRevision: number;
+  configResolution: ConfigResolution;
   // Oompa worker detection — true if first user message started with "[oompa]".
   // Set during JSONL loading, preserved across restarts.
   isWorker: boolean;
@@ -505,10 +627,8 @@ class Conversation extends EventEmitter {
     const {
       id,
       workingDirectory = null,
-      provider = 'claude',
+      configState,
       existingSessionId,
-      model,
-      reasoningEffort,
       isWorker = false,
       swarmId = null,
       workerId = null,
@@ -532,14 +652,9 @@ class Conversation extends EventEmitter {
     this.createdAt = new Date();
     // Resolve to absolute path: sessions are identified by absolute path in oompa
     this.workingDirectory = path.resolve(workingDirectory || process.cwd());
-    this.provider = provider;
-    this.model = normalizeModelId(provider, model);
-    // Canonical server-side default per provider. Applied in the constructor
-    // so every creation path (WS new_conversation, merge forks, swarm spawns,
-    // test setup) yields a Conversation with a valid effort for the provider.
-    // claude defaults to 'high', codex to 'xhigh'; other providers have no
-    // effort flag and stay undefined regardless.
-    this.reasoningEffort = reasoningEffort ?? defaultReasoningEffortForProvider(provider);
+    this.config = configState.config;
+    this.configRevision = configState.revision;
+    this.configResolution = configState.resolution;
     this.isWorker = isWorker;
     this.swarmId = swarmId;
     this.workerId = workerId;
@@ -572,7 +687,11 @@ class Conversation extends EventEmitter {
    *
    * First turn omits resumeSessionId; subsequent turns resume with the captured session ID.
    */
-  private spawnForMessage(content: string, forkSourceSessionId?: string): void {
+  private spawnForMessage(
+    content: string,
+    executionConfig: ResolvedExecutionConfig,
+    forkSourceSessionId?: string
+  ): void {
     if (this.process || this.isRunning) {
       console.warn(`[${this.id}] Already processing a message, ignoring`);
       return;
@@ -597,20 +716,6 @@ class Conversation extends EventEmitter {
     this._processStartTime = Date.now();
     this._primeSwarmBaseline();
 
-    // Self-heal legacy in-memory codex conversations that still carry a composite
-    // model id (e.g. "gpt-5.4-xhigh") from the pre-refactor wire contract. Decompose
-    // once so downstream uses base model + separate reasoningEffort.
-    if (this.provider === 'codex' && typeof this.model === 'string') {
-      const { baseModel, effort } = fromCodexModelId(this.model);
-      if (baseModel !== this.model) {
-        console.warn(
-          `[${this.id}] Migrating legacy codex composite model '${this.model}' → base='${baseModel}' effort='${effort ?? this.reasoningEffort ?? 'none'}'`
-        );
-        this.model = baseModel as ModelId;
-        this.reasoningEffort = effort ?? this.reasoningEffort;
-      }
-    }
-
     // Per-provider narrowing: ExecuteCommandRequest is a discriminated union
     // keyed on `harness`. Reasoning effort is a pass-through string — the
     // `set_reasoning_effort` / `new_conversation` validation rejects any level
@@ -620,7 +725,7 @@ class Conversation extends EventEmitter {
       mode: 'conversation' as const,
       prompt: content,
       cwd: this.workingDirectory,
-      model: this.model,
+      model: executionConfig.modelId,
       resumeSessionId: shouldResume ? this.sessionId : undefined,
       forkSessionId: forking ? forkSourceSessionId : undefined,
       yolo: true,
@@ -628,19 +733,19 @@ class Conversation extends EventEmitter {
       debugRawEvents: AGENT_CLI_DEBUG_EVENTS,
     };
     const turn = executeCommand(
-      this.provider === 'claude'
+      executionConfig.provider === 'claude'
         ? {
             harness: 'claude',
             ...baseRequest,
-            reasoningEffort: this.reasoningEffort,
+            reasoningEffort: executionConfig.reasoningEffort,
           }
-        : this.provider === 'codex'
+        : executionConfig.provider === 'codex'
           ? {
               harness: 'codex',
               ...baseRequest,
-              reasoningEffort: this.reasoningEffort,
+              reasoningEffort: executionConfig.reasoningEffort,
             }
-          : { harness: this.provider, ...baseRequest }
+          : { harness: executionConfig.provider, ...baseRequest }
     );
 
     this.process = turn.child;
@@ -663,6 +768,7 @@ class Conversation extends EventEmitter {
               unregisterSessionAlias(oldSessionId, { keepKnown: true });
             }
             registerSessionAlias(event.sessionId, this.id);
+            await persistCurrentConversationSession(this, event.sessionId);
             broadcastToAll({
               type: 'session_bound',
               conversationId: this.id,
@@ -743,13 +849,14 @@ class Conversation extends EventEmitter {
     });
 
     void turn.completed
-      .then(({ exitCode, sessionId, reason }) => {
+      .then(async ({ exitCode, sessionId, reason }) => {
         this._clearTurnWatchdogs();
         if (sessionId && sessionId !== this.sessionId) {
           const oldSessionId = this.sessionId;
           this.sessionId = sessionId;
           unregisterSessionAlias(oldSessionId, { keepKnown: true });
           registerSessionAlias(sessionId, this.id);
+          await persistCurrentConversationSession(this, sessionId);
         }
 
         const durationMs = Date.now() - this._processStartTime;
@@ -994,7 +1101,9 @@ class Conversation extends EventEmitter {
       return null;
     }
 
-    const { phase, receiverThreadIds, prompt, agentStates } = extractCodexCollabToolInput(event.input);
+    const { phase, receiverThreadIds, prompt, agentStates } = extractCodexCollabToolInput(
+      event.input
+    );
     if (phase !== 'completed') {
       return {
         suppressGenericSubagentHandling: true,
@@ -1339,6 +1448,9 @@ class Conversation extends EventEmitter {
       return;
     }
 
+    const executionConfig = this.preflightExecution();
+    if (!executionConfig) return;
+
     // Prepend swarm debug prefix on first message only.
     // UI sees clean content; CLI process gets the full context.
     // Sentinel markers let disk-adapter.ts recover swarmDebugPrefix after server restart
@@ -1426,7 +1538,7 @@ class Conversation extends EventEmitter {
     });
 
     // Spawn CLI process with possibly-prefixed content
-    this.spawnForMessage(cliContent);
+    this.spawnForMessage(cliContent, executionConfig);
   }
 
   /**
@@ -1444,6 +1556,8 @@ class Conversation extends EventEmitter {
       console.warn(`[${this.id}] spawnMergeReviewFork: already running, ignoring`);
       return;
     }
+    const executionConfig = this.preflightExecution();
+    if (!executionConfig) return;
     const userMessage: Message = {
       role: 'user',
       content,
@@ -1461,7 +1575,34 @@ class Conversation extends EventEmitter {
     // id through, let the library handle the rest. Mark _hasStartedSession
     // false so spawnForMessage treats this as a first-turn fork.
     this._hasStartedSession = false;
-    this.spawnForMessage(content, forkSourceSessionId);
+    this.spawnForMessage(content, executionConfig, forkSourceSessionId);
+  }
+
+  private preflightExecution(): ResolvedExecutionConfig | undefined {
+    // Resolve immediately before any message, merge-prefix, or queue mutation.
+    // Catalog changes may affect defaults without changing durable intent.
+    const resolution = this.refreshConfigResolution();
+    if (resolution.status === 'resolved') return resolution.value;
+
+    const errorMessage = `Configuration unavailable: ${resolution.error.message}`;
+    console.error(`[${this.id}] ${errorMessage}`);
+    this.messages.push({
+      role: 'system',
+      content: errorMessage,
+      timestamp: new Date(),
+      completionReason: 'error',
+    });
+    const queued = this.queue[0];
+    if (queued?.status === 'sending') {
+      queued.status = 'pending';
+      this.broadcastQueue();
+    }
+    broadcastToAll({
+      type: 'conversation_updated',
+      reason: 'config',
+      conversation: this.toJSON(),
+    });
+    return undefined;
   }
 
   stop(): void {
@@ -1512,6 +1653,9 @@ class Conversation extends EventEmitter {
     this.sessionId = uuidv4();
     unregisterSessionAlias(oldSessionId, { keepKnown: true });
     registerSessionAlias(this.sessionId, this.id);
+    // This UUID is provisional until the provider confirms it. Persisting it
+    // as current here would make restart treat a never-started session as
+    // resumable.
     this._hasStartedSession = false;
     console.log(
       `[${this.id}] Reset session: ${oldSessionId.substring(0, 8)}... -> ${this.sessionId.substring(0, 8)}...`
@@ -1816,6 +1960,43 @@ class Conversation extends EventEmitter {
     return this.process !== null;
   }
 
+  hasStartedSession(): boolean {
+    return this._hasStartedSession;
+  }
+
+  get provider(): ProviderName {
+    return this.config.provider;
+  }
+
+  private get effectiveConfig() {
+    return this.configResolution.status === 'resolved'
+      ? this.configResolution.value
+      : this.configResolution.lastResolved;
+  }
+
+  get model(): ModelId | undefined {
+    return this.effectiveConfig?.modelId;
+  }
+
+  get reasoningEffort(): string | undefined {
+    return this.effectiveConfig?.reasoningEffort;
+  }
+
+  applyConfigState(state: ConversationConfigState): void {
+    this.config = state.config;
+    this.configRevision = state.revision;
+    this.configResolution = state.resolution;
+  }
+
+  refreshConfigResolution(): ConfigResolution {
+    const lastResolved =
+      this.configResolution.status === 'resolved'
+        ? this.configResolution.value
+        : this.configResolution.lastResolved;
+    this.configResolution = resolveConfigAgainstProviderCatalog(this.config, lastResolved);
+    return this.configResolution;
+  }
+
   // Harness/provider can only be changed before the first turn has started.
   // Once a session has started, provider-specific state (session files, resume
   // IDs, and message history) is no longer safely interchangeable.
@@ -1842,6 +2023,10 @@ class Conversation extends EventEmitter {
       provider: this.provider,
       model: this.model,
       reasoningEffort: this.reasoningEffort,
+      config: this.config,
+      configRevision: this.configRevision,
+      configResolution: this.configResolution,
+      reportedModel: this.modelName,
       subAgents: this.subAgents,
       queue: this.queue,
       isWorker: this.isWorker,
@@ -1858,90 +2043,49 @@ class Conversation extends EventEmitter {
   }
 }
 
-// =============================================================================
-// WebSocket Message Types
-// =============================================================================
+async function persistCurrentConversationSession(
+  conversation: Conversation,
+  sessionId: string
+): Promise<void> {
+  try {
+    await conversationConfigService.setCurrentSession(conversation.id, {
+      provider: conversation.config.provider,
+      sessionId,
+    });
+  } catch (error) {
+    console.warn(
+      `[conversation-config] Failed to bind session ${sessionId} to ${conversation.id}:`,
+      error
+    );
+  }
+}
 
-interface NewConversationData {
-  type: 'new_conversation';
-  id?: string; // Client-generated UUID for optimistic insert
-  workingDirectory?: string;
-  provider?: ProviderName;
-  model?: ModelId; // Provider-specific base model identifier (e.g. 'opus', 'gpt-5.4')
-  reasoningEffort?: string; // Standalone reasoning level (claude + codex)
-  swarmDebugPrefix?: string; // Debug prefix prepended to first CLI message
+function creationFingerprint(input: {
+  workingDirectory: string;
+  config: ConversationConfig;
+  initialMessage?: string;
+  swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
+}): string {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify({
+        workingDirectory: input.workingDirectory,
+        config: input.config,
+        initialMessage: input.initialMessage ?? null,
+        swarmDebugPrefix: input.swarmDebugPrefix ?? null,
+        resumedFromConversationId: input.resumedFromConversationId ?? null,
+      })
+    )
+    .digest('hex');
 }
 
-interface SendMessageData {
-  type: 'send_message';
-  conversationId: string;
-  content: string;
+async function dispatchCreationMessageIfPending(conversation: Conversation): Promise<void> {
+  const claimed = await conversationConfigService.claimInitialMessageDispatch(conversation.id);
+  const initialMessage = claimed?.creation?.initialMessage;
+  if (initialMessage) conversation.enqueueMessage(initialMessage);
 }
-
-interface StopConversationData {
-  type: 'stop_conversation';
-  conversationId: string;
-}
-
-interface DeleteConversationData {
-  type: 'delete_conversation';
-  conversationId: string;
-}
-
-interface QueueMessageData {
-  type: 'queue_message';
-  conversationId: string;
-  content: string;
-}
-
-interface InterruptAndSendData {
-  type: 'interrupt_and_send';
-  conversationId: string;
-  content: string;
-}
-
-interface CancelQueuedMessageData {
-  type: 'cancel_queued_message';
-  conversationId: string;
-  messageId: string;
-}
-
-interface ClearQueueData {
-  type: 'clear_queue';
-  conversationId: string;
-}
-
-interface SetModelData {
-  type: 'set_model';
-  conversationId: string;
-  model?: ModelId;
-}
-
-interface SetProviderData {
-  type: 'set_provider';
-  conversationId: string;
-  provider: ProviderName;
-}
-
-interface SetReasoningEffortData {
-  type: 'set_reasoning_effort';
-  conversationId: string;
-  value: string | null;
-}
-
-type ClientMessageData =
-  | NewConversationData
-  | SendMessageData
-  | StopConversationData
-  | DeleteConversationData
-  | SetProviderData
-  | QueueMessageData
-  | InterruptAndSendData
-  | CancelQueuedMessageData
-  | ClearQueueData
-  | SetModelData
-  | SetReasoningEffortData;
 
 // =============================================================================
 // WebSocket Handler
@@ -1961,34 +2105,31 @@ wss.on('connection', (ws: WebSocket) => {
     if (ws.readyState !== WebSocket.OPEN) return;
 
     // Send current state (include external running status for accurate initial render)
-    ws.send(
-      JSON.stringify({
-        type: 'init',
-        conversations: Array.from(conversations.values()).map((c) => {
-          const json = c.toJSON();
-          if (externallyRunning.has(c.sessionId) || externallyRunning.has(c.id)) {
-            json.isRunning = true;
-          }
-          return json;
-        }),
-        defaultCwd: process.cwd(),
-        uiState: getActiveUIState(),
-      })
-    );
+    sendToClient(ws, {
+      type: 'init',
+      conversations: Array.from(conversations.values()).map((c) => {
+        const json = c.toJSON();
+        if (externallyRunning.has(c.sessionId) || externallyRunning.has(c.id)) {
+          json.isRunning = true;
+        }
+        return json;
+      }),
+      defaultCwd: process.cwd(),
+      uiState: getActiveUIState(),
+      protocol: PROTOCOL_INFO,
+    });
   })();
 
-  ws.on('message', (message: Buffer | string) => {
+  ws.on('message', async (message: Buffer | string) => {
     try {
       const parsed = JSON.parse(message.toString());
       const result = safeParseClientMessage(parsed);
       if (!result.success) {
-        console.error('[WS] Invalid client message:', result.error.message);
-        ws.send(
-          JSON.stringify({
-            type: 'error',
-            message: `Invalid message: ${result.error.issues.map((i) => i.message).join(', ')}`,
-          })
-        );
+        const issueSummary = result.error.issues
+          .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+          .join('; ');
+        console.error(`[WS] Invalid client message: ${issueSummary}`);
+        sendLegacyError(ws, `Invalid message: ${issueSummary}`);
         return;
       }
       const data = result.data;
@@ -2003,7 +2144,141 @@ wss.on('connection', (ws: WebSocket) => {
         );
       }
 
+      const applyLegacyConfigPatch = async (
+        conv: Conversation,
+        patch: ConversationConfigPatch
+      ): Promise<boolean> => {
+        const result = await conversationConfigService.update(
+          {
+            config: conv.config,
+            revision: conv.configRevision,
+            resolution: conv.configResolution,
+          },
+          {
+            isRunning: conv.isRunning,
+            queueDepth: conv.queue.length,
+            hasStartedSession: conv.hasStartedSession(),
+          },
+          {
+            conversationId: conv.id,
+            commandId: `legacy-${uuidv4()}`,
+            expectedRevision: conv.configRevision,
+            patch,
+          }
+        );
+        if (!result.ok) {
+          sendLegacyError(ws, result.error.message);
+          broadcastToAll({
+            type: 'conversation_created',
+            conversation: conv.toJSON(),
+          });
+          return false;
+        }
+        conv.applyConfigState(result.value.next);
+        broadcastToAll({
+          type: 'conversation_created',
+          conversation: conv.toJSON(),
+        });
+        return true;
+      };
+
       switch (data.type) {
+        case 'create_conversation': {
+          const workingDir = resolveWorkingDirectoryInput(data.workingDirectory);
+          const fingerprint = creationFingerprint({
+            workingDirectory: workingDir,
+            config: data.config,
+            initialMessage: data.initialMessage,
+            swarmDebugPrefix: data.swarmDebugPrefix,
+            resumedFromConversationId: data.resumedFromConversationId,
+          });
+          const existingConversation = conversations.get(data.conversationId);
+          if (existingConversation) {
+            try {
+              await conversationConfigService.createOrReplay({
+                conversationId: data.conversationId,
+                config: data.config,
+                workingDirectory: workingDir,
+                creation: {
+                  commandId: data.commandId,
+                  fingerprint,
+                  initialMessage: data.initialMessage,
+                  swarmDebugPrefix: data.swarmDebugPrefix,
+                  resumedFromConversationId: data.resumedFromConversationId,
+                },
+              });
+              sendToClient(ws, {
+                type: 'conversation_created',
+                commandId: data.commandId,
+                conversation: existingConversation.toJSON(),
+              });
+              await dispatchCreationMessageIfPending(existingConversation);
+            } catch {
+              sendCommandRejected(ws, {
+                commandId: data.commandId,
+                conversationId: data.conversationId,
+                error: {
+                  code: 'create_failed',
+                  message: 'Conversation ID already exists with different configuration',
+                },
+                authoritativeConversation: existingConversation.toJSON(),
+              });
+            }
+            break;
+          }
+
+          try {
+            const persisted = await conversationConfigService.getRecord(data.conversationId);
+            if (!persisted) {
+              const directoryError = validateWorkingDirectory(workingDir);
+              if (directoryError) {
+                sendCommandRejected(ws, {
+                  commandId: data.commandId,
+                  conversationId: data.conversationId,
+                  error: directoryError,
+                });
+                break;
+              }
+            }
+
+            const creation = await conversationConfigService.createOrReplay({
+              conversationId: data.conversationId,
+              config: data.config,
+              workingDirectory: workingDir,
+              creation: {
+                commandId: data.commandId,
+                fingerprint,
+                initialMessage: data.initialMessage,
+                swarmDebugPrefix: data.swarmDebugPrefix,
+                resumedFromConversationId: data.resumedFromConversationId,
+              },
+            });
+            const conv = new Conversation({
+              id: data.conversationId,
+              workingDirectory: creation.record.workingDirectory ?? workingDir,
+              configState: creation.state,
+              existingSessionId: creation.record.currentSession?.sessionId,
+              swarmDebugPrefix: data.swarmDebugPrefix ?? null,
+              resumedFromConversationId: data.resumedFromConversationId ?? null,
+            });
+            conversations.set(conv.id, conv);
+            broadcastToAll({
+              type: 'conversation_created',
+              commandId: data.commandId,
+              conversation: conv.toJSON(),
+            });
+            await dispatchCreationMessageIfPending(conv);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            sendCommandRejected(ws, {
+              commandId: data.commandId,
+              conversationId: data.conversationId,
+              error: { code: 'create_failed', message },
+            });
+          }
+          break;
+        }
+
         case 'new_conversation': {
           // Use client-provided UUID if present (optimistic insert), otherwise generate one
           const id = data.id || uuidv4();
@@ -2017,94 +2292,68 @@ wss.on('connection', (ws: WebSocket) => {
 
           // Validate provider against the registry — no manual list needed
           if (!(provider in providers)) {
-            ws.send(
-              JSON.stringify({
-                type: 'error',
-                message: `Invalid provider: ${provider}. Must be one of: ${Object.keys(providers).join(', ')}.`,
-              })
+            sendLegacyError(
+              ws,
+              `Invalid provider: ${provider}. Must be one of: ${Object.keys(providers).join(', ')}.`
             );
             return;
           }
 
           if (!isModelIdValidForProvider(provider, model)) {
-            ws.send(
-              JSON.stringify({
-                type: 'error',
-                message: `Invalid model '${model}' for provider '${provider}'. Expected ${modelValidationHint(provider)}.`,
-              })
+            sendLegacyError(
+              ws,
+              `Invalid model '${model}' for provider '${provider}'. Expected ${modelValidationHint(provider)}.`
             );
             return;
           }
 
           // Validate directory exists and is accessible
-          try {
-            const stats = fs.statSync(workingDir);
-            if (!stats.isDirectory()) {
-              ws.send(
-                JSON.stringify({
-                  type: 'error',
-                  message: 'Path is not a directory',
-                })
-              );
-              return;
-            }
-          } catch {
-            ws.send(
-              JSON.stringify({
-                type: 'error',
-                message: `No matching folder: ${workingDir}`,
-              })
-            );
+          const legacyDirectoryError = validateWorkingDirectory(workingDir);
+          if (legacyDirectoryError) {
+            sendLegacyError(ws, legacyDirectoryError.message);
             return;
           }
 
           // Reject reasoning levels the selected provider doesn't accept
-          // (claude has 'max' but not 'minimal'; codex is the opposite).
+          // (claude has no 'minimal'; codex includes 'minimal' through 'ultra').
           if (
             data.reasoningEffort !== undefined &&
             !isEffortValidForProvider(provider, data.reasoningEffort)
           ) {
-            ws.send(
-              JSON.stringify({
-                type: 'error',
-                message: `Reasoning effort '${data.reasoningEffort}' is not accepted by provider '${provider}'. Valid: ${effortLevelsForProvider(provider).join(', ') || '(none — provider has no reasoning flag)'}.`,
-              })
+            sendLegacyError(
+              ws,
+              `Reasoning effort '${data.reasoningEffort}' is not accepted by provider '${provider}'. Valid: ${effortLevelsForProvider(provider).join(', ') || '(none — provider has no reasoning flag)'}.`
             );
             return;
           }
 
-          const conv = new Conversation({
-            id,
-            workingDirectory: workingDir,
+          const requestedConfig = configFromLegacyOptions({
             provider,
             model,
             reasoningEffort: data.reasoningEffort,
+            applyReasoningDefault: true,
+          });
+          const configState = await conversationConfigService.create({
+            conversationId: id,
+            config: requestedConfig,
+            workingDirectory: workingDir,
+          });
+          const conv = new Conversation({
+            id,
+            workingDirectory: workingDir,
+            configState,
             swarmDebugPrefix,
             resumedFromConversationId,
           });
-
-          // If no model specified by client, resolve the provider's isDefault model
-          // so the CLI receives the same model the UI shows pre-selected in the dropdown.
-          if (!conv.model) {
-            const providerInfo = providers[conv.provider];
-            if (providerInfo) {
-              const defaultModel = providerInfo.listModels().find((m) => m.isDefault);
-              if (defaultModel) {
-                conv.model = defaultModel.id as ModelId;
-              }
-            }
-          }
 
           conversations.set(id, conv);
 
           // No need to start - we spawn per message now
 
-          ws.send(
-            JSON.stringify({
-              type: 'conversation_created',
-              conversation: conv.toJSON(),
-            })
-          );
+          broadcastToAll({
+            type: 'conversation_created',
+            conversation: conv.toJSON(),
+          });
           break;
         }
 
@@ -2133,6 +2382,7 @@ wss.on('connection', (ws: WebSocket) => {
 
         case 'delete_conversation': {
           const convToDelete = conversations.get(data.conversationId);
+          const deletedDurably = await conversationConfigService.delete(data.conversationId);
           if (convToDelete) {
             convToDelete.stop();
             conversations.delete(data.conversationId);
@@ -2146,13 +2396,55 @@ wss.on('connection', (ws: WebSocket) => {
             unregisterConversationAliases(convToDelete.id);
             clearExternalRunningStatus(convToDelete.sessionId, convToDelete.id);
             clearLocalCompletionSuppression(convToDelete.sessionId, convToDelete.id);
-            ws.send(
-              JSON.stringify({
-                type: 'conversation_deleted',
-                conversationId: data.conversationId,
-              })
-            );
           }
+          if (convToDelete || deletedDurably) {
+            broadcastToAll({
+              type: 'conversation_deleted',
+              conversationId: data.conversationId,
+            });
+          }
+          break;
+        }
+
+        case 'set_conversation_config': {
+          const conv = conversations.get(data.conversationId);
+          if (!conv) {
+            sendCommandRejected(ws, {
+              commandId: data.commandId,
+              conversationId: data.conversationId,
+              error: { code: 'conversation_not_found', message: 'Conversation not found' },
+            });
+            break;
+          }
+          const result = await conversationConfigService.update(
+            {
+              config: conv.config,
+              revision: conv.configRevision,
+              resolution: conv.configResolution,
+            },
+            {
+              isRunning: conv.isRunning,
+              queueDepth: conv.queue.length,
+              hasStartedSession: conv.hasStartedSession(),
+            },
+            data
+          );
+          if (!result.ok) {
+            sendCommandRejected(ws, {
+              commandId: data.commandId,
+              conversationId: data.conversationId,
+              error: result.error,
+              authoritativeConversation: conv.toJSON(),
+            });
+            break;
+          }
+          conv.applyConfigState(result.value.next);
+          broadcastToAll({
+            type: 'conversation_updated',
+            commandId: data.commandId,
+            reason: 'config',
+            conversation: conv.toJSON(),
+          });
           break;
         }
 
@@ -2160,26 +2452,13 @@ wss.on('connection', (ws: WebSocket) => {
           const conv = conversations.get(data.conversationId);
           if (conv) {
             const normalizedModel = normalizeModelId(conv.provider, data.model);
-            if (!isModelIdValidForProvider(conv.provider, normalizedModel)) {
-              ws.send(
-                JSON.stringify({
-                  type: 'error',
-                  message: `Invalid model '${data.model}' for provider '${conv.provider}'. Expected ${modelValidationHint(conv.provider)}.`,
-                })
-              );
-              return;
-            }
-            conv.model = normalizedModel;
-            console.log(
-              `[WS] Model changed for ${data.conversationId}: ${normalizedModel ?? 'default'}`
-            );
-            // Broadcast updated conversation
-            ws.send(
-              JSON.stringify({
-                type: 'conversation_created',
-                conversation: conv.toJSON(),
-              })
-            );
+            await applyLegacyConfigPatch(conv, {
+              kind: 'set_model',
+              model:
+                normalizedModel === undefined
+                  ? { mode: 'default' }
+                  : { mode: 'explicit', modelId: normalizedModel },
+            });
           }
           break;
         }
@@ -2187,38 +2466,12 @@ wss.on('connection', (ws: WebSocket) => {
         case 'set_reasoning_effort': {
           const conv = conversations.get(data.conversationId);
           if (!conv) break;
-          // On any rejection below, also broadcast the current authoritative
-          // Conversation so a client that optimistically applied the bad value
-          // rolls back from the server's reply.
-          const sendRejection = (message: string): void => {
-            ws.send(JSON.stringify({ type: 'error', message }));
-            ws.send(
-              JSON.stringify({
-                type: 'conversation_created',
-                conversation: conv.toJSON(),
-              })
-            );
-          };
-          // Only providers with a reasoning flag (claude + codex) accept this.
-          if (conv.provider !== 'claude' && conv.provider !== 'codex') {
-            sendRejection(`Reasoning effort is not supported for provider '${conv.provider}'.`);
-            return;
-          }
-          // Claude and Codex accept different subsets (claude has max, codex has
-          // minimal — see shared/src/index.ts). Reject mismatches at the boundary.
-          if (!isEffortValidForProvider(conv.provider, data.value ?? undefined)) {
-            sendRejection(
-              `Reasoning effort '${data.value}' is not accepted by provider '${conv.provider}'. Valid: ${effortLevelsForProvider(conv.provider).join(', ')}.`
-            );
-            return;
-          }
-          conv.reasoningEffort = data.value ?? undefined;
-          console.log(
-            `[WS] Reasoning effort changed for ${data.conversationId}: ${conv.reasoningEffort ?? 'standard'}`
-          );
-          broadcastToAll({
-            type: 'conversation_created',
-            conversation: conv.toJSON(),
+          await applyLegacyConfigPatch(conv, {
+            kind: 'set_reasoning',
+            reasoning:
+              data.value === null
+                ? { mode: 'disabled' }
+                : { mode: 'explicit', effort: data.value },
           });
           break;
         }
@@ -2226,37 +2479,10 @@ wss.on('connection', (ws: WebSocket) => {
         case 'set_provider': {
           const conv = conversations.get(data.conversationId);
           if (conv) {
-            if (!(data.provider in providers)) {
-              ws.send(
-                JSON.stringify({
-                  type: 'error',
-                  message: `Invalid provider: ${data.provider}. Must be one of: ${Object.keys(providers).join(', ')}.`,
-                })
-              );
-              return;
-            }
-
-            if (!conv.canChangeProvider()) {
-              ws.send(
-                JSON.stringify({
-                  type: 'error',
-                  message: 'Harness can only be changed before the conversation starts.',
-                })
-              );
-              return;
-            }
-
-            conv.provider = data.provider;
-            // Reset model when switching provider to avoid invalid cross-provider IDs.
-            conv.model = undefined;
-            conv.modelName = null;
-            console.log(`[WS] Provider changed for ${data.conversationId}: ${data.provider}`);
-            ws.send(
-              JSON.stringify({
-                type: 'conversation_created',
-                conversation: conv.toJSON(),
-              })
-            );
+            await applyLegacyConfigPatch(conv, {
+              kind: 'set_provider',
+              provider: data.provider,
+            });
           }
           break;
         }
@@ -2307,12 +2533,15 @@ wss.on('connection', (ws: WebSocket) => {
 // Express Routes
 // =============================================================================
 
-// JSON body parser for API routes
-app.use(express.json());
+// JSON body parser for API routes.
+// Default limit is 100kb which is far too small — queue-message, merge, and
+// other endpoints routinely carry pasted content, inline images, or full
+// conversation histories. Matches client uploads already sized in MB.
+app.use(express.json({ limit: '50mb' }));
 
 // File upload API — saves files to disk and returns absolute paths
 // CLI agents (Claude, Codex) run on the same machine and can read these paths directly.
-const UPLOADS_DIR = path.join(os.homedir(), '.agent-viewer', 'uploads');
+const UPLOADS_DIR = path.join(APP_DATA_DIR, 'uploads');
 
 const uploadStorage = multer.diskStorage({
   destination: (req, _file, cb) => {
@@ -2364,15 +2593,19 @@ app.post('/api/upload', upload.array('files', 20), (req: Request, res: Response)
 });
 
 // Settings API - stored in ~/.agent-viewer/settings.json
-const SETTINGS_DIR = path.join(os.homedir(), '.agent-viewer');
+const SETTINGS_DIR = APP_DATA_DIR;
 const SETTINGS_FILE = path.join(SETTINGS_DIR, 'settings.json');
 
 interface Settings {
   colorPalette: string;
+  // workingDirectory patterns to hide from all UI views.
+  // No "*" → prefix match; contains "*" → glob (e.g. "/tmp/gemini_workspace_*").
+  ignore: string[];
 }
 
 const DEFAULT_SETTINGS: Settings = {
   colorPalette: 'solarized',
+  ignore: [],
 };
 
 // =============================================================================
@@ -2400,6 +2633,7 @@ async function initSettingsCache(): Promise<void> {
       throw new Error(`Failed to load settings: ${(e as Error).message}`);
     }
   }
+  setIgnorePatterns(settingsCache?.ignore ?? []);
 }
 
 /**
@@ -2418,6 +2652,7 @@ function getSettings(): Settings {
  */
 function writeSettingsAsync(settings: Settings): void {
   settingsCache = settings;
+  setIgnorePatterns(settings.ignore ?? []);
 
   // Fire-and-forget disk write
   (async () => {
@@ -2478,8 +2713,8 @@ async function initUIStateCache(): Promise<void> {
  * Map would silently drop valid doneConversations / lastSeenMessageIndex entries.
  * The client tolerates stale keys harmlessly (they reference IDs that don't render).
  */
-function getActiveUIState(): { [key: string]: unknown } {
-  return { ...uiStateCache };
+function getActiveUIState(): UIState {
+  return UIStateSchema.parse(uiStateCache);
 }
 
 /**
@@ -2537,6 +2772,70 @@ app.post('/api/ui-state', express.json({ limit: '1mb' }), (req: Request, res: Re
 
 // Model list API — returns ModelInfo[] for the given provider.
 // Used by the Sidebar model dropdown to show available models per provider.
+app.get('/api/provider-catalog', (_req: Request, res: Response) => {
+  res.json(createProviderCatalog());
+});
+
+// Buddies owns durable employee/work state. Unleashd only exposes it and links
+// its provider conversations back to the owning Buddy/work item.
+app.get('/api/buddies', async (_req: Request, res: Response) => {
+  try {
+    const buddies = await getBuddiesStore();
+    res.json(buddies.dashboard());
+  } catch (error) {
+    sendBuddiesError(res, error, 500);
+  }
+});
+
+app.post('/api/buddies/conversation-links', async (req: Request, res: Response) => {
+  try {
+    const { buddyId, projectId, workItemId, conversationId, provider = 'codex' } = req.body ?? {};
+    if (
+      typeof buddyId !== 'string' ||
+      typeof projectId !== 'string' ||
+      typeof conversationId !== 'string'
+    ) {
+      res.status(400).json({ error: 'buddyId, projectId, and conversationId are required' });
+      return;
+    }
+    const buddies = await getBuddiesStore();
+    const assigned = buddies
+      .listBuddyProjects(buddyId)
+      .some((project) => project.id === projectId);
+    if (!assigned) {
+      res.status(400).json({ error: 'Buddy is not assigned to this project' });
+      return;
+    }
+    const link = buddies.linkConversation({
+      buddy: buddyId,
+      workItem: typeof workItemId === 'string' ? workItemId : undefined,
+      provider,
+      unleashdConversationId: conversationId,
+    });
+    res.status(201).json(link);
+  } catch (error) {
+    sendBuddiesError(res, error, 400);
+  }
+});
+
+app.patch('/api/buddies/work-items/:id', async (req: Request, res: Response) => {
+  try {
+    const { status, blockedReason, nextAction } = req.body ?? {};
+    if (typeof status !== 'string') {
+      res.status(400).json({ error: 'status is required' });
+      return;
+    }
+    const buddies = await getBuddiesStore();
+    const workItem = buddies.updateWorkItemStatus(req.params.id, status as never, {
+      blockedReason: typeof blockedReason === 'string' ? blockedReason : undefined,
+      nextAction: typeof nextAction === 'string' ? nextAction : undefined,
+    });
+    res.json(workItem);
+  } catch (error) {
+    sendBuddiesError(res, error, 400);
+  }
+});
+
 app.get('/api/models', (req: Request, res: Response) => {
   const providerName = (req.query.provider as string) || 'claude';
   if (!(providerName in providers)) {
@@ -4022,13 +4321,22 @@ app.post('/api/settings', (req: Request, res: Response) => {
 //    produces junk). Returns 409 if so.
 app.post('/api/conversations/merge', express.json(), async (req: Request, res: Response) => {
   const body = req.body ?? {};
-  const parentProvider = body.parentProvider as ProviderName | undefined;
-  const parentModel = body.parentModel as ModelId | undefined;
+  const parsedParentConfig = ConversationConfigSchema.safeParse(body.parentConfig);
+  const legacyParentProvider = body.parentProvider as ProviderName | undefined;
+  const parentConfig = parsedParentConfig.success
+    ? parsedParentConfig.data
+    : legacyParentProvider && providers[legacyParentProvider]
+      ? configFromLegacyOptions({
+          provider: legacyParentProvider,
+          model: body.parentModel as ModelId | undefined,
+          applyReasoningDefault: true,
+        })
+      : undefined;
   const sourceIds = body.sourceIds as string[] | undefined;
   const workingDirectory = body.workingDirectory as string | undefined;
 
-  if (!parentProvider || !providers[parentProvider]) {
-    res.status(400).json({ error: 'Invalid or missing parentProvider' });
+  if (!parentConfig) {
+    res.status(400).json({ error: 'Invalid or missing parentConfig' });
     return;
   }
   if (!Array.isArray(sourceIds) || sourceIds.length === 0) {
@@ -4076,14 +4384,49 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
     childWorkingDirectory: src.conv.workingDirectory,
   }));
 
+  // Resolve and persist every config before exposing any of the merge
+  // conversations in memory. This keeps the visible merge creation atomic.
+  const createdConfigIds: string[] = [];
+  let parentConfigState: ConversationConfigState;
+  const childConfigStates: ConversationConfigState[] = [];
+  try {
+    parentConfigState = await conversationConfigService.create({
+      conversationId: parentId,
+      config: parentConfig,
+      workingDirectory,
+    });
+    createdConfigIds.push(parentId);
+
+    for (let index = 0; index < children.length; index += 1) {
+      const childId = children[index].childConversationId;
+      const source = sources[index].conv;
+      const state = await conversationConfigService.fork({
+        conversationId: childId,
+        source: {
+          config: source.config,
+          revision: source.configRevision,
+          resolution: source.configResolution,
+        },
+        workingDirectory: children[index].childWorkingDirectory,
+      });
+      childConfigStates.push(state);
+      createdConfigIds.push(childId);
+    }
+  } catch (error) {
+    await Promise.all(createdConfigIds.map((id) => conversationConfigService.purge(id)));
+    res.status(400).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+
   // Create parent conversation. It has no fork seed — it's an ordinary chat
   // whose only peculiarity is mergeParentMeta + the one-time prefix injection
   // on first send (see sendMessage).
   const parent = new Conversation({
     id: parentId,
     workingDirectory,
-    provider: parentProvider,
-    model: parentModel,
+    configState: parentConfigState,
     mergeParentMeta: {
       children: children.map((c) => ({
         sourceConversationId: c.sourceConversationId,
@@ -4094,10 +4437,6 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
       prefixInjected: false,
     },
   });
-  if (!parent.model) {
-    const def = providers[parentProvider].listModels().find((m) => m.isDefault);
-    if (def) parent.model = def.id as ModelId;
-  }
   conversations.set(parentId, parent);
   broadcastToAll({ type: 'conversation_created', conversation: parent.toJSON() });
 
@@ -4115,8 +4454,7 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
     const child = new Conversation({
       id: meta.childConversationId,
       workingDirectory: src.workingDirectory,
-      provider: src.provider,
-      model: src.model,
+      configState: childConfigStates[i],
       resumedFromConversationId: src.id,
       mergeChildMeta: {
         parentConversationId: parentId,
@@ -4164,7 +4502,7 @@ app.post('/api/conversations/merge', express.json(), async (req: Request, res: R
 //                 yellow, orange, red, magenta, violet, blue, cyan, green
 // =============================================================================
 
-const PALETTES_DIR = path.join(os.homedir(), '.agent-viewer', 'palettes');
+const PALETTES_DIR = path.join(APP_DATA_DIR, 'palettes');
 
 /** The 14 semantic keys that make up a Palette16 (excluding 'name') */
 const PALETTE16_KEYS = [
@@ -5367,12 +5705,50 @@ function killProcessOnPort(port: number): boolean {
  * Hydrate a server-side Conversation instance from shared ConversationData.
  * Used by both initial load (progressive batches) and file polling (new sessions).
  */
-function hydrateConversation(convData: ConversationData): Conversation {
+async function hydrateConversation(convData: ConversationData): Promise<Conversation | null> {
   const sessionId = convData.id;
+  let hydratedConfig;
+  try {
+    hydratedConfig = await conversationConfigService.hydrate({
+      conversationId: sessionId,
+      sessionBindings: [{ provider: convData.provider, sessionId }],
+      currentSession: { provider: convData.provider, sessionId },
+      workingDirectory: convData.workingDirectory,
+      legacy: {
+        provider: convData.provider,
+        reportedModel: convData.modelName ?? convData.model,
+        reasoningEffort: convData.reasoningEffort,
+        source: 'external_session',
+      },
+    });
+  } catch (error) {
+    if (error instanceof ConversationTombstonedError) return null;
+    throw error;
+  }
+  if (
+    hydratedConfig.record.currentSession &&
+    (hydratedConfig.record.currentSession.provider !== convData.provider ||
+      hydratedConfig.record.currentSession.sessionId !== sessionId)
+  ) {
+    // This file is a historical alias after a session rotation. It remains
+    // indexed for discovery, but only the explicit current session is resumed.
+    return null;
+  }
+  if (hydratedConfig.migrated && hydratedConfig.diagnostics.length > 0) {
+    console.warn(
+      `[conversation-config] Migrated ${sessionId}: ${hydratedConfig.diagnostics
+        .map((diagnostic) => diagnostic.message)
+        .join('; ')}`
+    );
+  }
+  // The application-owned ID remains stable even when the provider creates or
+  // rotates a native session ID. On restart, recover that ID through the
+  // durable session index instead of turning the session ID into a new thread.
+  const conversationId = hydratedConfig.record.conversationId;
   const conversation = new Conversation({
-    id: sessionId,
-    workingDirectory: convData.workingDirectory,
-    provider: convData.provider,
+    id: conversationId,
+    workingDirectory: hydratedConfig.record.workingDirectory ?? convData.workingDirectory,
+    configState: hydratedConfig.state,
     existingSessionId: sessionId,
     isWorker: convData.isWorker,
     swarmId: convData.swarmId ?? null,
@@ -5406,12 +5782,13 @@ async function loadExistingConversations(): Promise<void> {
       limit: STARTUP_INITIAL_LOAD_LIMIT,
       concurrency: STARTUP_PARSE_CONCURRENCY,
       batchSize: STARTUP_LOAD_BATCH_SIZE,
-      onProgress: (batch, progress) => {
+      onProgress: async (batch, progress) => {
         // Hydrate each batch into server-side Conversation instances
         const broadcastBatch: ConversationData[] = [];
         for (const convData of batch) {
-          const conversation = hydrateConversation(convData);
-          conversations.set(convData.id, conversation);
+          const conversation = await hydrateConversation(convData);
+          if (!conversation) continue;
+          conversations.set(conversation.id, conversation);
           broadcastBatch.push(conversation.toJSON());
         }
 
@@ -5435,6 +5812,31 @@ async function loadExistingConversations(): Promise<void> {
     });
 
     fileMtimes = mtimes;
+
+    // Recover app-owned conversations that have no native transcript yet (or
+    // whose transcript fell outside the progressive loader limit).
+    for (const record of await conversationConfigService.listRecoverable()) {
+      if (conversations.has(record.conversationId) || !record.workingDirectory) continue;
+      const hydrated = await conversationConfigService.hydrate({
+        conversationId: record.conversationId,
+        sessionBindings: [],
+        legacy: {
+          provider: record.config.provider,
+          reportedModel: record.lastResolvedConfig?.modelId,
+          source: 'external_session',
+        },
+      });
+      const recovered = new Conversation({
+        id: record.conversationId,
+        workingDirectory: record.workingDirectory,
+        configState: hydrated.state,
+        existingSessionId: record.currentSession?.sessionId,
+        swarmDebugPrefix: record.creation?.swarmDebugPrefix ?? null,
+        resumedFromConversationId: record.creation?.resumedFromConversationId ?? null,
+      });
+      conversations.set(recovered.id, recovered);
+      await dispatchCreationMessageIfPending(recovered);
+    }
 
     // Second pass: re-resolve parentConversationId now that all conversations are loaded.
     // During progressive loading, child conversations (sub-agent threads) may have been
@@ -5485,6 +5887,13 @@ function findConversationBySessionId(sessionId: string): Conversation | undefine
     }
   }
 
+  return undefined;
+}
+
+function findConversationByCurrentSessionId(sessionId: string): Conversation | undefined {
+  for (const conversation of conversations.values()) {
+    if (conversation.sessionId === sessionId) return conversation;
+  }
   return undefined;
 }
 
@@ -5616,7 +6025,7 @@ function startFilePolling(): void {
         // This session just completed locally; ignore file-tail writes.
         if (isLocalCompletionSuppressed(sessionId, now)) continue;
 
-        const existingConversation = findConversationBySessionId(sessionId);
+        const existingConversation = findConversationByCurrentSessionId(sessionId);
         const conversationId = existingConversation?.id ?? sessionId;
 
         // File changed and we didn't cause it — refresh the "last seen" timestamp
@@ -5643,7 +6052,7 @@ function startFilePolling(): void {
         }
         if (now - lastSeen >= EXTERNAL_GRACE_MS) {
           externallyRunning.delete(sessionId);
-          const existingConversation = findConversationBySessionId(sessionId);
+          const existingConversation = findConversationByCurrentSessionId(sessionId);
           const conversationId = existingConversation?.id ?? sessionId;
           if (VERBOSE)
             console.log(`[Poll] External activity stopped: ${sessionId.substring(0, 8)}`);
@@ -5668,7 +6077,7 @@ function startFilePolling(): void {
           continue;
         }
 
-        let existing = findConversationBySessionId(sessionId);
+        let existing = findConversationByCurrentSessionId(sessionId);
 
         if (!existing) {
           const reconciled = findBootstrapMatch(sessionId, convData);
@@ -5679,6 +6088,7 @@ function startFilePolling(): void {
               unregisterSessionAlias(oldSessionId, { keepKnown: true });
             }
             registerSessionAlias(sessionId, reconciled.id);
+            await persistCurrentConversationSession(reconciled, sessionId);
             existing = reconciled;
             console.log(
               `[Poll] Reconciled session ${sessionId.substring(0, 8)} with conversation ${reconciled.id.substring(0, 8)} (old session ${oldSessionId.substring(0, 8)})`
@@ -5709,7 +6119,11 @@ function startFilePolling(): void {
             convData.parentConversationId ?? null
           );
           existing.resumedFromConversationId = convData.resumedFromConversationId ?? null;
-          existing.modelName = convData.modelName ?? null;
+          // Native session files report runtime facts; they do not own user
+          // selection intent. Keep the durable config intact and record only
+          // the provider-observed model.
+          existing.modelName = convData.modelName ?? convData.model ?? null;
+          existing.refreshConfigResolution();
           const json = existing.toJSON();
           // Mark as running if externally active
           if (externallyRunning.has(sessionId)) {
@@ -5722,8 +6136,9 @@ function startFilePolling(): void {
           !deletedSessionIds.has(sessionId)
         ) {
           // New conversation (not an orphaned JSONL from resetProcess or a deleted one) — create fresh instance
-          const conversation = hydrateConversation(convData);
-          conversations.set(sessionId, conversation);
+          const conversation = await hydrateConversation(convData);
+          if (!conversation) continue;
+          conversations.set(conversation.id, conversation);
           const json = conversation.toJSON();
           if (externallyRunning.has(sessionId)) {
             json.isRunning = true;

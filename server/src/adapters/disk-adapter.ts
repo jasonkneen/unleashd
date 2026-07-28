@@ -12,7 +12,7 @@
  */
 
 import type { Conversation, Message, Provider, SubAgent } from '@unleashd/shared';
-import { ModelIdSchema, fromCodexModelId } from '@unleashd/shared';
+import { ModelIdSchema, fromCodexModelId, isModelIdValidForProvider } from '@unleashd/shared';
 import { extractSwarmDebugPrefix, extractWorkerMetadata } from './jsonl';
 
 // =============================================================================
@@ -69,7 +69,7 @@ export interface PollResult {
 export type LoadProgressCallback = (
   batch: Conversation[],
   progress: { loaded: number; total: number }
-) => void;
+) => void | Promise<void>;
 
 // =============================================================================
 // Shared session → Conversation conversion
@@ -96,17 +96,6 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
   // For codex, decompose any legacy composite (e.g. "gpt-5.4-xhigh") into its
   // base + reasoningEffort so they live as separate fields (matches claude shape).
   const { model: recoveredModel, reasoningEffort } = recoverModelAndEffort(session);
-
-  // Neither claude nor (post-refactor) codex session files persist reasoning effort
-  // separately. Warn when claude loses it on load, OR when codex loads without a
-  // recovered effort (i.e. the persisted model was base-only, not a legacy composite).
-  // Drift is visible: the next resumed turn runs without an effort flag until the
-  // user picks one from the UI.
-  if (session.provider === 'claude' || (session.provider === 'codex' && !reasoningEffort)) {
-    console.warn(
-      `[disk-adapter] ${session.provider} conversation ${session.sessionId} loaded without reasoningEffort; effort flag will not be passed on resume until set via UI`
-    );
-  }
 
   return {
     id: session.sessionId,
@@ -140,7 +129,8 @@ export function sessionToConversation(session: ParsedSession): Conversation | nu
  * base IDs, so this is a no-op for non-legacy data.
  *
  * Claude/opencode/gemini/cursor: session files don't persist --effort, so
- * reasoningEffort is always undefined on load (see claude warn above).
+ * reasoningEffort is always undefined here. Hydration preserves that absence;
+ * it must not invent a new flag for an existing provider session.
  */
 function recoverModelAndEffort(session: ParsedSession): {
   model: Conversation['model'];
@@ -154,14 +144,20 @@ function recoverModelAndEffort(session: ParsedSession): {
     const { baseModel, effort } = fromCodexModelId(session.model);
     const parsedBase = ModelIdSchema.safeParse(baseModel);
     return {
-      model: parsedBase.success ? parsedBase.data : undefined,
+      model:
+        parsedBase.success && isModelIdValidForProvider(session.provider, parsedBase.data)
+          ? parsedBase.data
+          : undefined,
       reasoningEffort: effort ?? undefined,
     };
   }
 
   const parsed = ModelIdSchema.safeParse(session.model);
   return {
-    model: parsed.success ? parsed.data : undefined,
+    model:
+      parsed.success && isModelIdValidForProvider(session.provider, parsed.data)
+        ? parsed.data
+        : undefined,
     reasoningEffort: undefined,
   };
 }

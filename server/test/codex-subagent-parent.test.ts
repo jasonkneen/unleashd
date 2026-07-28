@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { loadAllConversations } from '../src/adapters/jsonl';
+import { sessionToConversation } from '../src/adapters/disk-adapter';
+import { getDiskAdapter } from '../src/adapters/registry';
 
 function writeJsonl(filePath: string, entries: unknown[]): void {
   const lines = entries.map((entry) => JSON.stringify(entry)).join('\n');
@@ -12,13 +13,9 @@ function writeJsonl(filePath: string, entries: unknown[]): void {
 
 test('Codex spawned sub-agent session maps to parentConversationId', async () => {
   const tmpRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cwv-codex-parent-'));
-  const claudeProjectsDir = path.join(tmpRoot, 'claude-projects');
   const codexSessionsDir = path.join(tmpRoot, 'codex-sessions');
-  const openCodeMessageDir = path.join(tmpRoot, 'opencode', 'message');
   const dayDir = path.join(codexSessionsDir, '2026', '02', '10');
-  await fs.promises.mkdir(claudeProjectsDir, { recursive: true });
   await fs.promises.mkdir(dayDir, { recursive: true });
-  await fs.promises.mkdir(openCodeMessageDir, { recursive: true });
 
   const parentSessionId = '11111111-1111-4111-8111-111111111111';
   const childSessionId = '22222222-2222-4222-8222-222222222222';
@@ -98,14 +95,11 @@ test('Codex spawned sub-agent session maps to parentConversationId', async () =>
   ]);
 
   try {
-    const { conversations } = await loadAllConversations(
-      claudeProjectsDir,
-      codexSessionsDir,
-      openCodeMessageDir
-    );
-
-    const parentConversation = conversations.get(parentSessionId);
-    const childConversation = conversations.get(childSessionId);
+    const adapter = getDiskAdapter('codex');
+    const parentSession = await adapter.parseFile(parentFile);
+    const childSession = await adapter.parseFile(childFile);
+    const parentConversation = parentSession ? sessionToConversation(parentSession) : null;
+    const childConversation = childSession ? sessionToConversation(childSession) : null;
 
     assert.ok(parentConversation, 'expected parent conversation to load');
     assert.ok(childConversation, 'expected child conversation to load');

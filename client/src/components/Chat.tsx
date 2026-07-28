@@ -3,15 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
 import 'highlight.js/styles/base16/solarized-dark.css';
-import type { ModelId, ModelInfo } from '@unleashd/shared';
-import {
-  CLAUDE_EFFORT_LEVELS,
-  CODEX_BASE_MODEL_INFOS,
-  CODEX_EFFORT_LEVELS,
-  EFFORT_DISPLAY_NAMES,
-  fromCodexModelId,
-  PROVIDER_OPTIONS,
-} from '@unleashd/shared';
+import type { ConversationConfig } from '@unleashd/shared';
 import { useDropzone } from 'react-dropzone';
 import {
   cancelQueuedMessage,
@@ -20,22 +12,24 @@ import {
   interruptAndSend,
   queueMessage,
   setActiveConversationId,
-  setModel,
-  setProvider,
-  setReasoningEffort,
 } from '../atoms/actions';
 import type { QueuedMessage } from '../atoms/actions';
+import { setConversationConfig } from '../atoms/config-actions';
 import {
   childConversationsAtomFamily,
   conversationAtomFamily,
   conversationCountAtom,
+  pendingConfigCommandAtomFamily,
+  pendingCreationAtomFamily,
   streamingAtomFamily,
 } from '../atoms/conversations';
 import { allMergeChildrenSettledAtomFamily } from '../atoms/mergeAtoms';
+import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useSavedPrompts } from '../hooks/useSavedPrompts';
 import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
+import { ConversationConfigPicker } from './ConversationConfigPicker';
 import { MergeProgressStrip } from './MergeProgressStrip';
 import { PromptPalette } from './PromptPalette';
 import { ResumeThreadWidget } from './ResumeThreadWidget';
@@ -50,14 +44,6 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 
 // Draft persistence: debounce delay for saving textarea content to localStorage
 const DRAFT_SAVE_DELAY_MS = 500;
-
-// Thread-header effort dropdowns use the provider's REAL level list.
-// Claude: low..max (no minimal). Codex: minimal..xhigh (no max). See shared.
-const STANDARD_OPTION = { value: null as string | null, label: 'Standard' };
-const CLAUDE_EFFORT_OPTIONS: Array<{ value: string | null; label: string }> = [
-  STANDARD_OPTION,
-  ...CLAUDE_EFFORT_LEVELS.map((level) => ({ value: level, label: EFFORT_DISPLAY_NAMES[level] })),
-];
 
 interface PendingFile {
   originalName: string;
@@ -92,6 +78,9 @@ export function Chat() {
 
   // Per-ID atoms — only re-render when THIS conversation changes, not others
   const conversation = useAtomValue(conversationAtomFamily(id ?? ''));
+  const pendingCreation = useAtomValue(pendingCreationAtomFamily(id ?? ''));
+  const pendingConfigCommand = useAtomValue(pendingConfigCommandAtomFamily(id ?? ''));
+  const configIsSaving = !!pendingConfigCommand && !pendingConfigCommand.error;
   const streamingText = useAtomValue(streamingAtomFamily(id ?? ''));
   const childSessionConversations = useAtomValue(childConversationsAtomFamily(id ?? ''));
   const conversationCount = useAtomValue(conversationCountAtom);
@@ -107,47 +96,23 @@ export function Chat() {
   const resumedFromConversationId = conversation?.resumedFromConversationId ?? '';
   const resumedFromConversation = useAtomValue(conversationAtomFamily(resumedFromConversationId));
 
-  // Model picker: fetch available models for the conversation's provider
-  const provider = conversation?.provider ?? 'claude';
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
-  // Codex thread header: base and effort are two independent dropdowns that fire
-  // separate setModel / setReasoningEffort wire events (same shape claude uses).
-  // fromCodexModelId is kept as a DISPLAY-ONLY bridge for legacy in-memory
-  // composite model ids (e.g. "gpt-5.4-xhigh") from before the server migration —
-  // once the server heals them on next spawn, conversation.model becomes the
-  // base id and conversation.reasoningEffort holds the effort directly.
-  const [effortPickerOpen, setEffortPickerOpen] = useState(false);
-  const modelPickerRef = useRef<HTMLDivElement>(null);
-  const providerPickerRef = useRef<HTMLDivElement>(null);
-  const effortPickerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    fetch(`/api/models?provider=${provider}`)
-      .then((res) => res.json())
-      .then((data: ModelInfo[]) => setModels(data))
-      .catch(() => setModels([]));
-  }, [provider]);
+  const { catalog } = useProviderCatalog();
+  const [configPickerOpen, setConfigPickerOpen] = useState(false);
+  const [headerConfigDraft, setHeaderConfigDraft] = useState<ConversationConfig | null>(null);
+  const configPickerRef = useRef<HTMLDivElement>(null);
 
   // Click-outside to close pickers
   useEffect(() => {
-    if (!modelPickerOpen && !providerPickerOpen && !effortPickerOpen) return;
+    if (!configPickerOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (modelPickerRef.current && !modelPickerRef.current.contains(target)) {
-        setModelPickerOpen(false);
-      }
-      if (providerPickerRef.current && !providerPickerRef.current.contains(target)) {
-        setProviderPickerOpen(false);
-      }
-      if (effortPickerRef.current && !effortPickerRef.current.contains(target)) {
-        setEffortPickerOpen(false);
+      if (configPickerRef.current && !configPickerRef.current.contains(target)) {
+        setConfigPickerOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [modelPickerOpen, providerPickerOpen, effortPickerOpen]);
+  }, [configPickerOpen]);
 
   const {
     savePrompt,
@@ -224,8 +189,6 @@ export function Chat() {
   const isRunningRef = useRef(isRunning);
   isRunningRef.current = isRunning;
   const canInput = confirmed;
-  const availableProviders = PROVIDER_OPTIONS;
-
   const currentMessage = queue.find((m) => m.status === 'sending') ?? null;
   const pendingQueue = queue.filter((m) => m.status === 'pending');
   // Enter should switch to interrupt mode as soon as a turn is in flight,
@@ -331,10 +294,10 @@ export function Chat() {
   }, [id, setUIActiveId]);
 
   useEffect(() => {
-    if (id && !conversation && conversationCount > 0) {
+    if (id && !conversation && !pendingCreation && conversationCount > 0) {
       navigate('/');
     }
-  }, [id, conversation, conversationCount, navigate]);
+  }, [id, conversation, pendingCreation, conversationCount, navigate]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -406,13 +369,13 @@ export function Chat() {
   };
 
   // IMPORTANT: All hooks must be called before any early return.
-  const messageCount = conversation?.messages.length ?? 0;
+  const conversationMessagesSnapshot = conversation?.messages;
+  const messageCount = conversationMessagesSnapshot?.length ?? 0;
   const lastMessageTime = useMemo(() => {
-    if (!conversation || messageCount === 0) return undefined;
-    const last = conversation.messages[messageCount - 1];
+    if (!conversationMessagesSnapshot || messageCount === 0) return undefined;
+    const last = conversationMessagesSnapshot[messageCount - 1];
     return last.timestamp ? new Date(last.timestamp) : undefined;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messageCount]);
+  }, [conversationMessagesSnapshot, messageCount]);
 
   const timeAgo = useTimeAgo(lastMessageTime);
 
@@ -428,9 +391,9 @@ export function Chat() {
     return messages;
   }, [conversation, streamingText]);
 
+  const swarmDebugPrefix = conversation?.swarmDebugPrefix;
   const messageGroups = useMemo((): MessageGroup[] => {
-    if (!conversation) return [];
-    const prefix = conversation.swarmDebugPrefix;
+    const prefix = swarmDebugPrefix;
     const groups: MessageGroup[] = [];
     let toolCallRun: (typeof conversationMessages)[number][] = [];
 
@@ -459,21 +422,34 @@ export function Chat() {
 
     flushRun();
     return groups;
-  }, [conversationMessages, conversation?.swarmDebugPrefix]);
+  }, [conversationMessages, swarmDebugPrefix]);
 
   const unifiedSubAgents = useMemo(() => {
     if (!conversation) return [];
     return buildUnifiedSubAgents(conversation, childSessionConversations);
   }, [conversation, childSessionConversations]);
 
+  const conversationConfig = useMemo<ConversationConfig | null>(() => {
+    if (!conversation) return null;
+    if (conversation.config) return conversation.config;
+    return {
+      provider: conversation.provider,
+      model: conversation.model
+        ? { mode: 'explicit', modelId: conversation.model }
+        : { mode: 'default' },
+      reasoning: conversation.reasoningEffort
+        ? { mode: 'explicit', effort: conversation.reasoningEffort }
+        : { mode: 'disabled' },
+    };
+  }, [conversation]);
+
   const threadCopyText = useMemo(() => {
     if (!conversation) return '';
 
     const modelDisplay =
-      models.find((m) => m.id === conversation.model)?.displayName ??
-      conversation.modelName ??
-      conversation.model ??
-      'default';
+      conversation.configResolution?.status === 'resolved'
+        ? conversation.configResolution.value.modelId
+        : (conversation.reportedModel ?? conversation.modelName ?? conversation.model ?? 'default');
     const folderDisplay = conversation.workingDirectory.replace(/^\/Users\/[^/]+/, '~');
     const header = [
       `Conversation: ${conversation.id}`,
@@ -488,7 +464,7 @@ export function Chat() {
       .join('\n\n');
 
     return messages ? `${header}\n\n${messages}` : header;
-  }, [conversation, messageGroups, models]);
+  }, [conversation, messageGroups]);
 
   const forkDraftText = useMemo(() => {
     if (!threadCopyText) return '';
@@ -504,26 +480,31 @@ export function Chat() {
   const handleForkThread = useCallback(() => {
     if (!conversation || !id) return;
 
-    const newId = createConversation(
-      conversation.workingDirectory,
-      conversation.provider,
-      conversation.model,
-      undefined,
-      conversation.id
-    );
+    if (!conversationConfig) return;
+    const newId = createConversation({
+      workingDirectory: conversation.workingDirectory,
+      config: conversationConfig,
+      resumedFromConversationId: conversation.id,
+    });
     localStorage.setItem(`${DRAFT_KEY_PREFIX}${newId}`, forkDraftText);
     navigate(`/chat/${newId}`);
-  }, [conversation, forkDraftText, id, navigate]);
+  }, [conversation, conversationConfig, forkDraftText, id, navigate]);
 
   if (!conversation) {
     return (
       <div className="chat-view">
         <div className="chat-header">
-          <div className="chat-title">Select a conversation</div>
+          <div className="chat-title">
+            {pendingCreation ? 'Creating conversation…' : 'Select a conversation'}
+          </div>
         </div>
         <div className="messages-container">
           <div className="empty-state">
-            Select a conversation from the sidebar or create a new one.
+            {pendingCreation?.error
+              ? `Creation failed: ${pendingCreation.error}`
+              : pendingCreation
+                ? `Starting ${pendingCreation.config.provider} in ${pendingCreation.workingDirectory}`
+                : 'Select a conversation from the sidebar or create a new one.'}
           </div>
         </div>
       </div>
@@ -614,223 +595,69 @@ export function Chat() {
       <div className="chat-header">
         <div className="chat-title">
           <span className="chat-id">{conversation.id.substring(0, 8)}</span>
-          {!canChangeHarness ? (
-            <span className={`provider-badge provider-${conversation.provider || 'claude'}`}>
-              {conversation.provider || 'claude'}
-            </span>
-          ) : (
-            <div className="provider-picker" ref={providerPickerRef}>
-              <button
-                type="button"
-                className={`provider-picker-trigger ${conversation.provider}`}
-                onClick={() => {
-                  setProviderPickerOpen((o) => !o);
-                  setModelPickerOpen(false);
-                }}
-              >
-                {conversation.provider || 'claude'}
-                <span className="provider-picker-caret">&#x25BE;</span>
-              </button>
-              {providerPickerOpen && (
-                <div className="provider-picker-menu">
-                  {availableProviders.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={`provider-picker-option ${
-                        p.id === conversation.provider ? 'selected' : ''
-                      }`}
-                      onClick={() => {
-                        setProvider(conversation.id, p.id);
-                        setProviderPickerOpen(false);
-                      }}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {conversation.provider === 'codex' ? (
-            (() => {
-              // conversation.reasoningEffort is the source of truth once the
-              // server has written it. For legacy in-memory composite model ids
-              // ("gpt-5.4-xhigh") still hanging around before the server heals
-              // them on next spawn, fall through to the decomposed effort.
-              const currentModelId =
-                (conversation.model as string | undefined) ??
-                CODEX_BASE_MODEL_INFOS.find((b) => b.isDefault)?.id ??
-                CODEX_BASE_MODEL_INFOS[0].id;
-              const { baseModel, effort: effortFromModel } = fromCodexModelId(currentModelId);
-              const effort = conversation.reasoningEffort ?? effortFromModel;
-              const baseDisplay =
-                CODEX_BASE_MODEL_INFOS.find((b) => b.id === baseModel)?.displayName ?? baseModel;
-              const effortDisplay =
-                effort === null || effort === undefined
-                  ? 'No Reasoning'
-                  : EFFORT_DISPLAY_NAMES[effort];
-
-              return (
-                <>
-                  <div className="model-picker" ref={modelPickerRef}>
-                    <button
-                      type="button"
-                      className="model-picker-trigger"
-                      onClick={() => {
-                        setModelPickerOpen((o) => !o);
-                        setProviderPickerOpen(false);
-                        setEffortPickerOpen(false);
-                      }}
-                    >
-                      {baseDisplay}
-                      <span className="model-picker-caret">&#x25BE;</span>
-                    </button>
-                    {modelPickerOpen && (
-                      <div className="model-picker-menu">
-                        {CODEX_BASE_MODEL_INFOS.map((b) => (
-                          <button
-                            key={b.id}
-                            type="button"
-                            className={`model-picker-option ${b.id === baseModel ? 'selected' : ''}`}
-                            onClick={() => {
-                              setModel(conversation.id, b.id as ModelId);
-                              setModelPickerOpen(false);
-                            }}
-                          >
-                            {b.displayName}
-                            {b.isDefault && <span className="model-default-tag">default</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="model-picker" ref={effortPickerRef}>
-                    <button
-                      type="button"
-                      className="model-picker-trigger"
-                      onClick={() => {
-                        setEffortPickerOpen((o) => !o);
-                        setModelPickerOpen(false);
-                        setProviderPickerOpen(false);
-                      }}
-                    >
-                      {effortDisplay}
-                      <span className="model-picker-caret">&#x25BE;</span>
-                    </button>
-                    {effortPickerOpen && (
-                      <div className="model-picker-menu">
-                        <button
-                          type="button"
-                          className={`model-picker-option ${effort === null || effort === undefined ? 'selected' : ''}`}
-                          onClick={() => {
-                            setReasoningEffort(conversation.id, null);
-                            setEffortPickerOpen(false);
-                          }}
-                        >
-                          No Reasoning
-                        </button>
-                        {CODEX_EFFORT_LEVELS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            className={`model-picker-option ${effort === opt ? 'selected' : ''}`}
-                            onClick={() => {
-                              setReasoningEffort(conversation.id, opt);
-                              setEffortPickerOpen(false);
-                            }}
-                          >
-                            {EFFORT_DISPLAY_NAMES[opt]}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              );
-            })()
-          ) : (
-            <>
-              {models.length > 0 && (
-                <div className="model-picker" ref={modelPickerRef}>
+          <div className="provider-picker" ref={configPickerRef}>
+            <button
+              type="button"
+              className={`provider-picker-trigger ${conversationConfig?.provider ?? conversation.provider}`}
+              disabled={!catalog || configIsSaving || isRunning || queue.length > 0}
+              onClick={() => {
+                if (configPickerOpen) {
+                  setConfigPickerOpen(false);
+                  return;
+                }
+                setHeaderConfigDraft(conversationConfig);
+                setConfigPickerOpen(true);
+              }}
+            >
+              {conversationConfig?.provider ?? conversation.provider}
+              {conversation.configResolution?.status === 'resolved'
+                ? ` · ${conversation.configResolution.value.modelId}`
+                : ''}
+              {configIsSaving ? ' · Saving…' : ''}
+              {pendingConfigCommand?.error ? ' · Error' : ''}
+              <span className="provider-picker-caret">&#x25BE;</span>
+            </button>
+            {configPickerOpen && catalog && headerConfigDraft && (
+              <div className="provider-picker-menu conversation-config-menu">
+                <ConversationConfigPicker
+                  value={headerConfigDraft}
+                  catalog={catalog}
+                  showProvider={canChangeHarness}
+                  disabled={isRunning || queue.length > 0 || configIsSaving}
+                  onChange={setHeaderConfigDraft}
+                />
+                <div className="directory-actions">
                   <button
                     type="button"
-                    className="model-picker-trigger"
-                    onClick={() => {
-                      setModelPickerOpen((o) => !o);
-                      setProviderPickerOpen(false);
-                      setEffortPickerOpen(false);
-                    }}
+                    className="dir-action-btn"
+                    onClick={() => setConfigPickerOpen(false)}
                   >
-                    {models.find((m) => m.id === conversation.model)?.displayName ??
-                      models.find((m) => m.isDefault)?.displayName ??
-                      conversation.modelName ??
-                      'default'}
-                    <span className="model-picker-caret">&#x25BE;</span>
+                    Cancel
                   </button>
-                  {modelPickerOpen && (
-                    <div className="model-picker-menu">
-                      {models.map((m) => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          className={`model-picker-option ${
-                            m.id === (conversation.model ?? models.find((d) => d.isDefault)?.id)
-                              ? 'selected'
-                              : ''
-                          }`}
-                          onClick={() => {
-                            setModel(conversation.id, m.id as ModelId);
-                            setModelPickerOpen(false);
-                          }}
-                        >
-                          {m.displayName}
-                          {m.isDefault && <span className="model-default-tag">default</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {conversation.provider === 'claude' && (
-                <div className="model-picker" ref={effortPickerRef}>
                   <button
                     type="button"
-                    className="model-picker-trigger"
+                    className="dir-action-btn dir-confirm-btn"
+                    disabled={configIsSaving}
                     onClick={() => {
-                      setEffortPickerOpen((o) => !o);
-                      setModelPickerOpen(false);
-                      setProviderPickerOpen(false);
+                      setConversationConfig({
+                        conversationId: conversation.id,
+                        expectedRevision: conversation.configRevision ?? 0,
+                        patch: { kind: 'replace', config: headerConfigDraft },
+                      });
+                      setConfigPickerOpen(false);
                     }}
                   >
-                    {CLAUDE_EFFORT_OPTIONS.find(
-                      (o) => o.value === (conversation.reasoningEffort ?? null)
-                    )?.label ?? 'Standard'}
-                    <span className="model-picker-caret">&#x25BE;</span>
+                    Save
                   </button>
-                  {effortPickerOpen && (
-                    <div className="model-picker-menu">
-                      {CLAUDE_EFFORT_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.label}
-                          type="button"
-                          className={`model-picker-option ${
-                            (conversation.reasoningEffort ?? null) === opt.value ? 'selected' : ''
-                          }`}
-                          onClick={() => {
-                            setReasoningEffort(conversation.id, opt.value);
-                            setEffortPickerOpen(false);
-                          }}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              )}
-            </>
-          )}
+                {pendingConfigCommand?.error && (
+                  <div className="config-picker-error" role="alert">
+                    {pendingConfigCommand.error}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <Link
             className="chat-dir"
             to={`/?folders=${encodeURIComponent(conversation.workingDirectory)}`}
@@ -856,6 +683,7 @@ export function Chat() {
           >
             {threadCopied ? (
               <svg
+                aria-hidden="true"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -869,6 +697,7 @@ export function Chat() {
               </svg>
             ) : (
               <svg
+                aria-hidden="true"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"

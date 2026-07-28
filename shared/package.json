@@ -8,24 +8,27 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.js",
+      "require": "./dist/cjs/index.js",
       "default": "./dist/index.js"
     },
     "./adapters/jsonl.types": {
       "types": "./dist/adapters/jsonl.types.d.ts",
       "import": "./dist/adapters/jsonl.types.js",
-      "require": "./dist/adapters/jsonl.types.js",
+      "require": "./dist/cjs/adapters/jsonl.types.js",
       "default": "./dist/adapters/jsonl.types.js"
     }
   },
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc --watch"
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc && tsc -p tsconfig.cjs.json && node scripts/write-cjs-package.mjs",
+    "watch:esm": "tsc --watch",
+    "watch:cjs": "tsc -p tsconfig.cjs.json --watch"
   },
-  "dependencies": {
+  "files": ["dist"],
+  "peerDependencies": {
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "zod": "^3.24.0"
   }
 }

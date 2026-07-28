@@ -5,48 +5,89 @@ import {
   CODEX_MODEL_REGISTRY,
   CodexModelSchema,
   DEFAULT_CODEX_MODEL_ID,
-  NO_CODEX_THINKING,
   ModelIdSchema,
+  NO_CODEX_THINKING,
   NewConversationMessageSchema,
   SetModelMessageSchema,
+  defaultReasoningEffortForProvider,
   fromCodexModelId,
+  isModelIdValidForProvider,
+  modelValidationHint,
   toCodexModelId,
 } from '../../shared/src/index';
 import { inferProviderFromModel } from '../src/adapters/jsonl';
 import codexProvider from '../src/providers/codex';
-import { isModelIdValidForProvider, modelValidationHint } from '../src/providers/model-validation';
 
 // =============================================================================
 // Canonical schema: base IDs only. Effort is a separate reasoningEffort field.
 // =============================================================================
 
-test('CODEX_MODEL_REGISTRY is three base entries with shared thinking options', () => {
+test('CODEX_MODEL_REGISTRY includes the expected base entries with shared thinking options', () => {
   const names = CODEX_MODEL_REGISTRY.map((entry) => entry.modelName).sort();
-  assert.deepEqual(names, ['gpt-5.3-codex-spark', 'gpt-5.4', 'gpt-5.4-mini']);
+  assert.deepEqual(names, [
+    'gpt-5.3-codex-spark',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.5',
+    'gpt-5.6-luna',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+  ]);
   for (const entry of CODEX_MODEL_REGISTRY) {
-    assert.deepEqual(entry.thinkingOptions, [NO_CODEX_THINKING, 'high', 'medium', 'xhigh']);
+    assert.deepEqual(entry.thinkingOptions, [
+      NO_CODEX_THINKING,
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ]);
   }
 });
 
-test('CodexModelSchema accepts only the three base IDs (no composites)', () => {
+test('CodexModelSchema accepts only the configured base IDs (no composites)', () => {
+  assert.equal(CodexModelSchema.safeParse('gpt-5.6-sol').success, true);
+  assert.equal(CodexModelSchema.safeParse('gpt-5.6-terra').success, true);
+  assert.equal(CodexModelSchema.safeParse('gpt-5.6-luna').success, true);
+  assert.equal(CodexModelSchema.safeParse('gpt-5.5').success, true);
   assert.equal(CodexModelSchema.safeParse('gpt-5.4').success, true);
   assert.equal(CodexModelSchema.safeParse('gpt-5.4-mini').success, true);
   assert.equal(CodexModelSchema.safeParse('gpt-5.3-codex-spark').success, true);
+  assert.equal(CodexModelSchema.safeParse('gpt-5.5-high').success, false);
   assert.equal(CodexModelSchema.safeParse('gpt-5.4-high').success, false);
   assert.equal(CodexModelSchema.safeParse('gpt-5.3-codex-spark-xhigh').success, false);
 });
 
-test('ModelIdSchema accepts base codex IDs and rejects legacy composites', () => {
-  for (const id of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']) {
+test('ModelIdSchema is an opaque wire string; provider catalogs enforce compatibility', () => {
+  for (const id of [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex-spark',
+  ]) {
     assert.equal(ModelIdSchema.safeParse(id).success, true, `${id} should be valid`);
   }
-  for (const id of ['gpt-5.4-high', 'gpt-5.3-codex-spark-xhigh']) {
-    assert.equal(ModelIdSchema.safeParse(id).success, false, `${id} should be rejected`);
+  for (const id of ['gpt-5.5-high', 'gpt-5.4-high', 'future-provider/model']) {
+    assert.equal(ModelIdSchema.safeParse(id).success, true, `${id} should be structurally valid`);
   }
+  assert.equal(ModelIdSchema.safeParse('').success, false);
 });
 
 test('NewConversationMessage canonical codex shape: base model + separate reasoningEffort', () => {
-  for (const model of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']) {
+  for (const model of [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex-spark',
+  ]) {
     for (const reasoningEffort of ['medium', 'high', 'xhigh'] as const) {
       const result = NewConversationMessageSchema.safeParse({
         type: 'new_conversation',
@@ -59,8 +100,16 @@ test('NewConversationMessage canonical codex shape: base model + separate reason
   }
 });
 
-test('SetModelMessage accepts base codex IDs only', () => {
-  for (const model of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']) {
+test('SetModelMessage structurally accepts opaque non-empty model IDs', () => {
+  for (const model of [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex-spark',
+  ]) {
     const result = SetModelMessageSchema.safeParse({
       type: 'set_model',
       conversationId: '550e8400-e29b-41d4-a716-446655440000',
@@ -75,9 +124,18 @@ test('SetModelMessage accepts base codex IDs only', () => {
 // =============================================================================
 
 test('isModelIdValidForProvider accepts base IDs for codex, rejects composites', () => {
-  for (const id of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']) {
+  for (const id of [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex-spark',
+  ]) {
     assert.equal(isModelIdValidForProvider('codex', id), true, `codex should accept ${id}`);
   }
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.5-high'), false);
   assert.equal(isModelIdValidForProvider('codex', 'gpt-5.4-high'), false);
 });
 
@@ -86,8 +144,10 @@ test('isModelIdValidForProvider rejects codex IDs for other providers', () => {
   assert.equal(isModelIdValidForProvider('opencode', 'gpt-5.4'), false);
 });
 
-test('modelValidationHint for codex mentions gpt-5.4 and spark', () => {
+test('modelValidationHint for codex mentions sol, gpt-5.4, and spark', () => {
   const hint = modelValidationHint('codex');
+  assert.ok(hint.includes('gpt-5.6-sol'), `Hint should mention gpt-5.6-sol: ${hint}`);
+  assert.ok(hint.includes('gpt-5.5'), `Hint should mention gpt-5.5: ${hint}`);
   assert.ok(hint.includes('gpt-5.4'), `Hint should mention gpt-5.4: ${hint}`);
   assert.ok(hint.includes('spark'), `Hint should mention spark: ${hint}`);
 });
@@ -100,14 +160,14 @@ test('modelValidationHint for codex mentions gpt-5.4 and spark', () => {
 
 test('buildCommand: base model + reasoning composes correctly', () => {
   const spec = buildCommand('codex', {
-    model: 'gpt-5.4',
-    reasoning: 'high',
+    model: 'gpt-5.6-sol',
+    reasoning: 'ultra',
     prompt: 'hello',
   });
   const mIdx = spec.argv.indexOf('-m');
-  assert.equal(spec.argv[mIdx + 1], 'gpt-5.4');
+  assert.equal(spec.argv[mIdx + 1], 'gpt-5.6-sol');
   assert.ok(spec.argv.includes('-c'));
-  assert.ok(spec.argv.includes('model_reasoning_effort=high'));
+  assert.ok(spec.argv.includes('model_reasoning_effort=ultra'));
 });
 
 test('buildCommand: base model without reasoning emits no effort flag', () => {
@@ -131,24 +191,32 @@ test('buildCommand: spark + reasoning composes correctly', () => {
   assert.ok(spec.argv.includes('model_reasoning_effort=xhigh'));
 });
 
-test('buildCommand: legacy composite still decomposes via agent-cli decomposeModel', () => {
+test('buildCommand: suffix-looking opaque model IDs pass through unchanged', () => {
   const spec = buildCommand('codex', {
     model: 'gpt-5.4-high',
     prompt: 'hello',
   });
   const mIdx = spec.argv.indexOf('-m');
-  assert.equal(spec.argv[mIdx + 1], 'gpt-5.4');
-  assert.ok(spec.argv.includes('model_reasoning_effort=high'));
+  assert.equal(spec.argv[mIdx + 1], 'gpt-5.4-high');
+  assert.ok(!spec.argv.some((arg) => arg.startsWith('model_reasoning_effort=')));
 });
 
 // =============================================================================
 // listModels returns base IDs only (effort is a separate UI control)
 // =============================================================================
 
-test('listModels returns exactly the three base IDs', () => {
+test('listModels returns exactly the configured base IDs', () => {
   const models = codexProvider.listModels();
   const ids = models.map((m) => m.id).sort();
-  assert.deepEqual(ids, ['gpt-5.3-codex-spark', 'gpt-5.4', 'gpt-5.4-mini']);
+  assert.deepEqual(ids, [
+    'gpt-5.3-codex-spark',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.5',
+    'gpt-5.6-luna',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+  ]);
 });
 
 test('listModels has exactly one default and it matches DEFAULT_CODEX_MODEL_ID', () => {
@@ -156,6 +224,35 @@ test('listModels has exactly one default and it matches DEFAULT_CODEX_MODEL_ID',
   const defaults = models.filter((m) => m.isDefault);
   assert.equal(defaults.length, 1);
   assert.equal(defaults[0].id, DEFAULT_CODEX_MODEL_ID);
+  assert.equal(DEFAULT_CODEX_MODEL_ID, 'gpt-5.6-sol');
+});
+
+test('reasoning defaults follow the selected provider and Codex model', () => {
+  assert.equal(defaultReasoningEffortForProvider('claude', 'opus'), 'high');
+  assert.equal(defaultReasoningEffortForProvider('codex', 'gpt-5.6-sol'), 'ultra');
+  assert.equal(defaultReasoningEffortForProvider('codex', 'gpt-5.6-terra'), 'xhigh');
+  assert.equal(defaultReasoningEffortForProvider('codex', 'gpt-5.6-luna'), 'xhigh');
+  assert.equal(defaultReasoningEffortForProvider('codex'), 'ultra');
+  assert.equal(defaultReasoningEffortForProvider('gemini'), undefined);
+});
+
+test('new conversation distinguishes provider default from explicit no-effort', () => {
+  const defaultResult = NewConversationMessageSchema.safeParse({
+    type: 'new_conversation',
+    provider: 'codex',
+    model: 'gpt-5.6-sol',
+  });
+  const noEffortResult = NewConversationMessageSchema.safeParse({
+    type: 'new_conversation',
+    provider: 'codex',
+    model: 'gpt-5.6-sol',
+    reasoningEffort: null,
+  });
+
+  assert.equal(defaultResult.success, true);
+  assert.equal(noEffortResult.success, true);
+  if (defaultResult.success) assert.equal(defaultResult.data.reasoningEffort, undefined);
+  if (noEffortResult.success) assert.equal(noEffortResult.data.reasoningEffort, null);
 });
 
 // =============================================================================
@@ -180,8 +277,16 @@ test('fromCodexModelId returns base as-is when no effort suffix present', () => 
 });
 
 test('to/fromCodexModelId round-trips through composite strings', () => {
-  for (const base of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']) {
-    for (const effort of ['medium', 'high', 'xhigh'] as const) {
+  for (const base of [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex-spark',
+  ]) {
+    for (const effort of ['medium', 'high', 'xhigh', 'ultra'] as const) {
       const composite = toCodexModelId(base, effort);
       const decomposed = fromCodexModelId(composite);
       assert.equal(decomposed.baseModel, base);
@@ -221,7 +326,15 @@ test('buildCommand: codex includes --skip-git-repo-check', () => {
 // =============================================================================
 
 test('inferProviderFromModel maps base codex IDs to codex', () => {
-  for (const model of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']) {
+  for (const model of [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex-spark',
+  ]) {
     assert.equal(inferProviderFromModel(model), 'codex', `${model} should infer codex`);
   }
 });

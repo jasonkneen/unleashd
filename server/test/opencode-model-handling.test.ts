@@ -5,8 +5,9 @@ import {
   ModelIdSchema,
   NewConversationMessageSchema,
   SetModelMessageSchema,
+  isModelIdValidForProvider,
 } from '../../shared/src/index';
-import { isModelIdValidForProvider } from '../src/providers/model-validation';
+import { sessionToConversation } from '../src/adapters/disk-adapter';
 import opencodeProvider from '../src/providers/opencode';
 
 const conversationId = '550e8400-e29b-41d4-a716-446655440000';
@@ -31,27 +32,52 @@ test('shared model schemas accept practical OpenCode ids', () => {
   );
 });
 
-test('shared model schema keeps claude/codex ids strict', () => {
+test('shared model wire schema accepts opaque ids and rejects only empty strings', () => {
+  assert.equal(ModelIdSchema.safeParse('fable').success, true);
   assert.equal(ModelIdSchema.safeParse('opus').success, true);
+  assert.equal(ModelIdSchema.safeParse('gpt-5.6-sol').success, true);
+  assert.equal(ModelIdSchema.safeParse('gpt-5.6-terra').success, true);
+  assert.equal(ModelIdSchema.safeParse('gpt-5.6-luna').success, true);
+  assert.equal(ModelIdSchema.safeParse('gpt-5.5').success, true);
   assert.equal(ModelIdSchema.safeParse('gpt-5.4').success, true);
   assert.equal(ModelIdSchema.safeParse('gpt-5.4-high').success, true);
-
-  // Missing provider/model separator should still be rejected.
-  assert.equal(ModelIdSchema.safeParse('openai').success, false);
-  assert.equal(ModelIdSchema.safeParse('gpt-5.3-codex-ultra').success, false);
+  assert.equal(ModelIdSchema.safeParse('openai').success, true);
+  assert.equal(ModelIdSchema.safeParse('gpt-5.3-codex-ultra').success, true);
+  assert.equal(ModelIdSchema.safeParse('').success, false);
 });
 
 test('server provider/model compatibility validation works per provider', () => {
   assert.equal(isModelIdValidForProvider('claude', 'opus'), true);
+  assert.equal(isModelIdValidForProvider('claude', 'fable'), true);
   assert.equal(isModelIdValidForProvider('claude', 'opencode/gpt-5'), false);
 
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.6-sol'), true);
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.6-terra'), true);
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.6-luna'), true);
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.5'), true);
   assert.equal(isModelIdValidForProvider('codex', 'gpt-5.4'), true);
-  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.4-medium'), true);
+  assert.equal(isModelIdValidForProvider('codex', 'gpt-5.4-medium'), false);
   assert.equal(isModelIdValidForProvider('codex', 'opencode/gpt-5'), false);
 
   assert.equal(isModelIdValidForProvider('opencode', 'opencode/gpt-5'), true);
   assert.equal(isModelIdValidForProvider('opencode', 'openai/gpt-5'), true);
   assert.equal(isModelIdValidForProvider('opencode', 'opus'), false);
+});
+
+test('disk hydration rejects a globally valid model from the wrong provider', () => {
+  const conversation = sessionToConversation({
+    sessionId: '550e8400-e29b-41d4-a716-446655440000',
+    filePath: '/tmp/codex-session.jsonl',
+    workingDirectory: '/tmp',
+    provider: 'codex',
+    model: 'opus',
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    modifiedAt: new Date('2026-01-01T00:00:00Z'),
+    messages: [],
+  });
+
+  assert.ok(conversation);
+  assert.equal(conversation.model, undefined);
 });
 
 test('OpenCode shared CLI builder normalizes model IDs', () => {

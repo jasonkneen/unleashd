@@ -1,23 +1,21 @@
 import type {
   ClientMessage,
   Conversation,
+  ConversationConfig,
   ModelId,
   Provider,
   QueuedMessage,
   ServerMessage,
 } from '@unleashd/shared';
-import { normalizeModelId } from '@unleashd/shared';
 import { enableMapSet, produce } from 'immer';
-import {
-  DRAFT_KEY_PREFIX,
-  PENDING_CONVERSATIONS_KEY,
-  PENDING_FILES_KEY_PREFIX,
-  useUIStore,
-} from '../stores/uiStore';
+import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
+import { setConversationConfig } from './config-actions';
 import {
   activeConversationIdAtom,
   conversationsAtom,
   defaultCwdAtom,
+  pendingConfigCommandsAtom,
+  pendingCreationsAtom,
   sendFnAtom,
   streamingContentAtom,
   wsStatusAtom,
@@ -27,6 +25,13 @@ import {
   mergeChildReviewDocPathMapAtom,
   mergeChildStatusMapAtom,
 } from './mergeAtoms';
+import {
+  loadPendingConversations,
+  markPendingCreationRejected,
+  normalizeWorkingDirectory,
+  removePendingConversation,
+  resendPendingCreation,
+} from './pending-creations';
 import { jotaiStore } from './store';
 
 // Enable Immer's Map/Set support — must be called once before any produce() on Maps.
@@ -34,6 +39,8 @@ enableMapSet();
 
 // Re-export for downstream consumers that previously imported from conversationStore
 export type { QueuedMessage } from '@unleashd/shared';
+export { createConversation } from './pending-creations';
+export type { CreateConversationArgs } from './pending-creations';
 
 // =============================================================================
 // Chunk Buffer
@@ -82,93 +89,6 @@ function scheduleChunkFlush(): void {
 }
 
 // =============================================================================
-// Pending Conversations Persistence
-//
-// Optimistic stubs created before server confirms are saved to localStorage so
-// they survive page refresh. Reconciled against server state on init.
-// =============================================================================
-
-interface PendingConversation {
-  id: string;
-  workingDirectory: string;
-  provider: Provider;
-  model?: ModelId;
-  createdAt: string;
-  swarmDebugPrefix?: string;
-  resumedFromConversationId?: string;
-  reasoningEffort?: string;
-}
-
-function normalizeWorkingDirectory(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return trimmed;
-  if (trimmed.startsWith('~')) {
-    return trimmed.replace(/\/+$/, '') || '~';
-  }
-
-  const withSingleSlashes = trimmed.replace(/\/+/g, '/');
-  const hasLeadingSlash = withSingleSlashes.startsWith('/');
-  const segments = withSingleSlashes.split('/');
-  const normalized: string[] = [];
-
-  for (const segment of segments) {
-    if (!segment || segment === '.') continue;
-    if (segment === '..') {
-      if (normalized.length > 0) {
-        normalized.pop();
-      }
-      continue;
-    }
-    normalized.push(segment);
-  }
-
-  if (hasLeadingSlash) {
-    const rootPath = `/${normalized.join('/')}`;
-    return rootPath === '/' ? '/' : rootPath.replace(/\/+$/, '');
-  }
-
-  const fallback = normalized.join('/');
-  return fallback || '.';
-}
-
-function loadPendingConversations(): PendingConversation[] {
-  const raw = localStorage.getItem(PENDING_CONVERSATIONS_KEY);
-  if (!raw) return [];
-  try {
-    return (JSON.parse(raw) as PendingConversation[]).map((conv) => ({
-      ...conv,
-      model: normalizeModelId(conv.provider, conv.model),
-    }));
-  } catch {
-    // Corrupt localStorage data — clear it so the bad entry doesn't block every
-    // subsequent init cycle.
-    console.warn('[PendingConversations] Corrupt localStorage data — clearing');
-    localStorage.removeItem(PENDING_CONVERSATIONS_KEY);
-    return [];
-  }
-}
-
-function savePendingConversation(conv: PendingConversation): void {
-  const pending = loadPendingConversations();
-  pending.push(conv);
-  localStorage.setItem(PENDING_CONVERSATIONS_KEY, JSON.stringify(pending));
-}
-
-function removePendingConversation(id: string): void {
-  const existing = loadPendingConversations();
-  // No-op if this id isn't pending — avoids spurious localStorage writes when
-  // conversation_created is broadcast for UPDATES (set_reasoning_effort,
-  // set_model, set_provider), which is the current wire shape for updates.
-  if (!existing.some((c) => c.id === id)) return;
-  const pending = existing.filter((c) => c.id !== id);
-  if (pending.length === 0) {
-    localStorage.removeItem(PENDING_CONVERSATIONS_KEY);
-  } else {
-    localStorage.setItem(PENDING_CONVERSATIONS_KEY, JSON.stringify(pending));
-  }
-}
-
-// =============================================================================
 // Helper: read the current send function
 // =============================================================================
 
@@ -196,73 +116,6 @@ export function setActiveConversationId(id: string | null): void {
   jotaiStore.set(activeConversationIdAtom, id);
 }
 
-export function createConversation(
-  workingDirectory: string,
-  provider: Provider = 'claude',
-  model?: ModelId,
-  swarmDebugPrefix?: string,
-  resumedFromConversationId?: string,
-  reasoningEffort?: string
-): string {
-  const id = crypto.randomUUID();
-  const normalizedWorkingDirectory = normalizeWorkingDirectory(workingDirectory);
-  const normalizedModel = normalizeModelId(provider, model);
-
-  const stub: Conversation = {
-    id,
-    messages: [],
-    isRunning: false,
-    isStreaming: false,
-    confirmed: false,
-    createdAt: new Date(),
-    workingDirectory: normalizedWorkingDirectory,
-    provider,
-    model: normalizedModel,
-    reasoningEffort,
-    subAgents: [],
-    queue: [],
-    isWorker: false,
-    swarmId: null,
-    workerId: null,
-    workerRole: null,
-    parentConversationId: null,
-    resumedFromConversationId: resumedFromConversationId ?? null,
-    modelName: null,
-    swarmDebugPrefix: swarmDebugPrefix ?? null,
-  };
-
-  jotaiStore.set(
-    conversationsAtom,
-    produce(jotaiStore.get(conversationsAtom), (draft) => {
-      draft.set(id, stub);
-    })
-  );
-  jotaiStore.set(activeConversationIdAtom, id);
-
-  savePendingConversation({
-    id,
-    workingDirectory: normalizedWorkingDirectory,
-    provider,
-    model: normalizedModel,
-    createdAt: stub.createdAt.toISOString(),
-    swarmDebugPrefix,
-    resumedFromConversationId,
-    reasoningEffort,
-  });
-  send({
-    type: 'new_conversation',
-    id,
-    workingDirectory: normalizedWorkingDirectory,
-    provider,
-    model: normalizedModel,
-    swarmDebugPrefix,
-    resumedFromConversationId,
-    reasoningEffort,
-  });
-
-  return id;
-}
-
 /**
  * Merge feature: POST /api/conversations/merge. Server mints the parent id
  * and per-child ids/review UUIDs, creates everything, spawns forks, then
@@ -270,8 +123,7 @@ export function createConversation(
  * parent id so the caller can navigate to the new thread.
  */
 export async function createMergeConversations(args: {
-  parentProvider: Provider;
-  parentModel?: ModelId;
+  parentConfig: ConversationConfig;
   workingDirectory: string;
   sourceIds: string[];
 }): Promise<{
@@ -315,27 +167,40 @@ export function interruptAndSend(conversationId: string, content: string): void 
   send({ type: 'interrupt_and_send', conversationId, content });
 }
 
+/** @deprecated Prefer setConversationConfig from config-actions. */
 export function setModel(conversationId: string, model: ModelId): void {
-  send({ type: 'set_model', conversationId, model });
+  const conversation = jotaiStore.get(conversationsAtom).get(conversationId);
+  if (!conversation) return;
+  setConversationConfig({
+    conversationId,
+    expectedRevision: conversation.configRevision ?? 0,
+    patch: { kind: 'set_model', model: { mode: 'explicit', modelId: model } },
+  });
 }
 
+/** @deprecated Prefer setConversationConfig from config-actions. */
 export function setProvider(conversationId: string, provider: Provider): void {
-  send({ type: 'set_provider', conversationId, provider });
+  const conversation = jotaiStore.get(conversationsAtom).get(conversationId);
+  if (!conversation) return;
+  setConversationConfig({
+    conversationId,
+    expectedRevision: conversation.configRevision ?? 0,
+    patch: { kind: 'set_provider', provider },
+  });
 }
 
-export function setReasoningEffort(
-  conversationId: string,
-  value: string | null
-): void {
-  jotaiStore.set(
-    conversationsAtom,
-    produce(jotaiStore.get(conversationsAtom), (draft) => {
-      const conv = draft.get(conversationId);
-      if (!conv) return;
-      conv.reasoningEffort = value ?? undefined;
-    })
-  );
-  send({ type: 'set_reasoning_effort', conversationId, value });
+/** @deprecated Prefer setConversationConfig from config-actions. */
+export function setReasoningEffort(conversationId: string, value: string | null): void {
+  const conversation = jotaiStore.get(conversationsAtom).get(conversationId);
+  if (!conversation) return;
+  setConversationConfig({
+    conversationId,
+    expectedRevision: conversation.configRevision ?? 0,
+    patch: {
+      kind: 'set_reasoning',
+      reasoning: value === null ? { mode: 'disabled' } : { mode: 'explicit', effort: value },
+    },
+  });
 }
 
 export function queueMessage(conversationId: string, content: string): void {
@@ -374,52 +239,33 @@ export function handleMessage(data: ServerMessage): void {
         serverState.set(conv.id, conv);
       }
 
-      // Reconcile pending stubs from localStorage
+      // Reconcile client-owned pending creations without weakening the
+      // authoritative Conversation map with schema-incomplete stubs.
+      const pendingState = new Map<string, import('./conversations').PendingConversationCreation>();
       for (const pc of loadPendingConversations()) {
-        if (serverState.has(pc.id)) {
-          removePendingConversation(pc.id);
+        if (serverState.has(pc.conversationId)) {
+          removePendingConversation(pc.conversationId, pc.commandId);
         } else {
-          const stub: Conversation = {
-            id: pc.id,
-            messages: [],
-            isRunning: false,
-            isStreaming: false,
-            confirmed: false,
-            createdAt: new Date(pc.createdAt),
+          pendingState.set(pc.conversationId, {
+            commandId: pc.commandId,
+            conversationId: pc.conversationId,
             workingDirectory: normalizeWorkingDirectory(pc.workingDirectory),
-            provider: pc.provider,
-            model: pc.model,
-            reasoningEffort: pc.reasoningEffort,
-            subAgents: [],
-            queue: [],
-            isWorker: false,
-            swarmId: null,
-            workerId: null,
-            workerRole: null,
-            parentConversationId: null,
-            resumedFromConversationId: pc.resumedFromConversationId ?? null,
-            modelName: null,
-            swarmDebugPrefix: pc.swarmDebugPrefix ?? null,
-          };
-          serverState.set(pc.id, stub);
-          const normalizedWorkingDirectory = normalizeWorkingDirectory(pc.workingDirectory);
-          setTimeout(() => {
-            send({
-              type: 'new_conversation',
-              id: pc.id,
-              workingDirectory: normalizedWorkingDirectory,
-              provider: pc.provider,
-              model: pc.model,
-              swarmDebugPrefix: pc.swarmDebugPrefix,
-              resumedFromConversationId: pc.resumedFromConversationId,
-              reasoningEffort: pc.reasoningEffort,
-            });
-          }, 0);
+            config: pc.config,
+            createdAt: new Date(pc.createdAt),
+            error: pc.error,
+          });
+          setTimeout(() => resendPendingCreation(pc), 0);
         }
       }
 
       jotaiStore.set(defaultCwdAtom, data.defaultCwd);
       jotaiStore.set(conversationsAtom, serverState);
+      jotaiStore.set(pendingCreationsAtom, pendingState);
+      // `init` is an authoritative epoch after connect/reconnect. Config writes
+      // are revision-checked and their result is already reflected in these
+      // snapshots, so an acknowledgement lost with the old socket must not
+      // leave the UI in a permanent "Saving…" state.
+      jotaiStore.set(pendingConfigCommandsAtom, new Map());
 
       // Apply server UI state preferences
       if (data.uiState) {
@@ -444,7 +290,75 @@ export function handleMessage(data: ServerMessage): void {
           });
         })
       );
-      removePendingConversation(data.conversation.id);
+      removePendingConversation(data.conversation.id, data.commandId);
+      jotaiStore.set(
+        pendingCreationsAtom,
+        produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
+          draft.delete(data.conversation.id);
+        })
+      );
+      if (data.commandId) {
+        jotaiStore.set(
+          pendingConfigCommandsAtom,
+          produce(jotaiStore.get(pendingConfigCommandsAtom), (draft) => {
+            draft.delete(data.commandId as string);
+          })
+        );
+      }
+      break;
+    }
+
+    case 'conversation_updated': {
+      jotaiStore.set(
+        conversationsAtom,
+        produce(jotaiStore.get(conversationsAtom), (draft) => {
+          const existing = draft.get(data.conversation.id);
+          draft.set(data.conversation.id, {
+            ...data.conversation,
+            swarmDebugPrefix:
+              data.conversation.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
+          });
+        })
+      );
+      if (data.commandId) {
+        jotaiStore.set(
+          pendingConfigCommandsAtom,
+          produce(jotaiStore.get(pendingConfigCommandsAtom), (draft) => {
+            draft.delete(data.commandId as string);
+          })
+        );
+      }
+      break;
+    }
+
+    case 'command_rejected': {
+      const authoritativeConversation = data.authoritativeConversation;
+      if (authoritativeConversation) {
+        jotaiStore.set(
+          conversationsAtom,
+          produce(jotaiStore.get(conversationsAtom), (draft) => {
+            draft.set(authoritativeConversation.id, authoritativeConversation);
+          })
+        );
+      }
+      const message = data.error.message;
+      markPendingCreationRejected(data.commandId, message);
+      jotaiStore.set(
+        pendingConfigCommandsAtom,
+        produce(jotaiStore.get(pendingConfigCommandsAtom), (draft) => {
+          const pending = draft.get(data.commandId);
+          if (pending) pending.error = message;
+        })
+      );
+      jotaiStore.set(
+        pendingCreationsAtom,
+        produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
+          const pending = Array.from(draft.values()).find(
+            (creation) => creation.commandId === data.commandId
+          );
+          if (pending) pending.error = message;
+        })
+      );
       break;
     }
 
@@ -472,6 +386,12 @@ export function handleMessage(data: ServerMessage): void {
         jotaiStore.set(activeConversationIdAtom, null);
       }
       removePendingConversation(data.conversationId);
+      jotaiStore.set(
+        pendingCreationsAtom,
+        produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
+          draft.delete(data.conversationId);
+        })
+      );
       localStorage.removeItem(`${DRAFT_KEY_PREFIX}${data.conversationId}`);
       localStorage.removeItem(`${PENDING_FILES_KEY_PREFIX}${data.conversationId}`);
       useUIStore.setState((s) => {

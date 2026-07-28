@@ -4,12 +4,20 @@
   "private": false,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"pnpm dev:server\" \"pnpm dev:client\"",
-    "dev:server": "pnpm --filter @unleashd/server dev",
-    "dev:client": "pnpm --filter @unleashd/client dev",
-    "build": "pnpm --filter @unleashd/shared build && pnpm --filter @unleashd/server build && node tools/patch-server-dist-shared-imports.cjs && pnpm --filter @unleashd/client build",
-    "start": "pnpm --filter @unleashd/server start",
-    "test": "node test/api.test.js",
+    "predev": "pnpm --filter @unleashd/shared build && pnpm --dir vendor/agent-cli-tool build",
+    "prepack": "pnpm build",
+    "dev": "concurrently -n shared-esm,shared-cjs,cli,server,client -c yellow,yellow,magenta,blue,green \"pnpm --filter @unleashd/shared watch:esm\" \"pnpm --filter @unleashd/shared watch:cjs\" \"pnpm --dir vendor/agent-cli-tool watch\" \"pnpm --filter @unleashd/server dev\" \"pnpm --filter @unleashd/client dev\"",
+    "dev:server": "pnpm --filter @unleashd/shared build && pnpm --dir vendor/agent-cli-tool build && pnpm --filter @unleashd/server dev",
+    "dev:client": "pnpm --filter @unleashd/shared build && pnpm --filter @unleashd/client dev",
+    "build": "pnpm --filter @unleashd/shared build && pnpm --dir vendor/agent-cli-tool build && pnpm --filter @unleashd/server build && pnpm --filter @unleashd/client build",
+    "start": "node server/dist/server.js",
+    "typecheck": "pnpm --filter @unleashd/shared build && pnpm --filter @unleashd/server typecheck && pnpm --filter @unleashd/client exec tsc -b && pnpm --dir vendor/agent-cli-tool typecheck",
+    "test": "pnpm typecheck && pnpm build && pnpm test:server && pnpm test:cli && pnpm test:package && pnpm test:api",
+    "test:server": "pnpm exec tsx --test server/test/*.test.ts",
+    "test:live:tools": "UNLEASHD_LIVE_TOOL_INTEGRATION=1 pnpm exec tsx --test server/test/tool-integration.test.ts",
+    "test:cli": "pnpm --dir vendor/agent-cli-tool test",
+    "test:package": "node test/package-smoke.js",
+    "test:api": "node test/api.test.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write ."
@@ -18,25 +26,19 @@
     "@biomejs/biome": "^1.9.4",
     "concurrently": "^9.1.2",
     "json-schema-to-typescript": "^15.0.4",
+    "tsx": "^4.7.0",
     "ws": "^8.14.2"
   },
   "bin": {
     "unleashd": "./bin/unleashd.js"
   },
-  "files": [
-    "bin",
-    "server/dist",
-    "client/dist",
-    "shared/dist",
-    "server/package.json",
-    "client/package.json",
-    "shared/package.json"
-  ],
+  "files": ["bin", "server/dist", "client/dist"],
+  "bundledDependencies": ["@nbardy/agent-cli", "@unleashd/shared"],
   "dependencies": {
-    "@nbardy/agent-cli": "workspace:*",
+    "@nbardy/agent-cli": "workspace:0.1.1",
+    "@unleashd/shared": "workspace:1.0.0",
     "express": "^4.18.2",
     "multer": "^2.0.2",
-    "tsx": "^4.7.0",
     "uuid": "^13.0.0",
     "ws": "^8.14.2",
     "zod": "^3.24.0"

@@ -719,7 +719,15 @@ export function SwarmDetail() {
     }
 
     const prefix = buildSwarmDebugPrefix(projectRoot, configPath, swarmId, summary, startedAt);
-    const id = createConversation(projectRoot, 'claude', undefined, prefix);
+    const id = createConversation({
+      workingDirectory: projectRoot,
+      config: {
+        provider: 'claude',
+        model: { mode: 'default' },
+        reasoning: { mode: 'default' },
+      },
+      swarmDebugPrefix: prefix,
+    });
     navigate(`/chat/${id}`);
   }, [projectRoot, effectiveRunId, runtimeSnapshot, createConversation, navigate]);
 

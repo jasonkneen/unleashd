@@ -787,6 +787,51 @@
 }
 
 /* Code blocks — elevated to darkest bg for clear separation from prose */
+.message-code-block {
+  position: relative;
+  margin: 12px 0;
+}
+
+.message-code-block pre {
+  margin: 0;
+  padding-top: 40px;
+}
+
+.message-code-copy-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  padding: 4px;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+
+.message-code-block:hover .message-code-copy-btn,
+.message-code-block:focus-within .message-code-copy-btn,
+.message-code-copy-btn.copied {
+  opacity: 1;
+}
+
+.message-code-copy-btn:hover,
+.message-code-copy-btn:focus-visible {
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  color: var(--text-emphasis);
+}
+
+.message-code-copy-btn.copied {
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  color: var(--accent-success, #4caf50);
+}
+
 .message-content pre {
   background: var(--bg-darkest);
   padding: 16px;
@@ -1372,4 +1417,16 @@
   color: var(--text-secondary);
   white-space: pre-wrap;
   line-height: 1.5;
+}
+.conversation-config-menu {
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: min(70vh, 42rem);
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.config-picker-error {
+  margin-top: 0.75rem;
+  color: var(--error, #dc322f);
+  font-size: 0.8rem;
 }

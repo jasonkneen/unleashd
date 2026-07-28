@@ -56,6 +56,11 @@
   outline: none;
 }
 
+.nav-section-header--active {
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  border-color: var(--border-default);
+}
+
 .nav-section-header--swarms:hover,
 .nav-section-header--swarms:focus-visible {
   border-color: var(--border-default);
@@ -275,6 +280,34 @@
   display: none;
 }
 
+.custom-model-option {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.custom-model-option input {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.custom-model-option input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.custom-model-option input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .new-conv-modal .directory-actions {
   display: flex;
   gap: 10px;
@@ -440,6 +473,13 @@
   background: var(--bg-selected);
   border-bottom: 1px solid color-mix(in srgb, var(--text-emphasis) 6%, transparent);
   border-left: 2px solid var(--user-dim);
+}
+
+.pending-creation {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 /* Conversation header — folder badge + metadata row.

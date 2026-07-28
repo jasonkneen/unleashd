@@ -1,4 +1,4 @@
-import type { Conversation, ModelId, Provider } from '@unleashd/shared';
+import type { Conversation } from '@unleashd/shared';
 import { providerSupportsFork } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -7,19 +7,21 @@ import { createConversation } from '../atoms/actions';
 import {
   activeConversationIdAtom,
   allConversationsAtom,
+  allPendingCreationsAtom,
   defaultCwdAtom,
   wsStatusAtom,
 } from '../atoms/conversations';
 import { mergeModeAtom, mergeSelectionAtom } from '../atoms/mergeAtoms';
-import { jotaiStore } from '../atoms/store';
+import { createDefaultDraft } from '../domain/conversation-config-draft';
+import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useSwarmRuntimeSnapshots } from '../hooks/useSwarmRuntimeSnapshots';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
 import { getProjectRoot, isWorktreeDirectory } from '../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getConversationLastActivity, getMinutesElapsed } from '../utils/time';
+import { ConversationConfigPicker } from './ConversationConfigPicker';
 import { PathAutocomplete } from './PathAutocomplete';
-import { ProviderModelPicker } from './ProviderModelPicker';
 import { SearchPalette } from './SearchPalette';
 import './Sidebar.css';
 
@@ -53,6 +55,7 @@ function timeAgoColor(minutesElapsed: number): string {
 
 export function Sidebar() {
   const allConversations = useAtomValue(allConversationsAtom);
+  const pendingCreations = useAtomValue(allPendingCreationsAtom);
   const activeConversationId = useAtomValue(activeConversationIdAtom);
   const defaultCwd = useAtomValue(defaultCwdAtom);
   const wsStatus = useAtomValue(wsStatusAtom);
@@ -211,9 +214,8 @@ export function Sidebar() {
   const [directory, setDirectory] = useState('');
   const [hasPendingDefault, setHasPendingDefault] = useState(false);
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
-  const [provider, setProvider] = useState<Provider>('codex');
-  const [model, setModel] = useState<ModelId | undefined>(undefined);
-  const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(undefined);
+  const [configDraft, setConfigDraft] = useState(() => createDefaultDraft('codex'));
+  const { catalog, error: catalogError, retry: retryCatalog } = useProviderCatalog();
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -227,16 +229,9 @@ export function Sidebar() {
     setDirectory(lastDir);
     setHasPendingDefault(true);
     setModalError(null);
+    setConfigDraft(createDefaultDraft('codex'));
     setShowPicker(true);
   }, [allConversations, lastWorkingDirectory, defaultCwd]);
-
-  // Unified reset on modal-open. Runs for every entry point (main "+"" button,
-  // per-folder "+" button, keyboard shortcut, swarm flow) so a previous pick
-  // can't leak into the next create. Server applies the canonical per-provider
-  // default when reasoningEffort is absent.
-  useEffect(() => {
-    if (showPicker) setReasoningEffort(undefined);
-  }, [showPicker]);
 
   const handleOpenNewSwarmFlow = useCallback(() => {
     handleNewConversation();
@@ -271,29 +266,14 @@ export function Sidebar() {
     return () => window.removeEventListener('keydown', handleSearchShortcut);
   }, []);
 
-  const navigateToCreatedConversation = useCallback(() => {
-    const newId = jotaiStore.get(activeConversationIdAtom);
-    if (newId) navigate(`/chat/${newId}`);
-  }, [navigate]);
-
   const handleConfirm = useCallback(() => {
     if (!directory.trim()) return;
     setModalError(null);
     setLastWorkingDirectory(directory);
-    // reasoningEffort applies to claude + codex; server ignores it for other providers.
-    const effectiveReasoning =
-      provider === 'claude' || provider === 'codex' ? reasoningEffort : undefined;
-    createConversation(directory, provider, model, undefined, undefined, effectiveReasoning);
+    const newId = createConversation({ workingDirectory: directory, config: configDraft });
     setShowPicker(false);
-    navigateToCreatedConversation();
-  }, [
-    directory,
-    model,
-    navigateToCreatedConversation,
-    provider,
-    reasoningEffort,
-    setLastWorkingDirectory,
-  ]);
+    navigate(`/chat/${newId}`);
+  }, [directory, configDraft, navigate, setLastWorkingDirectory]);
 
   const handleCreateNewSwarm = useCallback(async () => {
     if (!directory.trim()) return;
@@ -310,31 +290,19 @@ export function Sidebar() {
       }
 
       setLastWorkingDirectory(directory);
-      const effectiveReasoning =
-        provider === 'claude' || provider === 'codex' ? reasoningEffort : undefined;
-      createConversation(
-        directory,
-        provider,
-        model,
-        payload.prefix,
-        undefined,
-        effectiveReasoning
-      );
+      const newId = createConversation({
+        workingDirectory: directory,
+        config: configDraft,
+        swarmDebugPrefix: payload.prefix,
+      });
       setShowPicker(false);
-      navigateToCreatedConversation();
+      navigate(`/chat/${newId}`);
     } catch (error) {
       setModalError((error as Error).message);
     } finally {
       setIsCreatingSwarm(false);
     }
-  }, [
-    directory,
-    model,
-    navigateToCreatedConversation,
-    provider,
-    reasoningEffort,
-    setLastWorkingDirectory,
-  ]);
+  }, [directory, configDraft, navigate, setLastWorkingDirectory]);
 
   const handleCancel = () => {
     if (isCreatingSwarm) return;
@@ -484,10 +452,42 @@ export function Sidebar() {
           </div>
         </div>
 
+        {/* ── Buddies Section ── */}
+        <div className="nav-section">
+          <div
+            className={`nav-section-header nav-section-header--clickable ${
+              location.pathname.startsWith('/buddies') ? 'nav-section-header--active' : ''
+            }`}
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate('/buddies')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                navigate('/buddies');
+              }
+            }}
+            title="Open persistent employees"
+          >
+            <span className="nav-section-label">Buddies</span>
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: 'var(--ai)',
+                boxShadow: '0 0 8px var(--ai-glow)',
+              }}
+            />
+          </div>
+        </div>
+
         {/* ── Swarms Section ── */}
         <div className="nav-section">
           <div
-            className="nav-section-header nav-section-header--clickable nav-section-header--swarms"
+            className={`nav-section-header nav-section-header--clickable nav-section-header--swarms ${
+              location.pathname.startsWith('/workers') ? 'nav-section-header--active' : ''
+            }`}
             style={{ justifyContent: 'space-between' }}
             role="button"
             tabIndex={0}
@@ -519,7 +519,7 @@ export function Sidebar() {
           <div className="new-conv-overlay" onClick={handleCancel}>
             <div className="new-conv-modal" onClick={(e) => e.stopPropagation()}>
               <h3 className="new-conv-title">New Conversation</h3>
-              <label className="new-conv-label">Working Directory</label>
+              <div className="new-conv-label">Working Directory</div>
               <PathAutocomplete
                 value={directory}
                 onChange={setDirectory}
@@ -532,20 +532,34 @@ export function Sidebar() {
                 onValidationChange={setIsDirectoryValid}
                 autoFocus
               />
-              <ProviderModelPicker
-                provider={provider}
-                onProviderChange={setProvider}
-                model={model}
-                onModelChange={setModel}
-                reasoningEffort={reasoningEffort}
-                onReasoningEffortChange={setReasoningEffort}
-              />
+              {catalog ? (
+                <ConversationConfigPicker
+                  value={configDraft}
+                  onChange={setConfigDraft}
+                  catalog={catalog}
+                />
+              ) : (
+                <div className="config-picker-status" role={catalogError ? 'alert' : 'status'}>
+                  {catalogError ? (
+                    <>
+                      Unable to load providers.{' '}
+                      <button type="button" onClick={retryCatalog}>
+                        Retry
+                      </button>
+                    </>
+                  ) : (
+                    'Loading providers…'
+                  )}
+                </div>
+              )}
               <div className="directory-actions">
                 <button
                   type="button"
                   className="dir-action-btn dir-confirm-btn"
                   onClick={handleConfirm}
-                  disabled={wsStatus !== 'connected' || !isDirectoryValid || isCreatingSwarm}
+                  disabled={
+                    wsStatus !== 'connected' || !isDirectoryValid || isCreatingSwarm || !catalog
+                  }
                   title={
                     wsStatus !== 'connected'
                       ? 'Server disconnected'
@@ -593,7 +607,29 @@ export function Sidebar() {
       </div>
 
       <div className="conversations-list">
-        {topLevelConversations.length > 0 && (
+        {pendingCreations.map((creation) => (
+          <button
+            type="button"
+            key={creation.conversationId}
+            className={`conversation-item pending-creation ${
+              creation.conversationId === activeConversationId ? 'active' : ''
+            }`}
+            onClick={() => navigate(`/chat/${creation.conversationId}`)}
+          >
+            <div className="conversation-header">
+              <span className="folder-badge">
+                {creation.workingDirectory.split('/').filter(Boolean).pop() ?? '/'}
+              </span>
+              <span className="status-indicator pending" />
+            </div>
+            <div className="conversation-preview">
+              {creation.error
+                ? `Failed: ${creation.error}`
+                : `Starting ${creation.config.provider}…`}
+            </div>
+          </button>
+        ))}
+        {(topLevelConversations.length > 0 || pendingCreations.length > 0) && (
           <div
             className="sidebar-section-header"
             style={{

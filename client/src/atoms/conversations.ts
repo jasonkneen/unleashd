@@ -1,4 +1,9 @@
-import type { ClientMessage, Conversation } from '@unleashd/shared';
+import type {
+  ClientMessage,
+  Conversation,
+  ConversationConfig,
+  ConversationConfigPatch,
+} from '@unleashd/shared';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import { getConversationLastActivity } from '../utils/time';
@@ -6,12 +11,40 @@ import { getConversationLastActivity } from '../utils/time';
 // =============================================================================
 // Primary State Atoms
 //
-// These are the source-of-truth atoms. All mutations go through actions.ts
-// (which calls jotaiStore.set on these). Never mutate these directly in
-// React components — call action functions instead.
+// These are the source-of-truth atoms. Mutations go through actions.ts or
+// config-actions.ts (which call jotaiStore.set). React components call actions;
+// they never mutate these maps directly.
 // =============================================================================
 
 export const conversationsAtom = atom(new Map<string, Conversation>());
+
+export interface PendingConversationCreation {
+  commandId: string;
+  conversationId: string;
+  workingDirectory: string;
+  config: ConversationConfig;
+  createdAt: Date;
+  error?: string;
+}
+
+export interface PendingConfigCommand {
+  commandId: string;
+  conversationId: string;
+  baseRevision: number;
+  patch: ConversationConfigPatch;
+  error?: string;
+}
+
+// Client-owned command state is intentionally separate from authoritative
+// server Conversation snapshots. A pending create is not a partial Conversation.
+export const pendingCreationsAtom = atom(new Map<string, PendingConversationCreation>());
+export const pendingConfigCommandsAtom = atom(new Map<string, PendingConfigCommand>());
+
+export const allPendingCreationsAtom = atom((get) =>
+  Array.from(get(pendingCreationsAtom).values()).sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+  )
+);
 
 // Streaming text — kept separate from conversations so Sidebar never re-renders
 // at 60Hz during streaming. Flushed into conversations on stream end.
@@ -38,6 +71,19 @@ export const sendFnAtom = atom<{ send: (msg: ClientMessage) => void }>({ send: (
 // Single conversation by ID — use instead of s.conversations.get(id)
 export const conversationAtomFamily = atomFamily((id: string) =>
   atom((get) => get(conversationsAtom).get(id) ?? null)
+);
+
+export const pendingCreationAtomFamily = atomFamily((id: string) =>
+  atom((get) => get(pendingCreationsAtom).get(id) ?? null)
+);
+
+export const pendingConfigCommandAtomFamily = atomFamily((conversationId: string) =>
+  atom(
+    (get) =>
+      Array.from(get(pendingConfigCommandsAtom).values()).find(
+        (command) => command.conversationId === conversationId
+      ) ?? null
+  )
 );
 
 // Live streaming text for one conversation — use for Chat.tsx merge display

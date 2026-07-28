@@ -1,10 +1,14 @@
-import type { ModelId, Provider } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { useState } from 'react';
 import { createMergeConversations } from '../atoms/actions';
 import { defaultCwdAtom } from '../atoms/conversations';
 import { mergeModeAtom, mergeSelectionAtom } from '../atoms/mergeAtoms';
-import { ProviderModelPicker } from './ProviderModelPicker';
+import {
+  createDefaultDraft,
+  type ConversationConfigDraft,
+} from '../domain/conversation-config-draft';
+import { useProviderCatalog } from '../hooks/useProviderCatalog';
+import { ConversationConfigPicker } from './ConversationConfigPicker';
 import './MergeModal.css';
 
 // Slim merge modal: positioned over the main-content area (not covering
@@ -16,8 +20,11 @@ export function MergeModal({ onComplete }: { onComplete: (parentId: string) => v
   const [, setMergeMode] = useAtom(mergeModeAtom);
   const [mergeSelection, setMergeSelection] = useAtom(mergeSelectionAtom);
 
-  const [parentProvider, setParentProvider] = useState<Provider>('claude');
-  const [parentModel, setParentModel] = useState<ModelId | undefined>(undefined);
+  const [parentConfig, setParentConfig] = useState<ConversationConfigDraft>(() =>
+    createDefaultDraft('claude')
+  );
+  const { catalog, isLoading: isCatalogLoading, error: catalogError, retry } =
+    useProviderCatalog();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [workingDirectory, setWorkingDirectory] = useState(defaultCwd);
@@ -34,8 +41,7 @@ export function MergeModal({ onComplete }: { onComplete: (parentId: string) => v
     setError(null);
     try {
       const result = await createMergeConversations({
-        parentProvider,
-        parentModel,
+        parentConfig,
         workingDirectory,
         sourceIds: Array.from(mergeSelection),
       });
@@ -70,15 +76,26 @@ export function MergeModal({ onComplete }: { onComplete: (parentId: string) => v
         placeholder="/path/to/project"
       />
 
-      <ProviderModelPicker
-        provider={parentProvider}
-        onProviderChange={(p) => {
-          setParentProvider(p);
-          setParentModel(undefined);
-        }}
-        model={parentModel}
-        onModelChange={setParentModel}
-      />
+      {catalog ? (
+        <ConversationConfigPicker
+          value={parentConfig}
+          onChange={setParentConfig}
+          catalog={catalog}
+        />
+      ) : (
+        <div className="config-picker-status" role={catalogError ? 'alert' : 'status'}>
+          {catalogError ? (
+            <>
+              Unable to load providers.{' '}
+              <button type="button" onClick={retry}>
+                Retry
+              </button>
+            </>
+          ) : isCatalogLoading ? (
+            'Loading providers…'
+          ) : null}
+        </div>
+      )}
 
       {error && <div className="merge-modal__error">{error}</div>}
 

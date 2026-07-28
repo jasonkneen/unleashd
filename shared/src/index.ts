@@ -7,6 +7,30 @@
  */
 
 import { z } from 'zod';
+import {
+  ConfigErrorSchema,
+  ConfigResolutionSchema,
+  ConversationConfigPatchSchema,
+  ConversationConfigSchema,
+  ModelIdSchema,
+} from './conversation-config.js';
+import {
+  decodeLegacyCodexCompositeModel,
+  encodeLegacyCodexCompositeModel,
+} from './legacy/codex-composite-model.js';
+import {
+  type Provider,
+  PROVIDER_IDS,
+  PROVIDER_METADATA,
+  PROVIDER_OPTIONS,
+  ProviderSchema,
+  type ProviderMetadata,
+  getProviderMetadata,
+} from './provider-catalog.js';
+
+export * from './conversation-config.js';
+export * from './provider-catalog.js';
+export * from './legacy/codex-composite-model.js';
 
 // =============================================================================
 // Provider-Specific Types (re-exported)
@@ -113,39 +137,15 @@ export {
 // Core Data Structures
 // =============================================================================
 
-// Provider enum for multi-CLI support (Claude, Codex, OpenCode, Gemini, etc.)
-export const ProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini', 'cursor']);
-export type Provider = z.infer<typeof ProviderSchema>;
-
-export interface ProviderMetadata {
-  id: Provider;
-  label: string;
-  shortLabel: string;
-  cssClass: string;
-}
-
-export const PROVIDER_METADATA: Record<Provider, Omit<ProviderMetadata, 'id'>> = {
-  claude: { label: 'Claude', shortLabel: 'C', cssClass: 'claude' },
-  codex: { label: 'Codex', shortLabel: 'X', cssClass: 'codex' },
-  opencode: { label: 'OpenCode', shortLabel: 'O', cssClass: 'opencode' },
-  gemini: { label: 'Gemini', shortLabel: 'G', cssClass: 'gemini' },
-  cursor: { label: 'Cursor', shortLabel: 'Cu', cssClass: 'cursor' },
+export {
+  ProviderSchema,
+  type Provider,
+  type ProviderMetadata,
+  PROVIDER_METADATA,
+  PROVIDER_OPTIONS,
+  PROVIDER_IDS,
+  getProviderMetadata,
 };
-
-export const PROVIDER_OPTIONS: readonly ProviderMetadata[] = [
-  { id: 'claude', ...PROVIDER_METADATA.claude },
-  { id: 'codex', ...PROVIDER_METADATA.codex },
-  { id: 'opencode', ...PROVIDER_METADATA.opencode },
-  { id: 'gemini', ...PROVIDER_METADATA.gemini },
-  { id: 'cursor', ...PROVIDER_METADATA.cursor },
-];
-
-export const PROVIDER_IDS: readonly Provider[] = PROVIDER_OPTIONS.map((provider) => provider.id);
-
-export const getProviderMetadata = (provider: Provider): ProviderMetadata => ({
-  id: provider,
-  ...PROVIDER_METADATA[provider],
-});
 
 // =============================================================================
 // Model Identifiers — per-provider model choices
@@ -164,7 +164,7 @@ export const getProviderMetadata = (provider: Provider): ProviderMetadata => ({
 // We require at least one "/" segment to avoid collisions with Claude/Codex IDs.
 // =============================================================================
 
-export const ClaudeModelSchema = z.enum(['opus', 'sonnet', 'haiku']);
+export const ClaudeModelSchema = z.enum(['fable', 'opus', 'sonnet', 'haiku']);
 export type ClaudeModel = z.infer<typeof ClaudeModelSchema>;
 
 export const GeminiModelSchema = z.enum([
@@ -178,9 +178,17 @@ export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 export const CursorModelSchema = z.enum(['composer-2', 'composer2']);
 export type CursorModel = z.infer<typeof CursorModelSchema>;
 
-// Codex's own accepted effort levels — NOT the union across all providers.
+// Codex's own accepted effort levels -- NOT the union across all providers.
 // Must match CODEX_EFFORT_LEVELS defined below. Ordering is low → high for UI.
-export const CODEX_THINKING_OPTIONS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const CODEX_THINKING_OPTIONS = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+] as const;
 export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
 export const NO_CODEX_THINKING = 'none' as const;
 export type CodexThinkingMode = typeof NO_CODEX_THINKING | CodexThinkingOption;
@@ -199,11 +207,39 @@ export type CodexModelRegistryEntry = {
 
 export const CODEX_MODEL_REGISTRY = [
   {
+    modelName: 'gpt-5.6-sol',
+    displayName: 'GPT-5.6 Sol',
+    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
+    defaultThinkingOption: 'ultra',
+    isDefault: true,
+  },
+  {
+    modelName: 'gpt-5.6-terra',
+    displayName: 'GPT-5.6 Terra',
+    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
+    defaultThinkingOption: 'xhigh',
+    isDefault: false,
+  },
+  {
+    modelName: 'gpt-5.6-luna',
+    displayName: 'GPT-5.6 Luna',
+    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
+    defaultThinkingOption: 'xhigh',
+    isDefault: false,
+  },
+  {
+    modelName: 'gpt-5.5',
+    displayName: 'GPT-5.5',
+    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
+    defaultThinkingOption: 'xhigh',
+    isDefault: false,
+  },
+  {
     modelName: 'gpt-5.4',
     displayName: 'GPT-5.4',
     thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
     defaultThinkingOption: 'xhigh',
-    isDefault: true,
+    isDefault: false,
   },
   {
     modelName: 'gpt-5.4-mini',
@@ -234,6 +270,8 @@ export const CODEX_THINKING_DISPLAY_NAMES: Record<CodexThinkingOption, string> =
   medium: 'Medium Effort',
   high: 'High Effort',
   xhigh: 'Extra High Effort',
+  max: 'Max Effort',
+  ultra: 'Ultra Effort',
 };
 
 /**
@@ -246,7 +284,10 @@ export const CODEX_THINKING_DISPLAY_NAMES: Record<CodexThinkingOption, string> =
  * is a plain `string` because composites are no longer valid `CodexModel` values.
  */
 export function toCodexModelId(modelName: string, thinkingOption: CodexThinkingMode): string {
-  return thinkingOption === NO_CODEX_THINKING ? modelName : `${modelName}-${thinkingOption}`;
+  return encodeLegacyCodexCompositeModel(
+    modelName,
+    thinkingOption === NO_CODEX_THINKING ? null : thinkingOption
+  );
 }
 
 /**
@@ -270,29 +311,10 @@ export function fromCodexModelId(modelId: string): {
   baseModel: string;
   effort: string | null;
 } {
-  // Longest base name first so e.g. `gpt-5.3-codex-spark` wins over `gpt-5.3`.
-  const baseNames = CODEX_MODEL_REGISTRY.map((entry) => entry.modelName).sort(
-    (a, b) => b.length - a.length
-  );
-
-  for (const base of baseNames) {
-    if (modelId === base) {
-      return { baseModel: base, effort: null };
-    }
-    const prefix = `${base}-`;
-    if (modelId.startsWith(prefix)) {
-      const suffix = modelId.slice(prefix.length);
-      // Accept any codex-recognized effort suffix (see CODEX_EFFORT_LEVELS).
-      if ((CODEX_EFFORT_LEVELS as readonly string[]).includes(suffix)) {
-        return { baseModel: base, effort: suffix };
-      }
-    }
-  }
-
-  // Passthrough for unknown composites: preserve the raw id as baseModel and
-  // leave effort explicitly null (no accidental optionality — this is the
-  // documented "unknown" sum-variant for this decomposition).
-  return { baseModel: modelId, effort: null };
+  return decodeLegacyCodexCompositeModel(modelId, {
+    modelIds: CODEX_MODEL_REGISTRY.map((entry) => entry.modelName),
+    effortLevels: CODEX_EFFORT_LEVELS,
+  });
 }
 
 export const CODEX_BASE_MODEL_INFOS = CODEX_MODEL_REGISTRY.map((entry) => ({
@@ -324,6 +346,26 @@ export const CodexModelSchema = z.custom<CodexModel>(
   }
 );
 
+/**
+ * Canonical server-side default for provider reasoning flags.
+ * Codex defaults are model-specific; an absent/unknown model uses the registry default.
+ * `none` is represented as undefined throughout Conversation state.
+ */
+export function defaultReasoningEffortForProvider(
+  provider: Provider,
+  model?: string
+): string | undefined {
+  if (provider === 'claude') return 'high';
+  if (provider !== 'codex') return undefined;
+
+  const entry: CodexModelRegistryEntry =
+    CODEX_MODEL_REGISTRY.find((candidate) => candidate.modelName === model) ??
+    CODEX_MODEL_REGISTRY.find((candidate) => candidate.isDefault) ??
+    CODEX_MODEL_REGISTRY[0];
+  const defaultOption = entry.defaultThinkingOption ?? NO_CODEX_THINKING;
+  return defaultOption === NO_CODEX_THINKING ? undefined : defaultOption;
+}
+
 export type OpenCodeModel = `${string}/${string}`;
 
 // "provider/model" path-style ID (allows additional segments like "openrouter/openai/gpt-5").
@@ -339,16 +381,39 @@ export const OpenCodeModelSchema = z.custom<OpenCodeModel>(
   }
 );
 
-export const ModelIdSchema = z.union([
-  ClaudeModelSchema,
-  CodexModelSchema,
-  GeminiModelSchema,
-  OpenCodeModelSchema,
-  CursorModelSchema,
-]);
-export type ModelId = z.infer<typeof ModelIdSchema>;
+export function isModelIdValidForProvider(provider: Provider, modelId?: string): boolean {
+  if (!modelId) return true;
 
-export function normalizeModelId(provider: Provider, model?: ModelId): ModelId | undefined {
+  switch (provider) {
+    case 'claude':
+      return ClaudeModelSchema.safeParse(modelId).success;
+    case 'codex':
+      return CodexModelSchema.safeParse(modelId).success;
+    case 'gemini':
+      return GeminiModelSchema.safeParse(modelId).success;
+    case 'opencode':
+      return OpenCodeModelSchema.safeParse(modelId).success;
+    case 'cursor':
+      return CursorModelSchema.safeParse(modelId).success;
+  }
+}
+
+export function modelValidationHint(provider: Provider): string {
+  switch (provider) {
+    case 'claude':
+      return `one of: ${ClaudeModelSchema.options.map((id) => `'${id}'`).join(', ')}`;
+    case 'codex':
+      return `one of: ${CODEX_MODEL_IDS.map((id) => `'${id}'`).join(', ')}`;
+    case 'gemini':
+      return `one of: ${GeminiModelSchema.options.map((id) => `'${id}'`).join(', ')}`;
+    case 'opencode':
+      return "'provider/model' format (e.g. 'opencode/big-pickle')";
+    case 'cursor':
+      return `one of: ${CursorModelSchema.options.map((id) => `'${id}'`).join(', ')}`;
+  }
+}
+
+export function normalizeModelId(provider: Provider, model?: string): string | undefined {
   if (!model) return undefined;
   if (provider === 'cursor' && model === 'composer2') return 'composer-2';
   return model;
@@ -455,17 +520,25 @@ export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 //
 // Per-provider authoritative sources (verified via --help / rejection messages):
 //   claude --effort:                 low | medium | high | xhigh | max
-//   codex -c model_reasoning_effort: none | minimal | low | medium | high | xhigh
+//   codex -c model_reasoning_effort: minimal | low | medium | high | xhigh | max | ultra
 //
-// 'none' is represented as undefined on Conversation.reasoningEffort, so it
-// doesn't appear in these lists. Every other CLI-accepted level does.
+// Omitting the effort flag is represented as undefined on
+// Conversation.reasoningEffort, so it does not appear in these lists.
 //
-// No shared union enum on the wire — reasoningEffort is z.string().optional()
-// at the schema layer. The per-provider arrays below are for UI rendering and
-// server-side validation only; the submodule only "aligns" the flag name, and
-// each CLI does the final runtime reject if something slips through.
+// No shared union enum on the wire — reasoningEffort is a nullable optional
+// string at the schema layer. The per-provider arrays below are for UI rendering
+// and server-side validation only; the submodule only "aligns" the flag name,
+// and each CLI does the final runtime reject if something slips through.
 export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
-export const CODEX_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const CODEX_EFFORT_LEVELS = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+] as const;
 export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
 export type CodexEffortLevel = (typeof CODEX_EFFORT_LEVELS)[number];
 
@@ -482,7 +555,9 @@ export function isEffortValidForProvider(
   provider: Provider,
   effort: string | null | undefined
 ): boolean {
-  if (effort == null) return true; // undefined/null = "no effort flag" = always valid
+  // Both control variants are valid at the boundary: undefined requests the
+  // provider/model default, while null explicitly requests no flag.
+  if (effort == null) return true;
   return effortLevelsForProvider(provider).includes(effort);
 }
 
@@ -495,6 +570,7 @@ export const EFFORT_DISPLAY_NAMES: Record<string, string> = {
   high: 'High',
   xhigh: 'xHigh',
   max: 'Max',
+  ultra: 'Ultra',
 };
 
 export const ConversationSchema = z.object({
@@ -518,6 +594,13 @@ export const ConversationSchema = z.object({
   // Pass-through string: value is whatever the target CLI accepts (see
   // CLAUDE_EFFORT_LEVELS / CODEX_EFFORT_LEVELS). Other providers leave it undefined.
   reasoningEffort: z.string().optional(),
+  // V2 configuration aggregate. Optional only during the compatibility release;
+  // new server-owned conversations always include all three fields.
+  config: ConversationConfigSchema.optional(),
+  configRevision: z.number().int().nonnegative().optional(),
+  configResolution: ConfigResolutionSchema.optional(),
+  // Provider-reported observation; never configuration authority.
+  reportedModel: z.string().nullish(),
   subAgents: z.array(SubAgentSchema).default([]), // Active/recent sub-agents
   queue: z.array(QueuedMessageSchema).default([]), // Server-owned message queue
   // Oompa worker detection: true if first user message started with "[oompa]".
@@ -728,12 +811,34 @@ export const NewConversationMessageSchema = z.object({
   workingDirectory: z.string().optional(),
   provider: ProviderSchema.optional(), // Defaults to 'claude' when not specified
   model: ModelIdSchema.optional(), // Provider-specific model (undefined = provider default)
-  reasoningEffort: z.string().optional(), // Pass-through: whatever the target CLI accepts
+  // undefined = apply provider/model default; null = explicitly pass no effort flag.
+  reasoningEffort: z.string().nullable().optional(),
   swarmDebugPrefix: z.string().optional(), // Debug prefix prepended to first CLI message
   resumedFromConversationId: z.string().uuid().optional(),
 });
 
 export type NewConversationMessage = z.infer<typeof NewConversationMessageSchema>;
+
+export const CreateConversationCommandSchema = z.object({
+  type: z.literal('create_conversation'),
+  commandId: z.string().min(1),
+  conversationId: z.string().uuid(),
+  workingDirectory: z.string().min(1),
+  config: ConversationConfigSchema,
+  initialMessage: z.string().min(1).optional(),
+  swarmDebugPrefix: z.string().optional(),
+  resumedFromConversationId: z.string().uuid().optional(),
+});
+export type CreateConversationCommand = z.infer<typeof CreateConversationCommandSchema>;
+
+export const SetConversationConfigCommandSchema = z.object({
+  type: z.literal('set_conversation_config'),
+  commandId: z.string().min(1),
+  conversationId: z.string().uuid(),
+  expectedRevision: z.number().int().nonnegative(),
+  patch: ConversationConfigPatchSchema,
+});
+export type SetConversationConfigCommand = z.infer<typeof SetConversationConfigCommandSchema>;
 
 export const SendMessageMessageSchema = z.object({
   type: z.literal('send_message'),
@@ -775,7 +880,7 @@ export type SetProviderMessage = z.infer<typeof SetProviderMessageSchema>;
 
 export const SetReasoningEffortMessageSchema = z.object({
   type: z.literal('set_reasoning_effort'),
-  conversationId: z.string(),
+  conversationId: z.string().uuid(),
   // null = clear the effort (server stores undefined, CLI gets no flag). Otherwise
   // a pass-through string the target CLI accepts; rejected by isEffortValidForProvider.
   value: z.string().nullable(),
@@ -816,6 +921,8 @@ export const ClearQueueMessageSchema = z.object({
 export type ClearQueueMessage = z.infer<typeof ClearQueueMessageSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  CreateConversationCommandSchema,
+  SetConversationConfigCommandSchema,
   NewConversationMessageSchema,
   SendMessageMessageSchema,
   StopConversationMessageSchema,
@@ -855,6 +962,25 @@ export type UIState = z.infer<typeof UIStateSchema>;
 // Server → Client Messages
 // =============================================================================
 
+export const ProtocolInfoSchema = z.object({
+  version: z.literal(2),
+  capabilities: z.tuple([
+    z.literal('conversation_config'),
+    z.literal('conversation_updated'),
+    z.literal('structured_command_errors'),
+  ]),
+});
+export type ProtocolInfo = z.infer<typeof ProtocolInfoSchema>;
+
+export const PROTOCOL_INFO: ProtocolInfo = {
+  version: 2,
+  capabilities: [
+    'conversation_config',
+    'conversation_updated',
+    'structured_command_errors',
+  ],
+};
+
 export const InitMessageSchema = z.object({
   type: z.literal('init'),
   conversations: z.array(ConversationSchema),
@@ -863,23 +989,55 @@ export const InitMessageSchema = z.object({
   loading: z.boolean().optional(),
   /** UI preferences synced from server (~/.agent-viewer/ui-state.json) */
   uiState: UIStateSchema.optional(),
+  /** V2 protocol information; optional while legacy clients remain supported. */
+  protocol: ProtocolInfoSchema.optional(),
 });
 
 export type InitMessage = z.infer<typeof InitMessageSchema>;
 
-export const ConversationCreatedMessageSchema = z.object({
+export const ConversationCreatedEventSchema = z.object({
   type: z.literal('conversation_created'),
+  commandId: z.string().min(1).optional(),
   conversation: ConversationSchema,
 });
+export type ConversationCreatedEvent = z.infer<typeof ConversationCreatedEventSchema>;
 
+export const ConversationCreatedMessageSchema = ConversationCreatedEventSchema;
 export type ConversationCreatedMessage = z.infer<typeof ConversationCreatedMessageSchema>;
 
-export const ConversationDeletedMessageSchema = z.object({
+export const ConversationUpdatedEventSchema = z.object({
+  type: z.literal('conversation_updated'),
+  commandId: z.string().min(1).optional(),
+  reason: z.enum(['config', 'catalog', 'status', 'queue', 'messages', 'external_refresh']),
+  conversation: ConversationSchema,
+});
+export type ConversationUpdatedEvent = z.infer<typeof ConversationUpdatedEventSchema>;
+
+export const ConversationDeletedEventSchema = z.object({
   type: z.literal('conversation_deleted'),
+  commandId: z.string().min(1).optional(),
   conversationId: z.string().uuid(),
 });
+export type ConversationDeletedEvent = z.infer<typeof ConversationDeletedEventSchema>;
 
+export const ConversationDeletedMessageSchema = ConversationDeletedEventSchema;
 export type ConversationDeletedMessage = z.infer<typeof ConversationDeletedMessageSchema>;
+
+export const GeneralCommandErrorSchema = z.object({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  details: z.unknown().optional(),
+});
+export type GeneralCommandError = z.infer<typeof GeneralCommandErrorSchema>;
+
+export const CommandRejectedEventSchema = z.object({
+  type: z.literal('command_rejected'),
+  commandId: z.string().min(1),
+  conversationId: z.string().uuid().optional(),
+  error: z.union([ConfigErrorSchema, GeneralCommandErrorSchema]),
+  authoritativeConversation: ConversationSchema.optional(),
+});
+export type CommandRejectedEvent = z.infer<typeof CommandRejectedEventSchema>;
 
 export const MessageMessageSchema = z.object({
   type: z.literal('message'),
@@ -995,7 +1153,9 @@ export type MergeChildStatusMessage = z.infer<typeof MergeChildStatusMessageSche
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   InitMessageSchema,
   ConversationCreatedMessageSchema,
+  ConversationUpdatedEventSchema,
   ConversationDeletedMessageSchema,
+  CommandRejectedEventSchema,
   MessageMessageSchema,
   ChunkMessageSchema,
   MessageCompleteMessageSchema,

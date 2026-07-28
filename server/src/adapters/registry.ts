@@ -216,6 +216,12 @@ export const diskAdapters: DiskAdapter[] = [
   geminiAdapter,
 ];
 
+export function getDiskAdapter(provider: DiskAdapter['provider']): DiskAdapter {
+  const adapter = diskAdapters.find((candidate) => candidate.provider === provider);
+  if (!adapter) throw new Error(`No disk adapter registered for provider '${provider}'`);
+  return adapter;
+}
+
 // =============================================================================
 // Re-export per-adapter helpers needed by loader.ts for polling
 // (mtime computation for OpenCode sessions, session ID extraction for Codex)
