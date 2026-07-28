@@ -27,6 +27,7 @@ import { BuddyConvoHeader } from './BuddyConvoHeader';
 import { FilePreview, getPreviewType, getPreviewableLocalHref } from './FilePreview';
 import { InlineSwarmRunWidget } from './InlineSwarmRunWidget';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
+import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
 
 // =============================================================================
 // remarkBreaks — inline remark plugin (replaces the `remark-breaks` npm package)
@@ -710,7 +711,8 @@ export function VirtualizedMessageList({
   // Track conversation ID to detect switches
   const prevConversationIdRef = useRef<string | null>(null);
 
-  const contextItemCount = (buddyContext ? 1 : 0) + (swarmDebugPrefix ? 1 : 0);
+  const visibleSwarmDebugPrefix = effectiveSwarmDebugPrefix(buddyContext, swarmDebugPrefix);
+  const contextItemCount = (buddyContext ? 1 : 0) + (visibleSwarmDebugPrefix ? 1 : 0);
   const totalItems = messageGroups.length + contextItemCount;
 
   const virtualizer = useVirtualizer({
@@ -718,7 +720,7 @@ export function VirtualizedMessageList({
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
       if (buddyContext && index === 0) return 88;
-      if (swarmDebugPrefix && index === (buddyContext ? 1 : 0)) return 80;
+      if (visibleSwarmDebugPrefix && index === (buddyContext ? 1 : 0)) return 80;
       const groupIndex = index - contextItemCount;
       return estimateGroupSize(messageGroups[groupIndex]);
     },
@@ -842,7 +844,7 @@ export function VirtualizedMessageList({
               );
             }
 
-            if (swarmDebugPrefix && virtualItem.index === (buddyContext ? 1 : 0)) {
+            if (visibleSwarmDebugPrefix && virtualItem.index === (buddyContext ? 1 : 0)) {
               return (
                 <div
                   key={virtualItem.key}
@@ -857,7 +859,7 @@ export function VirtualizedMessageList({
                   }}
                 >
                   <div style={{ paddingBottom: '24px' }}>
-                    <SwarmConvoPrefix prefix={swarmDebugPrefix} swarmId={swarmId ?? null} />
+                    <SwarmConvoPrefix prefix={visibleSwarmDebugPrefix} swarmId={swarmId ?? null} />
                   </div>
                 </div>
               );

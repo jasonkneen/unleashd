@@ -45,6 +45,14 @@ export function parseAutomationCompletion(output: string): {
 
 class BuddyAutomationCancelledError extends Error {}
 
+const LEGACY_SAFE_POLICY = {
+  max_runtime_seconds: 600,
+  max_iterations: 1,
+  max_tokens: 50_000,
+  max_cost_usd: 2,
+  allowed_operations: ['buddy.get_current_work'] as const,
+};
+
 function cronFieldMatches(field: string, value: number, min: number, max: number): boolean {
   return field.split(',').some((part) => {
     const [base, stepText] = part.split('/');
@@ -242,9 +250,16 @@ export class BuddyScheduler {
         status: 'running',
         conversationId: conversation.conversationId,
       });
+      const policy = run.policy ?? automation.policy ?? LEGACY_SAFE_POLICY;
+      const policyDeadline = Date.now() + policy.max_runtime_seconds * 1000;
       let outcome = '';
       if (automation.job_kind === 'prompt') {
-        outcome = await conversation.runTurn((automation.job_payload as { prompt: string }).prompt);
+        outcome = await this.runBeforeDeadline(
+          conversation,
+          (automation.job_payload as { prompt: string }).prompt,
+          policyDeadline,
+          'Automation runtime policy limit reached'
+        );
         this.assertNotCancelled(claimed.id);
         run = this.store.updateAutomationRun(run.id, {
           status: 'running',
@@ -253,8 +268,18 @@ export class BuddyScheduler {
         });
       } else if (automation.job_kind === 'sequence') {
         const prompts = (automation.job_payload as { prompts: string[] }).prompts;
+        if (prompts.length > policy.max_iterations) {
+          throw new Error(
+            `Automation sequence requires ${prompts.length} iterations but policy allows ${policy.max_iterations}`
+          );
+        }
         for (let index = 0; index < prompts.length; index += 1) {
-          outcome = await conversation.runTurn(prompts[index]);
+          outcome = await this.runBeforeDeadline(
+            conversation,
+            prompts[index],
+            policyDeadline,
+            'Automation runtime policy limit reached'
+          );
           this.assertNotCancelled(claimed.id);
           run = this.store.updateAutomationRun(run.id, {
             status: 'running',
@@ -271,18 +296,29 @@ export class BuddyScheduler {
             max_duration_seconds: number;
           };
         };
-        const deadline = Date.now() + payload.termination.max_duration_seconds * 1000;
+        const deadline = Math.min(
+          policyDeadline,
+          Date.now() + payload.termination.max_duration_seconds * 1000
+        );
+        const maxIterations = Math.min(payload.termination.max_iterations, policy.max_iterations);
         let terminationSatisfied = false;
-        for (let iteration = 1; iteration <= payload.termination.max_iterations; iteration += 1) {
+        for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
           if (Date.now() >= deadline) throw new Error('Automation loop duration limit reached');
           const prompt = [
             payload.prompt,
             '',
             `Termination condition: ${payload.termination.condition}`,
             'Return only JSON: {"buddyAutomation":{"done":boolean,"outcome":"brief result"}}.',
-            `Iteration ${iteration} of ${payload.termination.max_iterations}.`,
+            `Iteration ${iteration} of ${maxIterations}.`,
           ].join('\n');
-          outcome = await this.runBeforeDeadline(conversation, prompt, deadline);
+          outcome = await this.runBeforeDeadline(
+            conversation,
+            prompt,
+            deadline,
+            deadline === policyDeadline
+              ? 'Automation runtime policy limit reached'
+              : 'Automation loop duration limit reached'
+          );
           this.assertNotCancelled(claimed.id);
           run = this.store.updateAutomationRun(run.id, {
             status: 'running',
@@ -296,7 +332,7 @@ export class BuddyScheduler {
         }
         if (!terminationSatisfied) {
           throw new Error(
-            `Automation loop did not satisfy its termination condition after ${payload.termination.max_iterations} iterations`
+            `Automation loop did not satisfy its termination condition after ${maxIterations} iterations`
           );
         }
       }
@@ -351,19 +387,17 @@ export class BuddyScheduler {
   private async runBeforeDeadline(
     conversation: BuddyAutomationConversation,
     prompt: string,
-    deadline: number
+    deadline: number,
+    timeoutMessage: string
   ): Promise<string> {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error('Automation loop duration limit reached');
+    if (remaining <= 0) throw new Error(timeoutMessage);
     let timeout: NodeJS.Timeout | null = null;
     try {
       return await Promise.race([
         conversation.runTurn(prompt),
         new Promise<string>((_resolve, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error('Automation loop duration limit reached')),
-            remaining
-          );
+          timeout = setTimeout(() => reject(new Error(timeoutMessage)), remaining);
           timeout.unref?.();
         }),
       ]);

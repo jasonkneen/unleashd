@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "package": "@nbardy/buddies",
+  "version": "0.1.0",
+  "archive": "vendor/nbardy-buddies-0.1.0.tgz",
+  "sha256": "3ef687c6ca6f24fd9aba9e79a071ef09d52655f08abe0b1a49cfdced40e85de3",
+  "reproduciblePack": true,
+  "sourceCommit": "77fe3838a5700ab801003a0611ca38c01e4399d5",
+  "sourceDirty": false
+}

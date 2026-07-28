@@ -202,10 +202,16 @@ are not bound to the conversation.
 - [x] Extend the CLI with delegation and structured review commands.
 - [x] Add unit and integration tests.
 
-### Deferred integration task
+### Provider integration
 
-- [ ] Register operations with the provider tool bridge after the `server.ts`
-      refactor settles.
+- [x] Register operations for Codex through a conversation-scoped stdio MCP
+      adapter without editing `server.ts`.
+- [x] Bind Buddy, workspace, and selected project in trusted MCP launch
+      arguments rather than model tool input.
+- [x] Test the native surface through both an in-memory MCP client and a spawned
+      stdio process reopening durable SQLite state.
+- [ ] Add equivalent native adapters for non-Codex providers; they currently
+      retain the CLI compatibility fallback.
 
 ### Exit gate
 
@@ -260,15 +266,16 @@ Structured review result:
 ### Tasks
 
 - [x] Add validated structured output for review conversations.
-- [ ] Automatically persist review completion.
+- [x] Automatically persist review completion from a strictly delimited,
+      schema-validated result block.
 - [x] Fail review settlement if evidence is empty.
 - [x] Ensure the Lead cannot review itself.
 - [x] Ensure the reviewed project belongs to the subject.
 - [x] Settle delegation exactly once.
 - [x] Prevent conversation completion and HTTP retry from double-settling.
 - [x] Render compact team member and review cards.
-- [ ] Add lifecycle tests covering success, failure, cancellation, and restart
-      (success/failure/cancellation/idempotency pass; restart hook remains).
+- [x] Add lifecycle tests covering success, failure, cancellation, idempotency,
+      and file-backed restart.
 
 ### Exit gate
 
@@ -337,11 +344,19 @@ open commitments and evidence references, and survive an interrupted write.
 ### Tasks
 
 - [x] Replace raw completion sentinel matching with structured JSON completion.
-- [ ] Add per-run token/time/iteration budgets.
-- [ ] Add allowed-operation policy.
-- [ ] Add explicit approval boundaries.
+- [x] Add durable per-run runtime/iteration/token/cost budgets and immutable
+      policy snapshots. Provider token/cost event accounting is still pending
+      because the unified provider event contract does not expose main-turn
+      usage.
+- [x] Add allowed-operation policy and enforce it at the native Buddy operation
+      boundary for automation-scoped conversations.
+- [x] Add durable pending/approved/rejected human approvals, atomic audit
+      history, owner HTTP decisions, and a compact decision UI. Approval grants
+      do not yet unlock any open-world execution tool because Buddies exposes
+      no such tool.
 - [x] Add run cancellation.
-- [ ] Add stuck-run detection.
+- [x] Bound every prompt, sequence, and loop turn by the claimed run's runtime
+      policy; timeout stops the provider conversation and records failure.
 - [x] Add scheduler health status.
 - [x] Add real shim-provider integration tests.
 - [x] Add multi-connection SQLite claim test.
@@ -397,6 +412,9 @@ without opening a conversation.
 - [x] Add clean-clone bootstrap instructions.
 - [x] Update package smoke coverage to require the bundled Buddies module and
       a live `/api/buddies` response.
+- [x] Add a reproducible two-pack vendor command, SHA-256 provenance record,
+      and package-smoke hash verification. The current snapshot remains marked
+      non-release because the sibling source has no commit.
 - [x] Add database backup command.
 - [ ] Add migration dry run.
 - [x] Add downgrade refusal and recovery documentation.
@@ -447,9 +465,9 @@ Use one real but safe GTM task that does not require external sends or spend.
 
 - [x] Library migration and invariants.
 - [x] Overview route.
-- [ ] Empty Buddy conversation creation.
-- [ ] First-turn hidden context.
-- [ ] Visible prompt sanitization.
+- [x] Empty Buddy conversation creation through the WebSocket service path.
+- [x] First-turn hidden context exactly once, including resume behavior.
+- [x] Visible prompt sanitization during disk hydration.
 - [x] Native operation scope.
 - [x] Delegation settlement.
 - [x] Review settlement.
@@ -457,7 +475,12 @@ Use one real but safe GTM task that does not require external sends or spend.
 - [x] Automation execution.
 - [x] Restart hydration for library work, audit, organization, and recent runs.
 - [x] Recent-run projection.
-- [ ] Browser happy path.
+- [x] Assembled synthetic closure fixture covering briefing, native MCP work
+      mutation, memory compaction, delegation, review, audit, restart, and
+      overview.
+- [x] Browser happy path against a built server: top-level directory, employee
+      state, empty conversation, Buddy header, no Swarm Debug, native read-only
+      MCP call, and Recent Projects Buddies folder.
 
 ### Final completion gate
 

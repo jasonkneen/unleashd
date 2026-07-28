@@ -1,5 +1,24 @@
 export type BuddyAutomationRunStatus = 'claimed' | 'running' | 'complete' | 'failed' | 'cancelled';
 
+export type BuddyOperationName =
+  | 'buddy.get_current_work'
+  | 'buddy.new_project'
+  | 'buddy.update_project'
+  | 'buddy.remember'
+  | 'buddy.compact_memory'
+  | 'buddy.delegate'
+  | 'buddy.complete_delegation'
+  | 'buddy.submit_review'
+  | 'buddy.request_human_approval';
+
+export interface BuddyAutomationPolicy {
+  max_runtime_seconds: number;
+  max_iterations: number;
+  max_tokens: number;
+  max_cost_usd: number;
+  allowed_operations: BuddyOperationName[];
+}
+
 export interface BuddyAutomation {
   id: string;
   buddy_id: string;
@@ -21,6 +40,7 @@ export interface BuddyAutomation {
           max_duration_seconds: number;
         };
       };
+  policy: BuddyAutomationPolicy;
   enabled: boolean;
   next_run_at: string | null;
   last_run_at: string | null;
@@ -36,11 +56,31 @@ export interface BuddyAutomationRun {
   status: BuddyAutomationRunStatus;
   conversation_id: string | null;
   iteration: number;
+  tokens_used: number;
+  cost_usd: number;
+  policy: BuddyAutomationPolicy;
   outcome: string | null;
   error: string | null;
   claimed_at: string;
   started_at: string | null;
   ended_at: string | null;
+}
+
+export interface BuddyApprovalRequest {
+  id: string;
+  buddy_id: string;
+  workspace_id: string;
+  buddy_project_id: string | null;
+  automation_run_id: string | null;
+  conversation_id: string | null;
+  action: string;
+  reason: string;
+  risk: string;
+  status: 'pending' | 'approved' | 'rejected';
+  resolved_by: string | null;
+  resolution_note: string | null;
+  requested_at: string;
+  resolved_at: string | null;
 }
 
 interface BuddyRecord {
@@ -156,6 +196,32 @@ export interface BuddiesStorePort {
   remember(buddy: string, input: Record<string, unknown>): unknown;
   compactMemory(buddy: string, input: Record<string, unknown>): unknown;
   recordAuditEvent(input: Record<string, unknown>): unknown;
+  createApprovalRequest(input: {
+    buddy: string;
+    workspace: string;
+    project?: string;
+    automationRun?: string;
+    conversationId?: string;
+    action: string;
+    reason: string;
+    risk: string;
+  }): BuddyApprovalRequest;
+  getApprovalRequest(id: string): BuddyApprovalRequest | null;
+  listApprovalRequests(input?: {
+    buddy?: string;
+    workspace?: string;
+    project?: string;
+    status?: 'pending' | 'approved' | 'rejected';
+    limit?: number;
+  }): BuddyApprovalRequest[];
+  resolveApprovalRequest(
+    id: string,
+    input: {
+      decision: 'approved' | 'rejected';
+      resolvedBy: string;
+      note?: string;
+    }
+  ): BuddyApprovalRequest;
   newProject(input: Record<string, unknown>): unknown;
   updateProject(id: string, changes: Record<string, unknown>): unknown;
   createAutomation(input: Record<string, unknown>): BuddyAutomation;
@@ -174,12 +240,15 @@ export interface BuddiesStorePort {
       status: BuddyAutomationRunStatus;
       conversationId?: string | null;
       iteration?: number;
+      tokensUsed?: number;
+      costUsd?: number;
       outcome?: string | null;
       error?: string | null;
       nextRunAt?: string | null;
     }
   ): BuddyAutomationRun;
   listAutomationRuns(id: string, options?: { limit?: number }): BuddyAutomationRun[];
+  assertAutomationOperationAllowed(id: string, operation: BuddyOperationName): true;
   updateWorkItemStatus(
     id: string,
     status: string,

@@ -29,6 +29,13 @@ function automation(overrides: Partial<BuddyAutomation> = {}): BuddyAutomation {
     timezone: 'UTC',
     job_kind: 'prompt',
     job_payload: { prompt: 'Review growth' },
+    policy: {
+      max_runtime_seconds: 600,
+      max_iterations: 10,
+      max_tokens: 50_000,
+      max_cost_usd: 2,
+      allowed_operations: ['buddy.get_current_work'],
+    },
     enabled: true,
     next_run_at: '2026-01-01T00:00:00.000Z',
     last_run_at: null,
@@ -251,6 +258,69 @@ test('scheduler fails a bounded loop that exhausts iterations without structured
   assert.equal(run.status, 'failed');
   assert.equal(run.iteration, 2);
   assert.match(run.error ?? '', /did not satisfy its termination condition/);
+});
+
+test('scheduler rejects a sequence that exceeds its immutable run iteration policy', async () => {
+  const definition = automation({
+    job_kind: 'sequence',
+    job_payload: { prompts: ['first', 'second'] },
+    policy: {
+      max_runtime_seconds: 600,
+      max_iterations: 1,
+      max_tokens: 50_000,
+      max_cost_usd: 2,
+      allowed_operations: ['buddy.get_current_work'],
+    },
+  });
+  let run: BuddyAutomationRun = {
+    id: 'run-policy-iterations',
+    automation_id: definition.id,
+    scheduled_for: definition.next_run_at!,
+    idempotency_key: 'automation-1:policy-iterations',
+    status: 'claimed',
+    conversation_id: null,
+    iteration: 0,
+    tokens_used: 0,
+    cost_usd: 0,
+    policy: definition.policy,
+    outcome: null,
+    error: null,
+    claimed_at: definition.next_run_at!,
+    started_at: null,
+    ended_at: null,
+  };
+  let turns = 0;
+  const store = {
+    listDueAutomations: () => [definition],
+    claimAutomationRun: () => run,
+    updateAutomationRun: (_id: string, changes: Partial<BuddyAutomationRun>) => {
+      run = { ...run, ...changes };
+      return run;
+    },
+    getAutomation: () => definition,
+  } as unknown as BuddiesStorePort;
+  const scheduler = new BuddyScheduler({
+    store,
+    logger: { warn() {}, error() {} },
+    now: () => new Date(definition.next_run_at!),
+    createConversation: async () => ({
+      conversationId: 'conversation-policy-iterations',
+      async runTurn() {
+        turns += 1;
+        return 'should not run';
+      },
+      stop() {},
+      finish() {},
+    }),
+  });
+
+  await scheduler.poll();
+  for (let attempt = 0; attempt < 20 && run.status !== 'failed'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(run.status, 'failed');
+  assert.equal(turns, 0);
+  assert.match(run.error ?? '', /requires 2 iterations but policy allows 1/);
 });
 
 test('overdue intervals schedule from now instead of replaying missed ticks', async () => {

@@ -93,6 +93,19 @@ node node_modules/@nbardy/buddies/bin/buddies.js \
 The store refuses to open a database whose schema is newer than the installed
 library. Restore a backup rather than attempting an in-place downgrade.
 
+When updating the sibling Buddies source, regenerate the vendored snapshot
+twice and verify byte-for-byte reproducibility with:
+
+```bash
+pnpm vendor:buddies
+```
+
+Release packaging refuses an uncommitted or commit-less source tree. For a
+clearly marked local development snapshot only, use
+`pnpm vendor:buddies -- --allow-uncommitted`. The corresponding
+`vendor/nbardy-buddies-0.1.0.provenance.json` records the archive SHA-256 and
+whether the source was release-ready. Package smoke verifies that record.
+
 ## Supported Agents
 
 | Agent | Disk path read | Live spawn |

@@ -5,8 +5,30 @@ const http = require('node:http');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
+const { createHash } = require('node:crypto');
 
 const repositoryRoot = path.resolve(__dirname, '..');
+const buddiesProvenancePath = path.join(
+  repositoryRoot,
+  'vendor',
+  'nbardy-buddies-0.1.0.provenance.json'
+);
+if (!fs.existsSync(buddiesProvenancePath)) {
+  throw new Error('Vendored Buddies provenance is missing; run pnpm vendor:buddies');
+}
+const buddiesProvenance = JSON.parse(fs.readFileSync(buddiesProvenancePath, 'utf8'));
+const buddiesArchivePath = path.join(repositoryRoot, buddiesProvenance.archive);
+const buddiesArchiveHash = createHash('sha256')
+  .update(fs.readFileSync(buddiesArchivePath))
+  .digest('hex');
+if (
+  buddiesProvenance.package !== '@nbardy/buddies' ||
+  buddiesProvenance.version !== '0.1.0' ||
+  buddiesProvenance.reproduciblePack !== true ||
+  buddiesArchiveHash !== buddiesProvenance.sha256
+) {
+  throw new Error('Vendored Buddies archive does not match its provenance record');
+}
 const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'unleashd-package-install-'));
 const artifactRoot = path.join(installRoot, 'artifacts');
 fs.mkdirSync(artifactRoot, { recursive: true });

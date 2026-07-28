@@ -5,6 +5,8 @@ export const BuddyOperationContextSchema = z.object({
   buddyId: z.string().min(1),
   workspaceId: z.string().min(1),
   buddyProjectId: z.string().min(1).nullable().optional(),
+  automationRunId: z.string().min(1).nullable().optional(),
+  conversationId: z.string().min(1).nullable().optional(),
 });
 
 const TodoOperationSchema = z.discriminatedUnion('operation', [
@@ -135,6 +137,9 @@ export class BuddyOperationsService {
   }
 
   execute(name: BuddyOperationName, input: unknown = {}) {
+    if (this.context.automationRunId) {
+      this.store.assertAutomationOperationAllowed(this.context.automationRunId, name);
+    }
     switch (name) {
       case 'buddy.get_current_work': {
         const parsed = BuddyOperationInputSchemas[name].parse(input);
@@ -248,12 +253,23 @@ export class BuddyOperationsService {
       }
       case 'buddy.request_human_approval': {
         const parsed = BuddyOperationInputSchemas[name].parse(input);
-        return this.result(
-          name,
-          { status: 'pending_human_approval', ...parsed },
-          parsed,
-          parsed.projectId ?? this.context.buddyProjectId ?? undefined
-        );
+        const project = parsed.projectId ?? this.context.buddyProjectId ?? undefined;
+        if (project) this.requireScopedProject(project);
+        const approval = this.store.createApprovalRequest({
+          buddy: this.context.buddyId,
+          workspace: this.context.workspaceId,
+          project,
+          automationRun: this.context.automationRunId ?? undefined,
+          conversationId: this.context.conversationId ?? undefined,
+          action: parsed.action,
+          reason: parsed.reason,
+          risk: parsed.risk,
+        });
+        return BuddyOperationResultSchema.parse({
+          operation: name,
+          data: approval,
+          audit: { recordedAtomicallyByStore: true },
+        });
       }
     }
   }

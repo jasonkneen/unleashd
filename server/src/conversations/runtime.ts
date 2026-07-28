@@ -21,6 +21,7 @@ import type {
 } from '@unleashd/shared';
 import { mergeReviewDocPath } from '@unleashd/shared';
 import { formatToolUse, isCompletionOnlyToolUse } from '../adapters/tool-format';
+import { buddyCodexMcpArgs } from '../buddies/mcp-config';
 import {
   SWARM_POLL_INTERVAL_MS,
   SWARM_POLL_THROTTLE_MS,
@@ -196,6 +197,29 @@ export interface ConversationRuntime extends EventEmitter, ConversationRuntimeVi
 
 export type ConversationConstructor = new (options: ConversationOptions) => ConversationRuntime;
 
+export function buildFirstTurnCliContent(input: {
+  content: string;
+  messageCount: number;
+  hasStartedSession: boolean;
+  buddyContext: BuddyContext | null;
+  buddyBriefing: string | null;
+  swarmDebugPrefix: string | null;
+}): string {
+  const firstUnstartedTurn = input.messageCount === 0 && !input.hasStartedSession;
+  // Buddy and Swarm are mutually exclusive conversation modes. If malformed
+  // legacy state supplies both, the typed Buddy context wins and no Swarm
+  // prefix reaches the provider.
+  if (input.buddyContext !== null) {
+    if (!firstUnstartedTurn || input.buddyBriefing === null) return input.content;
+    const serializedContext = JSON.stringify(input.buddyContext);
+    return `<!-- unleashd:buddy-context ${serializedContext} -->\n${input.buddyBriefing}\n<!-- /unleashd:buddy-context -->\n\n${input.content}`;
+  }
+  if (input.swarmDebugPrefix !== null && firstUnstartedTurn) {
+    return `<!-- unleashd:swarm-prefix -->\n${input.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${input.content}`;
+  }
+  return input.content;
+}
+
 export function createConversationRuntime(
   dependencies: ConversationRuntimeDependencies
 ): ConversationConstructor {
@@ -333,14 +357,15 @@ export function createConversationRuntime(
       this.config = configState.config;
       this.configRevision = configState.revision;
       this.configResolution = configState.resolution;
-      this.isWorker = isWorker;
-      this.swarmId = swarmId;
-      this.workerId = workerId;
-      this.workerRole = workerRole;
+      const isBuddyConversation = buddyContext !== null;
+      this.isWorker = isBuddyConversation ? false : isWorker;
+      this.swarmId = isBuddyConversation ? null : swarmId;
+      this.workerId = isBuddyConversation ? null : workerId;
+      this.workerRole = isBuddyConversation ? null : workerRole;
       this.parentConversationId = parentConversationId;
       this.resumedFromConversationId = resumedFromConversationId;
       this.modelName = modelName;
-      this.swarmDebugPrefix = swarmDebugPrefix;
+      this.swarmDebugPrefix = isBuddyConversation ? null : swarmDebugPrefix;
       this.buddyContext = buddyContext;
       this._buddyBriefing = buddyBriefing;
       this.mergeParentMeta = mergeParentMeta;
@@ -424,6 +449,10 @@ export function createConversationRuntime(
                 harness: 'codex',
                 ...baseRequest,
                 reasoningEffort: executionConfig.reasoningEffort,
+                extraArgs:
+                  this.buddyContext !== null
+                    ? buddyCodexMcpArgs(this.buddyContext, this.id)
+                    : undefined,
               }
             : { harness: executionConfig.provider, ...baseRequest }
       );
@@ -1148,22 +1177,16 @@ export function createConversationRuntime(
       const executionConfig = this.preflightExecution();
       if (!executionConfig) return;
 
-      // Prepend swarm debug prefix on first message only.
-      // UI sees clean content; CLI process gets the full context.
-      // Sentinel markers let disk-adapter.ts recover swarmDebugPrefix after server restart
-      // (the JSONL stores CLI content, not the clean UI message).
-      let cliContent = content;
-      if (this.swarmDebugPrefix !== null && this.messages.length === 0) {
-        cliContent = `<!-- unleashd:swarm-prefix -->\n${this.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${content}`;
-      }
-      if (
-        this.buddyContext !== null &&
-        this._buddyBriefing !== null &&
-        this.messages.length === 0
-      ) {
-        const serializedContext = JSON.stringify(this.buddyContext);
-        cliContent = `<!-- unleashd:buddy-context ${serializedContext} -->\n${this._buddyBriefing}\n<!-- /unleashd:buddy-context -->\n\n${cliContent}`;
-      }
+      // UI/history retain clean user text. Only the first unstarted provider
+      // turn receives a hidden context prefix.
+      let cliContent = buildFirstTurnCliContent({
+        content,
+        messageCount: this.messages.length,
+        hasStartedSession: this._hasStartedSession,
+        buddyContext: this.buddyContext,
+        buddyBriefing: this._buddyBriefing,
+        swarmDebugPrefix: this.swarmDebugPrefix,
+      });
 
       // Merge feature: on the very first user send of a merge parent thread,
       // inject a prefix containing the contents of each child's review doc.

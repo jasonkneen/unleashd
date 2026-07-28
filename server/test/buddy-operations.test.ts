@@ -124,3 +124,87 @@ test('scoped Buddy operations close work, remember, delegate, review, and audit'
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('automation-scoped operations enforce the durable allowlist and create a real approval', () => {
+  const root = mkdtempSync(join(tmpdir(), 'buddy-automation-operations-'));
+  const store = new BuddiesStore(':memory:');
+  try {
+    const workspace = store.createWorkspace({ name: 'Workspace', rootPath: root });
+    const lead = store.createBuddy({
+      project: workspace.id,
+      name: 'Lead',
+      role: 'Own outcomes',
+    });
+    const project = store.newProject({
+      buddy: lead.id,
+      workspace: workspace.id,
+      title: 'Bounded launch',
+      definitionOfDone: 'Human decision recorded',
+    });
+    const automation = store.createAutomation({
+      buddy: lead.id,
+      workspace: workspace.id,
+      project: project.id,
+      name: 'Prepare launch',
+      scheduleKind: 'interval',
+      scheduleExpression: '3600',
+      jobKind: 'prompt',
+      jobPayload: { prompt: 'Prepare the launch without publishing.' },
+      policy: {
+        allowedOperations: ['buddy.get_current_work', 'buddy.request_human_approval'],
+      },
+    });
+    const run = store.claimAutomationRun(automation.id, {
+      scheduledFor: '2026-07-28T00:00:00.000Z',
+    });
+    const operations = new BuddyOperationsService(store as unknown as BuddiesStorePort, {
+      buddyId: lead.id,
+      workspaceId: workspace.id,
+      buddyProjectId: project.id,
+      automationRunId: run.id,
+    });
+
+    operations.execute('buddy.get_current_work');
+    assert.throws(
+      () =>
+        operations.execute('buddy.update_project', {
+          projectId: project.id,
+          nextAction: 'Publish now',
+        }),
+      /not allowed/
+    );
+
+    const requested = operations.execute('buddy.request_human_approval', {
+      action: 'Publish the bounded launch',
+      reason: 'The draft passed internal checks.',
+      risk: 'This changes public state.',
+    });
+    const approval = requested.data as { id: string; status: string };
+    assert.equal(approval.status, 'pending');
+    assert.equal(store.listApprovalRequests({ status: 'pending' }).length, 1);
+    assert.equal(
+      store
+        .listAuditEvents({ buddy: lead.id })
+        .filter((event) => event.operation === 'buddy.request_human_approval').length,
+      1
+    );
+
+    const resolved = store.resolveApprovalRequest(approval.id, {
+      decision: 'approved',
+      resolvedBy: 'owner',
+      note: 'Approved for this bounded action only.',
+    });
+    assert.equal(resolved.status, 'approved');
+    assert.throws(
+      () =>
+        store.resolveApprovalRequest(approval.id, {
+          decision: 'rejected',
+          resolvedBy: 'owner',
+        }),
+      /already approved/
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

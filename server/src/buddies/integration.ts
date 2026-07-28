@@ -2,9 +2,51 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { BuddyContext, ModelId, Provider } from '@unleashd/shared';
 import type { Response } from 'express';
+import { BuddyClosureService, BuddyReviewSettlementSchema } from './closure';
 import type { BuddiesModule, BuddiesStorePort } from './contract';
 
 const BUDDIES_PACKAGE_NAME: string = '@nbardy/buddies';
+export const BUDDY_REVIEW_RESULT_START = '<!-- unleashd:buddy-review-result -->';
+export const BUDDY_REVIEW_RESULT_END = '<!-- /unleashd:buddy-review-result -->';
+
+/**
+ * Parse only the explicitly delimited review result emitted by a Buddy review
+ * conversation. JSON elsewhere in an assistant response is ordinary prose and
+ * must never mutate durable review state.
+ */
+export function parseBuddyReviewResult(outcome: string) {
+  const startCount = outcome.split(BUDDY_REVIEW_RESULT_START).length - 1;
+  const endCount = outcome.split(BUDDY_REVIEW_RESULT_END).length - 1;
+  if (startCount === 0 && endCount === 0) return undefined;
+  if (startCount !== 1 || endCount !== 1) {
+    throw new Error('Buddy review result must contain exactly one complete delimited block');
+  }
+  const escapedStart = BUDDY_REVIEW_RESULT_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedEnd = BUDDY_REVIEW_RESULT_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const block = outcome.match(
+    new RegExp(`(?:^|\\n)${escapedStart}\\r?\\n([\\s\\S]*?)\\r?\\n${escapedEnd}(?=\\r?\\n|$)`)
+  );
+  if (!block) {
+    throw new Error('Buddy review result markers must each appear on their own line');
+  }
+  const payload = block[1].trim();
+  if (!payload) throw new Error('Buddy review result block is empty');
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(payload);
+  } catch {
+    throw new Error('Buddy review result block must contain raw JSON');
+  }
+  return BuddyReviewSettlementSchema.parse(decoded);
+}
+
+export const BUDDY_REVIEW_RESULT_INSTRUCTIONS = [
+  'End the review with exactly one structured result block using these literal marker lines:',
+  BUDDY_REVIEW_RESULT_START,
+  '{"verdict":"pass|needs_work|fail","score":0,"summary":"...","evidence":[{"kind":"file|conversation|project|metric","reference":"...","observation":"..."}],"requiredActions":[]}',
+  BUDDY_REVIEW_RESULT_END,
+  'Put raw JSON between the markers, without a Markdown code fence.',
+].join('\n');
 
 export interface BuddyConversationPort {
   id: string;
@@ -150,10 +192,13 @@ export function createBuddiesIntegration(dependencies: BuddiesIntegrationDepende
       ),
       '',
       'BUDDY OPERATIONS',
-      'Use the `buddies` CLI for durable employee state; never edit its SQLite database directly.',
-      'The public operations are new_project, update_project, and remember.',
-      'Close, cancel, block, or reopen project todos through an atomic `buddies project update` call.',
-      'Write durable personal handoffs through `buddies remember`.',
+      'Use the native `unleashd_buddy` tools for durable employee state whenever they are available.',
+      'Those tools are already bound to this employee, workspace, and selected project.',
+      'Never pass identity through prose, edit the Buddies SQLite database directly, or substitute filesystem notes for project state.',
+      'Use get_current_work before choosing work; use new_project/update_project for authoritative work; use remember for durable personal handoffs.',
+      'Completing work requires concrete evidence. External sends, spend, publishing, and deployment require request_human_approval first.',
+      'An approval request records pending intent only. Stop after requesting it; do not treat the request itself as authorization.',
+      'If this provider cannot expose the native tools, the `buddies` CLI is a compatibility fallback.',
     ].join('\n');
     return {
       context,
@@ -182,23 +227,31 @@ export function createBuddiesIntegration(dependencies: BuddiesIntegrationDepende
       );
   }
 
-  function settleDelegation(
+  async function settleDelegation(
     conversation: BuddyConversationPort,
     status: 'complete' | 'failed' | 'cancelled',
     outcome?: string
-  ): void {
-    if (!conversation.buddyContext?.delegatedByBuddyId) return;
-    void getStore()
-      .then((buddies) => {
-        const delegation = buddies
-          .listDelegations({ buddy: conversation.buddyContext!.buddyId })
-          .find((item) => item.child_conversation_id === conversation.id);
-        if (!delegation) return;
-        buddies.updateDelegation(delegation.id, { status, outcome });
-      })
-      .catch((error) =>
-        console.warn(`[buddies] Failed to settle delegation for ${conversation.id}:`, error)
-      );
+  ): Promise<void> {
+    if (!conversation.buddyContext) return;
+    try {
+      const buddies = await getStore();
+      const normalizedOutcome =
+        outcome?.trim() ||
+        (status === 'complete'
+          ? 'Buddy conversation completed.'
+          : status === 'cancelled'
+            ? 'Buddy conversation was cancelled.'
+            : 'Buddy conversation failed.');
+      const review = status === 'complete' ? parseBuddyReviewResult(normalizedOutcome) : undefined;
+      new BuddyClosureService(buddies).settleConversation({
+        conversationId: conversation.id,
+        status,
+        outcome: normalizedOutcome,
+        review,
+      });
+    } catch (error) {
+      console.warn(`[buddies] Failed to settle conversation ${conversation.id}:`, error);
+    }
   }
 
   async function createLink(conversation: BuddyConversationPort): Promise<void> {

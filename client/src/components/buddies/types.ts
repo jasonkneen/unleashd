@@ -89,6 +89,18 @@ export interface AutomationRun {
   outcome?: string | null;
   error?: string | null;
   conversation_id?: string | null;
+  iteration?: number;
+  tokens_used?: number;
+  cost_usd?: number;
+  policy?: BuddyAutomationPolicy;
+}
+
+export interface BuddyAutomationPolicy {
+  max_runtime_seconds: number;
+  max_iterations: number;
+  max_tokens: number;
+  max_cost_usd: number;
+  allowed_operations: string[];
 }
 
 export interface BuddyAutomation {
@@ -101,10 +113,23 @@ export interface BuddyAutomation {
   timezone: string;
   job_kind: 'prompt' | 'sequence' | 'loop';
   job_payload: Record<string, unknown>;
+  policy: BuddyAutomationPolicy;
   enabled: boolean;
   next_run_at?: string | null;
   last_run_at?: string | null;
   runs?: AutomationRun[];
+}
+
+export interface BuddyApprovalRequest {
+  id: string;
+  action: string;
+  reason: string;
+  risk: string;
+  status: 'pending' | 'approved' | 'rejected';
+  resolved_by: string | null;
+  resolution_note: string | null;
+  requested_at: string;
+  resolved_at: string | null;
 }
 
 export interface Buddy {
@@ -183,6 +208,7 @@ export interface EmployeeRecord {
     summary: string | null;
     created_at?: string;
   }>;
+  approvals: BuddyApprovalRequest[];
 }
 
 export type BuddyMutation = (key: string, action: () => Promise<unknown>) => Promise<void>;

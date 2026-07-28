@@ -1,6 +1,7 @@
 import type { BuddyContext } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import type { BuddiesStorePort, BuddyAutomation, BuddyAutomationRun } from './contract';
+import { BUDDY_REVIEW_RESULT_INSTRUCTIONS } from './integration';
 
 export interface BuddyConversationView {
   id: string;
@@ -58,6 +59,52 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
     }
   });
 
+  app.get('/api/buddies/approvals', async (req: Request, res: Response) => {
+    try {
+      const buddies = await getStore();
+      res.json(
+        buddies.listApprovalRequests({
+          buddy: typeof req.query.buddyId === 'string' ? req.query.buddyId : undefined,
+          workspace: typeof req.query.workspaceId === 'string' ? req.query.workspaceId : undefined,
+          project: typeof req.query.projectId === 'string' ? req.query.projectId : undefined,
+          status:
+            req.query.status === 'pending' ||
+            req.query.status === 'approved' ||
+            req.query.status === 'rejected'
+              ? req.query.status
+              : undefined,
+          limit:
+            typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined,
+        })
+      );
+    } catch (error) {
+      sendError(res, error, 400);
+    }
+  });
+
+  app.post('/api/buddies/approvals/:approvalId/resolve', async (req: Request, res: Response) => {
+    try {
+      if (req.body?.decision !== 'approved' && req.body?.decision !== 'rejected') {
+        res.status(400).json({ error: 'decision must be approved or rejected' });
+        return;
+      }
+      if (typeof req.body?.resolvedBy !== 'string' || !req.body.resolvedBy.trim()) {
+        res.status(400).json({ error: 'resolvedBy is required' });
+        return;
+      }
+      const buddies = await getStore();
+      res.json(
+        buddies.resolveApprovalRequest(req.params.approvalId, {
+          decision: req.body.decision,
+          resolvedBy: req.body.resolvedBy,
+          note: typeof req.body?.note === 'string' ? req.body.note : undefined,
+        })
+      );
+    } catch (error) {
+      sendError(res, error, 400);
+    }
+  });
+
   app.get('/api/buddies/:buddyId', async (req: Request, res: Response) => {
     try {
       const buddies = await getStore();
@@ -77,6 +124,7 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
         skills: buddies.listBuddySkills(buddy.id),
         delegations: buddies.listDelegations({ buddy: buddy.id }),
         reviews: buddies.listReviews({ buddy: buddy.id }),
+        approvals: buddies.listApprovalRequests({ buddy: buddy.id }),
       });
     } catch (error) {
       sendError(res, error, 500);
@@ -228,6 +276,7 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
           `Review Buddy ${subjectBuddyId}.`,
           `Review purpose: ${purpose}`,
           'Return a structured verdict, score, summary, and concrete evidence.',
+          BUDDY_REVIEW_RESULT_INSTRUCTIONS,
         ].join('\n'),
       });
       res.status(201).json({ review, conversation: conversation.toJSON() });

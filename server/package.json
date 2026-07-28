@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@nbardy/agent-cli": "workspace:*",
     "@nbardy/buddies": "file:../vendor/nbardy-buddies-0.1.0.tgz",
     "@unleashd/shared": "workspace:*",

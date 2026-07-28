@@ -39,6 +39,7 @@ import { SubAgentPanel } from './SubAgentPanel';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
 import { VirtualizedMessageList, isToolCallOnlyMessage } from './VirtualizedMessageList';
 import type { MessageGroup } from './VirtualizedMessageList';
+import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
 import './Chat.css';
 
 // Stable reference for empty queue — avoids new [] on every render triggering re-renders
@@ -134,13 +135,19 @@ export function Chat() {
     incrementUsage,
     deletePrompt,
   } = useSavedPrompts();
+  const [hasInput, setHasInput] = useState(false);
+  const [threadCopied, setThreadCopied] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>(EMPTY_PENDING);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const draftValueRef = useRef('');
   const lastMessageRef = useRef<HTMLDivElement>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   const saveDraft = useCallback(() => {
     if (!id) return;
-    const value = textareaRef.current?.value ?? '';
+    const value = draftValueRef.current;
     if (value) {
       localStorage.setItem(`${DRAFT_KEY_PREFIX}${id}`, value);
     } else {
@@ -148,18 +155,33 @@ export function Chat() {
     }
   }, [id]);
 
-  useEffect(() => {
-    if (!id) return;
-    const draft = localStorage.getItem(`${DRAFT_KEY_PREFIX}${id}`);
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.value = draft ?? '';
+  const attachTextarea = useCallback(
+    (textarea: HTMLTextAreaElement | null) => {
+      if (!textarea) {
+        saveDraft();
+        textareaRef.current = null;
+        return;
+      }
+
+      textareaRef.current = textarea;
+      const draft = id ? (localStorage.getItem(`${DRAFT_KEY_PREFIX}${id}`) ?? '') : '';
+      draftValueRef.current = draft;
+      textarea.value = draft;
       textarea.style.height = 'auto';
       textarea.style.height = `${Math.min(textarea.scrollHeight, 300)}px`;
-      setHasInput((draft ?? '').trim().length > 0);
+      setHasInput(draft.trim().length > 0);
       textarea.focus();
-    }
-  }, [id]);
+    },
+    [id, saveDraft]
+  );
+
+  useEffect(() => {
+    const flushDraft = () => saveDraft();
+    window.addEventListener('pagehide', flushDraft);
+    return () => {
+      window.removeEventListener('pagehide', flushDraft);
+    };
+  }, [saveDraft]);
 
   // Load pending files from localStorage on mount
   useEffect(() => {
@@ -182,11 +204,6 @@ export function Chat() {
     }
   }, [id]);
 
-  const [hasInput, setHasInput] = useState(false);
-  const [threadCopied, setThreadCopied] = useState(false);
-  const [showPalette, setShowPalette] = useState(false);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>(EMPTY_PENDING);
   const [isUploading, setIsUploading] = useState(false);
 
   const confirmed = conversation?.confirmed ?? false;
@@ -332,6 +349,7 @@ export function Chat() {
   const getInputValue = () => textareaRef.current?.value ?? '';
 
   const clearInput = () => {
+    draftValueRef.current = '';
     if (textareaRef.current) {
       textareaRef.current.value = '';
       textareaRef.current.style.height = 'auto';
@@ -354,6 +372,7 @@ export function Chat() {
 
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, 300)}px`;
+    draftValueRef.current = textarea.value;
 
     const has = textarea.value.trim().length > 0;
     if (has !== hasInput) setHasInput(has);
@@ -406,6 +425,7 @@ export function Chat() {
 
   const swarmDebugPrefix = conversation?.swarmDebugPrefix;
   const buddyContext = readBuddyContext(conversation);
+  const visibleSwarmDebugPrefix = effectiveSwarmDebugPrefix(buddyContext, swarmDebugPrefix);
   const messageGroups = useMemo((): MessageGroup[] => {
     const prefix = swarmDebugPrefix;
     const groups: MessageGroup[] = [];
@@ -761,10 +781,10 @@ export function Chat() {
       {conversation.messages.length === 0 ? (
         <div className="messages-container">
           {buddyContext && <BuddyConvoHeader context={buddyContext} />}
-          {conversation.swarmDebugPrefix && (
+          {visibleSwarmDebugPrefix && (
             <div style={{ paddingBottom: '24px' }}>
               <SwarmConvoPrefix
-                prefix={conversation.swarmDebugPrefix}
+                prefix={visibleSwarmDebugPrefix}
                 swarmId={conversation.swarmId ?? null}
               />
             </div>
@@ -788,7 +808,7 @@ export function Chat() {
             totalMessageCount={conversation.messages.length}
             scrollToBottomRef={scrollToBottomRef}
             workingDirectory={conversation.workingDirectory}
-            swarmDebugPrefix={conversation.swarmDebugPrefix}
+            swarmDebugPrefix={visibleSwarmDebugPrefix}
             swarmId={conversation.swarmId ?? null}
             buddyContext={buddyContext}
           />
@@ -888,7 +908,7 @@ export function Chat() {
 
         <div className="input-wrapper">
           <textarea
-            ref={textareaRef}
+            ref={attachTextarea}
             className={`message-input ${hasActiveTurn ? 'interrupt-mode' : ''}`}
             defaultValue=""
             onInput={handleInput}
@@ -970,10 +990,12 @@ export function Chat() {
         deletePrompt={deletePrompt}
         onSelect={(content) => {
           if (textareaRef.current) {
+            draftValueRef.current = content;
             textareaRef.current.value = content;
             textareaRef.current.style.height = 'auto';
             textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 300)}px`;
             setHasInput(content.trim().length > 0);
+            saveDraft();
             textareaRef.current.focus();
             const end = content.length;
             textareaRef.current.setSelectionRange(end, end);

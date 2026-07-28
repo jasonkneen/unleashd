@@ -94,9 +94,19 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
   // Both extractors mutate messages (strip markers from first user message).
   // Buddy and swarm metadata have independent sentinels. Buddy extraction runs
   // first because its hidden block is outermost for a Buddy's first turn.
+  // Typed Buddy ownership is authoritative and mutually exclusive with Oompa:
+  // do not interpret the visible Buddy prompt as a worker tag.
   const buddyContext = extractBuddyContext(session.messages);
-  const swarmDebugPrefix = extractSwarmDebugPrefix(session.messages);
-  const worker = extractWorkerMetadata(session.messages);
+  const swarmDebugPrefix = buddyContext ? null : extractSwarmDebugPrefix(session.messages);
+  const worker = buddyContext
+    ? {
+        isWorker: false,
+        isHidden: false,
+        swarmId: null,
+        workerId: null,
+        workerRole: null,
+      }
+    : extractWorkerMetadata(session.messages);
   if (worker.isHidden) return null;
 
   // Recover the canonical ModelId when session.model parses against the schema.

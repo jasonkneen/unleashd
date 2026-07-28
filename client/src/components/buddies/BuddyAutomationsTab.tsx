@@ -1,11 +1,12 @@
 import { type FormEvent, useState } from 'react';
 import { asArray, buddyApi } from './api';
-import type { AutomationRun, BuddyAutomation, BuddyMutation } from './types';
+import type { AutomationRun, BuddyApprovalRequest, BuddyAutomation, BuddyMutation } from './types';
 
 interface BuddyAutomationsTabProps {
   buddyId: string;
   workspaceId?: string;
   automations: BuddyAutomation[];
+  approvals: BuddyApprovalRequest[];
   busy: boolean;
   mutate: BuddyMutation;
   refresh: () => Promise<void>;
@@ -17,6 +18,7 @@ export function BuddyAutomationsTab({
   buddyId,
   workspaceId,
   automations,
+  approvals,
   busy,
   mutate,
   refresh,
@@ -73,6 +75,49 @@ export function BuddyAutomationsTab({
 
   return (
     <section className="buddy-section">
+      <div className="buddy-approval-list">
+        <h2>Human approvals</h2>
+        {approvals
+          .filter((approval) => approval.status === 'pending')
+          .map((approval) => (
+            <article key={approval.id} className="buddy-approval-card">
+              <div>
+                <strong>{approval.action}</strong>
+                <span>{approval.reason}</span>
+                <small>Risk: {approval.risk}</small>
+              </div>
+              <div className="buddy-record-actions">
+                {(['approved', 'rejected'] as const).map((decision) => (
+                  <button
+                    type="button"
+                    key={decision}
+                    disabled={busy}
+                    onClick={() =>
+                      void mutate(`approval-${approval.id}-${decision}`, () =>
+                        buddyApi(
+                          `/api/buddies/approvals/${encodeURIComponent(approval.id)}/resolve`,
+                          {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              decision,
+                              resolvedBy: 'Owner',
+                            }),
+                          }
+                        )
+                      )
+                    }
+                  >
+                    {decision === 'approved' ? 'Approve' : 'Reject'}
+                  </button>
+                ))}
+              </div>
+            </article>
+          ))}
+        {approvals.every((approval) => approval.status !== 'pending') && (
+          <p className="buddy-empty">No pending approvals.</p>
+        )}
+      </div>
       <form className="buddy-form buddy-form--automation" onSubmit={createAutomation}>
         <h2>New automation</h2>
         <input name="name" required placeholder="Automation name" />
@@ -170,6 +215,15 @@ function AutomationCard({
           · Last{' '}
           {automation.last_run_at ? new Date(automation.last_run_at).toLocaleString() : 'never'}
         </span>
+        {automation.policy && (
+          <span>
+            Policy · {automation.policy.max_runtime_seconds}s · {automation.policy.max_iterations}{' '}
+            iteration
+            {automation.policy.max_iterations === 1 ? '' : 's'} ·{' '}
+            {automation.policy.max_tokens.toLocaleString()} tokens · $
+            {automation.policy.max_cost_usd.toFixed(2)}
+          </span>
+        )}
       </div>
       <div className="buddy-record-actions">
         <button
@@ -223,6 +277,11 @@ function AutomationCard({
                 </button>
               )}
               <small>{run.outcome ?? run.error}</small>
+              {(run.tokens_used !== undefined || run.cost_usd !== undefined) && (
+                <small>
+                  {run.tokens_used ?? 0} tokens · ${(run.cost_usd ?? 0).toFixed(2)}
+                </small>
+              )}
             </div>
           ))}
           {runs.length === 0 && <span>No runs yet.</span>}

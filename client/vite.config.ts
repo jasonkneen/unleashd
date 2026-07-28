@@ -2,13 +2,25 @@ import { exec, execSync } from 'node:child_process';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { type ViteDevServer, defineConfig } from 'vite';
+import { type ViteDevServer, createLogger, defineConfig } from 'vite';
 
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
 const LOCAL_DOMAIN = 'unleashd.localhost';
 const LOCAL_HTTP_PORT = 80;
 const SETUP_SCRIPT = fileURLToPath(new URL('../tools/setup-domain.sh', import.meta.url));
+const viteLogger = createLogger();
+const logViteError = viteLogger.error.bind(viteLogger);
+
+viteLogger.error = (message, options) => {
+  const transientWebSocketRestart =
+    message.includes('ws proxy') &&
+    (message.includes('EPIPE') ||
+      message.includes('ECONNRESET') ||
+      message.includes('ECONNREFUSED'));
+  if (transientWebSocketRestart) return;
+  logViteError(message, options);
+};
 
 function openInBrowser(url: string) {
   const startCmd =
@@ -87,6 +99,7 @@ function openPreferredDevUrlPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  customLogger: viteLogger,
   plugins: [react(), openPreferredDevUrlPlugin()],
   server: {
     host: true,

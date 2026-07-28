@@ -19,6 +19,11 @@ import {
   type WorkStatus,
   type Workspace,
 } from './buddies/types';
+import {
+  buddyCardMetrics,
+  buddyProjectTodoProgress,
+  selectDirectoryEmployees,
+} from './buddies/ui-contract';
 import './BuddiesDashboard.css';
 
 const STATUS_LABELS: Record<WorkStatus, string> = {
@@ -51,11 +56,13 @@ function EmployeeDirectory({
   overview: BuddyOverview;
   onOpen: (id: string) => void;
 }) {
-  const visibleBuddies = overview.topLevel.length > 0 ? overview.topLevel : overview.employees;
+  const visibleBuddies = selectDirectoryEmployees(overview);
   return (
     <main className="buddies-directory-content">
       <div className="buddy-card-grid">
-        {visibleBuddies.map(({ buddy: employee, workspaces, team, currentWork }) => {
+        {visibleBuddies.map((employeeOverview) => {
+          const { buddy: employee, workspaces, team } = employeeOverview;
+          const metrics = buddyCardMetrics(employeeOverview);
           return (
             <article
               key={employee.id}
@@ -80,20 +87,20 @@ function EmployeeDirectory({
                   <div className="buddy-card-stats">
                     {team.length > 0 && (
                       <div>
-                        <strong>{team.length}</strong>
+                        <strong>{metrics.team}</strong>
                         <span>team</span>
                       </div>
                     )}
                     <div>
-                      <strong>{currentWork.open}</strong>
+                      <strong>{metrics.open}</strong>
                       <span>open</span>
                     </div>
                     <div>
-                      <strong>{currentWork.active}</strong>
+                      <strong>{metrics.active}</strong>
                       <span>active</span>
                     </div>
                     <div>
-                      <strong>{currentWork.blocked}</strong>
+                      <strong>{metrics.blocked}</strong>
                       <span>blocked</span>
                     </div>
                   </div>
@@ -207,6 +214,7 @@ export function BuddiesDashboard() {
           : null,
         directReports,
         reviews: asArray<EmployeeRecord['reviews'][number]>(detail, 'reviews'),
+        approvals: asArray<EmployeeRecord['approvals'][number]>(detail, 'approvals'),
       };
       setEmployee(record);
       setMemory({
@@ -577,50 +585,55 @@ export function BuddiesDashboard() {
             </div>
             <div className="buddy-work-list">
               {workspaceProjects
-                .filter((project) => !['done', 'cancelled'].includes(project.status))
-                .map((project) => (
-                  <article className={`buddy-work-card status-${project.status}`} key={project.id}>
-                    <div className="buddy-work-card__heading">
-                      <div>
-                        <span className="campaign-status">{STATUS_LABELS[project.status]}</span>
-                        <h3>{project.title}</h3>
+                .filter((project) => project.status !== 'cancelled')
+                .map((project) => {
+                  const todoProgress = buddyProjectTodoProgress(project);
+                  return (
+                    <article
+                      className={`buddy-work-card status-${project.status}`}
+                      key={project.id}
+                    >
+                      <span
+                        className="buddy-task-status"
+                        role="img"
+                        aria-label={STATUS_LABELS[project.status]}
+                      >
+                        {project.status === 'done' ? '✓' : ''}
+                      </span>
+                      <div className="buddy-work-card__body">
+                        <div className="buddy-work-card__title">
+                          <h3>{project.title}</h3>
+                          <span className={`buddy-work-status status-${project.status}`}>
+                            {STATUS_LABELS[project.status]}
+                          </span>
+                        </div>
+                        <div className="buddy-work-card__operations">
+                          <span>
+                            <strong>Next action</strong>
+                            {project.next_action ?? 'Not set'}
+                          </span>
+                          {project.blocked_reason && (
+                            <span className="buddy-work-blocker">
+                              <strong>Blocker</strong>
+                              {project.blocked_reason}
+                            </span>
+                          )}
+                          <span className="buddy-work-todos">
+                            <strong>Todos</strong>
+                            {todoProgress.done}/{todoProgress.total}
+                          </span>
+                        </div>
                       </div>
                       <button
                         type="button"
+                        disabled={!workspace}
                         onClick={() => workspace && talk(workspace, project.id)}
                       >
-                        Start conversation →
+                        Open
                       </button>
-                    </div>
-                    {project.objective && <p>{project.objective}</p>}
-                    {project.next_action && (
-                      <p className="buddy-next-action">
-                        <strong>Next:</strong> {project.next_action}
-                      </p>
-                    )}
-                    {project.blocked_reason && (
-                      <p className="buddy-blocker">
-                        <strong>Blocked:</strong> {project.blocked_reason}
-                      </p>
-                    )}
-                    {Date.now() - new Date(project.updated_at).getTime() >
-                      7 * 24 * 60 * 60 * 1000 && (
-                      <span className="buddy-stale-warning">No update in 7+ days</span>
-                    )}
-                    <div className="buddy-project-controls">
-                      <span>{project.definition_of_done}</span>
-                    </div>
-                    <ul className="buddy-todo-list">
-                      {project.todos.map((todo) => (
-                        <li key={todo.id}>
-                          <span className={`buddy-todo-dot status-${todo.status}`} />
-                          <span>{todo.title}</span>
-                          <small>{todo.status.replaceAll('_', ' ')}</small>
-                        </li>
-                      ))}
-                    </ul>
-                  </article>
-                ))}
+                    </article>
+                  );
+                })}
             </div>
 
             {legacyWork.length > 0 && (
@@ -737,6 +750,7 @@ export function BuddiesDashboard() {
             buddyId={employee.buddy.id}
             workspaceId={workspace?.id}
             automations={automations}
+            approvals={employee.approvals ?? []}
             busy={busy !== null}
             mutate={mutate}
             refresh={loadEmployee}
