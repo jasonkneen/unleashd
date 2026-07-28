@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { BuddyAutomationsTab } from './buddies/BuddyAutomationsTab';
+import { BuddyExecutionProfile } from './buddies/BuddyExecutionProfile';
 import { buddyApi as api, asArray } from './buddies/api';
 import {
   type Buddy,
@@ -447,6 +448,20 @@ export function BuddiesDashboard() {
       </header>
 
       <main className="buddies-content">
+        <BuddyExecutionProfile
+          key={`${employee.buddy.id}:${employee.buddy.provider}:${employee.buddy.model}:${employee.buddy.reasoning_effort}`}
+          buddy={employee.buddy}
+          busy={busy !== null}
+          onSave={(profile) =>
+            mutate('profile', () =>
+              api(`/api/buddies/${encodeURIComponent(employee.buddy.id)}/profile`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(profile),
+              })
+            )
+          }
+        />
         <section className="buddy-org-strip" aria-label="Employee capabilities and reporting line">
           <div>
             <span>Reports to</span>

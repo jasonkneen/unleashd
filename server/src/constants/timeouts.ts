@@ -8,7 +8,6 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 
 export const EXTERNAL_GRACE_MS = 30_000;
 export const LOCAL_COMPLETION_SUPPRESS_MS = EXTERNAL_GRACE_MS;
-export const HOT_RELOAD_DRAIN_MS = readPositiveIntEnv('CWV_HOT_RELOAD_DRAIN_MS', 15 * 60_000);
 export const HOT_RELOAD_FORCE_EXIT_GRACE_MS = readPositiveIntEnv(
   'CWV_HOT_RELOAD_FORCE_EXIT_GRACE_MS',
   3_000

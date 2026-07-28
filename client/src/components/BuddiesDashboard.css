@@ -178,6 +178,63 @@
   line-height: 1.4;
 }
 
+.buddy-execution-profile {
+  margin-bottom: 16px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+}
+
+.buddy-execution-profile summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px;
+  color: var(--text-emphasis);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.buddy-execution-profile summary span {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.buddy-execution-profile form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+
+.buddy-execution-profile label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.buddy-execution-profile select,
+.buddy-execution-profile button {
+  min-height: 32px;
+}
+
+.buddy-execution-profile p {
+  margin: 0;
+  padding: 0 14px 14px;
+  color: var(--danger-bright);
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .buddy-execution-profile form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .buddy-next-action,
 .buddy-blocker {
   padding: 8px 10px;

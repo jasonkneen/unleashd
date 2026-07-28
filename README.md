@@ -54,6 +54,8 @@ pnpm dev
 
 Opens at [http://unleashd.localhost](http://unleashd.localhost) if local port-80 routing is active, otherwise [http://localhost:7489](http://localhost:7489). On macOS startup, unleashd will try to run the local routing setup automatically and may prompt for `sudo` once. In dev, the API server stays on port `7499` behind the Vite proxy.
 
+Frontend edits reload immediately. Backend edits are coalesced by the development watcher: if Codex or another provider has active turns, the current backend keeps owning their event streams until they finish, then exits and starts the updated server. An explicit `Ctrl-C`, `SIGTERM`, or `pnpm dev:replace` remains an intentional shutdown and stops active turns.
+
 ### Production
 
 ```bash

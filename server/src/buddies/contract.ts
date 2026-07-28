@@ -169,6 +169,14 @@ export interface BuddiesStorePort {
   dashboard(): unknown;
   overview(options?: { recentSince?: Date | string }): unknown;
   getBuddy(id: string): BuddyRecord | null;
+  updateBuddy(
+    id: string,
+    changes: {
+      provider?: string | null;
+      model?: string | null;
+      reasoningEffort?: string | null;
+    }
+  ): BuddyRecord;
   listBuddyWorkspaces(buddy: string): unknown[];
   listBuddyOwnedProjects(input: Record<string, unknown>): unknown[];
   getBuddyProject(id: string): {

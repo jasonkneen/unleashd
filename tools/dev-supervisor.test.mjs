@@ -46,13 +46,12 @@ test('argument parser requires explicit replace mode and preserves custom comman
   assert.throws(() => parseSupervisorArgs(['--unknown']), /Unknown dev supervisor option/);
 });
 
-test('default replacement window includes the server drain and force-exit grace periods', () => {
+test('default replacement window includes the server force-exit grace period', () => {
   assert.equal(
     resolveDefaultReplaceTimeoutMs({
-      CWV_HOT_RELOAD_DRAIN_MS: '1200',
       CWV_HOT_RELOAD_FORCE_EXIT_GRACE_MS: '300',
     }),
-    6500
+    5300
   );
 });
 

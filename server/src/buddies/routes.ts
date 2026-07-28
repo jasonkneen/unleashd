@@ -1,4 +1,11 @@
-import type { BuddyContext } from '@unleashd/shared';
+import {
+  type BuddyContext,
+  ProviderSchema,
+  isEffortValidForProvider,
+  isModelIdValidForProvider,
+  modelValidationHint,
+  normalizeModelId,
+} from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
 import type { BuddiesStorePort, BuddyAutomation, BuddyAutomationRun } from './contract';
 import { BUDDY_REVIEW_RESULT_INSTRUCTIONS } from './integration';
@@ -132,6 +139,49 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
       });
     } catch (error) {
       sendError(res, error, 500);
+    }
+  });
+
+  app.patch('/api/buddies/:buddyId/profile', async (req: Request, res: Response) => {
+    try {
+      const providerResult = ProviderSchema.safeParse(req.body?.provider);
+      if (!providerResult.success) {
+        res.status(400).json({ error: 'A valid provider is required' });
+        return;
+      }
+      const provider = providerResult.data;
+      const model =
+        typeof req.body?.model === 'string' && req.body.model.trim()
+          ? normalizeModelId(provider, req.body.model.trim())
+          : null;
+      const reasoningEffort =
+        typeof req.body?.reasoningEffort === 'string' && req.body.reasoningEffort.trim()
+          ? req.body.reasoningEffort.trim()
+          : null;
+
+      if (!isModelIdValidForProvider(provider, model ?? undefined)) {
+        res.status(400).json({
+          error: `Invalid ${provider} model; expected ${modelValidationHint(provider)}`,
+        });
+        return;
+      }
+      if (!isEffortValidForProvider(provider, reasoningEffort)) {
+        res.status(400).json({
+          error: `Invalid ${provider} reasoning effort`,
+        });
+        return;
+      }
+
+      const buddies = await getStore();
+      res.json(
+        buddies.updateBuddy(req.params.buddyId, {
+          provider,
+          model,
+          reasoningEffort,
+        })
+      );
+    } catch (error) {
+      sendError(res, error, 400);
     }
   });
 

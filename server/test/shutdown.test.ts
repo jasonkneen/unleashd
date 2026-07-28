@@ -51,16 +51,16 @@ function createFixture(activeInitially: boolean) {
     conversation,
     pendingFlush,
     ports,
+    setActive: (value: boolean) => {
+      active = value;
+    },
     counts: () => ({ schedulerStops, flushes, exits, processStops }),
   };
 }
 
 test('SIGTERM claims shutdown before its single flush can be re-entered', async () => {
   const fixture = createFixture(false);
-  const controller = createShutdownController(
-    { drainTimeoutMs: 60_000, forceExitGraceMs: 3_000 },
-    fixture.ports
-  );
+  const controller = createShutdownController({ forceExitGraceMs: 3_000 }, fixture.ports);
 
   controller.handleSigterm();
   controller.handleSigterm();
@@ -80,28 +80,25 @@ test('SIGTERM claims shutdown before its single flush can be re-entered', async 
   controller.dispose();
 });
 
-test('repeated SIGTERM advances draining to forcing to one idempotent exit', async () => {
+test('reload waits for active turns and coalesces repeated requests', async () => {
   const fixture = createFixture(true);
-  const controller = createShutdownController(
-    { drainTimeoutMs: 60_000, forceExitGraceMs: 60_000 },
-    fixture.ports
-  );
+  const controller = createShutdownController({ forceExitGraceMs: 60_000 }, fixture.ports);
 
-  controller.handleSigterm();
-  assert.equal(controller.state, 'draining');
-  controller.handleSigterm();
-  assert.equal(controller.state, 'forcing');
-  controller.handleSigterm();
-  assert.equal(controller.state, 'exiting');
+  controller.handleReload();
+  assert.equal(controller.state, 'reloading');
+  controller.handleReload();
 
   assert.deepEqual(fixture.counts(), {
     schedulerStops: 1,
-    flushes: 1,
+    flushes: 0,
     exits: 0,
-    processStops: 1,
+    processStops: 0,
   });
-  assert.equal(fixture.conversation.messages.length, 1);
+  assert.equal(fixture.conversation.messages.length, 0);
 
+  fixture.setActive(false);
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  assert.equal(fixture.counts().flushes, 1);
   fixture.pendingFlush.resolve();
   await fixture.pendingFlush.promise;
   await Promise.resolve();

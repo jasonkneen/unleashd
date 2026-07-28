@@ -26,7 +26,6 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const FORCE_REPLACE_TIMEOUT_MS = 2_000;
 const POLL_INTERVAL_MS = 100;
 const REPLACE_EXIT_MARGIN_MS = 5_000;
-const DEFAULT_HOT_RELOAD_DRAIN_MS = 15 * 60_000;
 const DEFAULT_HOT_RELOAD_FORCE_EXIT_GRACE_MS = 3_000;
 export function resolveDefaultReplaceTimeoutMs(environment = process.env) {
   const readPositiveInteger = (name, fallback) => {
@@ -34,12 +33,10 @@ export function resolveDefaultReplaceTimeoutMs(environment = process.env) {
     return Number.isFinite(value) && value > 0 ? value : fallback;
   };
   return (
-    readPositiveInteger('CWV_HOT_RELOAD_DRAIN_MS', DEFAULT_HOT_RELOAD_DRAIN_MS) +
     readPositiveInteger(
       'CWV_HOT_RELOAD_FORCE_EXIT_GRACE_MS',
       DEFAULT_HOT_RELOAD_FORCE_EXIT_GRACE_MS
-    ) +
-    REPLACE_EXIT_MARGIN_MS
+    ) + REPLACE_EXIT_MARGIN_MS
   );
 }
 const DEFAULT_REPLACE_TIMEOUT_MS = resolveDefaultReplaceTimeoutMs();
@@ -578,7 +575,7 @@ function resolveConcurrentlyCommand() {
       'pnpm --filter @unleashd/shared watch:esm',
       'pnpm --filter @unleashd/shared watch:cjs',
       'pnpm --dir vendor/agent-cli-tool watch',
-      'pnpm --filter @unleashd/server exec tsx watch src/server.ts',
+      'node tools/watch-server.mjs',
       'pnpm --filter @unleashd/client exec vite',
     ],
     environment: { NODE_ENV: 'development' },
@@ -640,14 +637,8 @@ export function createExecutionPhases(options) {
         {
           name: 'running-server',
           specification: {
-            ...resolvePnpmCommand([
-              '--filter',
-              '@unleashd/server',
-              'exec',
-              'tsx',
-              'watch',
-              'src/server.ts',
-            ]),
+            command: process.execPath,
+            arguments: [path.join(repositoryRoot, 'tools', 'watch-server.mjs')],
             environment: { NODE_ENV: 'development' },
           },
         },

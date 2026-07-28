@@ -17,14 +17,14 @@ export interface ShutdownPorts {
 }
 
 export interface ShutdownOptions {
-  drainTimeoutMs: number;
   forceExitGraceMs: number;
 }
 
-export type ShutdownState = 'idle' | 'draining' | 'forcing' | 'exiting';
+export type ShutdownState = 'idle' | 'reloading' | 'shutting_down' | 'exiting';
 
 export interface ShutdownController {
   readonly state: ShutdownState;
+  handleReload(): void;
   handleSigint(): void;
   handleSigterm(): void;
   dispose(): void;
@@ -35,7 +35,6 @@ export function createShutdownController(
   ports: ShutdownPorts
 ): ShutdownController {
   let drainInterval: NodeJS.Timeout | null = null;
-  let forceTimeout: NodeJS.Timeout | null = null;
   let forceExitTimeout: NodeJS.Timeout | null = null;
   let state: ShutdownState = 'idle';
   let schedulerStopped = false;
@@ -45,10 +44,8 @@ export function createShutdownController(
     Array.from(ports.conversations()).filter((item) => item.hasActiveProcess());
   const clearTimers = () => {
     if (drainInterval) clearInterval(drainInterval);
-    if (forceTimeout) clearTimeout(forceTimeout);
     if (forceExitTimeout) clearTimeout(forceExitTimeout);
     drainInterval = null;
-    forceTimeout = null;
     forceExitTimeout = null;
   };
   const stopScheduler = () => {
@@ -83,74 +80,52 @@ export function createShutdownController(
       });
     return exitPromise;
   };
-  const beginForcedExit = (reason: string) => {
-    if (state === 'exiting') return;
-    clearTimers();
-    state = 'forcing';
-    interrupt(reason);
-    forceExitTimeout = setTimeout(() => void exitOnce(), options.forceExitGraceMs);
-  };
-  const handleSigint = () => {
-    console.log('SIGINT — killing child processes and shutting down...');
-    stopScheduler();
-    clearTimers();
-    for (const conversation of ports.conversations()) {
-      if (conversation.hasActiveProcess()) conversation.stop('server_restart');
-    }
-    void exitOnce();
-  };
-  const handleSigterm = () => {
-    stopScheduler();
-    if (state === 'exiting') return;
-    if (state === 'forcing') {
-      console.warn('SIGTERM received during forced shutdown; exiting now');
+  const waitForActiveTurns = (onWaiting: () => void) => {
+    if (activeRuns().length === 0) {
       void exitOnce();
       return;
     }
-    if (state === 'draining') {
-      const active = activeRuns();
-      console.warn(
-        `SIGTERM received again with ${active.length} active turn(s); forcing shutdown now`
-      );
-      beginForcedExit('forced restart');
-      return;
-    }
-
-    // Claim shutdown ownership before any asynchronous work. Signal handlers can
-    // be re-entered while a flush is pending, so the state transition must be
-    // synchronous.
-    state = 'draining';
-    const active = activeRuns();
-    if (active.length === 0) {
-      console.log('SIGTERM — no active turns, exiting for restart');
-      void exitOnce();
-      return;
-    }
-    console.warn(
-      `SIGTERM deferred: waiting for ${active.length} active turn(s) to finish (timeout ${Math.round(options.drainTimeoutMs / 1000)}s)`
-    );
+    onWaiting();
     drainInterval = setInterval(() => {
-      if (activeRuns().length !== 0) return;
-      console.log('SIGTERM — active turns drained, exiting for restart');
-      void exitOnce();
+      if (activeRuns().length === 0) void exitOnce();
     }, 500);
-    forceTimeout = setTimeout(() => {
-      const remaining = activeRuns().length;
-      if (remaining > 0) {
-        console.warn(
-          `SIGTERM drain timeout reached with ${remaining} active turn(s); interrupting and exiting`
-        );
-        beginForcedExit('hot-reload timeout');
-        return;
-      }
-      void exitOnce();
-    }, options.drainTimeoutMs);
   };
+  const handleReload = () => {
+    if (state !== 'idle') return;
+    stopScheduler();
+    state = 'reloading';
+    // A live provider turn cannot be handed to a replacement server because
+    // this process owns its event stream and in-memory buffers. Keep that
+    // ownership until the turn completes; the dev watcher coalesces further
+    // file changes and starts one replacement process afterward.
+    waitForActiveTurns(() => {
+      console.warn(
+        `Backend reload queued: waiting for ${activeRuns().length} active turn(s) to finish`
+      );
+    });
+  };
+  const handleShutdown = (signal: 'SIGINT' | 'SIGTERM') => {
+    if (state === 'exiting' || state === 'shutting_down') return;
+    stopScheduler();
+    clearTimers();
+    state = 'shutting_down';
+    console.log(`${signal} — stopping active turns and shutting down`);
+    interrupt('explicit shutdown');
+    if (activeRuns().length === 0) {
+      void exitOnce();
+    } else {
+      waitForActiveTurns(() => undefined);
+      forceExitTimeout = setTimeout(() => void exitOnce(), options.forceExitGraceMs);
+    }
+  };
+  const handleSigint = () => handleShutdown('SIGINT');
+  const handleSigterm = () => handleShutdown('SIGTERM');
 
   return {
     get state() {
       return state;
     },
+    handleReload,
     handleSigint,
     handleSigterm,
     dispose: clearTimers,
@@ -164,6 +139,17 @@ export function registerShutdownHandlers(
   const controller = createShutdownController(options, ports);
   process.on('SIGINT', controller.handleSigint);
   process.on('SIGTERM', controller.handleSigterm);
+  const handleProcessMessage = (message: unknown) => {
+    if (
+      message &&
+      typeof message === 'object' &&
+      'type' in message &&
+      message.type === 'unleashd:dev-reload'
+    ) {
+      controller.handleReload();
+    }
+  };
+  process.on('message', handleProcessMessage);
   const disposeController = controller.dispose;
   return {
     get state() {
@@ -171,9 +157,11 @@ export function registerShutdownHandlers(
     },
     handleSigint: controller.handleSigint,
     handleSigterm: controller.handleSigterm,
+    handleReload: controller.handleReload,
     dispose() {
       process.off('SIGINT', controller.handleSigint);
       process.off('SIGTERM', controller.handleSigterm);
+      process.off('message', handleProcessMessage);
       disposeController();
     },
   };

@@ -19,7 +19,6 @@ import { setIgnorePatterns } from './config';
 import {
   EXTERNAL_GRACE_MS,
   FILE_POLL_INTERVAL_MS,
-  HOT_RELOAD_DRAIN_MS,
   HOT_RELOAD_FORCE_EXIT_GRACE_MS,
   LOCAL_COMPLETION_SUPPRESS_MS,
   PALETTE_GENERATION_TIMEOUT_MS,
@@ -300,7 +299,6 @@ const SETUP_SCRIPT = path.join(__dirname, '../../tools/setup-domain.sh');
 
 registerShutdownHandlers(
   {
-    drainTimeoutMs: HOT_RELOAD_DRAIN_MS,
     forceExitGraceMs: HOT_RELOAD_FORCE_EXIT_GRACE_MS,
   },
   {
