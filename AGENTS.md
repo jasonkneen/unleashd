@@ -420,6 +420,20 @@ Relevant files:
   paths. If it needs a parallel transport or lifecycle, simplify the design
   before adding safety wrappers and tests.
 
+### Preserve lifecycle and hydration authority
+
+- `server/src/lifecycle/shutdown.ts` is the only process-lifecycle and mutation
+  admission authority. The dev watcher requests reloads; it never owns, adopts,
+  or transfers provider processes.
+- A source reload pauses new work and lets the server that spawned each turn
+  drain it. Explicit shutdown is the only path that interrupts owned turns.
+- Conversation summaries are bounded transport projections, never durable
+  state or a cache. Full transcripts hydrate through the conversation-detail
+  route, while the runtime/store remains authoritative.
+- Do not add detached-process adoption, fallback snapshots, a second readiness
+  gate, or task-specific model routing as incidental “safety.” Those are
+  separate architecture decisions and require an explicit scoped design.
+
 ### High-value, low-cost
 - Contract tests for builder + provider command specs (`agent-cli-tool`).
 - Adapter loader/poller integration fixture test.
