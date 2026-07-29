@@ -88,3 +88,24 @@ export function buddyCodexMcpArgs(
   }
   return config;
 }
+
+export function buddyBuilderCodexMcpArgs(
+  conversationId: string,
+  launch: BuddyMcpLaunch = resolveBuddyMcpLaunch()
+): string[] {
+  const args = [...launch.args, '--builder', '--conversation', conversationId];
+  const config = [
+    '-c',
+    `mcp_servers.${BUDDY_MCP_SERVER_NAME}.command=${tomlString(launch.command)}`,
+    '-c',
+    `mcp_servers.${BUDDY_MCP_SERVER_NAME}.args=${tomlStringArray(args)}`,
+    '-c',
+    `mcp_servers.${BUDDY_MCP_SERVER_NAME}.enabled=true`,
+    '-c',
+    `mcp_servers.${BUDDY_MCP_SERVER_NAME}.required=true`,
+  ];
+  if (launch.cwd) {
+    config.push('-c', `mcp_servers.${BUDDY_MCP_SERVER_NAME}.cwd=${tomlString(launch.cwd)}`);
+  }
+  return config;
+}

@@ -32,6 +32,10 @@ export interface BuddyRouteDependencies {
     commandId: string;
     conversationId?: string;
   }): Promise<BuddyConversationView>;
+  createBuilderConversation?(input: {
+    commandId: string;
+    conversationId?: string;
+  }): Promise<BuddyConversationView>;
   sendError(response: Response, error: unknown, fallbackStatus: number): void;
   getNextAutomationRunAt(automation: BuddyAutomation, after: Date): string;
   createId(): string;
@@ -42,6 +46,7 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
     getStore,
     getScheduler,
     createConversation,
+    createBuilderConversation,
     sendError,
     getNextAutomationRunAt,
     createId,
@@ -65,6 +70,30 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
             typeof req.query.recentSince === 'string' ? req.query.recentSince : undefined,
         })
       );
+    } catch (error) {
+      sendError(res, error, 400);
+    }
+  });
+
+  app.post('/api/buddies/builder', async (req: Request, res: Response) => {
+    try {
+      if (!createBuilderConversation) {
+        res.status(503).json({ error: 'Buddy Builder is unavailable' });
+        return;
+      }
+      const conversationId =
+        typeof req.body?.conversationId === 'string' ? req.body.conversationId : undefined;
+      const conversation = await createBuilderConversation({
+        commandId:
+          typeof req.body?.commandId === 'string' && req.body.commandId.trim()
+            ? req.body.commandId.trim()
+            : createId(),
+        conversationId,
+      });
+      res.status(201).json({
+        conversationId: conversation.id,
+        conversation: conversation.toJSON(),
+      });
     } catch (error) {
       sendError(res, error, 400);
     }

@@ -804,7 +804,9 @@ export function Chat() {
           )}
           <div className="empty-state">
             {confirmed
-              ? 'Send a message to start the conversation.'
+              ? conversation.purpose === 'buddy_builder'
+                ? 'Describe the Buddy you want to create.'
+                : 'Send a message to start the conversation.'
               : `Waiting for ${conversation.provider || 'claude'} to be ready...`}
           </div>
         </div>
@@ -932,7 +934,9 @@ export function Chat() {
                 ? `Waiting for ${conversation.provider || 'claude'}...`
                 : hasActiveTurn
                   ? 'Enter to interrupt, Tab to queue...'
-                  : 'Type your message...'
+                  : conversation.purpose === 'buddy_builder'
+                    ? 'I want a new Buddy for…'
+                    : 'Type your message...'
             }
             disabled={!canInput}
           />

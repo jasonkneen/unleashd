@@ -204,6 +204,12 @@ registerBuddyRoutes(app, {
   getStore: getBuddiesStore,
   getScheduler: () => buddyScheduler,
   createConversation: buddyCreationService.createServerBuddyConversation,
+  createBuilderConversation: ({ commandId, conversationId }) =>
+    buddyCreationService.createBuddyBuilderConversation({
+      commandId,
+      conversationId,
+      workingDirectory: process.cwd(),
+    }),
   sendError: sendBuddiesError,
   getNextAutomationRunAt: nextAutomationRunAt,
   createId: uuidv4,

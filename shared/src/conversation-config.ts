@@ -126,6 +126,9 @@ export const BuddyContextSchema = z.object({
 });
 export type BuddyContext = z.infer<typeof BuddyContextSchema>;
 
+export const ConversationPurposeSchema = z.enum(['general', 'buddy_builder']);
+export type ConversationPurpose = z.infer<typeof ConversationPurposeSchema>;
+
 export const ConversationCreationMetadataSchema = z.object({
   commandId: z.string().min(1).optional(),
   fingerprint: z.string().min(1).optional(),
@@ -136,6 +139,7 @@ export const ConversationCreationMetadataSchema = z.object({
   swarmDebugPrefix: z.string().optional(),
   resumedFromConversationId: z.string().uuid().optional(),
   buddyContext: BuddyContextSchema.optional(),
+  purpose: ConversationPurposeSchema.optional(),
 });
 export type ConversationCreationMetadata = z.infer<typeof ConversationCreationMetadataSchema>;
 

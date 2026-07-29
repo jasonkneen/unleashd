@@ -1,3 +1,4 @@
+import { BUDDY_CREATED_RE } from './buddy-created-message';
 import { BUDDY_REVIEW_RESULT_RE } from './buddy-review-message';
 
 /**
@@ -13,6 +14,7 @@ export const OOMPA_RUN_TOOL_FRAGMENT_RE =
 export type StructuredMessageSegment =
   | { type: 'text'; content: string }
   | { type: 'ask_user_question'; json: string }
+  | { type: 'buddy_created'; json: string }
   | { type: 'buddy_review_result'; json: string }
   | { type: 'oompa_run' };
 
@@ -48,6 +50,7 @@ function collectMatches(
 export function splitStructuredMessageContent(content: string): StructuredMessageSegment[] {
   const matches = [
     ...collectMatches(content, 'ask_user_question', ASK_USER_QUESTION_RE, 1),
+    ...collectMatches(content, 'buddy_created', BUDDY_CREATED_RE, 1),
     ...collectMatches(content, 'buddy_review_result', BUDDY_REVIEW_RESULT_RE, 1),
     ...collectMatches(content, 'oompa_run', OOMPA_RUN_TOOL_FRAGMENT_RE),
   ].sort((a, b) => a.index - b.index);
@@ -59,7 +62,7 @@ export function splitStructuredMessageContent(content: string): StructuredMessag
     if (match.index > lastIndex) {
       segments.push({ type: 'text', content: content.slice(lastIndex, match.index) });
     }
-    if (match.type === 'ask_user_question') {
+    if (match.type === 'ask_user_question' || match.type === 'buddy_created') {
       segments.push({ type: match.type, json: match.payload ?? '' });
     } else if (match.type === 'buddy_review_result') {
       segments.push({ type: match.type, json: match.payload ?? '' });

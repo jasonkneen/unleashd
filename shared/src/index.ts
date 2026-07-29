@@ -13,6 +13,7 @@ import {
   ConfigResolutionSchema,
   ConversationConfigPatchSchema,
   ConversationConfigSchema,
+  ConversationPurposeSchema,
   ModelIdSchema,
 } from './conversation-config.js';
 import {
@@ -638,6 +639,9 @@ export const ConversationSchema = z.object({
   // Oompa/swarm fields: a Buddy conversation is an ordinary provider thread
   // with durable employee context.
   buddyContext: BuddyContextSchema.nullish(),
+  // Application-owned purpose selects a narrow first-turn briefing/tool profile.
+  // `general` is implicit for historical conversations.
+  purpose: ConversationPurposeSchema.optional(),
 
   // Merge feature metadata. Parent threads that aggregate review docs from
   // forked children set mergeParentMeta; forked children set mergeChildMeta.

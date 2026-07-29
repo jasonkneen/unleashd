@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { BuddyAutomationsTab } from './buddies/BuddyAutomationsTab';
@@ -53,21 +53,26 @@ function compactPath(path: string | null): string {
 function EmployeeDirectory({
   overview,
   onOpen,
+  onNew,
+  creating,
 }: {
   overview: BuddyOverview;
   onOpen: (id: string) => void;
+  onNew: () => void;
+  creating: boolean;
 }) {
   const visibleBuddies = selectDirectoryEmployees(overview);
-  if (visibleBuddies.length === 0) {
-    return (
-      <main className="buddies-directory-content">
-        <p className="buddy-empty">No top-level employees are configured yet.</p>
-      </main>
-    );
-  }
   return (
     <main className="buddies-directory-content">
       <div className="buddy-card-grid">
+        <button
+          type="button"
+          className="buddy-directory-card buddy-directory-card--new"
+          onClick={onNew}
+          disabled={creating}
+        >
+          {creating ? 'Opening…' : 'New'}
+        </button>
         {visibleBuddies.map((employeeOverview) => {
           const { buddy: employee, workspaces, team } = employeeOverview;
           const metrics = buddyCardMetrics(employeeOverview);
@@ -136,6 +141,7 @@ function EmployeeDirectory({
 export function BuddiesDashboard() {
   const navigate = useNavigate();
   const { buddyId } = useParams();
+  const [searchParams] = useSearchParams();
   const [overview, setOverview] = useState<BuddyOverview | null>(null);
   const [employee, setEmployee] = useState<EmployeeRecord | null>(null);
   const [memory, setMemory] = useState<BuddyMemory>(EMPTY_MEMORY);
@@ -148,6 +154,7 @@ export function BuddiesDashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
+  const startedConversationRef = useRef<string | null>(null);
 
   const loadDirectory = useCallback(
     async (signal?: AbortSignal, generation = loadGenerationRef.current) => {
@@ -382,27 +389,63 @@ export function BuddiesDashboard() {
     }
   };
 
-  const talk = (targetWorkspace: Workspace, buddyProjectId?: string) => {
-    if (!employee) return;
-    const context: BuddyContext = {
-      buddyId: employee.buddy.id,
-      workspaceId: targetWorkspace.id,
-      buddyProjectId: buddyProjectId ?? null,
-    };
-    const id = createConversation({
-      workingDirectory: targetWorkspace.root_path,
-      config: {
-        provider: (employee.buddy.provider || 'codex') as 'codex',
-        model: employee.buddy.model
-          ? { mode: 'explicit', modelId: employee.buddy.model }
-          : { mode: 'default' },
-        reasoning: employee.buddy.reasoning_effort
-          ? { mode: 'explicit', effort: employee.buddy.reasoning_effort }
-          : { mode: 'default' },
-      },
-      buddyContext: context,
-    });
-    navigate(`/chat/${id}`);
+  const talk = useCallback(
+    (targetWorkspace: Workspace, buddyProjectId?: string) => {
+      if (!employee) return;
+      const context: BuddyContext = {
+        buddyId: employee.buddy.id,
+        workspaceId: targetWorkspace.id,
+        buddyProjectId: buddyProjectId ?? null,
+      };
+      const id = createConversation({
+        workingDirectory: targetWorkspace.root_path,
+        config: {
+          provider: (employee.buddy.provider || 'codex') as 'codex',
+          model: employee.buddy.model
+            ? { mode: 'explicit', modelId: employee.buddy.model }
+            : { mode: 'default' },
+          reasoning: employee.buddy.reasoning_effort
+            ? { mode: 'explicit', effort: employee.buddy.reasoning_effort }
+            : { mode: 'default' },
+        },
+        buddyContext: context,
+      });
+      navigate(`/chat/${id}`);
+    },
+    [employee, navigate]
+  );
+
+  useEffect(() => {
+    if (
+      !buddyId ||
+      searchParams.get('startConversation') !== '1' ||
+      !employee ||
+      !workspace ||
+      startedConversationRef.current === buddyId
+    ) {
+      return;
+    }
+    startedConversationRef.current = buddyId;
+    navigate(`/buddies/${encodeURIComponent(buddyId)}`, { replace: true });
+    talk(workspace);
+  }, [buddyId, employee, navigate, searchParams, talk, workspace]);
+
+  const openBuddyBuilder = async () => {
+    setBusy('buddy-builder');
+    setError(null);
+    try {
+      const result = await api<{ conversationId?: string; conversation?: { id?: string } }>(
+        '/api/buddies/builder',
+        { method: 'POST' }
+      );
+      const conversationId = result.conversationId ?? result.conversation?.id;
+      if (!conversationId) throw new Error('Buddy Builder did not return a conversation');
+      navigate(`/chat/${conversationId}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
   };
 
   const openProjectConversation = (targetWorkspace: Workspace, projectId: string) => {
@@ -431,7 +474,13 @@ export function BuddiesDashboard() {
   if (!buddyId && overview) {
     return (
       <div className="buddies-dashboard">
-        <EmployeeDirectory overview={overview} onOpen={(id) => navigate(`/buddies/${id}`)} />
+        {error && <div className="buddies-error">{error}</div>}
+        <EmployeeDirectory
+          overview={overview}
+          onOpen={(id) => navigate(`/buddies/${id}`)}
+          onNew={() => void openBuddyBuilder()}
+          creating={busy === 'buddy-builder'}
+        />
       </div>
     );
   }

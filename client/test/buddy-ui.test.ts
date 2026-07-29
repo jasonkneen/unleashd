@@ -14,6 +14,7 @@ import {
   effectiveSwarmDebugPrefix,
   selectDirectoryEmployees,
 } from '../src/components/buddies/ui-contract';
+import { BUDDY_CREATED_RE, parseBuddyCreated } from '../src/components/buddy-created-message';
 import {
   BUDDY_REVIEW_RESULT_RE,
   parseBuddyReviewRequest,
@@ -91,6 +92,15 @@ test('directory never promotes reports when no top-level employee is returned', 
     recentRuns: [],
   };
   assert.deepEqual(selectDirectoryEmployees(overview), []);
+});
+
+test('directory keeps the conversational New Buddy entry before employee cards', () => {
+  const source = readFileSync(path.resolve('src/components/BuddiesDashboard.tsx'), 'utf8');
+  const newEntry = source.indexOf('buddy-directory-card--new');
+  const employeeCards = source.indexOf('visibleBuddies.map');
+  assert.ok(newEntry >= 0 && employeeCards > newEntry);
+  assert.match(source, /\/api\/buddies\/builder/);
+  assert.doesNotMatch(source.slice(newEntry, employeeCards), /<form|<input|<select/);
 });
 
 test('Buddy context always suppresses the Swarm debug prefix', () => {
@@ -216,6 +226,9 @@ test('structured message adapters produce one normalized segment stream', () => 
     'Before',
     '<!--ask_user_question:{"questions":[]}-->',
     'Middle',
+    '<!-- unleashd:buddy-created -->',
+    '{"type":"buddy_created","buddy":{"id":"buddy_scout","name":"Research Scout","role":"Growth research","status":"active","provider":"codex","model":"gpt-5.6-luna","reasoning_effort":"high"},"route":"/buddies/buddy_scout"}',
+    '<!-- /unleashd:buddy-created -->',
     '<!-- unleashd:buddy-review-result -->',
     '{"verdict":"needs_work","summary":"Fix it.","evidence":[],"requiredActions":[]}',
     '<!-- /unleashd:buddy-review-result -->',
@@ -224,8 +237,32 @@ test('structured message adapters produce one normalized segment stream', () => 
   const segments = splitStructuredMessageContent(content);
   assert.deepEqual(
     segments.map((segment) => segment.type),
-    ['text', 'ask_user_question', 'text', 'buddy_review_result', 'text']
+    ['text', 'ask_user_question', 'text', 'buddy_created', 'text', 'buddy_review_result', 'text']
   );
+});
+
+test('Buddy creation envelopes parse into canonical employee cards', () => {
+  const content = [
+    '<!-- unleashd:buddy-created -->',
+    '{"type":"buddy_created","buddy":{"id":"buddy_scout","name":"Research Scout","role":"Growth research","status":"active","provider":"codex","model":"gpt-5.6-luna","reasoning_effort":"high"},"route":"/buddies/buddy_scout"}',
+    '<!-- /unleashd:buddy-created -->',
+  ].join('\n');
+  const match = content.match(BUDDY_CREATED_RE);
+  assert.ok(match);
+  assert.deepEqual(parseBuddyCreated(match[1]), {
+    type: 'buddy_created',
+    buddy: {
+      id: 'buddy_scout',
+      name: 'Research Scout',
+      role: 'Growth research',
+      status: 'active',
+      provider: 'codex',
+      model: 'gpt-5.6-luna',
+      reasoning_effort: 'high',
+    },
+    route: '/buddies/buddy_scout',
+  });
+  assert.equal(parseBuddyCreated('{"type":"buddy_created"}'), null);
 });
 
 test('Buddy review result envelopes parse into verdict cards without transport text', () => {

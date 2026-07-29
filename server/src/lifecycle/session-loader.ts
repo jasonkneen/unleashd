@@ -164,6 +164,7 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       mergeParentMeta: source.mergeParentMeta ?? null,
       mergeChildMeta: source.mergeChildMeta ?? null,
       buddyContext: source.buddyContext ?? hydratedConfig.record.creation?.buddyContext ?? null,
+      purpose: source.purpose ?? hydratedConfig.record.creation?.purpose ?? 'general',
     });
     conversation.messages = source.messages;
     conversation.createdAt = source.createdAt;
@@ -202,6 +203,7 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
         resumedFromConversationId: record.creation?.resumedFromConversationId ?? null,
         buddyContext: recoveredBuddy?.context ?? record.creation?.buddyContext ?? null,
         buddyBriefing: recoveredBuddy?.briefing ?? null,
+        purpose: record.creation?.purpose ?? 'general',
       });
       dependencies.registry.set(recovered);
       await dependencies.dispatchInitialMessage(recovered);
@@ -337,6 +339,7 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       existing.parentConversationId = resolveParentConversationId(source.parentConversationId);
       existing.resumedFromConversationId = source.resumedFromConversationId ?? null;
       existing.buddyContext = source.buddyContext ?? existing.buddyContext;
+      existing.purpose = source.purpose ?? existing.purpose;
       existing.modelName = source.modelName ?? source.model ?? null;
       existing.refreshConfigResolution();
       const serialized = existing.toJSON();

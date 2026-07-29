@@ -1,5 +1,10 @@
 import crypto from 'node:crypto';
-import type { BuddyContext, ConversationConfig, Provider } from '@unleashd/shared';
+import type {
+  BuddyContext,
+  ConversationConfig,
+  ConversationPurpose,
+  Provider,
+} from '@unleashd/shared';
 import { normalizeModelId } from '@unleashd/shared';
 import type { BuddyAutomation, BuddyAutomationRun } from '../buddies/contract';
 import type { ResolvedBuddyConversation } from '../buddies/integration';
@@ -21,12 +26,19 @@ export interface CreationFingerprintInput {
   swarmDebugPrefix?: string;
   resumedFromConversationId?: string;
   buddyContext?: BuddyContext;
+  purpose?: ConversationPurpose;
 }
 
 export interface CreateServerBuddyConversationInput {
   context: BuddyContext;
   initialMessage: string;
   commandId: string;
+  conversationId?: string;
+}
+
+export interface CreateBuddyBuilderConversationInput {
+  commandId: string;
+  workingDirectory: string;
   conversationId?: string;
 }
 
@@ -65,6 +77,9 @@ export interface BuddyCreationService {
   createServerBuddyConversation(
     input: CreateServerBuddyConversationInput
   ): Promise<ConversationRuntime>;
+  createBuddyBuilderConversation(
+    input: CreateBuddyBuilderConversationInput
+  ): Promise<ConversationRuntime>;
 }
 
 export function creationFingerprint(input: CreationFingerprintInput): string {
@@ -78,6 +93,7 @@ export function creationFingerprint(input: CreationFingerprintInput): string {
         swarmDebugPrefix: input.swarmDebugPrefix ?? null,
         resumedFromConversationId: input.resumedFromConversationId ?? null,
         buddyContext: input.buddyContext ?? null,
+        ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
       })
     )
     .digest('hex');
@@ -287,11 +303,55 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
     return conversation;
   }
 
+  async function createBuddyBuilderConversation(
+    input: CreateBuddyBuilderConversationInput
+  ): Promise<ConversationRuntime> {
+    if (!ports.isProviderAvailable('codex')) {
+      throw new Error('Buddy Builder requires the Codex provider');
+    }
+    const conversationId = input.conversationId ?? ports.createId();
+    const workingDirectory = ports.resolveWorkingDirectory(input.workingDirectory);
+    const purpose = 'buddy_builder' as const;
+    const config = configFromProviderPreferences({
+      provider: 'codex',
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'high',
+    });
+    const fingerprint = creationFingerprint({
+      workingDirectory,
+      config,
+      purpose,
+    });
+    const creation = await ports.configService.createOrReplay({
+      conversationId,
+      config,
+      workingDirectory,
+      creation: {
+        commandId: input.commandId,
+        fingerprint,
+        purpose,
+      },
+    });
+    const conversation = ports.createConversation({
+      id: conversationId,
+      workingDirectory,
+      configState: creation.state,
+      purpose,
+    });
+    ports.registerConversation(conversation);
+    ports.broadcast({
+      type: 'conversations_updated',
+      conversations: [conversation.toJSON()],
+    });
+    return conversation;
+  }
+
   return {
     creationFingerprint,
     persistCurrentSession,
     dispatchInitialMessageIfPending,
     createAutomationConversation,
     createServerBuddyConversation,
+    createBuddyBuilderConversation,
   };
 }

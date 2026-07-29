@@ -1192,6 +1192,8 @@ const BUDDY_CONTEXT_RE =
 const BUDDY_CONTEXT_V2_HEADER_RE =
   /^<!-- unleashd:buddy-context-v2 ([A-Za-z0-9_-]+) ([0-9]+) -->\n/;
 const BUDDY_CONTEXT_V2_SUFFIX = '\n<!-- /unleashd:buddy-context-v2 -->\n\n';
+const BUDDY_BUILDER_V1_HEADER_RE = /^<!-- unleashd:buddy-builder-v1 ([0-9]+) -->\n/;
+const BUDDY_BUILDER_V1_SUFFIX = '\n<!-- /unleashd:buddy-builder-v1 -->\n\n';
 
 /**
  * Recover typed Buddy ownership while removing the hidden first-turn briefing
@@ -1237,6 +1239,26 @@ export function extractBuddyContext(messages: Message[]): BuddyContext | null {
   if (!parsed.success) return null;
   firstUserMsg.content = firstUserMsg.content.slice(match[0].length);
   return parsed.data;
+}
+
+/** Remove the hidden Buddy Builder briefing and recover its persisted purpose. */
+export function extractBuddyBuilderPurpose(messages: Message[]): boolean {
+  const firstUserMsg = messages.find((message) => message.role === 'user');
+  if (!firstUserMsg) return false;
+  const header = firstUserMsg.content.match(BUDDY_BUILDER_V1_HEADER_RE);
+  if (!header) return false;
+  const briefingLength = Number.parseInt(header[1], 10);
+  const suffixStart = header[0].length + briefingLength;
+  if (
+    !Number.isSafeInteger(briefingLength) ||
+    briefingLength < 0 ||
+    !firstUserMsg.content.startsWith(BUDDY_BUILDER_V1_SUFFIX, suffixStart)
+  ) {
+    firstUserMsg.content = '[Buddy Builder context recovery failed; hidden briefing removed]';
+    return false;
+  }
+  firstUserMsg.content = firstUserMsg.content.slice(suffixStart + BUDDY_BUILDER_V1_SUFFIX.length);
+  return true;
 }
 
 export function extractSwarmDebugPrefix(messages: Message[]): string | null {

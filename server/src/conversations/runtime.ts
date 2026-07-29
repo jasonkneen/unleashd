@@ -10,6 +10,7 @@ import type {
   ConversationConfig,
   ConversationConfigState,
   Conversation as ConversationData,
+  ConversationPurpose,
   Message,
   ModelId,
   OompaRuntimeSnapshot,
@@ -21,7 +22,8 @@ import type {
 } from '@unleashd/shared';
 import { mergeReviewDocPath } from '@unleashd/shared';
 import { formatToolUse, isCompletionOnlyToolUse } from '../adapters/tool-format';
-import { buddyCodexMcpArgs } from '../buddies/mcp-config';
+import { BUDDY_BUILDER_BRIEFING } from '../buddies/builder';
+import { buddyBuilderCodexMcpArgs, buddyCodexMcpArgs } from '../buddies/mcp-config';
 import {
   SWARM_POLL_INTERVAL_MS,
   SWARM_POLL_THROTTLE_MS,
@@ -154,6 +156,7 @@ export interface ConversationOptions {
   swarmDebugPrefix?: string | null;
   buddyContext?: BuddyContext | null;
   buddyBriefing?: string | null;
+  purpose?: ConversationPurpose;
   mergeParentMeta?: MergeParentMeta | null;
   mergeChildMeta?: MergeChildMeta | null;
 }
@@ -176,6 +179,7 @@ export interface ConversationRuntime extends EventEmitter, ConversationRuntimeVi
   swarmDebugPrefix: string | null;
   mergeParentMeta: MergeParentMeta | null;
   mergeChildMeta: MergeChildMeta | null;
+  purpose: ConversationPurpose;
   subAgents: SubAgent[];
   queue: QueuedMessage[];
   readonly provider: ProviderName;
@@ -217,6 +221,7 @@ export function buildFirstTurnCliContent(input: {
   buddyContext: BuddyContext | null;
   buddyBriefing: string | null;
   swarmDebugPrefix: string | null;
+  purpose?: ConversationPurpose;
 }): string {
   const firstUnstartedTurn = input.messageCount === 0 && !input.hasStartedSession;
   // Buddy and Swarm are mutually exclusive conversation modes. If malformed
@@ -228,6 +233,9 @@ export function buildFirstTurnCliContent(input: {
       'base64url'
     );
     return `<!-- unleashd:buddy-context-v2 ${encodedContext} ${input.buddyBriefing.length} -->\n${input.buddyBriefing}\n<!-- /unleashd:buddy-context-v2 -->\n\n${input.content}`;
+  }
+  if (input.purpose === 'buddy_builder' && firstUnstartedTurn) {
+    return `<!-- unleashd:buddy-builder-v1 ${BUDDY_BUILDER_BRIEFING.length} -->\n${BUDDY_BUILDER_BRIEFING}\n<!-- /unleashd:buddy-builder-v1 -->\n\n${input.content}`;
   }
   if (input.swarmDebugPrefix !== null && firstUnstartedTurn) {
     return `<!-- unleashd:swarm-prefix -->\n${input.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${input.content}`;
@@ -288,6 +296,7 @@ export function createConversationRuntime(
     // Stays on the object (never cleared) so toJSON() includes it for client rendering.
     swarmDebugPrefix: string | null;
     buddyContext: BuddyContext | null;
+    purpose: ConversationPurpose;
     // Hidden first-turn context. Never serialized to clients; the typed
     // buddyContext is the durable/UI-facing metadata.
     private _buddyBriefing: string | null;
@@ -355,6 +364,7 @@ export function createConversationRuntime(
         swarmDebugPrefix = null,
         buddyContext = null,
         buddyBriefing = null,
+        purpose = 'general',
         mergeParentMeta = null,
         mergeChildMeta = null,
       } = opts;
@@ -384,6 +394,7 @@ export function createConversationRuntime(
       this.swarmDebugPrefix = isBuddyConversation ? null : swarmDebugPrefix;
       this.buddyContext = buddyContext;
       this._buddyBriefing = buddyBriefing;
+      this.purpose = purpose;
       this.mergeParentMeta = mergeParentMeta;
       this.mergeChildMeta = mergeChildMeta;
       this.subAgents = [];
@@ -523,7 +534,9 @@ export function createConversationRuntime(
                   extraArgs:
                     this.buddyContext !== null
                       ? buddyCodexMcpArgs(this.buddyContext, this.id)
-                      : undefined,
+                      : this.purpose === 'buddy_builder'
+                        ? buddyBuilderCodexMcpArgs(this.id)
+                        : undefined,
                 }
               : { harness: executionConfig.provider, ...baseRequest }
         );
@@ -1301,6 +1314,7 @@ export function createConversationRuntime(
         messageCount: this.messages.length,
         hasStartedSession: this._hasStartedSession,
         buddyContext: this.buddyContext,
+        purpose: this.purpose,
         buddyBriefing: this._buddyBriefing,
         swarmDebugPrefix: this.swarmDebugPrefix,
       });
@@ -1935,6 +1949,7 @@ export function createConversationRuntime(
         modelName: this.modelName,
         swarmDebugPrefix: this.swarmDebugPrefix,
         buddyContext: this.buddyContext,
+        purpose: this.purpose,
         mergeParentMeta: this.mergeParentMeta,
         mergeChildMeta: this.mergeChildMeta,
       };

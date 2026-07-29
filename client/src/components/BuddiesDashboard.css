@@ -45,6 +45,26 @@
   transition: all 0.2s;
 }
 
+.buddy-directory-card--new {
+  min-height: 74px;
+  justify-content: center;
+  border-style: dashed;
+  border-left-width: 1px;
+  color: var(--ai-bright);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.buddy-directory-card--new:hover {
+  border-left-color: var(--border-default);
+}
+
+.buddy-directory-card--new:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .buddy-directory-card:hover {
   transform: translateY(-1px);
   border-color: var(--border-default);

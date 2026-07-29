@@ -18,23 +18,16 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import type { Plugin } from 'unified';
 import type { BuddyContext } from '../atoms/pending-creations';
-import {
-  AskUserQuestionWidget,
-  parseAskUserQuestion,
-} from './AskUserQuestion';
+import { AskUserQuestionWidget, parseAskUserQuestion } from './AskUserQuestion';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
-import {
-  BuddyReviewRequestCard,
-  BuddyReviewResultCard,
-} from './BuddyReviewMessage';
+import { BuddyCreatedCard } from './BuddyCreatedMessage';
+import { BuddyReviewRequestCard, BuddyReviewResultCard } from './BuddyReviewMessage';
 import { FilePreview, getPreviewType, getPreviewableLocalHref } from './FilePreview';
 import { InlineSwarmRunWidget } from './InlineSwarmRunWidget';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
-import {
-  parseBuddyReviewRequest,
-  parseBuddyReviewResult,
-} from './buddy-review-message';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
+import { parseBuddyCreated } from './buddy-created-message';
+import { parseBuddyReviewRequest, parseBuddyReviewResult } from './buddy-review-message';
 import {
   OOMPA_RUN_TOOL_FRAGMENT_RE,
   splitStructuredMessageContent,
@@ -551,6 +544,14 @@ const MemoizedMessage = memo(
                   <BuddyReviewResultCard key={i} result={result} />
                 ) : (
                   <code key={i}>Buddy review result (parse error)</code>
+                );
+              }
+              if (seg.type === 'buddy_created') {
+                const result = parseBuddyCreated(seg.json);
+                return result ? (
+                  <BuddyCreatedCard key={i} result={result} />
+                ) : (
+                  <code key={i}>Buddy creation result (parse error)</code>
                 );
               }
               // AskUserQuestion widget

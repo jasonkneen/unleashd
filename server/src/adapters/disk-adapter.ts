@@ -19,7 +19,12 @@ import type {
   SubAgent,
 } from '@unleashd/shared';
 import { ModelIdSchema, fromCodexModelId, isModelIdValidForProvider } from '@unleashd/shared';
-import { extractBuddyContext, extractSwarmDebugPrefix, extractWorkerMetadata } from './jsonl';
+import {
+  extractBuddyBuilderPurpose,
+  extractBuddyContext,
+  extractSwarmDebugPrefix,
+  extractWorkerMetadata,
+} from './jsonl';
 
 // =============================================================================
 // Normalized session output — all adapters produce this before conversion
@@ -101,16 +106,19 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
   // Typed Buddy ownership is authoritative and mutually exclusive with Oompa:
   // do not interpret the visible Buddy prompt as a worker tag.
   const buddyContext = extractBuddyContext(session.messages);
-  const swarmDebugPrefix = buddyContext ? null : extractSwarmDebugPrefix(session.messages);
-  const worker = buddyContext
-    ? {
-        isWorker: false,
-        isHidden: false,
-        swarmId: null,
-        workerId: null,
-        workerRole: null,
-      }
-    : extractWorkerMetadata(session.messages);
+  const isBuddyBuilder = buddyContext ? false : extractBuddyBuilderPurpose(session.messages);
+  const swarmDebugPrefix =
+    buddyContext || isBuddyBuilder ? null : extractSwarmDebugPrefix(session.messages);
+  const worker =
+    buddyContext || isBuddyBuilder
+      ? {
+          isWorker: false,
+          isHidden: false,
+          swarmId: null,
+          workerId: null,
+          workerRole: null,
+        }
+      : extractWorkerMetadata(session.messages);
   if (worker.isHidden) return null;
 
   // Recover the canonical ModelId when session.model parses against the schema.
@@ -139,6 +147,7 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
     modelName: session.model !== 'unknown' ? session.model : null,
     swarmDebugPrefix: swarmDebugPrefix ?? null,
     buddyContext,
+    purpose: isBuddyBuilder ? 'buddy_builder' : undefined,
   };
 }
 
