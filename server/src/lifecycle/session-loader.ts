@@ -246,7 +246,14 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
         {
           load: dependencies.loadConversations,
           hydrate,
-          store: (conversation) => dependencies.registry.set(conversation),
+          // Creation is allowed while old history hydrates. A live runtime
+          // created after discovery is authoritative and must never be replaced
+          // by the older disk snapshot.
+          store: (conversation) => {
+            if (dependencies.registry.has(conversation.id)) return false;
+            dependencies.registry.set(conversation);
+            return true;
+          },
           serialize: (conversation) => summarizeConversation(conversation.toJSON()),
           broadcast: (conversations) =>
             dependencies.broadcast({

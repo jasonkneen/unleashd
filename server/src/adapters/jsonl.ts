@@ -321,11 +321,49 @@ export function extractCodexSessionIdFromFilename(filePath: string): string | nu
   return match ? match[1] : null;
 }
 
+const CODEX_RETAINED_EVENT_TYPES = new Set([
+  'user_message',
+  'agent_message',
+  'task_started',
+  'task_complete',
+  'turn_aborted',
+]);
+
+/**
+ * Codex transcripts contain large world-state, tool-result, reasoning, and
+ * token-accounting rows that never contribute to the conversation UI. Reading
+ * their first two type tags lets startup skip JSON expansion for those rows
+ * while preserving every row used for metadata, visible messages, or lifecycle.
+ */
+function codexLineTypes(line: string): [string | null, string | null] {
+  const compactKey = '"type":"';
+  const first = line.indexOf(compactKey);
+  if (first >= 0) {
+    const outerStart = first + compactKey.length;
+    const outerEnd = line.indexOf('"', outerStart);
+    const second = line.indexOf(compactKey, outerEnd + 1);
+    const innerStart = second + compactKey.length;
+    const innerEnd = second >= 0 ? line.indexOf('"', innerStart) : -1;
+    return [
+      outerEnd >= 0 ? line.slice(outerStart, outerEnd) : null,
+      second >= 0 && innerEnd >= 0 ? line.slice(innerStart, innerEnd) : null,
+    ];
+  }
+
+  // Native traces are compact JSON. Keep a permissive fallback for fixtures or
+  // manually repaired JSONL without making every large production row pay the
+  // regular-expression allocation cost.
+  const matches = line.slice(0, 1_024).matchAll(/"type"\s*:\s*"([^"]+)"/g);
+  return [matches.next().value?.[1] ?? null, matches.next().value?.[1] ?? null];
+}
+
 /**
  * Parse a native Codex session file (~/.codex/sessions/YYYY/MM/DD/*.jsonl).
  */
 export async function parseCodexJsonlFile(filePath: string): Promise<CodexSession> {
   const entries: CodexSessionEntry[] = [];
+  const fallbackMessageEntries: CodexSessionEntry[] = [];
+  let hasEventMessages = false;
   let sessionId = '';
   let workingDirectory = '';
   let model = 'unknown';
@@ -344,9 +382,16 @@ export async function parseCodexJsonlFile(filePath: string): Promise<CodexSessio
   for await (const line of rl) {
     if (!line.trim()) continue;
 
+    const [outerType, innerType] = codexLineTypes(line);
+    const isMetadata = outerType === 'session_meta' || outerType === 'turn_context';
+    const isRetainedEvent =
+      outerType === 'event_msg' && innerType !== null && CODEX_RETAINED_EVENT_TYPES.has(innerType);
+    const isFallbackMessage =
+      !hasEventMessages && outerType === 'response_item' && innerType === 'message';
+    if (!isMetadata && !isRetainedEvent && !isFallbackMessage) continue;
+
     try {
       const entry = JSON.parse(line) as CodexSessionEntry;
-      entries.push(entry);
 
       const rawTimestamp = (entry as { timestamp?: string }).timestamp;
       if (rawTimestamp) {
@@ -386,10 +431,25 @@ export async function parseCodexJsonlFile(filePath: string): Promise<CodexSessio
           model = payload.model;
         }
       }
+
+      if (isCodexUserMessageEvent(entry) || isCodexAgentMessageEvent(entry)) {
+        if (!hasEventMessages) {
+          hasEventMessages = true;
+          fallbackMessageEntries.length = 0;
+        }
+        entries.push(entry);
+      } else if (isRetainedEvent) {
+        entries.push(entry);
+      } else if (isFallbackMessage && isCodexResponseMessage(entry)) {
+        const role = entry.payload.role;
+        if (role === 'user' || role === 'assistant') fallbackMessageEntries.push(entry);
+      }
     } catch {
       skippedLines++;
     }
   }
+
+  if (!hasEventMessages) entries.push(...fallbackMessageEntries);
 
   if (skippedLines > 0) {
     console.warn(

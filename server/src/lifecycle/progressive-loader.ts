@@ -22,7 +22,8 @@ export interface ProgressiveLoaderPorts<TSource, THydrated, TBroadcast> {
     onProgress(batch: TSource[], progress: LoadProgress): Promise<void>;
   }): Promise<ProgressiveLoadResult>;
   hydrate(source: TSource): Promise<THydrated | null>;
-  store(hydrated: THydrated): void;
+  /** Returns false when a live value won the same identity during hydration. */
+  store(hydrated: THydrated): boolean;
   serialize(hydrated: THydrated): TBroadcast;
   broadcast(batch: TBroadcast[]): void;
   count(): number;
@@ -41,7 +42,7 @@ export async function loadProgressively<TSource, THydrated, TBroadcast>(
       for (const source of batch) {
         const hydrated = await ports.hydrate(source);
         if (!hydrated) continue;
-        ports.store(hydrated);
+        if (!ports.store(hydrated)) continue;
         broadcastBatch.push(ports.serialize(hydrated));
       }
       if (broadcastBatch.length > 0) ports.broadcast(broadcastBatch);

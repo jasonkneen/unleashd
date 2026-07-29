@@ -26,7 +26,7 @@ export type ShutdownState = 'starting' | 'idle' | 'reloading' | 'shutting_down' 
 
 export interface ShutdownController {
   readonly state: ShutdownState;
-  beginMutation(): (() => void) | null;
+  beginMutation(options?: { allowDuringStartup?: boolean }): (() => void) | null;
   completeStartup(): boolean;
   abortStartup(): void;
   handleReload(): void;
@@ -115,8 +115,9 @@ export function createShutdownController(
   const abortStartup = () => {
     startupPending = false;
   };
-  const beginMutation = (): (() => void) | null => {
-    if (state !== 'idle') return null;
+  const beginMutation = (options?: { allowDuringStartup?: boolean }): (() => void) | null => {
+    const startupCreation = state === 'starting' && options?.allowDuringStartup === true;
+    if (state !== 'idle' && !startupCreation) return null;
     activeMutations += 1;
     let released = false;
     return () => {

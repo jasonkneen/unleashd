@@ -166,3 +166,84 @@ test('Codex disk hydration surfaces explicit aborts but not genuinely open turns
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Codex disk hydration skips non-display rows and preserves response-message fallback', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-row-filter-'));
+  const eventFile = path.join(
+    directory,
+    'rollout-2026-07-29T03-00-00-019fabcd-0000-7000-8000-000000000002.jsonl'
+  );
+  const fallbackFile = path.join(
+    directory,
+    'rollout-2026-07-29T03-00-01-019fabcd-0000-7000-8000-000000000003.jsonl'
+  );
+  const sessionMeta = (id: string) => ({
+    timestamp: '2026-07-29T03:00:00.000Z',
+    type: 'session_meta',
+    payload: { id, cwd: directory },
+  });
+  const write = (filePath: string, entries: unknown[]) =>
+    fs.promises.writeFile(filePath, entries.map((entry) => JSON.stringify(entry)).join('\n'));
+
+  await write(eventFile, [
+    sessionMeta('019fabcd-0000-7000-8000-000000000002'),
+    {
+      timestamp: '2026-07-29T03:00:00.000Z',
+      type: 'response_item',
+      payload: { type: 'message', role: 'user', content: 'fallback duplicate' },
+    },
+    { timestamp: '2026-07-29T03:00:00.000Z', type: 'world_state', payload: { text: 'noise' } },
+    {
+      timestamp: '2026-07-29T03:00:01.000Z',
+      type: 'event_msg',
+      payload: { type: 'user_message', message: 'visible event' },
+    },
+    {
+      timestamp: '2026-07-29T03:00:02.000Z',
+      type: 'event_msg',
+      payload: { type: 'agent_message', message: 'visible response' },
+    },
+    {
+      timestamp: '2026-07-29T03:00:02.000Z',
+      type: 'event_msg',
+      payload: { type: 'token_count', info: { total_tokens: 1 } },
+    },
+  ]);
+  await write(fallbackFile, [
+    sessionMeta('019fabcd-0000-7000-8000-000000000003'),
+    {
+      timestamp: '2026-07-29T03:00:01.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'legacy prompt' }],
+      },
+    },
+    {
+      timestamp: '2026-07-29T03:00:02.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'legacy response' }],
+      },
+    },
+  ]);
+
+  try {
+    const adapter = getDiskAdapter('codex');
+    const eventSession = await adapter.parseFile(eventFile);
+    const fallbackSession = await adapter.parseFile(fallbackFile);
+    assert.deepEqual(
+      eventSession?.messages.map((message) => message.content),
+      ['visible event', 'visible response']
+    );
+    assert.deepEqual(
+      fallbackSession?.messages.map((message) => message.content),
+      ['legacy prompt', 'legacy response']
+    );
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});

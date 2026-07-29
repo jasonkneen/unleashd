@@ -80,7 +80,9 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
   const conversations = new Map<string, InstanceType<typeof fixture.Conversation>>();
   const transportBroadcasts: unknown[] = [];
   let initialDispatches = 0;
-  let acceptsCommands = false;
+  let runtimeCreations = 0;
+  let conversationLinks = 0;
+  const acceptsCommands = false;
   let finishInitialLoad!: () => void;
   const initialLoadComplete = new Promise<void>((resolve) => {
     finishInitialLoad = resolve;
@@ -114,7 +116,8 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
       completionSuppression: { clear: () => undefined },
       initialLoadComplete,
       isInitialLoadComplete: () => acceptsCommands,
-      beginCommand: () => (acceptsCommands ? () => undefined : null),
+      beginCommand: (command: { type: string }) =>
+        command.type === 'create_conversation' || acceptsCommands ? () => undefined : null,
       configService: {
         getRecord: async () => null,
         createOrReplay: async (input: {
@@ -143,8 +146,13 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
         workingDirectory: '/tmp',
         provider: 'codex',
       }),
-      createConversation: (options) => new fixture.Conversation(options),
-      createConversationLink: async () => undefined,
+      createConversation: (options) => {
+        runtimeCreations += 1;
+        return new fixture.Conversation(options);
+      },
+      createConversationLink: async () => {
+        conversationLinks += 1;
+      },
       dispatchInitialMessage: async () => {
         initialDispatches += 1;
       },
@@ -189,23 +197,6 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
       })
     )
   );
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(conversations.size, 0);
-
-  finishInitialLoad();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(conversations.size, 0);
-  assert.equal(
-    socket.sent
-      .map((payload) => JSON.parse(payload) as { type?: string; error?: { code?: string } })
-      .some(
-        (message) =>
-          message.type === 'command_rejected' && message.error?.code === 'server_draining'
-      ),
-    true
-  );
-
-  acceptsCommands = true;
   socket.emit(
     'message',
     Buffer.from(
@@ -223,6 +214,8 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
 
   const conversation = conversations.get('00000000-0000-4000-8000-000000000123');
   assert.ok(conversation);
+  assert.equal(runtimeCreations, 1);
+  assert.equal(conversationLinks, 1);
   assert.equal(initialDispatches, 1);
   assert.equal(conversation.isRunning, false);
   assert.equal(conversation.process, null);
@@ -231,6 +224,7 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
     fixture.broadcasts.some((message) => (message as { type?: string }).type === 'message'),
     false
   );
+  finishInitialLoad();
 });
 
 test('hidden Buddy briefing is injected exactly once and never on resumed turns', () => {

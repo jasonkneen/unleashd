@@ -92,7 +92,8 @@ const turnAttemptJournal = new TurnAttemptJournal({
 const turnAttemptObserver = createJournalTurnAttemptObserver(turnAttemptJournal);
 let buddyScheduler: BuddyScheduler | null = null;
 let shutdownController: ShutdownController | null = null;
-const beginMutation = () => shutdownController?.beginMutation() ?? null;
+const beginMutation = (options?: { allowDuringStartup?: boolean }) =>
+  shutdownController?.beginMutation(options) ?? null;
 const pauseBuddyScheduler = () => buddyScheduler?.pause();
 const stopBuddyScheduler = () => {
   buddyScheduler?.stop();
@@ -179,7 +180,8 @@ registerConversationWebSocket(wss, {
   // `idle` is the sole ready state: startup has completed and no reload or
   // shutdown owns the mutation gate.
   isInitialLoadComplete: () => shutdownController?.state === 'idle',
-  beginCommand: beginMutation,
+  beginCommand: (command) =>
+    beginMutation({ allowDuringStartup: command.type === 'create_conversation' }),
   configService: conversationConfigService,
   getUIState: () => persistedServerState.getUIState(),
   getDefaultWorkingDirectory: () => process.cwd(),

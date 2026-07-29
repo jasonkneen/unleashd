@@ -94,6 +94,9 @@ test('reload waits for active turns and coalesces repeated requests', async () =
   const fixture = createFixture(true);
   const controller = createShutdownController({ forceExitGraceMs: 60_000 }, fixture.ports);
   assert.equal(controller.beginMutation(), null);
+  const startupCreation = controller.beginMutation({ allowDuringStartup: true });
+  assert.ok(startupCreation);
+  startupCreation();
   assert.equal(controller.completeStartup(), true);
   const admissionProbe = controller.beginMutation();
   assert.ok(admissionProbe);

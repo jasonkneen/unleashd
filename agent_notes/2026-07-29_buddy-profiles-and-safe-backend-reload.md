@@ -31,7 +31,9 @@ active turns are stopped before exit.
 
 There is one server lifecycle authority:
 
-- `starting` admits no mutations while persisted conversations hydrate;
+- `starting` admits only creation of a new UUID-backed conversation while
+  persisted conversations hydrate; commands against existing history still
+  wait;
 - `idle` accepts WebSocket commands and mutating HTTP requests;
 - `reloading` accepts no new mutations, pauses the Buddy scheduler, and lets
   already-admitted commands and provider streams finish;
@@ -60,6 +62,28 @@ the detail request is retried. The final identity check and detail application
 are synchronous. This prevents an older HTTP snapshot from overwriting newer
 messages, status, queue, or configuration without inventing a second revision
 protocol.
+
+Creation is intentionally available before old history finishes hydrating.
+Three invariants make that safe without a second lifecycle authority:
+
+1. the shutdown controller explicitly admits only `create_conversation` during
+   `starting`;
+2. startup hydration inserts only when the registry identity is still absent,
+   so an older disk snapshot cannot replace a newly live runtime;
+3. duplicate create delivery is at-least-once, but durable fingerprints and a
+   post-persistence registry recheck materialize exactly one runtime.
+
+Codex startup parsing projects raw JSONL at the adapter boundary. It parses and
+retains only session metadata, visible user/assistant messages, lifecycle rows,
+and the legacy response-message fallback. Encrypted reasoning, tool results,
+world state, and token-accounting rows are not UI state and must not be expanded
+or retained merely to build conversation previews.
+
+The motivating production sample was 8.34 GB across the newest 500 Codex
+sessions. The old parser took 6,920 seconds under memory pressure. The projected
+parser loaded the same 496 conversations in 40.1 seconds and preserved all
+1,244 visible messages in a checked 200 MB session. This is an edge projection,
+not a cache or second persistence format.
 
 HTTP mutations and WebSocket commands take a short lifecycle lease while they
 dispatch. Reload waits for those leases as well as active provider turns, so a

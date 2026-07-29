@@ -63,6 +63,23 @@ function markConversationDetailsLoaded(ids: Iterable<string>): void {
   jotaiStore.set(conversationDetailsLoadedAtom, next);
 }
 
+/**
+ * Replace one authoritative conversation snapshot while preserving the only
+ * client-only field carried on the record. Whole-record replacement does not
+ * need Immer; cloning the Map gives Jotai the structural change it subscribes
+ * to and keeps this boundary readable at call sites.
+ */
+function replaceConversationSnapshot(snapshot: Conversation): void {
+  const conversations = jotaiStore.get(conversationsAtom);
+  const existing = conversations.get(snapshot.id);
+  const next = new Map(conversations);
+  next.set(snapshot.id, {
+    ...snapshot,
+    swarmDebugPrefix: snapshot.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
+  });
+  jotaiStore.set(conversationsAtom, next);
+}
+
 export function loadConversationDetails(conversationId: string): Promise<void> {
   const existing = conversationDetailRequests.get(conversationId);
   if (existing) return existing;
@@ -86,17 +103,7 @@ export function loadConversationDetails(conversationId: string): Promise<void> {
         return parsed.data;
       },
       (snapshot) => {
-        jotaiStore.set(
-          conversationsAtom,
-          produce(jotaiStore.get(conversationsAtom), (draft) => {
-            const existingConversation = draft.get(conversationId);
-            draft.set(conversationId, {
-              ...snapshot,
-              swarmDebugPrefix:
-                snapshot.swarmDebugPrefix ?? existingConversation?.swarmDebugPrefix ?? null,
-            });
-          })
-        );
+        replaceConversationSnapshot(snapshot);
         markConversationDetailsLoaded([conversationId]);
       }
     );
@@ -322,17 +329,7 @@ export function handleMessage(data: ServerMessage): void {
     }
 
     case 'conversation_created': {
-      jotaiStore.set(
-        conversationsAtom,
-        produce(jotaiStore.get(conversationsAtom), (draft) => {
-          const existing = draft.get(data.conversation.id);
-          draft.set(data.conversation.id, {
-            ...data.conversation,
-            swarmDebugPrefix:
-              data.conversation.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
-          });
-        })
-      );
+      replaceConversationSnapshot(data.conversation);
       markConversationDetailsLoaded([data.conversation.id]);
       removePendingConversation(data.conversation.id, data.commandId);
       jotaiStore.set(
@@ -348,17 +345,7 @@ export function handleMessage(data: ServerMessage): void {
     }
 
     case 'conversation_updated': {
-      jotaiStore.set(
-        conversationsAtom,
-        produce(jotaiStore.get(conversationsAtom), (draft) => {
-          const existing = draft.get(data.conversation.id);
-          draft.set(data.conversation.id, {
-            ...data.conversation,
-            swarmDebugPrefix:
-              data.conversation.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
-          });
-        })
-      );
+      replaceConversationSnapshot(data.conversation);
       markConversationDetailsLoaded([data.conversation.id]);
       if (data.commandId) {
         jotaiStore.set(
@@ -374,12 +361,7 @@ export function handleMessage(data: ServerMessage): void {
     case 'command_rejected': {
       const authoritativeConversation = data.authoritativeConversation;
       if (authoritativeConversation) {
-        jotaiStore.set(
-          conversationsAtom,
-          produce(jotaiStore.get(conversationsAtom), (draft) => {
-            draft.set(authoritativeConversation.id, authoritativeConversation);
-          })
-        );
+        replaceConversationSnapshot(authoritativeConversation);
         markConversationDetailsLoaded([authoritativeConversation.id]);
       }
       const message = data.error.message;

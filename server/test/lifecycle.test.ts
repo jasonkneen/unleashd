@@ -4,7 +4,7 @@ import { createFilePoller } from '../src/lifecycle/file-poller';
 import { ensureAvailablePort } from '../src/lifecycle/port-guard';
 import { loadProgressively } from '../src/lifecycle/progressive-loader';
 
-test('progressive loader hydrates, stores, and broadcasts each non-null item', async () => {
+test('progressive loader broadcasts only hydrated values accepted by the live registry', async () => {
   const stored: number[] = [];
   const broadcasts: string[][] = [];
   const mtimes = new Map([['session', 1]]);
@@ -16,7 +16,11 @@ test('progressive loader hydrates, stores, and broadcasts each non-null item', a
         return { mtimes };
       },
       hydrate: async (source) => (source === 2 ? null : source * 10),
-      store: (hydrated) => stored.push(hydrated),
+      store: (hydrated) => {
+        if (hydrated === 30) return false;
+        stored.push(hydrated);
+        return true;
+      },
       serialize: (hydrated) => String(hydrated),
       broadcast: (batch) => broadcasts.push(batch),
       count: () => stored.length,
@@ -24,8 +28,8 @@ test('progressive loader hydrates, stores, and broadcasts each non-null item', a
   );
 
   assert.equal(result, mtimes);
-  assert.deepEqual(stored, [10, 30]);
-  assert.deepEqual(broadcasts, [['10', '30']]);
+  assert.deepEqual(stored, [10]);
+  assert.deepEqual(broadcasts, [['10']]);
 });
 
 test('file poller delegates application updates and external status through ports', async () => {

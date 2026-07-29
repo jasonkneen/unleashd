@@ -44,7 +44,7 @@ export interface ConversationWebSocketDependencies {
   completionSuppression: CompletionSuppression;
   initialLoadComplete: Promise<void>;
   isInitialLoadComplete(): boolean;
-  beginCommand(): (() => void) | null;
+  beginCommand(command: ClientMessage): (() => void) | null;
   configService: ConversationConfigService;
   getUIState(): UIState;
   getDefaultWorkingDirectory(): string;
@@ -78,11 +78,6 @@ export function registerConversationWebSocket(
       let activeCommand: { commandId: string; conversationId?: string } | null = null;
       let releaseCommand: (() => void) | null = null;
       try {
-        // The hydrated registry is authoritative. Commands received while the
-        // server is starting wait behind the same barrier as the initial
-        // snapshot instead of racing disk restoration.
-        await dependencies.initialLoadComplete;
-        if (socket.readyState !== WebSocket.OPEN) return;
         const parsed: unknown = JSON.parse(message.toString());
         const result = safeParseClientMessage(parsed);
         if (!result.success) {
@@ -91,13 +86,21 @@ export function registerConversationWebSocket(
         }
 
         const data = result.data;
+        // A new UUID and durable config record cannot collide with historical
+        // session hydration, so creation is safe as soon as durable services
+        // and the WebSocket are available. Commands against existing history
+        // still wait for that history to become authoritative.
+        if (data.type !== 'create_conversation') {
+          await dependencies.initialLoadComplete;
+          if (socket.readyState !== WebSocket.OPEN) return;
+        }
         if ('commandId' in data) {
           activeCommand = {
             commandId: data.commandId,
             ...('conversationId' in data ? { conversationId: data.conversationId } : {}),
           };
         }
-        releaseCommand = dependencies.beginCommand();
+        releaseCommand = dependencies.beginCommand(data);
         if (!releaseCommand) {
           const unavailable =
             'Backend reload is draining active turns; try again after reconnecting';
@@ -203,6 +206,19 @@ export function registerConversationWebSocket(
                   buddyContext: buddyResolution?.context,
                 },
               });
+              // Matching create commands are deliberately at-least-once across
+              // reconnects. Another socket may have materialized the runtime
+              // while this command awaited durable config. Reuse that winner;
+              // JavaScript runs the following check + set without an async gap.
+              const replayWinner = dependencies.registry.get(data.conversationId);
+              if (replayWinner) {
+                sendToClient(socket, {
+                  type: 'conversation_created',
+                  commandId: data.commandId,
+                  conversation: replayWinner.toJSON(),
+                });
+                break;
+              }
               const conversation = dependencies.createConversation({
                 id: data.conversationId,
                 workingDirectory: creation.record.workingDirectory ?? workingDirectory,
