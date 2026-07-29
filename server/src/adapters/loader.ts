@@ -18,6 +18,7 @@ import { sessionToConversation } from './disk-adapter';
 import { extractCodexSessionIdFromFilename } from './jsonl';
 import { diskAdapters } from './registry';
 import { OPENCODE_PART_DIR, getOpenCodeSessionMtime } from './registry';
+import type { NormalizedSessionCache } from './session-cache';
 
 // =============================================================================
 // DiscoveredFile — adapter-tagged file entry from Phase 1
@@ -161,38 +162,98 @@ interface ParsedResult {
   mtimeMs: number;
   conversation: DiscoveredConversation | null;
   parseTimeMs: number;
+  cacheHit: boolean;
 }
 
-async function parseOneFile(file: DiscoveredFile): Promise<ParsedResult> {
+async function readParsedSession(
+  file: DiscoveredFile,
+  cache?: NormalizedSessionCache
+): Promise<{ session: Awaited<ReturnType<DiskAdapter['parseFile']>>; cacheHit: boolean }> {
+  const key = {
+    provider: file.adapter.provider,
+    filePath: file.filePath,
+    mtimeMs: file.mtimeMs,
+    sizeBytes: file.sizeBytes,
+  };
+  const cached = cache ? await cache.read(key) : { hit: false as const };
+  if (cached.hit) return { session: cached.session, cacheHit: true };
+
+  const session = await file.adapter.parseFile(file.filePath);
+  if (cache) {
+    await cache.write(key, session).catch((error: unknown) => {
+      console.warn(
+        `[session-cache] Could not cache ${path.basename(file.filePath)}: ${
+          error instanceof Error ? error.message : error
+        }`
+      );
+    });
+  }
+  return { session, cacheHit: false };
+}
+
+async function parseOneFile(
+  file: DiscoveredFile,
+  cache?: NormalizedSessionCache
+): Promise<ParsedResult> {
   const startTime = performance.now();
   try {
-    const session = await file.adapter.parseFile(file.filePath);
+    const { session, cacheHit } = await readParsedSession(file, cache);
     const parseTimeMs = performance.now() - startTime;
 
     if (!session) {
-      return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation: null, parseTimeMs };
+      return {
+        filePath: file.filePath,
+        mtimeMs: file.mtimeMs,
+        conversation: null,
+        parseTimeMs,
+        cacheHit,
+      };
     }
 
     // Drop sessions whose workingDirectory matches a user-configured ignore pattern
     // (~/.agent-viewer/config.json — see server/src/config.ts).
     if (shouldIgnoreWorkingDirectory(session.workingDirectory)) {
-      return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation: null, parseTimeMs };
+      return {
+        filePath: file.filePath,
+        mtimeMs: file.mtimeMs,
+        conversation: null,
+        parseTimeMs,
+        cacheHit,
+      };
     }
 
     const conversation = sessionToConversation(session);
 
     // null = hidden test conversation ([_HIDE_TEST_]) or empty messages — drop at ingestion.
     if (!conversation || conversation.messages.length === 0) {
-      return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation: null, parseTimeMs };
+      return {
+        filePath: file.filePath,
+        mtimeMs: file.mtimeMs,
+        conversation: null,
+        parseTimeMs,
+        cacheHit,
+      };
     }
 
-    return { filePath: file.filePath, mtimeMs: file.mtimeMs, conversation, parseTimeMs };
+    return {
+      filePath: file.filePath,
+      mtimeMs: file.mtimeMs,
+      conversation,
+      parseTimeMs,
+      cacheHit,
+    };
   } catch (error: unknown) {
     const parseTimeMs = performance.now() - startTime;
     console.warn(
       `Failed to parse session: ${path.basename(file.filePath)} (${error instanceof Error ? error.message : error})`
     );
-    return { filePath: file.filePath, mtimeMs: 0, conversation: null, parseTimeMs };
+    return {
+      filePath: file.filePath,
+      mtimeMs: 0,
+      conversation: null,
+      parseTimeMs,
+      cacheHit: false,
+    };
   }
 }
 
@@ -223,8 +284,10 @@ export async function loadAllConversations(
     offset?: number;
     concurrency?: number;
     batchSize?: number;
+    initialBatchSize?: number;
     maxInFlightParseBytes?: number;
     adapters?: readonly DiskAdapter[];
+    cache?: NormalizedSessionCache;
   } = {}
 ): Promise<LoadResult> {
   const {
@@ -233,14 +296,20 @@ export async function loadAllConversations(
     offset = 0,
     concurrency = 10,
     batchSize = 50,
+    initialBatchSize = Math.min(20, batchSize),
     maxInFlightParseBytes = DEFAULT_MAX_IN_FLIGHT_PARSE_BYTES,
     adapters = diskAdapters,
+    cache,
   } = options;
 
   const normalizedConcurrency =
     Number.isFinite(concurrency) && concurrency > 0 ? Math.floor(concurrency) : 10;
   const normalizedBatchSize =
     Number.isFinite(batchSize) && batchSize > 0 ? Math.floor(batchSize) : 50;
+  const normalizedInitialBatchSize =
+    Number.isFinite(initialBatchSize) && initialBatchSize > 0
+      ? Math.min(normalizedBatchSize, Math.floor(initialBatchSize))
+      : Math.min(20, normalizedBatchSize);
   const normalizedMaxInFlightParseBytes =
     Number.isFinite(maxInFlightParseBytes) && maxInFlightParseBytes > 0
       ? Math.floor(maxInFlightParseBytes)
@@ -284,6 +353,7 @@ export async function loadAllConversations(
   let parseTimeMax = 0;
   let parseTimeSum = 0;
   let parseTimeCount = 0;
+  let cacheHits = 0;
   let batchBuffer: DiscoveredConversation[] = [];
   let filesProcessed = 0;
   let conversationCount = 0;
@@ -296,13 +366,14 @@ export async function loadAllConversations(
     normalizedMaxInFlightParseBytes,
     (file) => file.sizeBytes,
     async (file) => {
-      const result = await parseOneFile(file);
+      const result = await parseOneFile(file, cache);
 
       const t = result.parseTimeMs;
       if (t < parseTimeMin) parseTimeMin = t;
       if (t > parseTimeMax) parseTimeMax = t;
       parseTimeSum += t;
       parseTimeCount++;
+      if (result.cacheHit) cacheHits++;
 
       if (result.conversation) {
         conversations?.set(result.conversation.sessionId, result.conversation);
@@ -312,7 +383,9 @@ export async function loadAllConversations(
 
       filesProcessed++;
 
-      if (onProgress && batchBuffer.length >= normalizedBatchSize) {
+      const nextBatchSize =
+        conversationCount <= batchBuffer.length ? normalizedInitialBatchSize : normalizedBatchSize;
+      if (onProgress && batchBuffer.length >= nextBatchSize) {
         // Detach the full batch before awaiting the consumer. Other parser
         // workers may complete while hydration is in progress.
         const batch = batchBuffer;
@@ -335,6 +408,9 @@ export async function loadAllConversations(
     console.log(
       `Parse timing (${parseTimeCount} files): min=${parseTimeMin.toFixed(1)}ms, avg=${avg.toFixed(1)}ms, max=${parseTimeMax.toFixed(1)}ms`
     );
+  }
+  if (cache) {
+    console.log(`[session-cache] ${cacheHits}/${parseTimeCount} startup sources reused`);
   }
 
   const totalTimeMs = discoverTimeMs + parseTimeMs;
@@ -365,7 +441,8 @@ export async function loadAllConversations(
  */
 export async function pollForChanges(
   prevMtimes: Map<string, number>,
-  activeIds: Set<string>
+  activeIds: Set<string>,
+  options: { cache?: NormalizedSessionCache } = {}
 ): Promise<PollResult> {
   const updated = new Map<string, DiscoveredConversation>();
   const deferredDirtyPaths = new Set<string>();
@@ -398,14 +475,17 @@ export async function pollForChanges(
         // Compute current mtime — for OpenCode sessions (directories) use
         // the composite mtime that covers message files + part subdirs.
         let currentMtime: number;
+        let currentSizeBytes: number;
         if (adapter.provider === 'opencode') {
           const sessionId = path.basename(filePath);
           const metadataPath = openCodeSessionIndex?.get(sessionId);
           currentMtime = await getOpenCodeSessionMtime(filePath, OPENCODE_PART_DIR, metadataPath);
           if (currentMtime <= 0) continue;
+          currentSizeBytes = 1;
         } else {
           const stat = await fs.promises.stat(filePath);
           currentMtime = stat.mtimeMs;
+          currentSizeBytes = stat.size;
         }
 
         // Always record the current mtime for every discovered file.
@@ -449,7 +529,15 @@ export async function pollForChanges(
         }
 
         // Re-parse the changed session
-        const session = await adapter.parseFile(filePath);
+        const { session } = await readParsedSession(
+          {
+            filePath,
+            mtimeMs: currentMtime,
+            sizeBytes: currentSizeBytes,
+            adapter,
+          },
+          options.cache
+        );
         if (!session) continue;
         if (shouldIgnoreWorkingDirectory(session.workingDirectory)) continue;
 

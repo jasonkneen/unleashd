@@ -9,19 +9,22 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@unleashd/shared": "workspace:*",
     "@tanstack/react-virtual": "^3.13.18",
+    "@unleashd/shared": "workspace:*",
     "highlight.js": "^11.11.1",
     "immer": "^11.1.4",
     "jotai": "^2.18.0",
     "jotai-family": "^1.0.1",
+    "katex": "^0.16.47",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-dropzone": "^14.4.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.1.0",
     "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "zustand": "^5.0.10"
   },
   "devDependencies": {

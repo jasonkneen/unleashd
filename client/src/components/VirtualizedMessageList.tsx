@@ -15,8 +15,11 @@ import {
 import Markdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import type { Plugin } from 'unified';
+import 'katex/dist/katex.min.css';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { AskUserQuestionWidget, parseAskUserQuestion } from './AskUserQuestion';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
@@ -68,6 +71,68 @@ const remarkBreaks: Plugin<[], Root> = () => (tree) => {
   };
   visit(tree);
 };
+
+/**
+ * remark-math recognizes $...$ and $$...$$, while model output commonly uses
+ * LaTeX's \(...\) and \[...\] delimiters. Normalize those alternate delimiters
+ * before parsing, without changing fenced or inline code.
+ */
+function normalizeLatexDelimiters(markdown: string): string {
+  const lines = markdown.split('\n');
+  let fence: { marker: string; length: number } | null = null;
+
+  return lines
+    .map((line) => {
+      const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (fenceMatch) {
+        const markerRun = fenceMatch[1];
+        const marker = markerRun[0];
+        if (!fence) {
+          fence = { marker, length: markerRun.length };
+        } else if (marker === fence.marker && markerRun.length >= fence.length) {
+          fence = null;
+        }
+        return line;
+      }
+      if (fence) return line;
+
+      let result = '';
+      let inlineCodeLength = 0;
+
+      for (let i = 0; i < line.length; ) {
+        if (line[i] === '`') {
+          let runLength = 1;
+          while (line[i + runLength] === '`') runLength++;
+          if (inlineCodeLength === 0) inlineCodeLength = runLength;
+          else if (inlineCodeLength === runLength) inlineCodeLength = 0;
+          result += line.slice(i, i + runLength);
+          i += runLength;
+          continue;
+        }
+
+        const delimiter = line.slice(i, i + 2);
+        const isUnescapedLatexDelimiter =
+          inlineCodeLength === 0 &&
+          line[i - 1] !== '\\' &&
+          (delimiter === '\\(' ||
+            delimiter === '\\)' ||
+            delimiter === '\\[' ||
+            delimiter === '\\]');
+
+        if (isUnescapedLatexDelimiter) {
+          result += delimiter === '\\(' || delimiter === '\\)' ? '$' : '$$';
+          i += 2;
+          continue;
+        }
+
+        result += line[i];
+        i++;
+      }
+
+      return result;
+    })
+    .join('\n');
+}
 
 // =============================================================================
 // VirtualizedMessageList: Renders large message lists efficiently using
@@ -481,8 +546,9 @@ const MemoizedMessage = memo(
     // Collapse consecutive tool-emoji lines in assistant messages to reduce noise.
     // User/system messages pass through unchanged.
     const displayContent = useMemo(() => {
-      if (msg.role !== 'assistant') return msg.content || '...';
-      return collapseToolLines(msg.content || '...');
+      const content =
+        msg.role === 'assistant' ? collapseToolLines(msg.content || '...') : msg.content || '...';
+      return normalizeLatexDelimiters(content);
     }, [msg.content, msg.role]);
 
     const reviewRequest = useMemo(
@@ -525,8 +591,8 @@ const MemoizedMessage = memo(
                 return (
                   <Markdown
                     key={i}
-                    remarkPlugins={[remarkGfm, remarkBreaks]}
-                    rehypePlugins={[rehypeHighlight]}
+                    remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+                    rehypePlugins={[rehypeHighlight, rehypeKatex]}
                     components={mdComponents}
                   >
                     {trimmed}
@@ -556,8 +622,8 @@ const MemoizedMessage = memo(
           ) : (
             // Fast path: no widgets, render as pure Markdown
             <Markdown
-              remarkPlugins={[remarkGfm, remarkBreaks]}
-              rehypePlugins={[rehypeHighlight]}
+              remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+              rehypePlugins={[rehypeHighlight, rehypeKatex]}
               components={mdComponents}
             >
               {displayContent}
@@ -657,10 +723,22 @@ export function VirtualizedMessageList({
   const visibleSwarmDebugPrefix = effectiveSwarmDebugPrefix(buddyContext, swarmDebugPrefix);
   const contextItemCount = (buddyContext ? 1 : 0) + (visibleSwarmDebugPrefix ? 1 : 0);
   const totalItems = messageGroups.length + contextItemCount;
+  const estimatedInitialOffset = useMemo(() => {
+    let total = 0;
+    if (buddyContext) total += 88;
+    if (visibleSwarmDebugPrefix) total += 80;
+    for (const group of messageGroups) total += estimateGroupSize(group);
+    return total;
+  }, [buddyContext, messageGroups, visibleSwarmDebugPrefix]);
 
   const virtualizer = useVirtualizer({
     count: totalItems,
     getScrollElement: () => parentRef.current,
+    // Conversations open at the newest message. Starting the virtualizer at
+    // offset zero briefly rendered the oldest item before the layout effect
+    // scrolled down; a large first prompt could spend hundreds of milliseconds
+    // in Markdown parsing even though the user never saw it.
+    initialOffset: () => estimatedInitialOffset,
     estimateSize: (index) => {
       if (buddyContext && index === 0) return 88;
       if (visibleSwarmDebugPrefix && index === (buddyContext ? 1 : 0)) return 80;

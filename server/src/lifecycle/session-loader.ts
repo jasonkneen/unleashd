@@ -31,6 +31,7 @@ export interface SessionLoaderOptions {
   startupLimit: number;
   startupConcurrency: number;
   startupBatchSize: number;
+  startupInitialBatchSize: number;
   startupLogEveryFiles: number;
   pollIntervalMs: number;
   externalGraceMs: number;
@@ -241,6 +242,7 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
           limit: dependencies.options.startupLimit,
           concurrency: dependencies.options.startupConcurrency,
           batchSize: dependencies.options.startupBatchSize,
+          initialBatchSize: dependencies.options.startupInitialBatchSize,
           logEveryFiles: dependencies.options.startupLogEveryFiles,
         },
         {

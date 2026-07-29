@@ -11,6 +11,7 @@ export interface ProgressiveLoadOptions {
   limit: number;
   concurrency: number;
   batchSize: number;
+  initialBatchSize?: number;
   logEveryFiles: number;
 }
 
@@ -19,6 +20,7 @@ export interface ProgressiveLoaderPorts<TSource, THydrated, TBroadcast> {
     limit: number;
     concurrency: number;
     batchSize: number;
+    initialBatchSize: number;
     onProgress(batch: TSource[], progress: LoadProgress): Promise<void>;
   }): Promise<ProgressiveLoadResult>;
   hydrate(source: TSource): Promise<THydrated | null>;
@@ -37,6 +39,7 @@ export async function loadProgressively<TSource, THydrated, TBroadcast>(
     limit: options.limit,
     concurrency: options.concurrency,
     batchSize: options.batchSize,
+    initialBatchSize: options.initialBatchSize ?? Math.min(20, options.batchSize),
     onProgress: async (batch, progress) => {
       const broadcastBatch: TBroadcast[] = [];
       for (const source of batch) {

@@ -4,6 +4,36 @@ This document tracks key implementation patterns, edge cases, and maintenance no
 
 ---
 
+## Persisted Session Cache and Progressive Startup
+
+**Where**:
+
+- `server/src/adapters/session-cache.ts`
+- `server/src/adapters/loader.ts`
+- cache data: `~/.agent-viewer/session-cache-v1/`
+
+Raw provider sessions remain authoritative. Startup may reuse a normalized JSON cache record only
+when provider, absolute path, mtime, source size, and cache version match. Invalid cache records are
+treated as misses and rebuilt from the provider source.
+
+The cache contains conversation text. Its directory is forced to mode `0700` and records to `0600`.
+Deleting the cache directory is safe: the next startup recreates it from provider files.
+
+Startup parses newest sources first and emits a small first batch before returning to larger
+steady-state batches:
+
+```text
+CWV_STARTUP_INITIAL_BATCH_SIZE=20
+CWV_STARTUP_BATCH_SIZE=100
+```
+
+Keep the first batch small enough for a responsive sidebar, but avoid making every batch small:
+each broadcast causes schema validation and client state reconciliation. See
+`agent_notes/2026-07-30-session-cache-progressive-loading-and-math-rendering.md` for benchmarks and
+the cache invalidation contract.
+
+---
+
 ## State Management Patterns
 
 ### localStorage via zustand-persist

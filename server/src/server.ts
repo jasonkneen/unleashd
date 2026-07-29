@@ -14,6 +14,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocketServer } from 'ws';
 import { loadAllConversations, pollForChanges } from './adapters/loader';
+import { NormalizedSessionCache } from './adapters/session-cache';
 import { createConversationApplicationContext } from './application/context';
 import { setIgnorePatterns } from './config';
 import {
@@ -79,6 +80,9 @@ const conversationConfigStore = new ConversationConfigStore({
     warn: (warning) => console.warn('[conversation-config]', warning),
   },
 });
+const normalizedSessionCache = new NormalizedSessionCache(
+  path.join(APP_DATA_DIR, 'session-cache-v1')
+);
 const conversationConfigService = new ConversationConfigService({
   store: conversationConfigStore,
   resolver: {
@@ -130,6 +134,7 @@ const initialLoadComplete = new Promise<void>((resolve) => {
 const STARTUP_INITIAL_LOAD_LIMIT = readPositiveIntEnv('CWV_STARTUP_INITIAL_LOAD_LIMIT', 500);
 const STARTUP_PARSE_CONCURRENCY = readPositiveIntEnv('CWV_STARTUP_PARSE_CONCURRENCY', 16);
 const STARTUP_LOAD_BATCH_SIZE = readPositiveIntEnv('CWV_STARTUP_BATCH_SIZE', 100);
+const STARTUP_INITIAL_BATCH_SIZE = readPositiveIntEnv('CWV_STARTUP_INITIAL_BATCH_SIZE', 20);
 const STARTUP_PROGRESS_FILE_STEP = readPositiveIntEnv('CWV_STARTUP_LOG_EVERY_FILES', 500);
 const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 
@@ -364,6 +369,7 @@ const sessionLoader = createSessionLoader({
     startupLimit: STARTUP_INITIAL_LOAD_LIMIT,
     startupConcurrency: STARTUP_PARSE_CONCURRENCY,
     startupBatchSize: STARTUP_LOAD_BATCH_SIZE,
+    startupInitialBatchSize: STARTUP_INITIAL_BATCH_SIZE,
     startupLogEveryFiles: STARTUP_PROGRESS_FILE_STEP,
     pollIntervalMs: FILE_POLL_INTERVAL_MS,
     externalGraceMs: EXTERNAL_GRACE_MS,
@@ -375,8 +381,10 @@ const sessionLoader = createSessionLoader({
   completionSuppression: applicationContext.completionSuppression,
   configStore: conversationConfigStore,
   configService: conversationConfigService,
-  loadConversations: loadAllConversations,
-  pollConversations: pollForChanges,
+  loadConversations: (options) =>
+    loadAllConversations({ ...options, cache: normalizedSessionCache }),
+  pollConversations: (mtimes, activeIds) =>
+    pollForChanges(mtimes, activeIds, { cache: normalizedSessionCache }),
   createConversation: (options) => new Conversation(options),
   createId: uuidv4,
   resolveBuddyConversation,
@@ -397,6 +405,7 @@ void runServerStartup(
     server,
     initialize: async () => {
       startupAuditResults = auditLocalAgents();
+      await normalizedSessionCache.initialize();
       await turnAttemptJournal.initialize();
       await persistedServerState.initialize();
       await paletteService.initialize();
