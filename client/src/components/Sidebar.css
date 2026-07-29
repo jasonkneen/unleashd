@@ -13,76 +13,56 @@
 }
 
 .sidebar-header {
-  padding: 12px 12px 8px;
+  padding: 10px 10px 8px;
   border-bottom: 1px solid var(--border-emphasis);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   background: var(--bg-darkest);
 }
 
-/* =============================================================================
-   Nav Sections — IDE-like two-section header (Conversations + Swarms)
-   ============================================================================= */
-
-.nav-section {
-  padding: 0;
+/* One visual home for the three top-level concepts. */
+.sidebar-primary-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
 }
 
-.nav-section + .nav-section {
-  margin-top: 2px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.nav-section-header {
+.sidebar-nav-item {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 2px;
-}
-
-.nav-section-home-button {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-button.nav-section-header {
-  width: 100%;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-
-.nav-section-header--clickable {
-  cursor: pointer;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 4px;
   border: 1px solid transparent;
-  transition: background 0.15s, border-color 0.15s;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 10px / 1 var(--font-mono);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 
-.nav-section-header--clickable:hover,
-.nav-section-header--clickable:focus-visible {
-  background: color-mix(in srgb, var(--bg-panel) 58%, transparent);
-  border-color: var(--border-default);
+.sidebar-nav-item:hover,
+.sidebar-nav-item:focus-visible {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-panel) 60%, transparent);
+  border-color: var(--border-subtle);
   outline: none;
 }
 
-.nav-section-header--active {
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+.sidebar-nav-item.active {
+  color: var(--text-emphasis);
+  background: color-mix(in srgb, var(--bg-panel) 86%, transparent);
   border-color: var(--border-default);
 }
 
-.nav-section-header--swarms:hover,
-.nav-section-header--swarms:focus-visible {
-  border-color: var(--border-default);
+.sidebar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 2px;
 }
 
 /* + button — sharp, monospace, compact */
@@ -141,25 +121,6 @@ button.nav-section-header {
   background: var(--primary);
   border-color: var(--primary);
   color: var(--text-on-accent);
-}
-
-/* Section label — clickable, navigates to section home */
-.nav-section-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-primary);
-  padding: 0;
-  cursor: pointer;
-  transition: color 0.15s, text-shadow 0.15s;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.nav-section-label:hover {
-  color: var(--text-emphasis);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--text-emphasis) 40%, transparent);
 }
 
 /* New Conversation Modal — centered popup overlay */

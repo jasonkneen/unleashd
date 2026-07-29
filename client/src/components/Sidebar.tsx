@@ -502,129 +502,122 @@ export function Sidebar() {
   return (
     <div className={`sidebar ${mergeMode ? 'sidebar--merge-mode' : ''}`}>
       <div className="sidebar-header">
-        {/* ── Conversations Section ── */}
-        <div className="nav-section">
-          <div
-            className="nav-section-header nav-section-header--clickable nav-section-header--conversations"
-            style={{ justifyContent: 'space-between' }}
-            title="Open conversations"
+        <nav className="sidebar-primary-nav" aria-label="Main navigation">
+          <button
+            type="button"
+            className={`sidebar-nav-item ${!location.pathname.startsWith('/workers') && !location.pathname.startsWith('/buddies') ? 'active' : ''}`}
+            onClick={() => navigate('/')}
+            aria-current={
+              !location.pathname.startsWith('/workers') && !location.pathname.startsWith('/buddies')
+                ? 'page'
+                : undefined
+            }
           >
-            <button type="button" className="nav-section-home-button" onClick={() => navigate('/')}>
-              <span className="nav-section-label">Conversations</span>
-            </button>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                className="nav-create-btn nav-create-btn--search"
-                aria-label="Search conversations"
-                onClick={(event) => {
-                  // Keep header click from firing.
-                  event.stopPropagation();
-                  setSearchFilterDir(undefined);
-                  setShowSearch(true);
-                }}
-                title="Search conversations (Cmd+K)"
-              >
-                <svg
-                  role="img"
-                  aria-hidden="true"
-                  className="nav-search-icon"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                >
-                  <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
-                  <line
-                    x1="11"
-                    y1="11"
-                    x2="14.5"
-                    y2="14.5"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="nav-create-btn"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleNewConversation();
-                }}
-                title="New conversation (Shift+Space)"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className={`nav-create-btn nav-create-btn--merge ${mergeMode ? 'nav-create-btn--merge-active' : ''}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleToggleMergeMode();
-                }}
-                title={mergeMode ? 'Exit merge mode' : 'Merge conversations'}
-              >
-                <svg
-                  role="img"
-                  aria-hidden="true"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                >
-                  <path
-                    d="M3 2v4a3 3 0 0 0 3 3h4a3 3 0 0 1 3 3v2"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                  <path
-                    d="M13 2v4a3 3 0 0 1-3 3"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                  <circle cx="3" cy="2" r="1.3" fill="currentColor" />
-                  <circle cx="13" cy="2" r="1.3" fill="currentColor" />
-                  <circle cx="13" cy="14" r="1.3" fill="currentColor" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Swarms Section ── */}
-        <div className="nav-section">
-          <div
-            className={`nav-section-header nav-section-header--clickable nav-section-header--swarms ${
-              location.pathname.startsWith('/workers') ? 'nav-section-header--active' : ''
-            }`}
-            style={{ justifyContent: 'space-between' }}
+            <span>Chats</span>
+          </button>
+          <button
+            type="button"
+            className={`sidebar-nav-item ${location.pathname.startsWith('/workers') ? 'active' : ''}`}
+            onClick={() => navigate('/workers')}
             title={hasWorkers ? 'Open swarm dashboard' : 'Open swarm dashboard (no workers yet)'}
+            aria-current={location.pathname.startsWith('/workers') ? 'page' : undefined}
           >
-            <button
-              type="button"
-              className="nav-section-home-button"
-              onClick={() => navigate('/workers')}
+            <span>Swarms</span>
+          </button>
+          <button
+            type="button"
+            className={`sidebar-nav-item ${location.pathname.startsWith('/buddies') ? 'active' : ''}`}
+            onClick={() => navigate('/buddies')}
+            aria-current={location.pathname.startsWith('/buddies') ? 'page' : undefined}
+          >
+            <span>Buddies</span>
+          </button>
+        </nav>
+
+        <div className="sidebar-actions" aria-label="Quick actions">
+          <button
+            type="button"
+            className="nav-create-btn nav-create-btn--search"
+            aria-label="Search conversations"
+            onClick={() => {
+              setSearchFilterDir(undefined);
+              setShowSearch(true);
+            }}
+            title="Search conversations (Cmd+K)"
+          >
+            <svg
+              role="img"
+              aria-hidden="true"
+              className="nav-search-icon"
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="none"
             >
-              <span className="nav-section-label">Swarms</span>
-            </button>
-            <button
-              type="button"
-              className="nav-create-btn nav-create-btn--swarm"
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleOpenNewSwarmFlow();
-              }}
-              title="Create new swarm"
+              <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" />
+              <line
+                x1="11"
+                y1="11"
+                x2="14.5"
+                y2="14.5"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="nav-create-btn"
+            onClick={handleNewConversation}
+            aria-label="New conversation"
+            title="New conversation (Shift+Space)"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            className={`nav-create-btn nav-create-btn--merge ${mergeMode ? 'nav-create-btn--merge-active' : ''}`}
+            onClick={handleToggleMergeMode}
+            aria-label={mergeMode ? 'Exit merge mode' : 'Merge conversations'}
+            title={mergeMode ? 'Exit merge mode' : 'Merge conversations'}
+          >
+            <svg
+              role="img"
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
             >
-              +
-            </button>
-          </div>
+              <path
+                d="M3 2v4a3 3 0 0 0 3 3h4a3 3 0 0 1 3 3v2"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                fill="none"
+              />
+              <path
+                d="M13 2v4a3 3 0 0 1-3 3"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                fill="none"
+              />
+              <circle cx="3" cy="2" r="1.3" fill="currentColor" />
+              <circle cx="13" cy="2" r="1.3" fill="currentColor" />
+              <circle cx="13" cy="14" r="1.3" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="nav-create-btn nav-create-btn--swarm"
+            onClick={() => void handleOpenNewSwarmFlow()}
+            aria-label="New swarm"
+            title="Create new swarm"
+          >
+            +
+          </button>
         </div>
 
         {showPicker && (
@@ -824,11 +817,9 @@ export function Sidebar() {
                 key={conv.id}
                 conv={conv}
                 isActive={conv.id === activeConversationId}
-                hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
+                hasUnseen={hasUnseenMessages(conv.id, conversationMessageCount(conv))}
                 showFolderBadge
-                contextLabel={
-                  conv.buddyContext ? buddyContextLabel(conv) : undefined
-                }
+                contextLabel={conv.buddyContext ? buddyContextLabel(conv) : undefined}
                 onSelect={handleSelectConversation}
                 onDone={handleDone}
                 mergeMode={mergeMode}
@@ -887,7 +878,7 @@ export function Sidebar() {
                           isActive={conversation.id === activeConversationId}
                           hasUnseen={hasUnseenMessages(
                             conversation.id,
-                            conversation.messages.length
+                            conversationMessageCount(conversation)
                           )}
                           showFolderBadge={false}
                           contextLabel={buddyContextLabel(conversation)}
@@ -1037,7 +1028,10 @@ export function Sidebar() {
                               key={conv.id}
                               conv={conv}
                               isActive={conv.id === activeConversationId}
-                              hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
+                              hasUnseen={hasUnseenMessages(
+                                conv.id,
+                                conversationMessageCount(conv)
+                              )}
                               showFolderBadge={false}
                               onSelect={handleSelectConversation}
                               onDone={handleDone}
@@ -1069,7 +1063,7 @@ export function Sidebar() {
                       key={conv.id}
                       conv={conv}
                       isActive={conv.id === activeConversationId}
-                      hasUnseen={hasUnseenMessages(conv.id, conv.messages.length)}
+                      hasUnseen={hasUnseenMessages(conv.id, conversationMessageCount(conv))}
                       showFolderBadge
                       contextLabel={conv.buddyContext ? buddyContextLabel(conv) : undefined}
                       onSelect={handleSelectConversation}
@@ -1089,6 +1083,10 @@ export function Sidebar() {
  * Extracted conversation item — avoids duplicating JSX across list/grouped modes.
  * showFolderBadge=false in grouped mode since the folder header already shows the path.
  */
+function conversationMessageCount(conversation: Conversation): number {
+  return conversation.messageCount ?? conversation.messages.length;
+}
+
 function ConversationItem({
   conv,
   isActive,
@@ -1161,9 +1159,7 @@ function ConversationItem({
             {conv.buddyContext ? 'Buddies' : folderName}
           </span>
         )}
-        {contextLabel && (
-          <span className="buddy-conversation-label">{contextLabel}</span>
-        )}
+        {contextLabel && <span className="buddy-conversation-label">{contextLabel}</span>}
         <div className="conversation-header-right">
           {hasUnseen && <span className="new-badge">NEW</span>}
           {timeAgo && (
