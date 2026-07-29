@@ -464,6 +464,9 @@ export async function pollForChanges(
 
         updated.set(conversation.sessionId, conversation);
       } catch (error: unknown) {
+        // A failed parse did not observe an authoritative new state. Preserve
+        // the prior baseline so the same dirty file is retried next poll.
+        deferredDirtyPaths.add(filePath);
         console.warn(
           `[Poll] Failed to parse ${adapter.provider} session: ${path.basename(filePath)} (${error instanceof Error ? error.message : error})`
         );

@@ -80,6 +80,11 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
   const conversations = new Map<string, InstanceType<typeof fixture.Conversation>>();
   const transportBroadcasts: unknown[] = [];
   let initialDispatches = 0;
+  let acceptsCommands = false;
+  let finishInitialLoad!: () => void;
+  const initialLoadComplete = new Promise<void>((resolve) => {
+    finishInitialLoad = resolve;
+  });
   class FakeSocket extends EventEmitter {
     readyState = 1;
     sent: string[] = [];
@@ -105,9 +110,11 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
         aliasEntries: () => [][Symbol.iterator](),
         unregisterConversationAliases: () => undefined,
       },
-      externalActivity: { clear: () => undefined },
+      externalActivity: { clear: () => undefined, has: () => false },
       completionSuppression: { clear: () => undefined },
-      initialLoadComplete: Promise.resolve(),
+      initialLoadComplete,
+      isInitialLoadComplete: () => acceptsCommands,
+      beginCommand: () => (acceptsCommands ? () => undefined : null),
       configService: {
         getRecord: async () => null,
         createOrReplay: async (input: {
@@ -150,6 +157,25 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
 
   const socket = new FakeSocket();
   webSocketServer.emit('connection', socket);
+  assert.deepEqual(
+    JSON.parse(socket.sent[0]) as { type?: string; summaries?: boolean; loading?: boolean },
+    {
+      type: 'init',
+      summaries: true,
+      loading: true,
+      conversations: [],
+      defaultCwd: '/tmp',
+      uiState: {
+        activeConversationId: null,
+        lastWorkingDirectory: null,
+        galleryExpandedProjects: [],
+      },
+      protocol: {
+        version: 2,
+        capabilities: ['conversation_config', 'conversation_updated', 'structured_command_errors'],
+      },
+    }
+  );
   socket.emit(
     'message',
     Buffer.from(
@@ -164,6 +190,35 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
     )
   );
   await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(conversations.size, 0);
+
+  finishInitialLoad();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(conversations.size, 0);
+  assert.equal(
+    socket.sent
+      .map((payload) => JSON.parse(payload) as { type?: string; error?: { code?: string } })
+      .some(
+        (message) =>
+          message.type === 'command_rejected' && message.error?.code === 'server_draining'
+      ),
+    true
+  );
+
+  acceptsCommands = true;
+  socket.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        type: 'create_conversation',
+        commandId: 'create-empty-buddy',
+        conversationId: '00000000-0000-4000-8000-000000000123',
+        workingDirectory: '/tmp',
+        config: fixture.config,
+        buddyContext,
+      })
+    )
+  );
   await new Promise((resolve) => setImmediate(resolve));
 
   const conversation = conversations.get('00000000-0000-4000-8000-000000000123');

@@ -10,6 +10,8 @@ export interface ShutdownConversation {
 
 export interface ShutdownPorts {
   conversations(): Iterable<ShutdownConversation>;
+  activeSchedulerRuns(): number;
+  pauseScheduler(): void;
   stopScheduler(): void;
   flushState(): void | Promise<void>;
   broadcastMessage(conversationId: string, content: string): void;
@@ -20,11 +22,15 @@ export interface ShutdownOptions {
   forceExitGraceMs: number;
 }
 
-export type ShutdownState = 'idle' | 'reloading' | 'shutting_down' | 'exiting';
+export type ShutdownState = 'starting' | 'idle' | 'reloading' | 'shutting_down' | 'exiting';
 
 export interface ShutdownController {
   readonly state: ShutdownState;
+  beginMutation(): (() => void) | null;
+  completeStartup(): boolean;
+  abortStartup(): void;
   handleReload(): void;
+  handleStartupFailure(): void;
   handleSigint(): void;
   handleSigterm(): void;
   dispose(): void;
@@ -36,17 +42,27 @@ export function createShutdownController(
 ): ShutdownController {
   let drainInterval: NodeJS.Timeout | null = null;
   let forceExitTimeout: NodeJS.Timeout | null = null;
-  let state: ShutdownState = 'idle';
+  let state: ShutdownState = 'starting';
+  let startupPending = true;
+  let activeMutations = 0;
+  let schedulerPaused = false;
   let schedulerStopped = false;
   let exitPromise: Promise<void> | null = null;
 
   const activeRuns = () =>
     Array.from(ports.conversations()).filter((item) => item.hasActiveProcess());
+  const activeWorkCount = () =>
+    activeRuns().length + ports.activeSchedulerRuns() + activeMutations + (startupPending ? 1 : 0);
   const clearTimers = () => {
     if (drainInterval) clearInterval(drainInterval);
     if (forceExitTimeout) clearTimeout(forceExitTimeout);
     drainInterval = null;
     forceExitTimeout = null;
+  };
+  const pauseScheduler = () => {
+    if (schedulerPaused || schedulerStopped) return;
+    schedulerPaused = true;
+    ports.pauseScheduler();
   };
   const stopScheduler = () => {
     if (schedulerStopped) return;
@@ -61,7 +77,7 @@ export function createShutdownController(
       conversation.stop('server_restart');
     }
   };
-  const exitOnce = (): Promise<void> => {
+  const exitOnce = (code = 0): Promise<void> => {
     if (exitPromise) return exitPromise;
     state = 'exiting';
     clearTimers();
@@ -76,31 +92,50 @@ export function createShutdownController(
         console.error('Failed to flush state during shutdown:', error);
       })
       .then(() => {
-        ports.exit();
+        ports.exit(code);
       });
     return exitPromise;
   };
-  const waitForActiveTurns = (onWaiting: () => void) => {
-    if (activeRuns().length === 0) {
+  const waitForDrain = (onWaiting: () => void) => {
+    if (activeWorkCount() === 0) {
       void exitOnce();
       return;
     }
     onWaiting();
     drainInterval = setInterval(() => {
-      if (activeRuns().length === 0) void exitOnce();
+      if (activeWorkCount() === 0) void exitOnce();
     }, 500);
   };
+  const completeStartup = () => {
+    startupPending = false;
+    if (state !== 'starting') return false;
+    state = 'idle';
+    return true;
+  };
+  const abortStartup = () => {
+    startupPending = false;
+  };
+  const beginMutation = (): (() => void) | null => {
+    if (state !== 'idle') return null;
+    activeMutations += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      activeMutations = Math.max(0, activeMutations - 1);
+    };
+  };
   const handleReload = () => {
-    if (state !== 'idle') return;
-    stopScheduler();
+    if (state !== 'starting' && state !== 'idle') return;
+    pauseScheduler();
     state = 'reloading';
     // A live provider turn cannot be handed to a replacement server because
     // this process owns its event stream and in-memory buffers. Keep that
     // ownership until the turn completes; the dev watcher coalesces further
     // file changes and starts one replacement process afterward.
-    waitForActiveTurns(() => {
+    waitForDrain(() => {
       console.warn(
-        `Backend reload queued: waiting for ${activeRuns().length} active turn(s) to finish`
+        `Backend reload queued: waiting for ${activeWorkCount()} active operation(s) to finish`
       );
     });
   };
@@ -109,23 +144,36 @@ export function createShutdownController(
     stopScheduler();
     clearTimers();
     state = 'shutting_down';
+    startupPending = false;
     console.log(`${signal} — stopping active turns and shutting down`);
     interrupt('explicit shutdown');
-    if (activeRuns().length === 0) {
+    if (activeWorkCount() === 0) {
       void exitOnce();
     } else {
-      waitForActiveTurns(() => undefined);
+      waitForDrain(() => undefined);
       forceExitTimeout = setTimeout(() => void exitOnce(), options.forceExitGraceMs);
     }
   };
   const handleSigint = () => handleShutdown('SIGINT');
   const handleSigterm = () => handleShutdown('SIGTERM');
+  const handleStartupFailure = () => {
+    if (state === 'exiting') return;
+    stopScheduler();
+    startupPending = false;
+    state = 'shutting_down';
+    interrupt('startup failure');
+    void exitOnce(1);
+  };
 
   return {
     get state() {
       return state;
     },
+    beginMutation,
+    completeStartup,
+    abortStartup,
     handleReload,
+    handleStartupFailure,
     handleSigint,
     handleSigterm,
     dispose: clearTimers,
@@ -155,9 +203,13 @@ export function registerShutdownHandlers(
     get state() {
       return controller.state;
     },
+    beginMutation: controller.beginMutation,
+    completeStartup: controller.completeStartup,
+    abortStartup: controller.abortStartup,
     handleSigint: controller.handleSigint,
     handleSigterm: controller.handleSigterm,
     handleReload: controller.handleReload,
+    handleStartupFailure: controller.handleStartupFailure,
     dispose() {
       process.off('SIGINT', controller.handleSigint);
       process.off('SIGTERM', controller.handleSigterm);

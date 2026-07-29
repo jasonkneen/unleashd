@@ -90,6 +90,7 @@ export function createFilePoller<TUpdate, TBroadcast>(
         if (conversationId) ports.broadcastStatus(conversationId, false);
       }
 
+      ports.pruneTracking();
       if (updated.size === 0) return;
       if (options.verbose) console.log(`[Poll] ${updated.size} conversation(s) changed`);
 
@@ -100,7 +101,6 @@ export function createFilePoller<TUpdate, TBroadcast>(
         if (broadcast) changed.push(broadcast);
       }
       if (changed.length > 0) ports.broadcastUpdates(changed);
-      ports.pruneTracking();
     } catch (error) {
       console.error('[Poll] Error during file polling:', error);
     }

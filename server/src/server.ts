@@ -31,6 +31,7 @@ import {
 import { ConversationConfigService } from './conversations/config-service';
 import { ConversationConfigStore } from './conversations/config-store';
 import { type ConversationRuntime, createConversationRuntime } from './conversations/runtime';
+import { registerConversationRoutes } from './http/conversation-routes';
 import { registerCoreRoutes } from './http/core-routes';
 import { registerFilesystemRoutes } from './http/filesystem-routes';
 import { createKnownProjectAuthorizer } from './http/known-projects';
@@ -40,9 +41,8 @@ import { registerSearchRoutes } from './http/search-routes';
 import { registerTurnDiagnosticsRoutes } from './http/turn-diagnostics-routes';
 import { registerUploadRoutes } from './http/upload-routes';
 import { registerUsageRoutes } from './http/usage-routes';
-import { ensureLocalDomain } from './lifecycle/local-domain';
 import { createSessionLoader } from './lifecycle/session-loader';
-import { registerShutdownHandlers } from './lifecycle/shutdown';
+import { type ShutdownController, registerShutdownHandlers } from './lifecycle/shutdown';
 import { runServerStartup } from './lifecycle/startup';
 import { registerStaticClient } from './lifecycle/static-client';
 import { registerMergeRoutes } from './merge/routes';
@@ -91,6 +91,13 @@ const turnAttemptJournal = new TurnAttemptJournal({
 });
 const turnAttemptObserver = createJournalTurnAttemptObserver(turnAttemptJournal);
 let buddyScheduler: BuddyScheduler | null = null;
+let shutdownController: ShutdownController | null = null;
+const beginMutation = () => shutdownController?.beginMutation() ?? null;
+const pauseBuddyScheduler = () => buddyScheduler?.pause();
+const stopBuddyScheduler = () => {
+  buddyScheduler?.stop();
+  buddyScheduler = null;
+};
 
 const applicationContext = createConversationApplicationContext<ConversationRuntime>({
   webSocketServer: wss,
@@ -108,11 +115,9 @@ const {
   getConversation: (id) => conversations.get(id),
 });
 
-// Track initial load readiness. Resolved immediately at startup so WebSocket
-// handlers can send init right away. Conversations stream in progressively
-// via conversations_updated as batches are parsed from disk.
+// One hydration barrier governs both the authoritative initial snapshot and
+// command admission. Disk state must be loaded before either can proceed.
 let resolveInitialLoad!: () => void;
-// Resolved by startServer after loadExistingConversations.
 const initialLoadComplete = new Promise<void>((resolve) => {
   resolveInitialLoad = resolve;
 });
@@ -171,6 +176,10 @@ registerConversationWebSocket(wss, {
   externalActivity: applicationContext.externalActivity,
   completionSuppression: applicationContext.completionSuppression,
   initialLoadComplete,
+  // `idle` is the sole ready state: startup has completed and no reload or
+  // shutdown owns the mutation gate.
+  isInitialLoadComplete: () => shutdownController?.state === 'idle',
+  beginCommand: beginMutation,
   configService: conversationConfigService,
   getUIState: () => persistedServerState.getUIState(),
   getDefaultWorkingDirectory: () => process.cwd(),
@@ -193,10 +202,31 @@ registerConversationWebSocket(wss, {
 // other endpoints routinely carry pasted content, inline images, or full
 // conversation histories. Matches client uploads already sized in MB.
 app.use(express.json({ limit: '50mb' }));
+app.use((request, response, next) => {
+  if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') {
+    next();
+    return;
+  }
+  const release = beginMutation();
+  if (!release) {
+    const draining = shutdownController?.state !== 'starting';
+    response.status(503).json({
+      error: draining ? 'server_draining' : 'server_starting',
+      message: draining
+        ? 'Backend reload is draining active turns; try again after reconnecting'
+        : 'Backend is restoring persisted conversations; try again when startup completes',
+    });
+    return;
+  }
+  response.once('finish', release);
+  response.once('close', release);
+  next();
+});
 
 const UPLOADS_DIR = path.join(APP_DATA_DIR, 'uploads');
 registerUploadRoutes(app, UPLOADS_DIR);
 registerCoreRoutes(app, () => startupAuditResults);
+registerConversationRoutes(app, (id) => conversations.get(id));
 registerTurnDiagnosticsRoutes(app, turnAttemptJournal);
 
 persistedServerState.registerRoutes(app);
@@ -303,19 +333,19 @@ registerStaticClient(app, path.join(__dirname, '../../client/dist'));
 
 const DEV_CLIENT_PORT = 7489;
 const DEV_API_PORT = 7499;
-const LOCAL_DOMAIN = 'unleashd.localhost';
 const PORT =
   process.env.PORT || (process.env.NODE_ENV === 'development' ? DEV_API_PORT : DEV_CLIENT_PORT);
 const LISTEN_HOST = resolveListenHost();
-const SETUP_SCRIPT = path.join(__dirname, '../../tools/setup-domain.sh');
 
-registerShutdownHandlers(
+shutdownController = registerShutdownHandlers(
   {
     forceExitGraceMs: HOT_RELOAD_FORCE_EXIT_GRACE_MS,
   },
   {
     conversations: () => conversations.values(),
-    stopScheduler: () => buddyScheduler?.stop(),
+    activeSchedulerRuns: () => buddyScheduler?.health().activeRunIds.length ?? 0,
+    pauseScheduler: pauseBuddyScheduler,
+    stopScheduler: stopBuddyScheduler,
     flushState: async () => {
       persistedServerState.flushUIStateSync();
       await turnAttemptJournal.flush();
@@ -360,7 +390,6 @@ void runServerStartup(
     host: LISTEN_HOST,
     development: process.env.NODE_ENV === 'development',
     developmentClientPort: DEV_CLIENT_PORT,
-    localDomain: LOCAL_DOMAIN,
   },
   {
     server,
@@ -382,11 +411,19 @@ void runServerStartup(
         console.warn('[buddies] Scheduler unavailable:', error);
       }
     },
-    ensureLocalDomain: (callback) => {
-      ensureLocalDomain({ domain: LOCAL_DOMAIN, setupScript: SETUP_SCRIPT }, callback);
+    pauseOptionalScheduler: pauseBuddyScheduler,
+    isStartupActive: () => shutdownController?.state === 'starting',
+    markReady: () => {
+      if (!shutdownController?.completeStartup()) return false;
+      resolveInitialLoad();
+      applicationContext.broadcast({ type: 'conversation_load_complete' });
+      return true;
     },
-    markReady: resolveInitialLoad,
+    abortStartup: () => shutdownController?.abortStartup(),
     loadConversations: sessionLoader.loadExistingConversations,
     startPolling: sessionLoader.startFilePolling,
   }
-);
+).catch((error) => {
+  console.error('Server startup failed before authoritative state was ready:', error);
+  shutdownController?.handleStartupFailure();
+});

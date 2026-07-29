@@ -580,6 +580,9 @@ export const ConversationSchema = z.object({
   id: z.string().uuid(),
   sessionId: z.string().optional(),
   messages: z.array(MessageSchema),
+  // Full snapshots set this to messages.length. Summary snapshots keep only
+  // the last preview message while preserving the authoritative total.
+  messageCount: z.number().int().nonnegative().optional(),
   isRunning: z.boolean(),
   // Server-authoritative: assistant is actively producing content.
   // true on first text_delta, false on message_complete or process close.
@@ -956,6 +959,8 @@ export const InitMessageSchema = z.object({
   type: z.literal('init'),
   conversations: z.array(ConversationSchema),
   defaultCwd: z.string(),
+  /** Conversations contain metadata + last-message previews, not full transcripts. */
+  summaries: z.boolean().optional(),
   /** True if server is still loading conversations from disk. Client should wait for conversations_updated. */
   loading: z.boolean().optional(),
   /** UI preferences synced from server (~/.agent-viewer/ui-state.json) */
@@ -1104,9 +1109,17 @@ export type QueueUpdatedMessage = z.infer<typeof QueueUpdatedMessageSchema>;
 export const ConversationsUpdatedMessageSchema = z.object({
   type: z.literal('conversations_updated'),
   conversations: z.array(ConversationSchema),
+  /** Conversations contain metadata + last-message previews, not full transcripts. */
+  summaries: z.boolean().optional(),
 });
 
 export type ConversationsUpdatedMessage = z.infer<typeof ConversationsUpdatedMessageSchema>;
+
+export const ConversationLoadCompleteMessageSchema = z.object({
+  type: z.literal('conversation_load_complete'),
+});
+
+export type ConversationLoadCompleteMessage = z.infer<typeof ConversationLoadCompleteMessageSchema>;
 
 export const MergeChildStatusMessageSchema = z.object({
   type: z.literal('merge_child_status'),
@@ -1136,6 +1149,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   SubAgentUpdateMessageSchema,
   SubAgentCompleteMessageSchema,
   ConversationsUpdatedMessageSchema,
+  ConversationLoadCompleteMessageSchema,
   QueueUpdatedMessageSchema,
   MergeChildStatusMessageSchema,
 ]);

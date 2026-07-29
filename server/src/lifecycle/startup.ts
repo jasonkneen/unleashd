@@ -8,15 +8,16 @@ export interface StartupOptions {
   host: string;
   development: boolean;
   developmentClientPort: number;
-  localDomain: string;
 }
 
 export interface StartupPorts {
   server: Server;
   initialize(): Promise<void>;
   startOptionalScheduler(): Promise<void>;
-  ensureLocalDomain(callback: (enabled: boolean) => void): void;
-  markReady(): void;
+  pauseOptionalScheduler(): void;
+  isStartupActive(): boolean;
+  markReady(): boolean;
+  abortStartup(): void;
   loadConversations(): Promise<void>;
   startPolling(): void;
 }
@@ -26,7 +27,6 @@ export async function runServerStartup(
   ports: StartupPorts
 ): Promise<void> {
   await ports.initialize();
-  await ports.startOptionalScheduler();
   await ensureAvailablePort(options.port, {
     checkPort,
     askQuestion,
@@ -36,31 +36,30 @@ export async function runServerStartup(
   });
 
   ports.server.listen(options.port, options.host, () => {
-    const domainUrl = `http://${options.localDomain}`;
-    const fallbackUrl = options.development
-      ? `http://localhost:${options.developmentClientPort}`
-      : `http://localhost:${options.port}`;
-    ports.ensureLocalDomain((useDomain) => {
-      const startUrl = useDomain ? domainUrl : fallbackUrl;
-      if (options.development) {
-        console.log(`Server running on http://localhost:${options.port} (frontend on ${startUrl})`);
-        return;
-      }
-      console.log(`Server running on ${startUrl} (backend on ${options.host}:${options.port})`);
-      const command =
-        process.platform === 'darwin'
-          ? 'open'
-          : process.platform === 'win32'
-            ? 'start'
-            : 'xdg-open';
-      exec(`${command} ${startUrl}`);
-    });
+    const localPort = options.development ? options.developmentClientPort : options.port;
+    const startUrl = `http://localhost:${localPort}`;
+    if (options.development) {
+      console.log(`Server running on http://localhost:${options.port} (frontend on ${startUrl})`);
+      return;
+    }
+    console.log(`Server running on ${startUrl} (backend on ${options.host}:${options.port})`);
+    const command =
+      process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    exec(`${command} ${startUrl}`);
   });
 
-  ports.markReady();
-  console.log('WebSocket handlers unblocked, loading conversations progressively...');
+  console.log('Loading conversations before accepting WebSocket commands...');
   await ports.loadConversations();
-  console.log('Initial load complete');
+  if (!ports.isStartupActive()) {
+    ports.abortStartup();
+    return;
+  }
+  await ports.startOptionalScheduler();
+  if (!ports.markReady()) {
+    ports.pauseOptionalScheduler();
+    return;
+  }
+  console.log('Initial load complete; WebSocket handlers unblocked');
   ports.startPolling();
   console.log('File polling started (5s interval)');
 }

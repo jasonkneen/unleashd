@@ -20,6 +20,7 @@ import type {
   ConversationOptions,
   ConversationRuntime,
 } from '../conversations/runtime';
+import { summarizeConversation } from '../conversations/serialization';
 import {
   sendCommandRejected,
   sendProtocolError,
@@ -42,6 +43,8 @@ export interface ConversationWebSocketDependencies {
   externalActivity: ExternalActivity;
   completionSuppression: CompletionSuppression;
   initialLoadComplete: Promise<void>;
+  isInitialLoadComplete(): boolean;
+  beginCommand(): (() => void) | null;
   configService: ConversationConfigService;
   getUIState(): UIState;
   getDefaultWorkingDirectory(): string;
@@ -69,12 +72,17 @@ export function registerConversationWebSocket(
 ): void {
   webSocketServer.on('connection', (socket) => {
     const logger = dependencies.logger ?? console;
-    logger.log('New WebSocket connection');
     sendInitialState(socket, dependencies);
 
     socket.on('message', async (message) => {
       let activeCommand: { commandId: string; conversationId?: string } | null = null;
+      let releaseCommand: (() => void) | null = null;
       try {
+        // The hydrated registry is authoritative. Commands received while the
+        // server is starting wait behind the same barrier as the initial
+        // snapshot instead of racing disk restoration.
+        await dependencies.initialLoadComplete;
+        if (socket.readyState !== WebSocket.OPEN) return;
         const parsed: unknown = JSON.parse(message.toString());
         const result = safeParseClientMessage(parsed);
         if (!result.success) {
@@ -88,6 +96,20 @@ export function registerConversationWebSocket(
             commandId: data.commandId,
             ...('conversationId' in data ? { conversationId: data.conversationId } : {}),
           };
+        }
+        releaseCommand = dependencies.beginCommand();
+        if (!releaseCommand) {
+          const unavailable =
+            'Backend reload is draining active turns; try again after reconnecting';
+          if (activeCommand) {
+            sendCommandRejected(socket, {
+              ...activeCommand,
+              error: { code: 'server_draining', message: unavailable },
+            });
+          } else {
+            sendProtocolError(socket, unavailable);
+          }
+          return;
         }
         logCommand(data, logger);
 
@@ -326,10 +348,10 @@ export function registerConversationWebSocket(
         } else {
           sendProtocolError(socket, `Failed to handle message: ${errorMessage(error)}`);
         }
+      } finally {
+        releaseCommand?.();
       }
     });
-
-    socket.on('close', () => logger.log('WebSocket connection closed'));
   });
 }
 
@@ -337,26 +359,25 @@ function sendInitialState(
   socket: WebSocket,
   dependencies: ConversationWebSocketDependencies
 ): void {
-  void (async () => {
-    await dependencies.initialLoadComplete;
-    if (socket.readyState !== WebSocket.OPEN) return;
-    sendToClient(socket, {
-      type: 'init',
-      conversations: Array.from(dependencies.registry.values(), (conversation) => {
-        const value = conversation.toJSON();
-        if (
-          dependencies.externalActivity.has(conversation.sessionId) ||
-          dependencies.externalActivity.has(conversation.id)
-        ) {
-          value.isRunning = true;
-        }
-        return value;
-      }),
-      defaultCwd: dependencies.getDefaultWorkingDirectory(),
-      uiState: dependencies.getUIState(),
-      protocol: PROTOCOL_INFO,
-    });
-  })();
+  if (socket.readyState !== WebSocket.OPEN) return;
+  sendToClient(socket, {
+    type: 'init',
+    summaries: true,
+    loading: !dependencies.isInitialLoadComplete(),
+    conversations: Array.from(dependencies.registry.values(), (conversation) => {
+      const value = conversation.toJSON();
+      if (
+        dependencies.externalActivity.has(conversation.sessionId) ||
+        dependencies.externalActivity.has(conversation.id)
+      ) {
+        value.isRunning = true;
+      }
+      return summarizeConversation(value);
+    }),
+    defaultCwd: dependencies.getDefaultWorkingDirectory(),
+    uiState: dependencies.getUIState(),
+    protocol: PROTOCOL_INFO,
+  });
 }
 
 function rejectInvalidMessage(

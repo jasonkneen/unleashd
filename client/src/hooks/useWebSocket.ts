@@ -7,6 +7,7 @@ export function useWebSocket(url: string, onMessage: (data: ServerMessage) => vo
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialConnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);
   const isIntentionalClose = useRef(false);
   // STABILITY FIX: Use ref for callback to avoid reconnecting when callback changes.
@@ -24,6 +25,7 @@ export function useWebSocket(url: string, onMessage: (data: ServerMessage) => vo
     const ws = new WebSocket(url);
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return;
       if (isMounted.current) {
         console.log('WebSocket connected');
         setStatus('connected');
@@ -31,6 +33,7 @@ export function useWebSocket(url: string, onMessage: (data: ServerMessage) => vo
     };
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return;
       try {
         const parsed = safeParseServerMessage(JSON.parse(event.data));
         if (!parsed.success) {
@@ -44,6 +47,8 @@ export function useWebSocket(url: string, onMessage: (data: ServerMessage) => vo
     };
 
     ws.onclose = () => {
+      if (wsRef.current !== ws) return;
+      wsRef.current = null;
       if (isMounted.current && !isIntentionalClose.current) {
         console.log('WebSocket disconnected, reconnecting...');
         setStatus('disconnected');
@@ -57,6 +62,7 @@ export function useWebSocket(url: string, onMessage: (data: ServerMessage) => vo
     };
 
     ws.onerror = (error) => {
+      if (wsRef.current !== ws) return;
       if (isMounted.current) {
         console.error('WebSocket error:', error);
       }
@@ -68,17 +74,29 @@ export function useWebSocket(url: string, onMessage: (data: ServerMessage) => vo
   useEffect(() => {
     isMounted.current = true;
     isIntentionalClose.current = false;
-    connect();
+    // Defer the initial connection by one task. React Strict Mode immediately
+    // cleans up and re-runs effects in development; deferring prevents that
+    // probe from opening a throwaway socket that is closed mid-handshake.
+    initialConnectTimeout.current = window.setTimeout(() => {
+      initialConnectTimeout.current = null;
+      if (isMounted.current) connect();
+    }, 0);
 
     return () => {
       isMounted.current = false;
       isIntentionalClose.current = true;
+      if (initialConnectTimeout.current) {
+        clearTimeout(initialConnectTimeout.current);
+        initialConnectTimeout.current = null;
+      }
       if (reconnectTimeout.current) {
         clearTimeout(reconnectTimeout.current);
+        reconnectTimeout.current = null;
       }
       if (wsRef.current) {
-        wsRef.current.close();
+        const ws = wsRef.current;
         wsRef.current = null;
+        ws.close();
       }
     };
   }, [connect]);

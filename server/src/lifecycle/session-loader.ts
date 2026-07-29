@@ -23,6 +23,7 @@ import type {
   ConversationOptions,
   ConversationRuntime,
 } from '../conversations/runtime';
+import { summarizeConversation } from '../conversations/serialization';
 import { createFilePoller } from './file-poller';
 import { loadProgressively } from './progressive-loader';
 
@@ -217,10 +218,14 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       const resolved = resolveParentConversationId(conversation.parentConversationId);
       if (resolved === conversation.parentConversationId) continue;
       conversation.parentConversationId = resolved;
-      changed.push(conversation.toJSON());
+      changed.push(summarizeConversation(conversation.toJSON()));
     }
     if (changed.length > 0) {
-      dependencies.broadcast({ type: 'conversations_updated', conversations: changed });
+      dependencies.broadcast({
+        type: 'conversations_updated',
+        conversations: changed,
+        summaries: true,
+      });
     }
   }
 
@@ -242,9 +247,13 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
           load: dependencies.loadConversations,
           hydrate,
           store: (conversation) => dependencies.registry.set(conversation),
-          serialize: (conversation) => conversation.toJSON(),
+          serialize: (conversation) => summarizeConversation(conversation.toJSON()),
           broadcast: (conversations) =>
-            dependencies.broadcast({ type: 'conversations_updated', conversations }),
+            dependencies.broadcast({
+              type: 'conversations_updated',
+              conversations,
+              summaries: true,
+            }),
           count: () => dependencies.registry.size,
         }
       );
@@ -253,6 +262,7 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       logger.log(`Loaded ${dependencies.registry.size} conversations from persisted session files`);
     } catch (error) {
       logger.error('Failed to load conversations from persisted sessions:', error);
+      throw error;
     }
   }
 

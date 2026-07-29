@@ -74,6 +74,7 @@ test('file poller coalesces overlapping cycles', async () => {
     | ((result: { updated: Map<string, string>; mtimes: Map<string, number> }) => void)
     | undefined;
   let pollCalls = 0;
+  let trackingPrunes = 0;
   const poller = createFilePoller<string, string>(
     { intervalMs: 5_000, externalGraceMs: 30_000, verbose: false },
     {
@@ -98,7 +99,9 @@ test('file poller coalesces overlapping cycles', async () => {
       broadcastStatus: () => undefined,
       applyUpdate: async () => null,
       broadcastUpdates: () => undefined,
-      pruneTracking: () => undefined,
+      pruneTracking: () => {
+        trackingPrunes += 1;
+      },
     }
   );
 
@@ -110,12 +113,14 @@ test('file poller coalesces overlapping cycles', async () => {
   assert.ok(resolvePoll);
   resolvePoll({ updated: new Map(), mtimes: new Map() });
   await Promise.all([first, second]);
+  assert.equal(trackingPrunes, 1);
 
   const third = poller.runOnce();
   assert.equal(pollCalls, 2);
   assert.ok(resolvePoll);
   resolvePoll({ updated: new Map(), mtimes: new Map() });
   await third;
+  assert.equal(trackingPrunes, 2);
 });
 
 test('file poller preserves dirty baselines until an active session can be reconciled', async () => {

@@ -537,6 +537,11 @@ test('scheduler cancellation stops the active conversation and preserves cancell
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.deepEqual(scheduler.health().activeRunIds, [run.id]);
+  scheduler.pause();
+  assert.equal(scheduler.health().running, false);
+  assert.deepEqual(scheduler.health().activeRunIds, [run.id]);
+  assert.equal(run.status, 'running');
+  assert.equal(stopped, 0);
   assert.equal(scheduler.cancel(run.id).status, 'cancelled');
   resolveTurn?.('late result');
   for (let attempt = 0; attempt < 20 && scheduler.health().activeRunIds.length; attempt += 1) {

@@ -18,6 +18,8 @@ import { getConversationLastActivity } from '../utils/time';
 // =============================================================================
 
 export const conversationsAtom = atom(new Map<string, Conversation>());
+export const conversationDetailsLoadedAtom = atom(new Set<string>());
+export const conversationLoadCompleteAtom = atom(false);
 
 export interface PendingConversationCreation {
   kind: 'create_conversation';
@@ -75,6 +77,10 @@ export const sendFnAtom = atom<{ send: (msg: ClientMessage) => void }>({ send: (
 // Single conversation by ID — use instead of s.conversations.get(id)
 export const conversationAtomFamily = atomFamily((id: string) =>
   atom((get) => get(conversationsAtom).get(id) ?? null)
+);
+
+export const conversationDetailsLoadedAtomFamily = atomFamily((id: string) =>
+  atom((get) => get(conversationDetailsLoadedAtom).has(id))
 );
 
 export const pendingCreationAtomFamily = atomFamily((id: string) =>

@@ -67,9 +67,6 @@ const OPENCODE_SESSION_DIR = path.join(OPENCODE_STORAGE_DIR, 'session');
 /** Default location of Gemini CLI session files */
 export const GEMINI_SESSIONS_DIR = path.join(os.homedir(), '.gemini', 'tmp');
 
-/** Track directories that have already warned about ENOENT (only log once) */
-const warnedDirectories = new Set<string>();
-
 // =============================================================================
 // Directory Scanning
 // =============================================================================
@@ -89,16 +86,12 @@ export async function getProjectDirectories(
     const code =
       error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
     if (code === 'ENOENT') {
-      // Only warn once per directory to avoid log spam during polling
-      if (!warnedDirectories.has(projectsDir)) {
-        warnedDirectories.add(projectsDir);
-        console.warn(`Projects directory not found, skipping: ${projectsDir}`);
-      }
-    } else {
-      console.warn(
-        `Failed to read projects directory: ${projectsDir} (${error instanceof Error ? error.message : error})`
-      );
+      // Optional provider storage does not exist until that CLI creates a session.
+      return [];
     }
+    console.warn(
+      `Failed to read projects directory: ${projectsDir} (${error instanceof Error ? error.message : error})`
+    );
     return [];
   }
 }

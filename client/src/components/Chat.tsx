@@ -10,6 +10,7 @@ import {
   clearQueue,
   createConversation,
   interruptAndSend,
+  loadConversationDetails,
   queueMessage,
   setActiveConversationId,
 } from '../atoms/actions';
@@ -19,6 +20,8 @@ import {
   childConversationsAtomFamily,
   conversationAtomFamily,
   conversationCountAtom,
+  conversationDetailsLoadedAtomFamily,
+  conversationLoadCompleteAtom,
   pendingConfigCommandAtomFamily,
   pendingCreationAtomFamily,
   streamingAtomFamily,
@@ -32,7 +35,6 @@ import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../store
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
-import { BuddyBuilderResultCard } from './buddies/BuddyBuilderResultCard';
 import { ConversationConfigPicker } from './ConversationConfigPicker';
 import { MergeProgressStrip } from './MergeProgressStrip';
 import { PromptPalette } from './PromptPalette';
@@ -42,6 +44,7 @@ import { SwarmConvoPrefix } from './SwarmConvoPrefix';
 import { TurnStatus } from './TurnStatus';
 import { VirtualizedMessageList, isToolCallOnlyMessage } from './VirtualizedMessageList';
 import type { MessageGroup } from './VirtualizedMessageList';
+import { BuddyBuilderResultCard } from './buddies/BuddyBuilderResultCard';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
 import { shouldPresentTurnAttempt, turnDiagnosticsFromAttempt } from './turn-diagnostics';
 import './Chat.css';
@@ -96,6 +99,8 @@ export function Chat() {
 
   // Per-ID atoms — only re-render when THIS conversation changes, not others
   const conversation = useAtomValue(conversationAtomFamily(id ?? ''));
+  const conversationDetailsLoaded = useAtomValue(conversationDetailsLoadedAtomFamily(id ?? ''));
+  const conversationLoadComplete = useAtomValue(conversationLoadCompleteAtom);
   const pendingCreation = useAtomValue(pendingCreationAtomFamily(id ?? ''));
   const pendingConfigCommand = useAtomValue(pendingConfigCommandAtomFamily(id ?? ''));
   const configIsSaving = !!pendingConfigCommand && !pendingConfigCommand.error;
@@ -143,6 +148,7 @@ export function Chat() {
   const [threadCopied, setThreadCopied] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [detailLoadError, setDetailLoadError] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>(EMPTY_PENDING);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftValueRef = useRef('');
@@ -335,9 +341,27 @@ export function Chat() {
 
   useEffect(() => {
     if (id && !conversation && !pendingCreation && conversationCount > 0) {
+      if (!conversationLoadComplete) return;
       navigate('/');
     }
-  }, [id, conversation, pendingCreation, conversationCount, navigate]);
+  }, [id, conversation, pendingCreation, conversationCount, conversationLoadComplete, navigate]);
+
+  useEffect(() => {
+    if (!id || !conversation || conversationDetailsLoaded) {
+      setDetailLoadError(null);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoadError(null);
+    void loadConversationDetails(id).catch((error) => {
+      if (!cancelled) {
+        setDetailLoadError(error instanceof Error ? error.message : String(error));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, conversation, conversationDetailsLoaded]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -538,6 +562,19 @@ export function Chat() {
                 ? `Starting ${pendingCreation.config.provider} in ${pendingCreation.workingDirectory}`
                 : 'Select a conversation from the sidebar or create a new one.'}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!conversationDetailsLoaded) {
+    return (
+      <div className="chat-view">
+        <div className="chat-header">
+          <div className="chat-title">{conversation.id.slice(0, 8)}</div>
+        </div>
+        <div className="messages-container">
+          <div className="empty-state">{detailLoadError ?? 'Loading conversation history…'}</div>
         </div>
       </div>
     );

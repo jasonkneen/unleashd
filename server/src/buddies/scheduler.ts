@@ -175,9 +175,19 @@ export class BuddyScheduler {
     void this.poll();
   }
 
-  stop(): void {
+  /**
+   * Stop claiming new occurrences without disturbing work already in flight.
+   * Source reload uses this while the old server remains the sole owner of its
+   * provider streams. Explicit shutdown uses stop() because it must terminate
+   * those streams.
+   */
+  pause(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  stop(): void {
+    this.pause();
     for (const runId of this.activeRuns) void this.cancel(runId);
   }
 
@@ -245,11 +255,7 @@ export class BuddyScheduler {
       claimToken,
       leaseSeconds: automation.policy.max_runtime_seconds + 60,
     });
-    if (
-      run.claim_acquired !== false &&
-      run.status === 'claimed' &&
-      !this.activeRuns.has(run.id)
-    ) {
+    if (run.claim_acquired !== false && run.status === 'claimed' && !this.activeRuns.has(run.id)) {
       void this.execute(automation, run, claimToken);
     }
     return run;
@@ -370,10 +376,7 @@ export class BuddyScheduler {
       });
       conversation.finish('complete');
     } catch (error) {
-      if (
-        error instanceof BuddyAutomationCancelledError ||
-        this.cancelledRuns.has(claimed.id)
-      ) {
+      if (error instanceof BuddyAutomationCancelledError || this.cancelledRuns.has(claimed.id)) {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);

@@ -5,10 +5,13 @@ import type {
   QueuedMessage,
   ServerMessage,
 } from '@unleashd/shared';
+import { ConversationSchema } from '@unleashd/shared';
 import { enableMapSet, produce } from 'immer';
 import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../stores/uiStore';
 import {
   activeConversationIdAtom,
+  conversationDetailsLoadedAtom,
+  conversationLoadCompleteAtom,
   conversationsAtom,
   defaultCwdAtom,
   pendingConfigCommandsAtom,
@@ -17,6 +20,7 @@ import {
   streamingContentAtom,
   wsStatusAtom,
 } from './conversations';
+import { applyStableSnapshot } from './detail-loader';
 import {
   mergeChildErrorMapAtom,
   mergeChildReviewDocPathMapAtom,
@@ -50,6 +54,62 @@ export type { CreateConversationArgs } from './pending-creations';
 
 const chunkBuffer: Map<string, string> = new Map();
 let chunkFlushScheduled = false;
+const conversationDetailRequests = new Map<string, Promise<void>>();
+let conversationDetailEpoch = 0;
+
+function markConversationDetailsLoaded(ids: Iterable<string>): void {
+  const next = new Set(jotaiStore.get(conversationDetailsLoadedAtom));
+  for (const id of ids) next.add(id);
+  jotaiStore.set(conversationDetailsLoadedAtom, next);
+}
+
+export function loadConversationDetails(conversationId: string): Promise<void> {
+  const existing = conversationDetailRequests.get(conversationId);
+  if (existing) return existing;
+
+  const requestEpoch = conversationDetailEpoch;
+  const request = (async () => {
+    await applyStableSnapshot(
+      () =>
+        requestEpoch === conversationDetailEpoch
+          ? jotaiStore.get(conversationsAtom).get(conversationId)
+          : undefined,
+      async () => {
+        const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`);
+        if (!response.ok) {
+          throw new Error(`Conversation detail request failed with HTTP ${response.status}`);
+        }
+        const parsed = ConversationSchema.safeParse(await response.json());
+        if (!parsed.success) {
+          throw new Error(`Invalid conversation detail: ${parsed.error.message}`);
+        }
+        return parsed.data;
+      },
+      (snapshot) => {
+        jotaiStore.set(
+          conversationsAtom,
+          produce(jotaiStore.get(conversationsAtom), (draft) => {
+            const existingConversation = draft.get(conversationId);
+            draft.set(conversationId, {
+              ...snapshot,
+              swarmDebugPrefix:
+                snapshot.swarmDebugPrefix ?? existingConversation?.swarmDebugPrefix ?? null,
+            });
+          })
+        );
+        markConversationDetailsLoaded([conversationId]);
+      }
+    );
+  })().finally(() => {
+    // An old epoch may settle after reconnect installed a newer request.
+    if (conversationDetailRequests.get(conversationId) === request) {
+      conversationDetailRequests.delete(conversationId);
+    }
+  });
+
+  conversationDetailRequests.set(conversationId, request);
+  return request;
+}
 
 function flushChunkBuffer(): void {
   chunkFlushScheduled = false;
@@ -203,6 +263,8 @@ export function handleMessage(data: ServerMessage): void {
   switch (data.type) {
     case 'init': {
       console.log(`[WS] init: ${data.conversations.length} conversations`);
+      conversationDetailEpoch += 1;
+      conversationDetailRequests.clear();
 
       // Total wipe and replace. Server is the absolute epoch.
       const serverState = new Map<string, Conversation>();
@@ -234,6 +296,13 @@ export function handleMessage(data: ServerMessage): void {
 
       jotaiStore.set(defaultCwdAtom, data.defaultCwd);
       jotaiStore.set(conversationsAtom, serverState);
+      jotaiStore.set(
+        conversationDetailsLoadedAtom,
+        data.summaries
+          ? new Set()
+          : new Set(data.conversations.map((conversation) => conversation.id))
+      );
+      jotaiStore.set(conversationLoadCompleteAtom, data.loading !== true);
       jotaiStore.set(pendingCreationsAtom, pendingState);
       // `init` is an authoritative epoch after connect/reconnect. Config writes
       // are revision-checked and their result is already reflected in these
@@ -264,6 +333,7 @@ export function handleMessage(data: ServerMessage): void {
           });
         })
       );
+      markConversationDetailsLoaded([data.conversation.id]);
       removePendingConversation(data.conversation.id, data.commandId);
       jotaiStore.set(
         pendingCreationsAtom,
@@ -289,6 +359,7 @@ export function handleMessage(data: ServerMessage): void {
           });
         })
       );
+      markConversationDetailsLoaded([data.conversation.id]);
       if (data.commandId) {
         jotaiStore.set(
           pendingConfigCommandsAtom,
@@ -309,6 +380,7 @@ export function handleMessage(data: ServerMessage): void {
             draft.set(authoritativeConversation.id, authoritativeConversation);
           })
         );
+        markConversationDetailsLoaded([authoritativeConversation.id]);
       }
       const message = data.error.message;
       const pendingConfig = jotaiStore.get(pendingConfigCommandsAtom).get(data.commandId);
@@ -359,6 +431,9 @@ export function handleMessage(data: ServerMessage): void {
           draft.delete(data.conversationId);
         })
       );
+      const loadedDetails = new Set(jotaiStore.get(conversationDetailsLoadedAtom));
+      loadedDetails.delete(data.conversationId);
+      jotaiStore.set(conversationDetailsLoadedAtom, loadedDetails);
       const currentActive = jotaiStore.get(activeConversationIdAtom);
       if (currentActive === data.conversationId) {
         jotaiStore.set(activeConversationIdAtom, null);
@@ -474,6 +549,7 @@ export function handleMessage(data: ServerMessage): void {
 
     case 'conversations_updated': {
       console.log(`[WS] conversations_updated: ${data.conversations.length} changed`);
+      const loadedDetails = jotaiStore.get(conversationDetailsLoadedAtom);
       jotaiStore.set(
         conversationsAtom,
         produce(jotaiStore.get(conversationsAtom), (draft) => {
@@ -484,20 +560,33 @@ export function handleMessage(data: ServerMessage): void {
             const existing = draft.get(conv.id);
             draft.set(conv.id, {
               ...conv,
+              messages:
+                data.summaries && existing && loadedDetails.has(conv.id)
+                  ? existing.messages
+                  : conv.messages,
               swarmDebugPrefix: conv.swarmDebugPrefix ?? existing?.swarmDebugPrefix ?? null,
             });
           }
         })
       );
+      if (!data.summaries) {
+        markConversationDetailsLoaded(data.conversations.map((conversation) => conversation.id));
+      }
       // Mark all updated conversations as seen to prevent stale NEW badges after
       // external JSONL edits. Conservative — better to miss a badge than show wrong one.
       useUIStore.setState((s) => {
         const updates: Record<string, number> = {};
         for (const conv of data.conversations) {
-          if (conv.messages.length > 0) updates[conv.id] = conv.messages.length - 1;
+          const messageCount = conv.messageCount ?? conv.messages.length;
+          if (messageCount > 0) updates[conv.id] = messageCount - 1;
         }
         return { lastSeenMessageIndex: { ...s.lastSeenMessageIndex, ...updates } };
       });
+      break;
+    }
+
+    case 'conversation_load_complete': {
+      jotaiStore.set(conversationLoadCompleteAtom, true);
       break;
     }
 

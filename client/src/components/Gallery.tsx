@@ -347,7 +347,7 @@ export function Gallery({ filter }: GalleryProps = {}) {
               </div>
             </div>
           </div>
-          <div>{conv.messages.length} messages</div>
+          <div>{conv.messageCount ?? conv.messages.length} messages</div>
           <div className="gallery-messages">
             {conv.messages.length === 0 ? (
               <div className="empty-state">No messages yet</div>

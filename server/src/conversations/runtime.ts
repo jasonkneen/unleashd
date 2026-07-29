@@ -1926,6 +1926,7 @@ export function createConversationRuntime(
         id: this.id,
         sessionId: this.sessionId,
         messages: this.messages,
+        messageCount: this.messages.length,
         isRunning: this.isRunning,
         isStreaming: this.isStreaming,
         confirmed: true,
