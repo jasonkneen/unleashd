@@ -1,16 +1,19 @@
-import { exec, execSync } from 'node:child_process';
-import net from 'node:net';
-import { fileURLToPath } from 'node:url';
+import { exec } from 'node:child_process';
 import react from '@vitejs/plugin-react';
 import { type ViteDevServer, createLogger, defineConfig } from 'vite';
 
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
 const LOCAL_DOMAIN = 'unleashd.localhost';
-const LOCAL_HTTP_PORT = 80;
-const SETUP_SCRIPT = fileURLToPath(new URL('../tools/setup-domain.sh', import.meta.url));
+const LOCAL_DEV_URL =
+  process.env.UNLEASHD_LOCAL_DOMAIN_ENABLED === '1'
+    ? `http://${LOCAL_DOMAIN}`
+    : `http://localhost:${DEV_CLIENT_PORT}`;
 const viteLogger = createLogger();
 const logViteError = viteLogger.error.bind(viteLogger);
+const logViteInfo = viteLogger.info.bind(viteLogger);
+let lastHmrMessage = '';
+let lastHmrAt = 0;
 
 viteLogger.error = (message, options) => {
   const transientWebSocketRestart =
@@ -18,9 +21,31 @@ viteLogger.error = (message, options) => {
     (message.includes('EPIPE') ||
       message.includes('ECONNRESET') ||
       message.includes('ECONNREFUSED'));
-  if (transientWebSocketRestart) return;
+  const transientHttpRestart =
+    message.includes('http proxy error:') &&
+    (message.includes('EPIPE') ||
+      message.includes('ECONNRESET') ||
+      message.includes('ECONNREFUSED'));
+  if (transientWebSocketRestart || transientHttpRestart) return;
   logViteError(message, options);
 };
+
+viteLogger.info = (message, options) => {
+  if (message.includes('hmr update')) {
+    const now = Date.now();
+    if (message === lastHmrMessage && now - lastHmrAt < 1_000) return;
+    lastHmrMessage = message;
+    lastHmrAt = now;
+  }
+  logViteInfo(message, options);
+};
+
+function logUnexpectedProxyError(scope: string, error: NodeJS.ErrnoException) {
+  if (error.code === 'EPIPE' || error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
+    return;
+  }
+  console.error(`[${scope} proxy]`, error.message);
+}
 
 function openInBrowser(url: string) {
   const startCmd =
@@ -28,70 +53,13 @@ function openInBrowser(url: string) {
   exec(`${startCmd} ${url}`);
 }
 
-function canReachBareLocalDomain(callback: (useBareDomain: boolean) => void) {
-  const socket = net.connect({ host: '127.0.0.1', port: LOCAL_HTTP_PORT });
-  const finish = (result: boolean) => {
-    socket.removeAllListeners();
-    socket.destroy();
-    callback(result);
-  };
-
-  socket.setTimeout(250);
-  socket.once('connect', () => finish(true));
-  socket.once('timeout', () => finish(false));
-  socket.once('error', () => finish(false));
-}
-
-function ensureBareLocalDomain(callback: (startUrl: string) => void) {
-  const fallbackUrl = `http://localhost:${DEV_CLIENT_PORT}`;
-  const bareUrl = `http://${LOCAL_DOMAIN}`;
-
-  const finish = (useBareDomain: boolean) => {
-    if (useBareDomain) {
-      console.log(`[unleashd] Using bare local domain: ${bareUrl}`);
-    } else {
-      console.log(`[unleashd] Falling back to ${fallbackUrl}`);
-    }
-    callback(useBareDomain ? bareUrl : fallbackUrl);
-  };
-
-  canReachBareLocalDomain((useBareDomain) => {
-    if (useBareDomain) {
-      console.log('[unleashd] Local port-80 routing already active');
-      finish(true);
-      return;
-    }
-
-    if (process.platform !== 'darwin' || !process.stdin.isTTY || !process.stdout.isTTY) {
-      console.log(
-        '[unleashd] Skipping automatic local domain setup: requires macOS + interactive TTY'
-      );
-      finish(false);
-      return;
-    }
-
-    try {
-      console.log('[unleashd] Attempting automatic local domain setup...');
-      execSync(`sudo bash ${JSON.stringify(SETUP_SCRIPT)}`, { stdio: 'inherit' });
-    } catch {
-      console.log('[unleashd] Automatic local domain setup failed or was cancelled');
-      finish(false);
-      return;
-    }
-
-    console.log('[unleashd] Re-checking local domain after setup');
-    canReachBareLocalDomain(finish);
-  });
-}
-
 function openPreferredDevUrlPlugin() {
   return {
     name: 'open-preferred-dev-url',
     configureServer(server: ViteDevServer) {
       server.httpServer?.once('listening', () => {
-        ensureBareLocalDomain((startUrl) => {
-          openInBrowser(startUrl);
-        });
+        console.log(`[unleashd] Opening ${LOCAL_DEV_URL}`);
+        openInBrowser(LOCAL_DEV_URL);
       });
     },
   };
@@ -108,7 +76,7 @@ export default defineConfig({
     allowedHosts: [LOCAL_DOMAIN],
     proxy: {
       '/ws': {
-        target: `ws://localhost:${API_SERVER_PORT}`,
+        target: `ws://127.0.0.1:${API_SERVER_PORT}`,
         ws: true,
         // Suppress EPIPE/ECONNRESET noise during backend restarts.
         // Vite reconnects automatically — these errors are expected and transient.
@@ -125,7 +93,10 @@ export default defineConfig({
         },
       },
       '/api': {
-        target: `http://localhost:${API_SERVER_PORT}`,
+        target: `http://127.0.0.1:${API_SERVER_PORT}`,
+        configure: (proxy) => {
+          proxy.on('error', (error) => logUnexpectedProxyError('http', error));
+        },
       },
     },
   },

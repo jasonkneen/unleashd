@@ -1,97 +1,139 @@
 #!/usr/bin/env bash
-# setup-domain.sh — Forward port 80 → 7489 for unleashd.localhost
+# Install a persistent, loopback-only port proxy for:
+#   http://unleashd.localhost → http://127.0.0.1:7489
 #
-# What it does:
-#   1. Removes old unleash*.dev host overrides if present
-#   2. Creates a pf (packet filter) anchor to redirect port 80 → 7489
-#   3. Loads the pf rule so http://unleashd.localhost works without typing a port
-#
-# Usage:
-#   sudo bash tools/setup-domain.sh          # install
-#   sudo bash tools/setup-domain.sh --remove  # uninstall
-#
-# Requires: macOS (uses pf). For Linux, swap pf for iptables.
+# The installed helper binds port 80 as root, immediately drops to `nobody`,
+# and then proxies raw TCP. Unleashd and Node always run as the normal user.
 
 set -euo pipefail
 
 DOMAIN="unleashd.localhost"
-DEV_PORT=7489
 TARGET_PORT=7489
+LABEL="com.unleashd.local-domain"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROXY_SOURCE="${SCRIPT_DIR}/local-port-proxy.c"
+HELPER="/Library/PrivilegedHelperTools/com.unleashd.local-port-proxy"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+HOSTS_FILE="/etc/hosts"
+HOSTS_LINE="127.0.0.1 ${DOMAIN}"
+
+# Legacy PF paths from the original implementation.
 PF_ANCHOR_NAME="com.unleashd"
 PF_ANCHOR_FILE="/etc/pf.anchors/${PF_ANCHOR_NAME}"
+PF_CONFIG="/etc/pf.conf"
 
+TEMP_PROXY=""
+TEMP_PF_CONFIG=""
+cleanup() {
+  [[ -z "${TEMP_PROXY}" ]] || rm -f "${TEMP_PROXY}"
+  [[ -z "${TEMP_PF_CONFIG}" ]] || rm -f "${TEMP_PF_CONFIG}"
+}
+trap cleanup EXIT
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "Local-domain setup currently supports macOS only." >&2
+  exit 1
+fi
 if [[ $EUID -ne 0 ]]; then
-  echo "This script requires root. Run with: sudo $0"
+  echo "This installer requires administrator permission. Run it with sudo." >&2
   exit 1
 fi
 
-remove() {
-  echo "Removing ${DOMAIN} domain setup..."
-
-  # Remove old host overrides that may shadow localhost aliases
-  sed -i '' '/unleash\.dev/d;/unleashd\.dev/d;/unleashd\.localhost/d' /etc/hosts
-  echo "  ✓ Removed old unleash host overrides from /etc/hosts"
-
-  # Remove pf anchor file
-  if [[ -f "${PF_ANCHOR_FILE}" ]]; then
-    rm "${PF_ANCHOR_FILE}"
-    echo "  ✓ Removed ${PF_ANCHOR_FILE}"
+remove_legacy_pf_setup() {
+  if ! grep -qF "${PF_ANCHOR_NAME}" "${PF_CONFIG}" && [[ ! -f "${PF_ANCHOR_FILE}" ]]; then
+    return
   fi
 
-  # Remove anchor from pf.conf if present
-  if grep -qF "${PF_ANCHOR_NAME}" /etc/pf.conf; then
-    sed -i '' "/${PF_ANCHOR_NAME}/d" /etc/pf.conf
-    echo "  ✓ Removed anchor from /etc/pf.conf"
-  fi
-
-  # Reload pf
-  pfctl -f /etc/pf.conf 2>/dev/null || true
-  echo "  ✓ Reloaded pf"
-  echo "Done. ${DOMAIN} is no longer configured."
+  TEMP_PF_CONFIG="$(mktemp /tmp/unleashd-pf.XXXXXX)"
+  sed \
+    -e "/^[[:space:]]*rdr-anchor \"${PF_ANCHOR_NAME}\"[[:space:]]*$/d" \
+    -e "/^[[:space:]]*load anchor \"${PF_ANCHOR_NAME}\" from/d" \
+    "${PF_CONFIG}" > "${TEMP_PF_CONFIG}"
+  pfctl -nf "${TEMP_PF_CONFIG}"
+  install -o root -g wheel -m 644 "${TEMP_PF_CONFIG}" "${PF_CONFIG}"
+  rm -f "${PF_ANCHOR_FILE}"
+  pfctl -f "${PF_CONFIG}"
 }
 
-install() {
-  echo "Setting up ${DOMAIN} → 127.0.0.1:${TARGET_PORT}..."
+stop_proxy() {
+  launchctl bootout "system/${LABEL}" >/dev/null 2>&1 || true
+}
 
-  # Step 1: clean up old host overrides. `.localhost` resolves to loopback automatically.
-  sed -i '' '/unleash\.dev/d;/unleashd\.dev/d;/unleashd\.localhost/d' /etc/hosts
-  echo "  ✓ Cleared old unleash host overrides from /etc/hosts"
+remove_setup() {
+  stop_proxy
+  rm -f "${PLIST}" "${HELPER}"
+  sed -i '' "\\|^${HOSTS_LINE}$|d" "${HOSTS_FILE}"
+  remove_legacy_pf_setup
+  echo "Removed http://${DOMAIN} routing."
+}
 
-  # Step 2: pf anchor file (port 80 → TARGET_PORT)
-  cat > "${PF_ANCHOR_FILE}" <<EOF
-rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 80 -> 127.0.0.1 port ${TARGET_PORT}
+install_setup() {
+  remove_legacy_pf_setup
+  stop_proxy
+
+  TEMP_PROXY="$(mktemp /tmp/unleashd-local-port-proxy.XXXXXX)"
+  /usr/bin/clang -O2 -Wall -Wextra -Werror "${PROXY_SOURCE}" -o "${TEMP_PROXY}"
+  install -o root -g wheel -m 755 "${TEMP_PROXY}" "${HELPER}"
+
+  cat > "${PLIST}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${HELPER}</string>
+    <string>${TARGET_PORT}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/var/log/unleashd-local-domain.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/unleashd-local-domain.log</string>
+</dict>
+</plist>
 EOF
-  echo "  ✓ Created ${PF_ANCHOR_FILE}"
+  chown root:wheel "${PLIST}"
+  chmod 644 "${PLIST}"
+  plutil -lint "${PLIST}" >/dev/null
 
-  # Step 3: Wire anchor into pf.conf if not already present
-  if grep -qF "${PF_ANCHOR_NAME}" /etc/pf.conf; then
-    echo "  - pf.conf already references ${PF_ANCHOR_NAME}, skipping"
-  else
-    # Insert anchor lines before the last line (which is typically a default rule)
-    # We need both the rdr-anchor and load anchor directives
-    {
-      echo "rdr-anchor \"${PF_ANCHOR_NAME}\""
-      echo "load anchor \"${PF_ANCHOR_NAME}\" from \"${PF_ANCHOR_FILE}\""
-    } >> /etc/pf.conf
-    echo "  ✓ Added anchor to /etc/pf.conf"
-  fi
+  sed -i '' "\\|^${HOSTS_LINE}$|d" "${HOSTS_FILE}"
+  printf '%s\n' "${HOSTS_LINE}" >> "${HOSTS_FILE}"
 
-  # Step 4: Enable and reload pf
-  pfctl -ef /etc/pf.conf 2>/dev/null || pfctl -f /etc/pf.conf 2>/dev/null || true
-  echo "  ✓ Loaded pf rules"
+  launchctl bootstrap system "${PLIST}"
+  launchctl kickstart -k "system/${LABEL}"
 
-  echo ""
-  echo "Done! You can now access:"
-  echo "  http://${DOMAIN}        (dev / pnpm dev, production / pnpm start)"
-  echo ""
-  echo "To remove: sudo $0 --remove"
+  local attempt
+  for attempt in {1..30}; do
+    if nc -z 127.0.0.1 80 >/dev/null 2>&1; then
+      echo "Ready: http://${DOMAIN} forwards to http://127.0.0.1:${TARGET_PORT}"
+      return
+    fi
+    sleep 0.1
+  done
+
+  echo "The local port proxy did not start. launchd status:" >&2
+  launchctl print "system/${LABEL}" >&2 || true
+  tail -30 /var/log/unleashd-local-domain.log >&2 || true
+  exit 1
 }
 
-case "${1:-}" in
-  --remove|-r|remove|uninstall)
-    remove
+case "${1:-install}" in
+  install)
+    install_setup
+    ;;
+  remove|uninstall|--remove|-r)
+    remove_setup
     ;;
   *)
-    install
+    echo "Usage: sudo bash $0 [install|remove]" >&2
+    exit 2
     ;;
 esac

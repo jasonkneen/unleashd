@@ -80,6 +80,13 @@ test('execution plans keep destructive and partial-dev work behind the superviso
     }).map((phase) => phase.name),
     ['build-shared', 'build-agent-cli', 'running-server']
   );
+  const devEnvironment = createExecutionPhases({
+    task: 'dev',
+    skipBootstrap: true,
+    command: [],
+    localDomainEnabled: true,
+  })[0].specification.environment;
+  assert.equal(devEnvironment.UNLEASHD_LOCAL_DOMAIN_ENABLED, '1');
 });
 
 test('owner inspection validates both PID liveness and cwd identity', () => {
@@ -350,7 +357,10 @@ test('supervisor subprocess removes its lock and preserves boot metadata', (cont
       '-e',
       'process.exit(0)',
     ],
-    { encoding: 'utf8', timeout: 5_000 }
+    // Full validation runs this process test beside TypeScript builds and the
+    // server integration suite. Leave enough room for a busy local machine;
+    // the child itself still exits immediately.
+    { encoding: 'utf8', timeout: 20_000 }
   );
 
   assert.equal(result.status, 0, result.stderr);

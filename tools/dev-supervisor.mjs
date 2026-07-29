@@ -20,6 +20,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LOCAL_DOMAIN_ENV, detectLocalDomain } from './local-domain.mjs';
 
 const require = createRequire(import.meta.url);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -561,7 +562,7 @@ function resolvePnpmCommand(arguments_) {
   };
 }
 
-function resolveConcurrentlyCommand() {
+function resolveConcurrentlyCommand(localDomainEnabled = false) {
   const packageRoot = path.dirname(require.resolve('concurrently/package.json'));
   return {
     command: process.execPath,
@@ -578,7 +579,10 @@ function resolveConcurrentlyCommand() {
       'node tools/watch-server.mjs',
       'pnpm --filter @unleashd/client exec vite',
     ],
-    environment: { NODE_ENV: 'development' },
+    environment: {
+      NODE_ENV: 'development',
+      [LOCAL_DOMAIN_ENV]: localDomainEnabled ? '1' : '0',
+    },
   };
 }
 
@@ -639,7 +643,10 @@ export function createExecutionPhases(options) {
           specification: {
             command: process.execPath,
             arguments: [path.join(repositoryRoot, 'tools', 'watch-server.mjs')],
-            environment: { NODE_ENV: 'development' },
+            environment: {
+              NODE_ENV: 'development',
+              [LOCAL_DOMAIN_ENV]: options.localDomainEnabled ? '1' : '0',
+            },
           },
         },
       ];
@@ -648,13 +655,21 @@ export function createExecutionPhases(options) {
         ...(options.skipBootstrap ? [] : [sharedBuild]),
         {
           name: 'running-client',
-          specification: resolvePnpmCommand(['--filter', '@unleashd/client', 'exec', 'vite']),
+          specification: {
+            ...resolvePnpmCommand(['--filter', '@unleashd/client', 'exec', 'vite']),
+            environment: {
+              [LOCAL_DOMAIN_ENV]: options.localDomainEnabled ? '1' : '0',
+            },
+          },
         },
       ];
     case 'dev':
       return [
         ...(options.skipBootstrap ? [] : [sharedBuild, agentCliBuild]),
-        { name: 'running', specification: resolveConcurrentlyCommand() },
+        {
+          name: 'running',
+          specification: resolveConcurrentlyCommand(options.localDomainEnabled),
+        },
       ];
     default:
       throw new Error(`Unsupported supervisor task: ${options.task}`);
@@ -662,11 +677,16 @@ export function createExecutionPhases(options) {
 }
 
 function spawnManagedChild(specification, cwd) {
+  const environment = { ...process.env, ...specification.environment };
+  // `concurrently` sets FORCE_COLOR for its named children. Passing an inherited
+  // NO_COLOR alongside it makes every Node child emit a warning before useful
+  // startup output, so the supervisor owns this normalization once.
+  environment.NO_COLOR = undefined;
   return spawn(specification.command, specification.arguments, {
     cwd,
     detached: process.platform !== 'win32',
     stdio: 'inherit',
-    env: { ...process.env, ...specification.environment },
+    env: environment,
   });
 }
 
@@ -708,7 +728,10 @@ export async function runSupervisor(options) {
 
   try {
     await assertDevPortsAvailable(options.task);
-    for (const phase of createExecutionPhases(options)) {
+    const localDomainEnabled = detectLocalDomain({
+      task: options.task,
+    });
+    for (const phase of createExecutionPhases({ ...options, localDomainEnabled })) {
       if (forwardedSignal) break;
       activeChild = spawnManagedChild(phase.specification, repositoryRoot);
       lease.update({
