@@ -2,12 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { BuddiesStore } from '@nbardy/buddies';
 import type { ZodTypeAny } from 'zod';
-import {
-  BuddyBuilderService,
-  type BuddyBuilderStore,
-  CreateBuddyInputSchema,
-  serializeBuddyCreated,
-} from './builder';
+import type { BuddyBuilderStore } from './builder';
+import { createBuddyBuilderMcpServer } from './builder-mcp-server';
 import type { BuddiesStorePort } from './contract';
 import {
   type BuddyOperationContext,
@@ -82,94 +78,6 @@ interface ToolRegistrationPort {
     },
     callback: (input: unknown) => Promise<Record<string, unknown>>
   ): unknown;
-}
-
-export function createBuddyBuilderMcpServer(
-  store: BuddyBuilderStore,
-  conversationId: string
-): McpServer {
-  const builder = new BuddyBuilderService(store, conversationId);
-  const server = new McpServer({
-    name: 'unleashd-buddy-builder',
-    version: '1.0.0',
-  });
-  const toolServer = server as unknown as ToolRegistrationPort;
-  toolServer.registerTool(
-    'list_workspaces',
-    {
-      description: 'List the available home workspaces for a new Buddy.',
-      inputSchema: BuddyOperationInputSchemas['buddy.get_inbox'],
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async () => {
-      const workspaces = builder.listWorkspaces();
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(workspaces, null, 2) }],
-        structuredContent: { workspaces },
-      };
-    }
-  );
-  toolServer.registerTool(
-    'list_buddies',
-    {
-      description:
-        'List existing Buddies, optionally within one workspace, before proposing a duplicate role.',
-      inputSchema: CreateBuddyInputSchema.pick({ workspaceId: true }).partial(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (input: unknown) => {
-      const parsed = CreateBuddyInputSchema.pick({ workspaceId: true }).partial().parse(input);
-      const buddies = builder.listBuddies(parsed.workspaceId);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(buddies, null, 2) }],
-        structuredContent: { buddies },
-      };
-    }
-  );
-  toolServer.registerTool(
-    'create_buddy',
-    {
-      description:
-        'Atomically create or replay one Buddy identity, home workspace, and execution profile.',
-      inputSchema: CreateBuddyInputSchema,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (input: unknown) => {
-      try {
-        const result = builder.createBuddy(input);
-        return {
-          content: [{ type: 'text' as const, text: serializeBuddyCreated(result) }],
-          structuredContent: result,
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text' as const,
-              text: error instanceof Error ? error.message : String(error),
-            },
-          ],
-        };
-      }
-    }
-  );
-  return server;
 }
 
 export function createBuddyMcpServer(

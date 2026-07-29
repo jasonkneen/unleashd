@@ -32,6 +32,7 @@ import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../store
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
+import { BuddyBuilderResultCard } from './buddies/BuddyBuilderResultCard';
 import { ConversationConfigPicker } from './ConversationConfigPicker';
 import { MergeProgressStrip } from './MergeProgressStrip';
 import { PromptPalette } from './PromptPalette';
@@ -827,6 +828,14 @@ export function Chat() {
             swarmId={conversation.swarmId ?? null}
             buddyContext={buddyContext}
           />
+          {conversation.purpose === 'buddy_builder' && (
+            <div className="buddy-builder-result-slot">
+              <BuddyBuilderResultCard
+                conversationId={conversation.id}
+                isRunning={conversation.isRunning}
+              />
+            </div>
+          )}
           {isStreaming && (
             <div className="typing-indicator-overlay">
               <span className="typing-dot" />

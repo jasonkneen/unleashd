@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { BuddyAutomationsTab } from './buddies/BuddyAutomationsTab';
+import { BuddyDirectory } from './buddies/BuddyDirectory';
 import { BuddyExecutionProfile } from './buddies/BuddyExecutionProfile';
 import { buddyApi as api, asArray } from './buddies/api';
 import {
@@ -20,11 +21,7 @@ import {
   type WorkStatus,
   type Workspace,
 } from './buddies/types';
-import {
-  buddyCardMetrics,
-  buddyProjectTodoProgress,
-  selectDirectoryEmployees,
-} from './buddies/ui-contract';
+import { buddyProjectTodoProgress } from './buddies/ui-contract';
 import './BuddiesDashboard.css';
 
 const STATUS_LABELS: Record<WorkStatus, string> = {
@@ -50,98 +47,9 @@ function compactPath(path: string | null): string {
   return path.replace(/^\/Users\/[^/]+\/git\//, '~/git/');
 }
 
-function EmployeeDirectory({
-  overview,
-  onOpen,
-  onNew,
-  creating,
-}: {
-  overview: BuddyOverview;
-  onOpen: (id: string) => void;
-  onNew: () => void;
-  creating: boolean;
-}) {
-  const visibleBuddies = selectDirectoryEmployees(overview);
-  return (
-    <main className="buddies-directory-content">
-      <div className="buddy-card-grid">
-        <button
-          type="button"
-          className="buddy-directory-card buddy-directory-card--new"
-          onClick={onNew}
-          disabled={creating}
-        >
-          {creating ? 'Opening…' : 'New'}
-        </button>
-        {visibleBuddies.map((employeeOverview) => {
-          const { buddy: employee, workspaces, team } = employeeOverview;
-          const metrics = buddyCardMetrics(employeeOverview);
-          return (
-            <article
-              key={employee.id}
-              className="buddy-directory-card"
-              role="link"
-              tabIndex={0}
-              onClick={() => onOpen(employee.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onOpen(employee.id);
-                }
-              }}
-            >
-              <div className="buddy-directory-card-info">
-                <div className="buddy-avatar" aria-hidden="true">
-                  {initials(employee.name)}
-                </div>
-                <div className="buddy-directory-card-copy">
-                  <h2>{employee.name}</h2>
-                  <p>{employee.role}</p>
-                  <div className="buddy-project-chips">
-                    {workspaces.map((workspace) => (
-                      <span key={workspace.id}>{workspace.name}</span>
-                    ))}
-                  </div>
-                  <div className="buddy-card-stats">
-                    {team.length > 0 && (
-                      <div>
-                        <strong>{metrics.team}</strong>
-                        <span>team</span>
-                      </div>
-                    )}
-                    <div>
-                      <strong>{metrics.open}</strong>
-                      <span>open</span>
-                    </div>
-                    <div>
-                      <strong>{metrics.active}</strong>
-                      <span>active</span>
-                    </div>
-                    <div>
-                      <strong>{metrics.blocked}</strong>
-                      <span>blocked</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="buddy-directory-card-actions">
-                <span className={`buddy-presence buddy-presence--${employee.status}`}>
-                  {employee.status}
-                </span>
-                <span className="buddy-directory-card-link">Open employee →</span>
-              </div>
-            </article>
-          );
-        })}
-      </div>
-    </main>
-  );
-}
-
 export function BuddiesDashboard() {
   const navigate = useNavigate();
   const { buddyId } = useParams();
-  const [searchParams] = useSearchParams();
   const [overview, setOverview] = useState<BuddyOverview | null>(null);
   const [employee, setEmployee] = useState<EmployeeRecord | null>(null);
   const [memory, setMemory] = useState<BuddyMemory>(EMPTY_MEMORY);
@@ -154,7 +62,6 @@ export function BuddiesDashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
-  const startedConversationRef = useRef<string | null>(null);
 
   const loadDirectory = useCallback(
     async (signal?: AbortSignal, generation = loadGenerationRef.current) => {
@@ -415,32 +322,27 @@ export function BuddiesDashboard() {
     [employee, navigate]
   );
 
-  useEffect(() => {
-    if (
-      !buddyId ||
-      searchParams.get('startConversation') !== '1' ||
-      !employee ||
-      !workspace ||
-      startedConversationRef.current === buddyId
-    ) {
-      return;
-    }
-    startedConversationRef.current = buddyId;
-    navigate(`/buddies/${encodeURIComponent(buddyId)}`, { replace: true });
-    talk(workspace);
-  }, [buddyId, employee, navigate, searchParams, talk, workspace]);
-
   const openBuddyBuilder = async () => {
     setBusy('buddy-builder');
     setError(null);
     try {
+      // IDs are client-owned for retry safety: a lost HTTP response can replay
+      // the same creation instead of leaving duplicate empty Builder threads.
+      const conversationId = crypto.randomUUID();
       const result = await api<{ conversationId?: string; conversation?: { id?: string } }>(
         '/api/buddies/builder',
-        { method: 'POST' }
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversationId,
+            commandId: crypto.randomUUID(),
+          }),
+        }
       );
-      const conversationId = result.conversationId ?? result.conversation?.id;
-      if (!conversationId) throw new Error('Buddy Builder did not return a conversation');
-      navigate(`/chat/${conversationId}`);
+      const confirmedId = result.conversationId ?? result.conversation?.id;
+      if (!confirmedId) throw new Error('Buddy Builder did not return a conversation');
+      navigate(`/chat/${confirmedId}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -475,7 +377,7 @@ export function BuddiesDashboard() {
     return (
       <div className="buddies-dashboard">
         {error && <div className="buddies-error">{error}</div>}
-        <EmployeeDirectory
+        <BuddyDirectory
           overview={overview}
           onOpen={(id) => navigate(`/buddies/${id}`)}
           onNew={() => void openBuddyBuilder()}

@@ -58,6 +58,7 @@ import { isProcessAlive, readLatestSwarmRuntime } from './swarm/runtime';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
 
 import { auditLocalAgents } from './audit.js';
+import { BuddyBuilderService, type BuddyBuilderStore } from './buddies/builder';
 import { createBuddiesIntegration } from './buddies/integration';
 import { registerBuddyRoutes } from './buddies/routes';
 import { BuddyScheduler, nextAutomationRunAt } from './buddies/scheduler';
@@ -210,6 +211,11 @@ registerBuddyRoutes(app, {
       conversationId,
       workingDirectory: process.cwd(),
     }),
+  getBuilderResult: async (conversationId) =>
+    new BuddyBuilderService(
+      (await getBuddiesStore()) as unknown as BuddyBuilderStore,
+      conversationId
+    ).getResult(),
   sendError: sendBuddiesError,
   getNextAutomationRunAt: nextAutomationRunAt,
   createId: uuidv4,

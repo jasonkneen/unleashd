@@ -1,5 +1,11 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
+  type BuddyBuilderResult,
+  type BuddySummary,
+  type BuddyWorkspaceSummary,
   ProviderSchema,
   defaultReasoningEffortForProvider,
   isEffortValidForProvider,
@@ -8,12 +14,12 @@ import {
 } from '@unleashd/shared';
 import { z } from 'zod';
 
-export const BUDDY_CREATED_START = '<!-- unleashd:buddy-created -->';
-export const BUDDY_CREATED_END = '<!-- /unleashd:buddy-created -->';
-
 export const CreateBuddyInputSchema = z
   .object({
-    workspaceId: z.string().min(1),
+    workspaceId: z.string().min(1).optional(),
+    workspacePath: z.string().min(1).optional(),
+    workspaceName: z.string().min(1).max(120).optional(),
+    additionalWorkspacePaths: z.array(z.string().min(1)).max(16).optional(),
     name: z.string().min(1).max(120),
     role: z.string().min(1).max(240),
     provider: ProviderSchema.optional(),
@@ -24,31 +30,30 @@ export const CreateBuddyInputSchema = z
 
 export type CreateBuddyInput = z.infer<typeof CreateBuddyInputSchema>;
 
-export interface BuddyBuilderRecord {
-  id: string;
-  project_id: string;
-  slug: string;
-  name: string;
-  role: string;
-  status: string;
-  provider: string | null;
-  model: string | null;
-  reasoning_effort: string | null;
-}
+export type BuddyBuilderRecord = BuddySummary;
+export type BuddyBuilderWorkspace = BuddyWorkspaceSummary;
 
-export interface BuddyBuilderWorkspace {
-  id: string;
-  slug: string;
-  name: string;
-  root_path: string;
+interface StoredBuilderResult {
+  buddy: BuddyBuilderRecord;
+  homeWorkspace: BuddyBuilderWorkspace;
+  workspaces: BuddyBuilderWorkspace[];
+  requestFingerprint: string;
+  replayed: boolean;
 }
 
 export interface BuddyBuilderStore {
   listWorkspaces(): BuddyBuilderWorkspace[];
   listBuddies(workspace?: string): BuddyBuilderRecord[];
-  getBuddy(idOrSlug: string, workspace?: string): BuddyBuilderRecord | null;
-  createBuddy(input: {
+  createWorkspace(input: {
+    name: string;
+    rootPath: string;
+    slug?: string;
+  }): BuddyBuilderWorkspace;
+  createBuddyFromBuilder(input: {
+    conversationId: string;
+    requestFingerprint: string;
     project: string;
+    additionalWorkspaces?: string[];
     slug: string;
     name: string;
     role: string;
@@ -56,15 +61,8 @@ export interface BuddyBuilderStore {
     provider: string;
     model?: string;
     reasoningEffort?: string;
-  }): BuddyBuilderRecord;
-}
-
-export interface BuddyCreatedResult {
-  type: 'buddy_created';
-  buddy: BuddyBuilderRecord & {
-    workspace: BuddyBuilderWorkspace;
-  };
-  route: string;
+  }): StoredBuilderResult;
+  getBuddyBuilderResult(conversationId: string): StoredBuilderResult | null;
 }
 
 function creationSlug(conversationId: string): string {
@@ -72,44 +70,42 @@ function creationSlug(conversationId: string): string {
   return `builder-${suffix}`;
 }
 
-function sameCreation(
-  existing: BuddyBuilderRecord,
-  requested: {
-    name: string;
-    role: string;
-    provider: string;
-    model: string | null;
-    reasoningEffort: string | null;
+function resolveDirectory(input: string): string {
+  const expanded =
+    input === '~' || input.startsWith(`~${path.sep}`)
+      ? path.join(os.homedir(), input.slice(2))
+      : input;
+  if (!path.isAbsolute(expanded)) {
+    throw new Error(`Workspace path must be absolute: ${input}`);
   }
-): boolean {
-  return (
-    existing.name === requested.name &&
-    existing.role === requested.role &&
-    existing.provider === requested.provider &&
-    existing.model === requested.model &&
-    existing.reasoning_effort === requested.reasoningEffort
-  );
+  const resolved = fs.realpathSync(expanded);
+  if (!fs.statSync(resolved).isDirectory()) {
+    throw new Error(`Workspace path is not a directory: ${input}`);
+  }
+  if (resolved === path.parse(resolved).root) {
+    throw new Error('The filesystem root cannot be used as a Buddy workspace');
+  }
+  return resolved;
 }
 
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /unique constraint failed:\s*buddies\.project_id,\s*buddies\.slug/i.test(error.message)
-  );
+function workspaceName(rootPath: string, requested?: string): string {
+  return requested?.trim() || path.basename(rootPath);
 }
 
-export function serializeBuddyCreated(result: BuddyCreatedResult): string {
-  return `${BUDDY_CREATED_START}\n${JSON.stringify(result)}\n${BUDDY_CREATED_END}`;
+function canonicalResult(conversationId: string, result: StoredBuilderResult): BuddyBuilderResult {
+  return {
+    conversationId,
+    buddy: result.buddy,
+    homeWorkspace: result.homeWorkspace,
+    workspaces: result.workspaces,
+  };
 }
 
 /**
  * Application boundary for the Buddy Builder. The model receives three narrow
- * tools; this service owns validation, defaults, idempotency, and store writes.
- *
- * Idempotency is represented by the durable `(workspace, slug)` uniqueness
- * already owned by BuddiesStore. The persisted Builder conversation id derives
- * that slug, so a retry replays after either a process or server restart and a
- * single Builder thread cannot silently hire multiple people.
+ * tools; this service owns validation and delegates the one durable mutation to
+ * the store. Keep the result server-readable: the UI must never depend on the
+ * model copying a special marker into prose.
  */
 export class BuddyBuilderService {
   constructor(
@@ -131,12 +127,46 @@ export class BuddyBuilderService {
     return this.store.listBuddies(workspaceId);
   }
 
-  createBuddy(input: unknown): BuddyCreatedResult {
+  getResult(): BuddyBuilderResult | null {
+    const result = this.store.getBuddyBuilderResult(this.conversationId);
+    return result ? canonicalResult(this.conversationId, result) : null;
+  }
+
+  private resolveWorkspace(input: {
+    workspaceId?: string;
+    workspacePath?: string;
+    workspaceName?: string;
+  }): BuddyBuilderWorkspace {
+    if (Boolean(input.workspaceId) === Boolean(input.workspacePath)) {
+      throw new Error('Provide exactly one of workspaceId or workspacePath');
+    }
+    if (input.workspaceId) {
+      const existing = this.store
+        .listWorkspaces()
+        .find((workspace) => workspace.id === input.workspaceId);
+      if (!existing) throw new Error(`Workspace not found: ${input.workspaceId}`);
+      return existing;
+    }
+
+    const rootPath = resolveDirectory(input.workspacePath as string);
+    const existing = this.store.listWorkspaces().find((workspace) => {
+      try {
+        return fs.realpathSync(workspace.root_path) === rootPath;
+      } catch {
+        return path.resolve(workspace.root_path) === rootPath;
+      }
+    });
+    return (
+      existing ??
+      this.store.createWorkspace({
+        name: workspaceName(rootPath, input.workspaceName),
+        rootPath,
+      })
+    );
+  }
+
+  createBuddy(input: unknown): BuddyBuilderResult {
     const parsed = CreateBuddyInputSchema.parse(input);
-    const workspace = this.store
-      .listWorkspaces()
-      .find((candidate) => candidate.id === parsed.workspaceId);
-    if (!workspace) throw new Error(`Workspace not found: ${parsed.workspaceId}`);
 
     const provider = parsed.provider ?? 'codex';
     const requestedModel = parsed.model ?? (provider === 'codex' ? 'gpt-5.6-luna' : undefined);
@@ -151,46 +181,54 @@ export class BuddyBuilderService {
       throw new Error(`Invalid ${provider} reasoning effort: ${reasoningEffort}`);
     }
 
+    const homeReference = parsed.workspaceId
+      ? { id: parsed.workspaceId }
+      : { path: resolveDirectory(parsed.workspacePath as string) };
+    const additionalPaths = [
+      ...new Set((parsed.additionalWorkspacePaths ?? []).map(resolveDirectory)),
+    ].sort();
     const requested = {
       name: parsed.name.trim(),
       role: parsed.role.trim(),
       provider,
       model: model ?? null,
       reasoningEffort: reasoningEffort ?? null,
+      homeWorkspace: homeReference,
+      additionalWorkspacePaths: additionalPaths,
     };
-    const slug = creationSlug(this.conversationId);
-    let buddy = this.store.listBuddies().find((candidate) => candidate.slug === slug) ?? null;
-    if (buddy && buddy.project_id !== workspace.id) {
-      throw new Error(
-        'This Buddy Builder conversation already created a Buddy in another workspace'
-      );
-    }
-    if (!buddy) {
-      try {
-        buddy = this.store.createBuddy({
-          project: workspace.id,
-          slug,
-          name: requested.name,
-          role: requested.role,
-          status: 'active',
-          provider,
-          model,
-          reasoningEffort,
-        });
-      } catch (error) {
-        if (!isUniqueConstraintError(error)) throw error;
-        buddy = this.store.getBuddy(slug, workspace.id);
-        if (!buddy) throw error;
+    const requestFingerprint = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(requested))
+      .digest('hex');
+    const existing = this.store.getBuddyBuilderResult(this.conversationId);
+    if (existing) {
+      if (existing.requestFingerprint !== requestFingerprint) {
+        throw new Error('This Buddy Builder conversation already created a different Buddy');
       }
+      return canonicalResult(this.conversationId, existing);
     }
-    if (!sameCreation(buddy, requested)) {
-      throw new Error('This Buddy Builder conversation already created a different Buddy');
-    }
-    return {
-      type: 'buddy_created',
-      buddy: { ...buddy, workspace },
-      route: `/buddies/${buddy.id}`,
-    };
+
+    const workspace = this.resolveWorkspace(parsed);
+    const additionalWorkspaces = additionalPaths.map((workspacePath) =>
+      this.resolveWorkspace({ workspacePath })
+    );
+    const slug = creationSlug(this.conversationId);
+    return canonicalResult(
+      this.conversationId,
+      this.store.createBuddyFromBuilder({
+        conversationId: this.conversationId,
+        requestFingerprint,
+        project: workspace.id,
+        additionalWorkspaces: additionalWorkspaces.map((candidate) => candidate.id),
+        slug,
+        name: requested.name,
+        role: requested.role,
+        status: 'active',
+        provider,
+        model: model ?? undefined,
+        reasoningEffort: reasoningEffort ?? undefined,
+      })
+    );
   }
 }
 
@@ -198,9 +236,11 @@ export const BUDDY_BUILDER_BRIEFING = [
   'You are the Unleashd Buddy Builder. Help the user hire one durable Buddy through conversation.',
   'Use only the native list_workspaces, list_buddies, and create_buddy tools for Buddy state.',
   'Inspect available workspaces and existing Buddies before proposing a hire.',
-  'Infer a concise name and role. Ask only when the home workspace or intended role is materially ambiguous.',
-  'Creation includes identity, one home workspace, and an execution profile only.',
+  'A workspace is durable context, not an approval allowlist. If the requested home folder exists but is not registered, pass its absolute path as workspacePath and the server will register it.',
+  'Use additionalWorkspacePaths only for other existing folders the user explicitly placed in scope.',
+  'Infer a concise name and role. Ask only when the home folder or intended role is materially ambiguous.',
+  'Creation includes identity, one home workspace, explicit additional workspace assignments, and an execution profile only.',
   'Do not create managers, automations, files, skills, projects, permissions, sends, or production changes.',
   'The server defaults new Buddies to Codex, gpt-5.6-luna, high. Omit profile fields unless the user requests an exception.',
-  `After create_buddy succeeds, copy its exact ${BUDDY_CREATED_START} result block into the final response without a Markdown code fence.`,
+  'After create_buddy succeeds, briefly confirm the hire. The application renders the canonical Buddy card separately.',
 ].join('\n');

@@ -74,21 +74,26 @@
   background: var(--bg-raised-1);
 }
 
-.buddy-created-card__actions a {
+.buddy-created-card__actions a,
+.buddy-created-card__actions button {
   padding: 7px 11px;
   border: 1px solid var(--border-default);
+  background: transparent;
   color: var(--text-secondary);
   text-decoration: none;
+  font: inherit;
   font-size: 11px;
+  cursor: pointer;
 }
 
-.buddy-created-card__actions a:last-child {
+.buddy-created-card__actions > :last-child {
   border-color: color-mix(in srgb, var(--ai) 55%, transparent);
   color: var(--ai-bright);
   background: var(--ai-glow);
 }
 
-.buddy-created-card__actions a:hover {
+.buddy-created-card__actions a:hover,
+.buddy-created-card__actions button:hover {
   border-color: var(--ai);
   color: var(--ai-bright);
 }

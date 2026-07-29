@@ -20,9 +20,10 @@ with `Open Buddy` and `Start conversation`.
 - The Builder MCP exposes only `list_workspaces`, `list_buddies`, and
   `create_buddy`. Ordinary and Buddy-owned conversations never receive these
   tools.
-- Creation is limited to identity, one home workspace, and an execution
-  profile. Managers, files, skills, automations, extra permissions, sends, and
-  production changes remain outside this flow.
+- Creation is limited to identity, a home workspace, explicit additional
+  workspace assignments, and an execution profile. Managers, files, skills,
+  automations, extra permissions, sends, and production changes remain outside
+  this flow.
 - The trusted Builder conversation ID is the durable idempotency key. A retry
   of the same normalized request replays the same Buddy; a changed request or
   workspace conflicts. The model cannot supply or replace the key.
@@ -30,19 +31,16 @@ with `Open Buddy` and `Start conversation`.
 ## Result contract
 
 `create_buddy` returns the canonical created record in structured content and
-an existing text-envelope compatibility block:
+persists the same record atomically with the Buddy and workspace assignments.
+The Builder conversation ID keys that record. After the turn completes, the
+client reads `GET /api/buddies/builder/:conversationId/result`, validates the
+shared schema, and renders the dedicated card. The model only confirms the hire
+in ordinary prose; it never transports application state in a magic marker.
 
-```text
-<!-- unleashd:buddy-created -->
-{"type":"buddy_created","buddy":{...},"route":"/buddies/:id"}
-<!-- /unleashd:buddy-created -->
-```
-
-The client accepts the block only when the route exactly matches the returned
-Buddy ID. It removes the envelope from prose and renders the dedicated card.
-Starting a conversation resolves the Buddy's canonical workspace and runtime
-profile through the existing Buddy detail flow. The temporary query flag is
-removed before navigation so browser Back cannot create duplicate chats.
+Starting a conversation uses the result's canonical workspace and runtime
+profile directly through the existing conversation action. There is no
+temporary query flag or second detail-page lifecycle, so browser Back cannot
+create duplicate chats.
 
 ## Review decisions
 
@@ -63,5 +61,5 @@ removed before navigation so browser Back cannot create duplicate chats.
 - Missing workspace, invalid model/effort, and changed retries fail before a
   second Buddy is created.
 - Successful retries return the same Buddy.
-- The result card survives persisted transcript reload, opens the Buddy, and
-  starts a correctly profiled conversation once.
+- The result card survives server restart without reparsing the transcript,
+  opens the Buddy, and starts a correctly profiled conversation once.

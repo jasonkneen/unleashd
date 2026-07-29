@@ -57,9 +57,6 @@ importers:
       '@unleashd/shared':
         specifier: workspace:*
         version: link:../shared
-      esbuild:
-        specifier: ^0.27.3
-        version: 0.27.3
       highlight.js:
         specifier: ^11.11.1
         version: 11.11.1
@@ -526,7 +523,7 @@ packages:
         optional: true
 
   '@nbardy/buddies@file:vendor/nbardy-buddies-0.1.0.tgz':
-    resolution: {integrity: sha512-sThX2zlB4wSGqtAWOPj6ZRhv3xLl6XzoQITQlXzh2Mr5AEAEx/FfEY1a5DfvRkejE4//voiLkhIGnIovzJIsJA==, tarball: file:vendor/nbardy-buddies-0.1.0.tgz}
+    resolution: {integrity: sha512-VCYLeM7TOrtbNdjB5ayyZ0dw2t3S3JnxopOc+LLOWCJ6n82U66absiQdLeh/hX02wzvXu0KnohsaO+DL9l3+tg==, tarball: file:vendor/nbardy-buddies-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.5'}
     hasBin: true

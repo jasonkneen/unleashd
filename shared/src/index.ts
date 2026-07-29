@@ -31,6 +31,7 @@ import {
 } from './provider-catalog.js';
 
 export * from './conversation-config.js';
+export * from './buddy.js';
 export * from './provider-catalog.js';
 export * from './legacy/codex-composite-model.js';
 

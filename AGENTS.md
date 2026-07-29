@@ -404,6 +404,22 @@ Relevant files:
 
 ## Test Strategy: Useful vs Overkill
 
+### Keep features lean
+
+- Prefer one integration test through the real boundary over many tests of
+  helpers, mocks, source text, CSS strings, or component structure.
+- Never read TSX/CSS source in a test to assert labels, ordering, class names,
+  or implementation details. Exercise the rendered/API behavior or omit the
+  test.
+- Do not extract trivial projection helpers merely to unit-test them.
+- Wire payloads get one shared Zod schema; do not redefine matching client and
+  server interfaces.
+- Durable application state is authoritative. Do not ask a model to copy a
+  magic marker into prose when the UI can read the canonical API/store result.
+- A small feature should use the existing creation, persistence, and navigation
+  paths. If it needs a parallel transport or lifecycle, simplify the design
+  before adding safety wrappers and tests.
+
 ### High-value, low-cost
 - Contract tests for builder + provider command specs (`agent-cli-tool`).
 - Adapter loader/poller integration fixture test.

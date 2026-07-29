@@ -41,6 +41,9 @@
   border-left: 4px solid var(--ai);
   border-radius: 2px;
   background: var(--bg-card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: all 0.2s;
 }

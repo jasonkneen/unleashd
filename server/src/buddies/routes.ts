@@ -1,4 +1,5 @@
 import {
+  type BuddyBuilderResult,
   type BuddyContext,
   ProviderSchema,
   isEffortValidForProvider,
@@ -10,8 +11,8 @@ import type { Express, Request, Response } from 'express';
 import type { BuddiesStorePort, BuddyAutomation, BuddyAutomationRun } from './contract';
 import { BUDDY_REVIEW_RESULT_INSTRUCTIONS } from './integration';
 import {
-  resolveDelegatedBuddyOperations,
   REVIEW_BUDDY_OPERATIONS,
+  resolveDelegatedBuddyOperations,
 } from './operations';
 
 export interface BuddyConversationView {
@@ -36,6 +37,7 @@ export interface BuddyRouteDependencies {
     commandId: string;
     conversationId?: string;
   }): Promise<BuddyConversationView>;
+  getBuilderResult?(conversationId: string): Promise<BuddyBuilderResult | null>;
   sendError(response: Response, error: unknown, fallbackStatus: number): void;
   getNextAutomationRunAt(automation: BuddyAutomation, after: Date): string;
   createId(): string;
@@ -47,6 +49,7 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
     getScheduler,
     createConversation,
     createBuilderConversation,
+    getBuilderResult,
     sendError,
     getNextAutomationRunAt,
     createId,
@@ -94,6 +97,23 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
         conversationId: conversation.id,
         conversation: conversation.toJSON(),
       });
+    } catch (error) {
+      sendError(res, error, 400);
+    }
+  });
+
+  app.get('/api/buddies/builder/:conversationId/result', async (req: Request, res: Response) => {
+    try {
+      if (!getBuilderResult) {
+        res.status(503).json({ error: 'Buddy Builder is unavailable' });
+        return;
+      }
+      const result = await getBuilderResult(req.params.conversationId);
+      if (!result) {
+        res.status(404).json({ error: 'Buddy has not been created yet' });
+        return;
+      }
+      res.json(result);
     } catch (error) {
       sendError(res, error, 400);
     }

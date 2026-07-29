@@ -282,6 +282,15 @@
   background: var(--bg-content);
 }
 
+.buddy-builder-result-slot {
+  padding: 0 32px 16px 16px;
+  background: var(--bg-content);
+}
+
+.buddy-builder-result-slot:empty {
+  display: none;
+}
+
 .messages-container {
   flex: 1;
   overflow-y: auto;
