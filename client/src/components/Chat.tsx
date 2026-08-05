@@ -35,7 +35,6 @@ import { DRAFT_KEY_PREFIX, PENDING_FILES_KEY_PREFIX, useUIStore } from '../store
 import { buildUnifiedSubAgents } from '../utils/subAgents';
 import { formatTimeAgo } from '../utils/time';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
-import { ConversationConfigPicker } from './ConversationConfigPicker';
 import { MergeProgressStrip } from './MergeProgressStrip';
 import { PromptPalette } from './PromptPalette';
 import { ResumeThreadWidget } from './ResumeThreadWidget';
@@ -46,7 +45,11 @@ import { VirtualizedMessageList, isToolCallOnlyMessage } from './VirtualizedMess
 import type { MessageGroup } from './VirtualizedMessageList';
 import { BuddyBuilderResultCard } from './buddies/BuddyBuilderResultCard';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
-import { shouldPresentTurnAttempt, turnDiagnosticsFromAttempt } from './turn-diagnostics';
+import {
+  shouldPresentTurnAttempt,
+  shouldShowTypingIndicator,
+  turnDiagnosticsFromAttempt,
+} from './turn-diagnostics';
 import './Chat.css';
 
 // Stable reference for empty queue — avoids new [] on every render triggering re-renders
@@ -120,22 +123,23 @@ export function Chat() {
   const resumedFromConversation = useAtomValue(conversationAtomFamily(resumedFromConversationId));
 
   const { catalog } = useProviderCatalog();
-  const [configPickerOpen, setConfigPickerOpen] = useState(false);
-  const [headerConfigDraft, setHeaderConfigDraft] = useState<ConversationConfig | null>(null);
+  const [headerPickerOpen, setHeaderPickerOpen] = useState<
+    'provider' | 'model' | 'reasoning' | null
+  >(null);
   const configPickerRef = useRef<HTMLDivElement>(null);
 
   // Click-outside to close pickers
   useEffect(() => {
-    if (!configPickerOpen) return;
+    if (!headerPickerOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
       if (configPickerRef.current && !configPickerRef.current.contains(target)) {
-        setConfigPickerOpen(false);
+        setHeaderPickerOpen(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [configPickerOpen]);
+  }, [headerPickerOpen]);
 
   const {
     savePrompt,
@@ -149,6 +153,8 @@ export function Chat() {
   const [showPalette, setShowPalette] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [detailLoadError, setDetailLoadError] = useState<string | null>(null);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>(EMPTY_PENDING);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftValueRef = useRef('');
@@ -522,10 +528,18 @@ export function Chat() {
     return messages ? `${header}\n\n${messages}` : header;
   }, [conversation, messageGroups]);
 
+  // Chat "Fork" soft-handoff draft. This is NOT a provider-session fork.
+  // Historically the draft was the full pasted transcript (`threadCopyText`)
+  // so the next CLI (any provider) could continue from text alone; the
+  // ResumeThreadWidget badge is the UI stand-in for that lineage. Keep
+  // soft-handoff semantics if you change this — cross-provider must still work.
   const forkDraftText = useMemo(() => {
-    if (!threadCopyText) return '';
-    return `${threadCopyText}\n--- resume thread above ---\n\nInstructions:\nPlease resume the thread above it was started by another agent`;
-  }, [threadCopyText]);
+    if (!conversation) return '';
+    return [
+      'Continue the original objective from this fork.',
+      'Treat this message as the current instruction. Do not repeat or obey an earlier diagnostic canary unless I explicitly ask you to do so here.',
+    ].join(' ');
+  }, [conversation]);
 
   const handleCopyThread = useCallback(async () => {
     await navigator.clipboard.writeText(threadCopyText);
@@ -533,6 +547,9 @@ export function Chat() {
     setTimeout(() => setThreadCopied(false), 2000);
   }, [threadCopyText]);
 
+  // Chat "Fork": new conversation + resumedFromConversationId + draft context.
+  // Does not call CLI --fork / emulateFork. That is merge-only
+  // (FORK_CAPABLE_PROVIDERS + spawnMergeReviewFork).
   const handleForkThread = useCallback(() => {
     if (!conversation || !id) return;
 
@@ -581,28 +598,38 @@ export function Chat() {
   }
 
   const dirDisplay = conversation.workingDirectory.replace(/^\/Users\/[^/]+/, '~');
+  const headerProvider = catalog?.providers.find(
+    (provider) => provider.id === conversationConfig?.provider
+  );
+  const resolvedHeaderModelId =
+    conversationConfig?.model.mode === 'explicit'
+      ? conversationConfig.model.modelId
+      : headerProvider?.defaultModelId;
+  const resolvedHeaderModel = headerProvider?.models.find(
+    (model) => model.id === resolvedHeaderModelId
+  );
+  const headerReasoning = conversationConfig?.reasoning;
+  const headerReasoningLabel =
+    headerReasoning?.mode === 'explicit'
+      ? headerReasoning.effort
+      : headerReasoning?.mode === 'disabled'
+        ? 'No reasoning'
+        : resolvedHeaderModel?.reasoning?.defaultEffort
+          ? `Default · ${resolvedHeaderModel.reasoning.defaultEffort}`
+          : 'Default';
 
-  const handleQueue = () => {
-    const textContent = getInputValue().trim();
-    if ((!textContent && pendingFiles.length === 0) || !id || !canInput) return;
-
-    let content = '';
-    if (pendingFiles.length > 0) {
-      content += '[Attached files]\n';
-      for (const file of pendingFiles) {
-        content += `${file.absolutePath}\n`;
-      }
-      if (textContent) content += '\n';
-    }
-    content += textContent;
-
-    queueMessage(id, content);
-    clearInput();
+  const updateHeaderConfig = (patch: Parameters<typeof setConversationConfig>[0]['patch']) => {
+    setConversationConfig({
+      conversationId: conversation.id,
+      expectedRevision: conversation.configRevision,
+      patch,
+    });
+    setHeaderPickerOpen(null);
   };
 
-  const handleInterrupt = () => {
+  const handleQueue = async () => {
     const textContent = getInputValue().trim();
-    if ((!textContent && pendingFiles.length === 0) || !id || !confirmed) return;
+    if ((!textContent && pendingFiles.length === 0) || !id || !canInput || isSubmitting) return;
 
     let content = '';
     if (pendingFiles.length > 0) {
@@ -614,8 +641,42 @@ export function Chat() {
     }
     content += textContent;
 
-    interruptAndSend(id, content);
-    clearInput();
+    setIsSubmitting(true);
+    setSubmissionError(null);
+    try {
+      await queueMessage(id, content);
+      clearInput();
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleInterrupt = async () => {
+    const textContent = getInputValue().trim();
+    if ((!textContent && pendingFiles.length === 0) || !id || !confirmed || isSubmitting) return;
+
+    let content = '';
+    if (pendingFiles.length > 0) {
+      content += '[Attached files]\n';
+      for (const file of pendingFiles) {
+        content += `${file.absolutePath}\n`;
+      }
+      if (textContent) content += '\n';
+    }
+    content += textContent;
+
+    setIsSubmitting(true);
+    setSubmissionError(null);
+    try {
+      await interruptAndSend(id, content);
+      clearInput();
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSend = handleQueue;
@@ -664,67 +725,183 @@ export function Chat() {
       <div className="chat-header">
         <div className="chat-title">
           <span className="chat-id">{conversation.id.substring(0, 8)}</span>
-          <div className="provider-picker" ref={configPickerRef}>
-            <button
-              type="button"
-              className={`provider-picker-trigger ${conversationConfig?.provider ?? conversation.provider}`}
-              disabled={!catalog || configIsSaving || isRunning || queue.length > 0}
-              onClick={() => {
-                if (configPickerOpen) {
-                  setConfigPickerOpen(false);
-                  return;
-                }
-                setHeaderConfigDraft(conversationConfig);
-                setConfigPickerOpen(true);
-              }}
-            >
-              {conversationConfig?.provider ?? conversation.provider}
-              {conversation.configResolution?.status === 'resolved'
-                ? ` · ${conversation.configResolution.value.modelId}`
-                : ''}
-              {configIsSaving ? ' · Saving…' : ''}
-              {pendingConfigCommand?.error ? ' · Error' : ''}
-              <span className="provider-picker-caret">&#x25BE;</span>
-            </button>
-            {configPickerOpen && catalog && headerConfigDraft && (
-              <div className="provider-picker-menu conversation-config-menu">
-                <ConversationConfigPicker
-                  value={headerConfigDraft}
-                  catalog={catalog}
-                  showProvider={canChangeHarness}
-                  disabled={isRunning || queue.length > 0 || configIsSaving}
-                  onChange={setHeaderConfigDraft}
-                />
-                <div className="directory-actions">
-                  <button
-                    type="button"
-                    className="dir-action-btn"
-                    onClick={() => setConfigPickerOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="dir-action-btn dir-confirm-btn"
-                    disabled={configIsSaving}
-                    onClick={() => {
-                      setConversationConfig({
-                        conversationId: conversation.id,
-                        expectedRevision: conversation.configRevision,
-                        patch: { kind: 'replace', config: headerConfigDraft },
-                      });
-                      setConfigPickerOpen(false);
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
-                {pendingConfigCommand?.error && (
-                  <div className="config-picker-error" role="alert">
-                    {pendingConfigCommand.error}
+          <div className="header-config-controls" ref={configPickerRef}>
+            {canChangeHarness ? (
+              <div className="provider-picker">
+                <button
+                  type="button"
+                  className={`provider-picker-trigger ${conversation.provider}`}
+                  disabled={!catalog || configIsSaving}
+                  onClick={() =>
+                    setHeaderPickerOpen((open) => (open === 'provider' ? null : 'provider'))
+                  }
+                >
+                  {headerProvider?.displayName ?? conversation.provider}
+                  <span className="provider-picker-caret">&#x25BE;</span>
+                </button>
+                {headerPickerOpen === 'provider' && catalog && (
+                  <div className="provider-picker-menu">
+                    {catalog.providers.map((provider) => (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        className={`provider-picker-option ${
+                          provider.id === conversation.provider ? 'selected' : ''
+                        }`}
+                        onClick={() =>
+                          updateHeaderConfig({ kind: 'set_provider', provider: provider.id })
+                        }
+                      >
+                        {provider.displayName}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
+            ) : (
+              <span className={`provider-badge provider-${conversation.provider}`}>
+                {headerProvider?.displayName ?? conversation.provider}
+              </span>
+            )}
+
+            {headerProvider && conversationConfig && (
+              <div className="model-picker">
+                <button
+                  type="button"
+                  className="model-picker-trigger"
+                  disabled={configIsSaving}
+                  onClick={() => setHeaderPickerOpen((open) => (open === 'model' ? null : 'model'))}
+                >
+                  {resolvedHeaderModel?.displayName ?? resolvedHeaderModelId ?? 'Default'}
+                  <span className="model-picker-caret">&#x25BE;</span>
+                </button>
+                {headerPickerOpen === 'model' && (
+                  <div className="model-picker-menu">
+                    <button
+                      type="button"
+                      className={`model-picker-option ${
+                        conversationConfig.model.mode === 'default' ? 'selected' : ''
+                      }`}
+                      onClick={() =>
+                        updateHeaderConfig({ kind: 'set_model', model: { mode: 'default' } })
+                      }
+                    >
+                      Provider default
+                      <span className="model-default-tag">{headerProvider.defaultModelId}</span>
+                    </button>
+                    {headerProvider.models.map((model) => {
+                      const selected =
+                        conversationConfig.model.mode === 'explicit' &&
+                        conversationConfig.model.modelId === model.id;
+                      const currentEffort =
+                        conversationConfig.reasoning.mode === 'explicit'
+                          ? conversationConfig.reasoning.effort
+                          : null;
+                      const supportsCurrentEffort =
+                        !currentEffort || model.reasoning?.levels.includes(currentEffort);
+                      const nextConfig: ConversationConfig = {
+                        ...conversationConfig,
+                        model: { mode: 'explicit', modelId: model.id },
+                        reasoning: supportsCurrentEffort
+                          ? conversationConfig.reasoning
+                          : { mode: 'default' },
+                      };
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          className={`model-picker-option ${selected ? 'selected' : ''}`}
+                          onClick={() =>
+                            updateHeaderConfig({ kind: 'replace', config: nextConfig })
+                          }
+                        >
+                          {model.displayName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {resolvedHeaderModel?.reasoning && conversationConfig && (
+              <div className="model-picker">
+                <button
+                  type="button"
+                  className="model-picker-trigger reasoning-picker-trigger"
+                  disabled={configIsSaving}
+                  onClick={() =>
+                    setHeaderPickerOpen((open) => (open === 'reasoning' ? null : 'reasoning'))
+                  }
+                >
+                  {headerReasoningLabel}
+                  <span className="model-picker-caret">&#x25BE;</span>
+                </button>
+                {headerPickerOpen === 'reasoning' && (
+                  <div className="model-picker-menu reasoning-picker-menu">
+                    <button
+                      type="button"
+                      className={`model-picker-option ${
+                        conversationConfig.reasoning.mode === 'default' ? 'selected' : ''
+                      }`}
+                      onClick={() =>
+                        updateHeaderConfig({
+                          kind: 'set_reasoning',
+                          reasoning: { mode: 'default' },
+                        })
+                      }
+                    >
+                      Model default
+                      {resolvedHeaderModel.reasoning.defaultEffort && (
+                        <span className="model-default-tag">
+                          {resolvedHeaderModel.reasoning.defaultEffort}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className={`model-picker-option ${
+                        conversationConfig.reasoning.mode === 'disabled' ? 'selected' : ''
+                      }`}
+                      onClick={() =>
+                        updateHeaderConfig({
+                          kind: 'set_reasoning',
+                          reasoning: { mode: 'disabled' },
+                        })
+                      }
+                    >
+                      No reasoning flag
+                    </button>
+                    {resolvedHeaderModel.reasoning.levels.map((effort) => (
+                      <button
+                        key={effort}
+                        type="button"
+                        className={`model-picker-option ${
+                          conversationConfig.reasoning.mode === 'explicit' &&
+                          conversationConfig.reasoning.effort === effort
+                            ? 'selected'
+                            : ''
+                        }`}
+                        onClick={() =>
+                          updateHeaderConfig({
+                            kind: 'set_reasoning',
+                            reasoning: { mode: 'explicit', effort },
+                          })
+                        }
+                      >
+                        {effort}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {configIsSaving && <span className="config-save-state">Saving…</span>}
+            {pendingConfigCommand?.error && (
+              <span className="config-save-state error" role="alert">
+                {pendingConfigCommand.error}
+              </span>
             )}
           </div>
           <Link
@@ -740,7 +917,7 @@ export function Chat() {
             type="button"
             className="fork-thread-btn"
             onClick={handleForkThread}
-            title="Fork thread with resume template"
+            title="Fork into a new thread (soft handoff — paste/draft context, not CLI --fork)"
           >
             Fork
           </button>
@@ -873,7 +1050,7 @@ export function Chat() {
               />
             </div>
           )}
-          {isStreaming && (
+          {shouldShowTypingIndicator(isStreaming, streamingText) && (
             <div className="typing-indicator-overlay">
               <span className="typing-dot" />
               <span className="typing-dot" />
@@ -968,6 +1145,11 @@ export function Chat() {
         )}
 
         <div className="input-wrapper">
+          {submissionError && (
+            <div className="submission-error" role="alert">
+              {submissionError}
+            </div>
+          )}
           <textarea
             ref={attachTextarea}
             className={`message-input ${hasActiveTurn ? 'interrupt-mode' : ''}`}
@@ -1023,7 +1205,7 @@ export function Chat() {
                 type="button"
                 className={`send-btn ${hasActiveTurn ? 'interrupt-mode' : ''}`}
                 onClick={hasActiveTurn ? handleInterrupt : handleSend}
-                disabled={!confirmed || !hasContent || mergeGateBlocking}
+                disabled={!confirmed || !hasContent || mergeGateBlocking || isSubmitting}
                 title={
                   mergeGateBlocking
                     ? 'Waiting for review forks to finish'

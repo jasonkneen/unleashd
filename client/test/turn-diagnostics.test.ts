@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { TurnStatusView } from '../src/components/TurnStatusView';
 import {
   buildTurnDiagnosticsViewModel,
   isActiveTurnStatus,
   isNonterminalAttemptState,
   shouldPresentTurnAttempt,
+  shouldShowTypingIndicator,
   turnDiagnosticsFromAttempt,
   turnDiagnosticsPollDelay,
 } from '../src/components/turn-diagnostics';
@@ -63,4 +67,182 @@ test('terminal projection remains distinct from active lifecycle states', () => 
   assert.equal(view.duration, '4s');
   assert.equal(isActiveTurnStatus(interrupted.status), false);
   assert.equal(isNonterminalAttemptState('interrupted'), false);
+});
+
+test('terminal updates do not masquerade as provider activity', () => {
+  const diagnostics = turnDiagnosticsFromAttempt({
+    createdAt: '2026-07-29T00:00:00.000Z',
+    startedAt: '2026-07-29T00:00:01.000Z',
+    lastActivityAt: '2026-07-29T00:02:00.000Z',
+    lastActivity: {
+      source: 'provider_event',
+      providerEventType: 'text.delta',
+    },
+    updatedAt: '2026-07-29T00:12:00.000Z',
+    terminalAt: '2026-07-29T00:12:00.000Z',
+    state: 'failed',
+    terminalCause: 'idle_timeout',
+  });
+  const view = buildTurnDiagnosticsViewModel(
+    diagnostics,
+    new Date('2026-07-29T00:12:00.000Z').getTime()
+  );
+
+  assert.equal(diagnostics.lastActivityAt, '2026-07-29T00:02:00.000Z');
+  assert.equal(view.lastActivity, 'Provider output 10m ago');
+  assert.equal(view.reason, 'Idle watchdog: no bridge activity');
+  assert.equal(view.label, 'Failed');
+});
+
+test('a turn with no bridge event does not invent provider activity from lifecycle time', () => {
+  const diagnostics = turnDiagnosticsFromAttempt({
+    createdAt: '2026-07-29T00:00:00.000Z',
+    startedAt: '2026-07-29T00:00:01.000Z',
+    updatedAt: '2026-07-29T00:10:01.000Z',
+    terminalAt: '2026-07-29T00:10:01.000Z',
+    state: 'failed',
+    terminalCause: 'idle_timeout',
+  });
+  const view = buildTurnDiagnosticsViewModel(
+    diagnostics,
+    new Date('2026-07-29T00:10:01.000Z').getTime()
+  );
+
+  assert.equal(diagnostics.lastActivityAt, undefined);
+  assert.equal(view.lastActivity, null);
+  assert.equal(view.reason, 'Idle watchdog: no bridge activity');
+});
+
+test('maximum runtime and legacy timeout causes remain distinguishable', () => {
+  const maximum = turnDiagnosticsFromAttempt({
+    ...baseAttempt,
+    state: 'failed',
+    terminalCause: 'max_runtime_timeout',
+  });
+  const legacy = turnDiagnosticsFromAttempt({
+    ...baseAttempt,
+    state: 'failed',
+    terminalCause: 'timeout',
+  });
+
+  assert.equal(maximum.reason, 'Maximum turn runtime reached');
+  assert.equal(legacy.reason, 'Legacy timeout (watchdog type unavailable)');
+});
+
+test('startup bridge heartbeat reports provider silence instead of generic activity', () => {
+  const diagnostics = turnDiagnosticsFromAttempt({
+    ...baseAttempt,
+    state: 'running',
+    lastActivityAt: '2026-07-29T00:11:15.000Z',
+    lastActivity: {
+      source: 'agent_cli_heartbeat',
+      providerEventType: 'progress',
+      providerEventSource: 'agent-cli.heartbeat',
+      heartbeat: {
+        unifiedEventSilentSeconds: 675,
+        rawStdoutSilentSeconds: 675,
+        phase: 'startup',
+      },
+    },
+  });
+  const view = buildTurnDiagnosticsViewModel(
+    diagnostics,
+    new Date('2026-07-29T00:11:37.000Z').getTime()
+  );
+
+  assert.equal(diagnostics.activity?.kind, 'bridge_heartbeat');
+  assert.equal(view.label, 'Waiting for provider output');
+  assert.equal(view.tone, 'warning');
+  assert.equal(view.lastActivity, 'Bridge heartbeat 22s ago · provider output silent 11m 15s');
+  assert.doesNotMatch(view.title, /Last activity/);
+});
+
+test('status component renders heartbeat-only startup as waiting, not generic activity', () => {
+  const diagnostics = turnDiagnosticsFromAttempt({
+    ...baseAttempt,
+    state: 'running',
+    lastActivityAt: '2026-07-29T00:11:15.000Z',
+    lastActivity: {
+      source: 'agent_cli_heartbeat',
+      providerEventType: 'progress',
+      heartbeat: { rawStdoutSilentSeconds: 675, phase: 'startup' },
+    },
+  });
+  const view = buildTurnDiagnosticsViewModel(
+    diagnostics,
+    new Date('2026-07-29T00:11:37.000Z').getTime()
+  );
+  const markup = renderToStaticMarkup(createElement(TurnStatusView, { view }));
+
+  assert.match(markup, /Waiting for provider output/);
+  assert.match(markup, /Bridge heartbeat 22s ago · provider output silent 11m 15s/);
+  assert.doesNotMatch(markup, /Last activity/);
+});
+
+test('native progress and visible output remain distinct', () => {
+  const native = turnDiagnosticsFromAttempt({
+    ...baseAttempt,
+    state: 'running',
+    lastActivityAt: '2026-07-29T00:00:04.000Z',
+    lastActivity: {
+      source: 'provider_native_activity',
+      providerEventType: 'progress',
+      providerEventSource: 'codex.native_session',
+    },
+  });
+  const visible = turnDiagnosticsFromAttempt({
+    ...baseAttempt,
+    state: 'running',
+    lastActivityAt: '2026-07-29T00:00:04.000Z',
+    lastActivity: {
+      source: 'provider_event',
+      providerEventType: 'text.delta',
+    },
+  });
+
+  assert.equal(native.activity?.kind, 'native_progress');
+  assert.equal(visible.activity?.kind, 'visible_output');
+  assert.equal(
+    buildTurnDiagnosticsViewModel(native, Date.parse('2026-07-29T00:00:05Z')).label,
+    'Working'
+  );
+  assert.equal(
+    buildTurnDiagnosticsViewModel(visible, Date.parse('2026-07-29T00:00:05Z')).lastActivity,
+    'Provider output just now'
+  );
+});
+
+test('heartbeat-embedded native advancement is native progress, not a bridge-only heartbeat', () => {
+  const diagnostics = turnDiagnosticsFromAttempt({
+    ...baseAttempt,
+    state: 'running',
+    lastActivityAt: '2026-07-29T00:11:15.000Z',
+    lastActivity: {
+      source: 'agent_cli_heartbeat',
+      providerEventType: 'progress',
+      providerEventSource: 'agent-cli.heartbeat',
+      heartbeat: {
+        unifiedEventSilentSeconds: 675,
+        rawStdoutSilentSeconds: 675,
+        phase: 'startup',
+        nativeSessionAvailable: true,
+        nativeSessionAdvanced: true,
+        nativeSessionSilentSeconds: 0,
+      },
+    },
+  });
+  const view = buildTurnDiagnosticsViewModel(
+    diagnostics,
+    new Date('2026-07-29T00:11:37.000Z').getTime()
+  );
+
+  assert.equal(diagnostics.activity?.kind, 'native_progress');
+  assert.equal(view.label, 'Working');
+  assert.equal(view.lastActivity, 'Native Codex progress 22s ago · UI output silent 11m 15s');
+});
+
+test('typing indicator requires an actual text delta', () => {
+  assert.equal(shouldShowTypingIndicator(true, ''), false);
+  assert.equal(shouldShowTypingIndicator(true, 'First visible delta'), true);
+  assert.equal(shouldShowTypingIndicator(false, 'Buffered text'), false);
 });

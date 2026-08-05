@@ -161,7 +161,10 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       workerId: source.workerId ?? null,
       workerRole: source.workerRole ?? null,
       parentConversationId: resolveParentConversationId(source.parentConversationId),
-      resumedFromConversationId: source.resumedFromConversationId ?? null,
+      resumedFromConversationId:
+        source.resumedFromConversationId ??
+        hydratedConfig.record.creation?.resumedFromConversationId ??
+        null,
       modelName: source.modelName ?? null,
       mergeParentMeta: source.mergeParentMeta ?? null,
       mergeChildMeta: source.mergeChildMeta ?? null,
@@ -356,7 +359,10 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       existing.workerId = source.workerId ?? null;
       existing.workerRole = source.workerRole ?? null;
       existing.parentConversationId = resolveParentConversationId(source.parentConversationId);
-      existing.resumedFromConversationId = source.resumedFromConversationId ?? null;
+      // Native provider artifacts do not carry Unleashd's UI lineage. A poll
+      // must never erase the durable parent recorded at child creation.
+      existing.resumedFromConversationId =
+        source.resumedFromConversationId ?? existing.resumedFromConversationId;
       existing.buddyContext = source.buddyContext ?? existing.buddyContext;
       existing.purpose = source.purpose ?? existing.purpose;
       existing.modelName = source.modelName ?? source.model ?? null;

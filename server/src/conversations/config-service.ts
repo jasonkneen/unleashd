@@ -102,12 +102,21 @@ export function applyConversationConfigPatch(
   context: ConfigUpdateContext,
   patch: ConversationConfigPatch
 ): Result<ConversationConfig, ConfigError> {
-  if (context.isRunning || context.queueDepth > 0) {
+  const changesProvider =
+    (patch.kind === 'set_provider' && patch.provider !== current.provider) ||
+    (patch.kind === 'replace' && patch.config.provider !== current.provider);
+
+  // A running CLI receives an immutable ResolvedExecutionConfig snapshot at
+  // spawn time. Model/reasoning changes are therefore safe while a turn is in
+  // flight and take effect on the next turn (including the next queued turn).
+  // Provider changes remain blocked because they would invalidate the active
+  // provider session and its resume state.
+  if (changesProvider && (context.isRunning || context.queueDepth > 0)) {
     return failure(
       'conversation_busy',
       context.isRunning
-        ? 'Configuration cannot change while a turn is running'
-        : 'Configuration cannot change while messages are queued'
+        ? 'Provider cannot change while a turn is running'
+        : 'Provider cannot change while messages are queued'
     );
   }
 

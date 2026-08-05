@@ -1,11 +1,15 @@
-import type { ModelInfo } from '@unleashd/shared';
+import { CURSOR_MODEL_REGISTRY, type ModelInfo } from '@unleashd/shared';
 import type { Provider } from './index';
 
 const cursorProvider: Provider = {
   name: 'cursor',
 
   listModels(): ModelInfo[] {
-    return [{ id: 'composer-2', displayName: 'Composer 2', isDefault: true }];
+    return CURSOR_MODEL_REGISTRY.map((entry) => ({
+      id: entry.id,
+      displayName: entry.displayName,
+      isDefault: entry.isDefault,
+    }));
   },
 };
 

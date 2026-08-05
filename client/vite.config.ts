@@ -1,4 +1,6 @@
 import { exec } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { type ViteDevServer, createLogger, defineConfig } from 'vite';
 
@@ -14,6 +16,8 @@ const logViteError = viteLogger.error.bind(viteLogger);
 const logViteInfo = viteLogger.info.bind(viteLogger);
 let lastHmrMessage = '';
 let lastHmrAt = 0;
+const clientRoot = path.dirname(fileURLToPath(import.meta.url));
+const sharedSourceEntry = path.resolve(clientRoot, '../shared/src/index.ts');
 
 viteLogger.error = (message, options) => {
   const transientWebSocketRestart =
@@ -69,6 +73,15 @@ function openPreferredDevUrlPlugin() {
 export default defineConfig({
   customLogger: viteLogger,
   plugins: [react(), openPreferredDevUrlPlugin()],
+  // The shared package's ESM and CJS watch builds update dist file-by-file.
+  // Reading that mutable output from Vite creates a window where index.js is
+  // absent or inconsistent with its leaf modules. The browser build can
+  // consume the canonical TypeScript entry directly and let Vite own HMR.
+  resolve: {
+    alias: {
+      '@unleashd/shared': sharedSourceEntry,
+    },
+  },
   server: {
     host: true,
     port: DEV_CLIENT_PORT,

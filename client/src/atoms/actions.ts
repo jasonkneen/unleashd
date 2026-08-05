@@ -30,6 +30,8 @@ import {
   loadPendingConversations,
   markPendingCreationRejected,
   normalizeWorkingDirectory,
+  persistPendingCreationRetry,
+  preparePendingCreationForReconnect,
   removePendingConversation,
   resendPendingCreation,
 } from './pending-creations';
@@ -56,6 +58,15 @@ const chunkBuffer: Map<string, string> = new Map();
 let chunkFlushScheduled = false;
 const conversationDetailRequests = new Map<string, Promise<void>>();
 let conversationDetailEpoch = 0;
+const pendingMessageCommands = new Map<
+  string,
+  { resolve: () => void; reject: (error: Error) => void }
+>();
+
+function rejectPendingMessageCommands(error: Error): void {
+  for (const pending of pendingMessageCommands.values()) pending.reject(error);
+  pendingMessageCommands.clear();
+}
 
 function markConversationDetailsLoaded(ids: Iterable<string>): void {
   const next = new Set(jotaiStore.get(conversationDetailsLoadedAtom));
@@ -210,13 +221,13 @@ export function deleteConversation(id: string): void {
   send({ type: 'delete_conversation', conversationId: id });
 }
 
-export function sendMessage(conversationId: string, content: string): void {
+export function sendMessage(conversationId: string, content: string): Promise<void> {
   const conv = jotaiStore.get(conversationsAtom).get(conversationId);
   if (!conv) {
     console.warn(`[Send] Cannot send message: conversation ${conversationId} not found`);
-    return;
+    return Promise.reject(new Error(`Conversation ${conversationId} not found`));
   }
-  send({ type: 'queue_message', conversationId, content });
+  return queueMessage(conversationId, content);
 }
 
 export function stopConversation(conversationId: string): void {
@@ -236,14 +247,26 @@ export function endConversation(conversationId: string): void {
   send({ type: 'stop_conversation', conversationId });
 }
 
-export function interruptAndSend(conversationId: string, content: string): void {
-  const conv = jotaiStore.get(conversationsAtom).get(conversationId);
-  if (!conv) return;
-  send({ type: 'interrupt_and_send', conversationId, content });
+function sendAcknowledgedMessageCommand(
+  message:
+    | { type: 'queue_message'; conversationId: string; content: string }
+    | { type: 'interrupt_and_send'; conversationId: string; content: string }
+): Promise<void> {
+  const commandId = crypto.randomUUID();
+  return new Promise<void>((resolve, reject) => {
+    pendingMessageCommands.set(commandId, { resolve, reject });
+    send({ ...message, commandId });
+  });
 }
 
-export function queueMessage(conversationId: string, content: string): void {
-  send({ type: 'queue_message', conversationId, content });
+export function interruptAndSend(conversationId: string, content: string): Promise<void> {
+  const conv = jotaiStore.get(conversationsAtom).get(conversationId);
+  if (!conv) return Promise.reject(new Error(`Conversation ${conversationId} not found`));
+  return sendAcknowledgedMessageCommand({ type: 'interrupt_and_send', conversationId, content });
+}
+
+export function queueMessage(conversationId: string, content: string): Promise<void> {
+  return sendAcknowledgedMessageCommand({ type: 'queue_message', conversationId, content });
 }
 
 export function cancelQueuedMessage(conversationId: string, messageId: string): void {
@@ -269,6 +292,11 @@ export function getQueue(conversationId: string): QueuedMessage[] {
 export function handleMessage(data: ServerMessage): void {
   switch (data.type) {
     case 'init': {
+      // A socket epoch ended without acknowledgements. Keep composer text and
+      // let the user retry against the new authoritative server epoch.
+      rejectPendingMessageCommands(
+        new Error('Connection restarted before the message was accepted')
+      );
       console.log(`[WS] init: ${data.conversations.length} conversations`);
       conversationDetailEpoch += 1;
       conversationDetailRequests.clear();
@@ -283,10 +311,12 @@ export function handleMessage(data: ServerMessage): void {
       // Reconcile client-owned pending creations without weakening the
       // authoritative Conversation map with schema-incomplete stubs.
       const pendingState = new Map<string, import('./conversations').PendingConversationCreation>();
-      for (const pc of loadPendingConversations()) {
+      for (const persistedCreation of loadPendingConversations()) {
+        const pc = preparePendingCreationForReconnect(persistedCreation);
         if (serverState.has(pc.conversationId)) {
           removePendingConversation(pc.conversationId, pc.commandId);
         } else {
+          if (pc !== persistedCreation) persistPendingCreationRetry(pc);
           pendingState.set(pc.conversationId, {
             kind: 'create_conversation',
             commandId: pc.commandId,
@@ -296,6 +326,7 @@ export function handleMessage(data: ServerMessage): void {
             buddyContext: pc.buddyContext,
             createdAt: new Date(pc.createdAt),
             error: pc.error,
+            errorCode: pc.errorCode,
           });
           setTimeout(() => resendPendingCreation(pc), 0);
         }
@@ -365,6 +396,12 @@ export function handleMessage(data: ServerMessage): void {
         markConversationDetailsLoaded([authoritativeConversation.id]);
       }
       const message = data.error.message;
+      const pendingMessageCommand = pendingMessageCommands.get(data.commandId);
+      if (pendingMessageCommand) {
+        pendingMessageCommands.delete(data.commandId);
+        pendingMessageCommand.reject(new Error(message));
+        break;
+      }
       const pendingConfig = jotaiStore.get(pendingConfigCommandsAtom).get(data.commandId);
       if (pendingConfig?.kind === 'set_conversation_config') {
         jotaiStore.set(
@@ -382,14 +419,26 @@ export function handleMessage(data: ServerMessage): void {
           creation.kind === 'create_conversation' && creation.commandId === data.commandId
       );
       if (pendingCreation) {
-        markPendingCreationRejected(data.commandId, message);
+        markPendingCreationRejected(data.commandId, message, data.error.code);
         jotaiStore.set(
           pendingCreationsAtom,
           produce(jotaiStore.get(pendingCreationsAtom), (draft) => {
             const pending = draft.get(pendingCreation.conversationId);
-            if (pending?.kind === 'create_conversation') pending.error = message;
+            if (pending?.kind === 'create_conversation') {
+              pending.error = message;
+              pending.errorCode = data.error.code;
+            }
           })
         );
+      }
+      break;
+    }
+
+    case 'command_accepted': {
+      const pendingMessageCommand = pendingMessageCommands.get(data.commandId);
+      if (pendingMessageCommand) {
+        pendingMessageCommands.delete(data.commandId);
+        pendingMessageCommand.resolve();
       }
       break;
     }
@@ -519,6 +568,10 @@ export function handleMessage(data: ServerMessage): void {
 
     case 'error': {
       console.error('Server error:', data.message);
+      // Backward compatibility for a draining server from before correlated
+      // message commands: its generic protocol error still must not strand the
+      // composer waiting forever or discard the submitted draft.
+      rejectPendingMessageCommands(new Error(data.message));
       break;
     }
 

@@ -178,8 +178,31 @@ export const GeminiModelSchema = z.enum([
 ]);
 export type GeminiModel = z.infer<typeof GeminiModelSchema>;
 
-export const CursorModelSchema = z.enum(['composer-2', 'composer2']);
-export type CursorModel = z.infer<typeof CursorModelSchema>;
+// Cursor CLI `--model` ids. Canonical IDs only — aliases live in
+// CURSOR_MODEL_ALIASES and are collapsed by normalizeModelId before validation.
+// Verified via Cursor docs / CLI catalog: Grok 4.5 effort = high|medium|low;
+// Composer 2 is retired and reroutes to Composer 2.5.
+export const CURSOR_MODEL_REGISTRY = [
+  { id: 'composer-2.5', displayName: 'Composer 2.5', isDefault: true },
+  { id: 'cursor-grok-4.5-high', displayName: 'Grok 4.5 High', isDefault: false },
+  { id: 'cursor-grok-4.5-medium', displayName: 'Grok 4.5 Medium', isDefault: false },
+  { id: 'cursor-grok-4.5-low', displayName: 'Grok 4.5 Low', isDefault: false },
+] as const;
+
+export type CursorModel = (typeof CURSOR_MODEL_REGISTRY)[number]['id'];
+export const CURSOR_MODEL_IDS = CURSOR_MODEL_REGISTRY.map((entry) => entry.id);
+export const CursorModelSchema = z.enum(
+  CURSOR_MODEL_IDS as unknown as [CursorModel, ...CursorModel[]]
+);
+
+/** Retired / shorthand ids → canonical Cursor `--model` value. */
+export const CURSOR_MODEL_ALIASES: Readonly<Record<string, CursorModel>> = {
+  'composer-2': 'composer-2.5',
+  composer2: 'composer-2.5',
+  'composer-2-fast': 'composer-2.5',
+  'composer-2.5-fast': 'composer-2.5',
+  'grok-4.5': 'cursor-grok-4.5-high',
+};
 
 // Codex's own accepted effort levels -- NOT the union across all providers.
 // Must match CODEX_EFFORT_LEVELS defined below. Ordering is low → high for UI.
@@ -386,18 +409,20 @@ export const OpenCodeModelSchema = z.custom<OpenCodeModel>(
 
 export function isModelIdValidForProvider(provider: Provider, modelId?: string): boolean {
   if (!modelId) return true;
+  // Validate the canonical form so aliases never need to live in the schema.
+  const canonical = normalizeModelId(provider, modelId) ?? modelId;
 
   switch (provider) {
     case 'claude':
-      return ClaudeModelSchema.safeParse(modelId).success;
+      return ClaudeModelSchema.safeParse(canonical).success;
     case 'codex':
-      return CodexModelSchema.safeParse(modelId).success;
+      return CodexModelSchema.safeParse(canonical).success;
     case 'gemini':
-      return GeminiModelSchema.safeParse(modelId).success;
+      return GeminiModelSchema.safeParse(canonical).success;
     case 'opencode':
-      return OpenCodeModelSchema.safeParse(modelId).success;
+      return OpenCodeModelSchema.safeParse(canonical).success;
     case 'cursor':
-      return CursorModelSchema.safeParse(modelId).success;
+      return CursorModelSchema.safeParse(canonical).success;
   }
 }
 
@@ -412,13 +437,15 @@ export function modelValidationHint(provider: Provider): string {
     case 'opencode':
       return "'provider/model' format (e.g. 'opencode/big-pickle')";
     case 'cursor':
-      return `one of: ${CursorModelSchema.options.map((id) => `'${id}'`).join(', ')}`;
+      return `one of: ${CURSOR_MODEL_IDS.map((id) => `'${id}'`).join(', ')}`;
   }
 }
 
 export function normalizeModelId(provider: Provider, model?: string): string | undefined {
   if (!model) return undefined;
-  if (provider === 'cursor' && model === 'composer2') return 'composer-2';
+  if (provider === 'cursor') {
+    return CURSOR_MODEL_ALIASES[model] ?? model;
+  }
   return model;
 }
 
@@ -629,8 +656,12 @@ export const ConversationSchema = z.object({
   // (e.g., Codex thread_spawn parent_thread_id).
   // When present, UI can render this conversation nested under its parent.
   parentConversationId: z.string().nullish(),
-  // Optional source conversation id for user-created forks/resume threads.
-  // Unlike parentConversationId, this does not imply nested UI treatment.
+  // Optional UI lineage for Chat "Fork" (soft handoff). Points at the source
+  // conversation the user forked from. This is NOT provider-session inheritance
+  // and does NOT imply FORK_CAPABLE_PROVIDERS. Context handoff is the draft /
+  // first-message content (historically a pasted transcript); the Resume
+  // badge is UI chrome for that lineage. Contrast with merge review children,
+  // which use spawnMergeReviewFork + CLI --fork / emulateFork.
   resumedFromConversationId: z.string().nullish(),
   // The actual model name from the CLI (e.g., "claude-sonnet-4-5-20250929").
   // More specific than `provider` which is just "claude", "codex", or "opencode".
@@ -681,13 +712,25 @@ export type DiscoveredConversation = Omit<
 };
 
 // =============================================================================
-// Merge feature — provider fork capability
+// Merge feature — provider-SESSION fork capability (NOT Chat "Fork")
 // =============================================================================
-
-// Providers whose conversations can be forked for merge. Native vs
-// cp+resume emulation is an implementation detail of agent-cli-tool
-// (selected from HarnessConfig); clients only need to know "can fork or
-// not" for UI gating. Cursor has no path yet, others do.
+//
+// Two different "fork" concepts in this codebase — do not conflate them:
+//
+// 1) Chat "Fork" button (soft handoff)
+//    New conversation + resumedFromConversationId + draft/first-message
+//    context (originally a pasted transcript). Cross-provider is fine because
+//    nothing inherits a CLI session. Gated by nothing here. See Chat.tsx
+//    handleForkThread + ResumeThreadWidget.
+//
+// 2) Merge review / provider-session fork (this set)
+//    Child turn inherits the parent's native CLI transcript under a NEW
+//    provider session id (parent untouched). Needs harness sessionForkFlags
+//    (claude/opencode) or emulateFork (codex/gemini). Cursor is omitted: no
+//    `--fork`, and chats are opaque sqlite / cloud-backed under
+//    ~/.cursor/chats/. Used only by /api/conversations/merge +
+//    spawnMergeReviewFork.
+//
 export const FORK_CAPABLE_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>([
   'claude',
   'opencode',
@@ -695,6 +738,7 @@ export const FORK_CAPABLE_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>([
   'gemini',
 ]);
 
+/** True if this provider can do merge-style provider-session forks. Not Chat Fork. */
 export function providerSupportsFork(p: Provider): boolean {
   return FORK_CAPABLE_PROVIDERS.has(p);
 }
@@ -834,6 +878,7 @@ export const CreateConversationCommandSchema = z.object({
   config: ConversationConfigSchema,
   initialMessage: z.string().min(1).optional(),
   swarmDebugPrefix: z.string().optional(),
+  // Chat "Fork" soft-handoff lineage only — not merge provider-session fork.
   resumedFromConversationId: z.string().uuid().optional(),
   buddyContext: BuddyContextSchema.optional(),
 });
@@ -873,6 +918,7 @@ export type DeleteConversationMessage = z.infer<typeof DeleteConversationMessage
 // Queue Messages (Client → Server)
 export const QueueMessageSchema = z.object({
   type: z.literal('queue_message'),
+  commandId: z.string().min(1),
   conversationId: z.string().uuid(),
   content: z.string().min(1),
 });
@@ -881,6 +927,7 @@ export type QueueMessage = z.infer<typeof QueueMessageSchema>;
 
 export const InterruptAndSendMessageSchema = z.object({
   type: z.literal('interrupt_and_send'),
+  commandId: z.string().min(1),
   conversationId: z.string().uuid(),
   content: z.string().min(1),
 });
@@ -1014,6 +1061,13 @@ export const CommandRejectedEventSchema = z.object({
 });
 export type CommandRejectedEvent = z.infer<typeof CommandRejectedEventSchema>;
 
+export const CommandAcceptedEventSchema = z.object({
+  type: z.literal('command_accepted'),
+  commandId: z.string().min(1),
+  conversationId: z.string().uuid(),
+});
+export type CommandAcceptedEvent = z.infer<typeof CommandAcceptedEventSchema>;
+
 export const MessageMessageSchema = z.object({
   type: z.literal('message'),
   conversationId: z.string().uuid(),
@@ -1138,6 +1192,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   ConversationCreatedMessageSchema,
   ConversationUpdatedEventSchema,
   ConversationDeletedMessageSchema,
+  CommandAcceptedEventSchema,
   CommandRejectedEventSchema,
   MessageMessageSchema,
   ChunkMessageSchema,

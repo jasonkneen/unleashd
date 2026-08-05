@@ -82,7 +82,8 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
   let initialDispatches = 0;
   let runtimeCreations = 0;
   let conversationLinks = 0;
-  const acceptsCommands = false;
+  let buddyCancellations = 0;
+  let acceptsCommands = false;
   let finishInitialLoad!: () => void;
   const initialLoadComplete = new Promise<void>((resolve) => {
     finishInitialLoad = resolve;
@@ -120,6 +121,7 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
         command.type === 'create_conversation' || acceptsCommands ? () => undefined : null,
       configService: {
         getRecord: async () => null,
+        delete: async () => true,
         createOrReplay: async (input: {
           conversationId: string;
           config: typeof fixture.config;
@@ -152,6 +154,9 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
       },
       createConversationLink: async () => {
         conversationLinks += 1;
+      },
+      cancelBuddyConversation: () => {
+        buddyCancellations += 1;
       },
       dispatchInitialMessage: async () => {
         initialDispatches += 1;
@@ -225,6 +230,19 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
     false
   );
   finishInitialLoad();
+  acceptsCommands = true;
+  socket.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        type: 'delete_conversation',
+        conversationId: '00000000-0000-4000-8000-000000000123',
+      })
+    )
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(buddyCancellations, 1);
+  assert.equal(conversations.has('00000000-0000-4000-8000-000000000123'), false);
 });
 
 test('hidden Buddy briefing is injected exactly once and never on resumed turns', () => {

@@ -9,6 +9,16 @@ import type {
 import { ConversationConfigSchema } from '@unleashd/shared';
 import type { Application, RequestHandler } from 'express';
 
+/**
+ * Merge-conversations HTTP surface.
+ *
+ * Uses provider-SESSION forks (CLI --fork / emulateFork via
+ * spawnMergeReviewFork), gated by FORK_CAPABLE_PROVIDERS.
+ *
+ * This is NOT the Chat "Fork" button. Chat Fork is a soft handoff
+ * (resumedFromConversationId + draft/transcript text) and does not use
+ * this route.
+ */
 export interface MergeConversation {
   readonly id: string;
   readonly provider: Provider;
@@ -225,8 +235,10 @@ function resolveSources(
       return undefined;
     }
     if (!dependencies.providerSupportsFork(conversation.provider)) {
+      // Merge-only gate (provider-session fork). Chat "Fork" soft handoff is
+      // unrestricted and must not reuse this check.
       response.status(400).json({
-        error: `Provider "${conversation.provider}" does not support fork yet. Supported: ${Array.from(dependencies.forkCapableProviders).join(', ')}.`,
+        error: `Provider "${conversation.provider}" does not support merge session-fork yet. Supported: ${Array.from(dependencies.forkCapableProviders).join(', ')}.`,
         conversationId: id,
       });
       return undefined;

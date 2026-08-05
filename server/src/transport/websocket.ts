@@ -49,3 +49,10 @@ export function sendCommandRejected(
       : {}),
   });
 }
+
+export function sendCommandAccepted(
+  ws: WebSocket,
+  input: { commandId: string; conversationId: string }
+): void {
+  sendToClient(ws, { type: 'command_accepted', ...input });
+}

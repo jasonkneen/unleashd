@@ -31,7 +31,7 @@ const DEFAULTS: Record<Provider, string> = {
   codex: 'gpt-5.6-sol',
   opencode: 'opencode/big-pickle',
   gemini: 'gemini-3.1-pro-preview',
-  cursor: 'composer-2',
+  cursor: 'composer-2.5',
 };
 
 const resolver: ConversationConfigResolver = {
@@ -126,13 +126,27 @@ test('pure provider transition resets dependent selections and enforces lifecycl
   assert.equal(locked.ok, false);
   if (!locked.ok) assert.equal(locked.error.code, 'provider_locked');
 
-  const busy = applyConversationConfigPatch(
+  const modelWhileBusy = applyConversationConfigPatch(
     DEFAULT_CONFIG,
     { isRunning: false, queueDepth: 1, hasStartedSession: false },
+    { kind: 'set_model', model: { mode: 'explicit', modelId: 'gpt-5.4' } }
+  );
+  assert.equal(modelWhileBusy.ok, true);
+
+  const reasoningWhileRunning = applyConversationConfigPatch(
+    DEFAULT_CONFIG,
+    { isRunning: true, queueDepth: 1, hasStartedSession: true },
     { kind: 'set_reasoning', reasoning: { mode: 'disabled' } }
   );
-  assert.equal(busy.ok, false);
-  if (!busy.ok) assert.equal(busy.error.code, 'conversation_busy');
+  assert.equal(reasoningWhileRunning.ok, true);
+
+  const providerWhileBusy = applyConversationConfigPatch(
+    DEFAULT_CONFIG,
+    { isRunning: true, queueDepth: 1, hasStartedSession: false },
+    { kind: 'set_provider', provider: 'claude' }
+  );
+  assert.equal(providerWhileBusy.ok, false);
+  if (!providerWhileBusy.ok) assert.equal(providerWhileBusy.error.code, 'conversation_busy');
 });
 
 test('create, update, fork, and hydrate preserve selection intent and revisions', async () => {

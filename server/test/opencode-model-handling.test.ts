@@ -6,6 +6,7 @@ import {
   ModelIdSchema,
   SetConversationConfigCommandSchema,
   isModelIdValidForProvider,
+  normalizeModelId,
 } from '../../shared/src/index';
 import { sessionToConversation } from '../src/adapters/disk-adapter';
 import opencodeProvider from '../src/providers/opencode';
@@ -73,6 +74,14 @@ test('server provider/model compatibility validation works per provider', () => 
   assert.equal(isModelIdValidForProvider('opencode', 'opencode/gpt-5'), true);
   assert.equal(isModelIdValidForProvider('opencode', 'openai/gpt-5'), true);
   assert.equal(isModelIdValidForProvider('opencode', 'opus'), false);
+
+  assert.equal(isModelIdValidForProvider('cursor', 'composer-2.5'), true);
+  assert.equal(isModelIdValidForProvider('cursor', 'composer-2'), true); // alias
+  assert.equal(isModelIdValidForProvider('cursor', 'grok-4.5'), true); // alias → high
+  assert.equal(isModelIdValidForProvider('cursor', 'cursor-grok-4.5-medium'), true);
+  assert.equal(isModelIdValidForProvider('cursor', 'opus'), false);
+  assert.equal(normalizeModelId('cursor', 'composer-2'), 'composer-2.5');
+  assert.equal(normalizeModelId('cursor', 'grok-4.5'), 'cursor-grok-4.5-high');
 });
 
 test('disk hydration rejects a globally valid model from the wrong provider', () => {

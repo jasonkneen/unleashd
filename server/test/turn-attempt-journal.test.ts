@@ -4,13 +4,51 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { StructuredObservabilityLogger } from '../src/observability';
-import { TurnAttemptJournal, createJournalTurnAttemptObserver } from '../src/observability';
+import {
+  TurnAttemptJournal,
+  createJournalTurnAttemptObserver,
+  createStructuredObservabilityLogger,
+} from '../src/observability';
 
 const silentLogger: StructuredObservabilityLogger = {
   info: () => undefined,
   warn: () => undefined,
   error: () => undefined,
 };
+
+test('structured logger preserves privacy-safe stream and native progress diagnostics', () => {
+  const lines: string[] = [];
+  const logger = createStructuredObservabilityLogger(
+    {
+      info: (line) => lines.push(String(line)),
+      warn: (line) => lines.push(String(line)),
+      error: (line) => lines.push(String(line)),
+    },
+    () => new Date('2026-08-04T00:00:00.000Z')
+  );
+  logger.info('attempt_activity', {
+    stdoutStreamEvent: 'resume',
+    stdoutReadableFlowing: null,
+    stdoutReadableLengthBytes: 512,
+    nativeSessionAvailable: true,
+    nativeSessionAdvanced: true,
+    nativeSessionSilentSeconds: 0,
+    nativeSessionSizeBytes: 12_345,
+  });
+  assert.deepEqual(JSON.parse(lines[0]), {
+    timestamp: '2026-08-04T00:00:00.000Z',
+    level: 'info',
+    component: 'turn-attempt-journal',
+    event: 'attempt_activity',
+    stdoutStreamEvent: 'resume',
+    stdoutReadableFlowing: null,
+    stdoutReadableLengthBytes: 512,
+    nativeSessionAvailable: true,
+    nativeSessionAdvanced: true,
+    nativeSessionSilentSeconds: 0,
+    nativeSessionSizeBytes: 12_345,
+  });
+});
 
 test('journal records state, identifiers, terminal cause, and query projections', async (t) => {
   const directory = await temporaryDirectory(t);
@@ -140,9 +178,11 @@ test('journal rotation keeps a bounded number of privacy-safe JSONL files', asyn
 
 test('runtime observer preserves async ordering and queue/provider correlation', async (t) => {
   const directory = await temporaryDirectory(t);
+  let timestamp = Date.parse('2026-07-29T01:00:00.000Z');
   const journal = new TurnAttemptJournal({
     directory,
     serverBootId: 'boot-observer',
+    now: () => new Date(timestamp++),
     logger: silentLogger,
   });
   await journal.initialize();
@@ -157,7 +197,39 @@ test('runtime observer preserves async ordering and queue/provider correlation',
   observer.starting('attempt-observer');
   observer.running('attempt-observer', 'provisional-session');
   observer.bindProviderSession('attempt-observer', 'actual-provider-session');
-  observer.activity('attempt-observer', 'actual-provider-session');
+  observer.activity(
+    'attempt-observer',
+    {
+      source: 'agent_cli_heartbeat',
+      providerEventType: 'progress',
+      providerEventSource: 'agent-cli.heartbeat',
+      heartbeat: {
+        phase: 'startup',
+        unifiedEventSilentSeconds: 30,
+        rawStdoutSilentSeconds: 30,
+      },
+    },
+    'actual-provider-session'
+  );
+  observer.activity(
+    'attempt-observer',
+    {
+      source: 'native_session',
+      providerEventType: 'progress',
+      providerEventSource: 'agent-cli.heartbeat',
+      heartbeat: {
+        phase: 'startup',
+        nativeSessionAvailable: true,
+        nativeSessionAdvanced: true,
+        nativeSessionSilentSeconds: 0,
+        nativeSessionSizeBytes: 12_345,
+        stdoutStreamEvent: 'pause',
+        stdoutReadableFlowing: null,
+        stdoutReadableLengthBytes: 512,
+      },
+    },
+    'actual-provider-session'
+  );
   observer.terminal({
     attemptId: 'attempt-observer',
     state: 'succeeded',
@@ -171,12 +243,78 @@ test('runtime observer preserves async ordering and queue/provider correlation',
   assert.equal(attempt?.queueMessageId, 'queue-observer');
   assert.equal(attempt?.providerSessionId, 'actual-provider-session');
   assert.equal(attempt?.terminalCause, 'provider_complete');
+  assert.equal(attempt?.lastActivity?.source, 'native_session');
+  assert.equal(attempt?.lastActivity?.heartbeat?.nativeSessionAdvanced, true);
+  assert.equal(attempt?.lastActivity?.heartbeat?.nativeSessionSizeBytes, 12_345);
+  assert.equal(attempt?.lastActivity?.heartbeat?.stdoutStreamEvent, 'pause');
+  assert.equal(attempt?.lastActivity?.heartbeat?.stdoutReadableFlowing, null);
+  assert.equal(attempt?.lastActivity?.heartbeat?.stdoutReadableLengthBytes, 512);
+  assert.ok(attempt?.lastActivityAt);
+  assert.ok(attempt?.lastBridgeActivityAt);
+  assert.ok(attempt?.lastProviderProgressAt);
+  assert.equal(attempt?.lastActivityAt, attempt?.lastProviderProgressAt);
+  assert.notEqual(attempt?.lastActivityAt, attempt?.terminalAt);
   assert.deepEqual(Object.keys(attempt?.stateTimestamps ?? {}), [
     'queued',
     'starting',
     'running',
     'succeeded',
   ]);
+
+  const recoveredJournal = new TurnAttemptJournal({
+    directory,
+    serverBootId: 'boot-observer-reload',
+    logger: silentLogger,
+  });
+  await recoveredJournal.initialize();
+  const recovered = await recoveredJournal.getAttempt('attempt-observer');
+  assert.equal(recovered?.lastActivity?.heartbeat?.nativeSessionSizeBytes, 12_345);
+  assert.equal(recovered?.lastActivity?.heartbeat?.stdoutStreamEvent, 'pause');
+  assert.equal(recovered?.lastActivity?.heartbeat?.stdoutReadableFlowing, null);
+  assert.equal(recovered?.lastActivity?.heartbeat?.stdoutReadableLengthBytes, 512);
+});
+
+test('legacy source-less activity remains readable without treating terminal time as activity', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const filePath = path.join(directory, 'turn-attempts.jsonl');
+  const journal = new TurnAttemptJournal({
+    directory,
+    serverBootId: 'boot-legacy-1',
+    logger: silentLogger,
+  });
+  await journal.initialize();
+  await journal.startAttempt({
+    attemptId: 'attempt-legacy',
+    conversationId: 'conversation-legacy',
+  });
+  await journal.transitionAttempt({ attemptId: 'attempt-legacy', state: 'starting' });
+  await journal.transitionAttempt({ attemptId: 'attempt-legacy', state: 'running' });
+  const activityAt = '2026-07-29T00:09:00.000Z';
+  await fs.promises.appendFile(
+    filePath,
+    `${JSON.stringify({
+      kind: 'attempt_activity',
+      schemaVersion: 1,
+      eventId: 'legacy-activity',
+      serverBootId: 'boot-legacy-1',
+      timestamp: activityAt,
+      attemptId: 'attempt-legacy',
+      conversationId: 'conversation-legacy',
+      state: 'running',
+    })}\n`
+  );
+
+  const recoveredJournal = new TurnAttemptJournal({
+    directory,
+    serverBootId: 'boot-legacy-2',
+    logger: silentLogger,
+  });
+  await recoveredJournal.initialize();
+  const recovered = await recoveredJournal.getAttempt('attempt-legacy');
+
+  assert.equal(recovered?.lastActivityAt, activityAt);
+  assert.equal(recovered?.lastActivity?.source, 'legacy_unknown');
+  assert.notEqual(recovered?.lastActivityAt, recovered?.terminalAt);
 });
 
 test('preflight failure can terminate an attempt before process startup', async (t) => {

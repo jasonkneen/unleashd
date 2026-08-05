@@ -32,7 +32,15 @@ export function BuddyDirectory({
           onClick={onNew}
           disabled={creating}
         >
-          {creating ? 'Opening…' : 'New'}
+          <span className="buddy-new-card-mark" aria-hidden="true">
+            +
+          </span>
+          <span className="buddy-new-card-copy">
+            <span className="buddy-new-card-eyebrow">Build your team</span>
+            <strong>{creating ? 'Opening Builder…' : 'Create a new Buddy'}</strong>
+            <span>Define a role, working style, and durable memory.</span>
+          </span>
+          <span className="buddy-new-card-action">{creating ? 'Opening…' : 'Start here →'}</span>
         </button>
         {visibleBuddies.map((employeeOverview) => {
           const { buddy, workspaces, team } = employeeOverview;

@@ -1,7 +1,7 @@
 import type { StructuredObservabilityLogger } from './structured-logger';
 import { createStructuredObservabilityLogger } from './structured-logger';
 import type { TurnAttemptJournal } from './turn-attempt-journal';
-import type { TerminalTurnAttemptState, TurnTerminalCause } from './types';
+import type { TerminalTurnAttemptState, TurnAttemptActivity, TurnTerminalCause } from './types';
 
 export interface RuntimeTurnAttemptObserver {
   queued(input: {
@@ -13,7 +13,7 @@ export interface RuntimeTurnAttemptObserver {
   starting(attemptId: string): void;
   running(attemptId: string, providerSessionId?: string): void;
   bindProviderSession(attemptId: string, providerSessionId: string): void;
-  activity(attemptId: string, providerSessionId?: string): void;
+  activity(attemptId: string, activity: TurnAttemptActivity, providerSessionId?: string): void;
   stopping(attemptId: string): void;
   terminal(input: {
     attemptId: string;
@@ -51,8 +51,8 @@ export function createJournalTurnAttemptObserver(
     bindProviderSession(attemptId, providerSessionId) {
       observe(attemptId, journal.bindProviderSession({ attemptId, providerSessionId }));
     },
-    activity(attemptId, providerSessionId) {
-      observe(attemptId, journal.touchAttempt({ attemptId, providerSessionId }));
+    activity(attemptId, activity, providerSessionId) {
+      observe(attemptId, journal.touchAttempt({ attemptId, activity, providerSessionId }));
     },
     stopping(attemptId) {
       observe(attemptId, journal.transitionAttempt({ attemptId, state: 'stopping' }));

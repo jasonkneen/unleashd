@@ -406,6 +406,14 @@ function CodeBlockFrame({
 }
 
 // -- Markdown component overrides ---------------------------------------------
+function hastText(node: unknown): string {
+  if (!node || typeof node !== 'object') return '';
+  const candidate = node as { value?: unknown; children?: unknown };
+  if (typeof candidate.value === 'string') return candidate.value;
+  if (!Array.isArray(candidate.children)) return '';
+  return candidate.children.map(hastText).join('');
+}
+
 // Factory returns a stable Components object keyed on `workingDirectory` so
 // react-markdown doesn't re-mount on every render. Relative file paths are
 // resolved against workingDirectory; absolute paths pass through unchanged.
@@ -418,7 +426,7 @@ function makeMarkdownComponents(workingDirectory: string): Components {
         </CodeBlockFrame>
       );
     },
-    a({ href, children, ...rest }) {
+    a({ node, href, children, ...rest }) {
       const previewableLocalHref = href ? getPreviewableLocalHref(href) : null;
       if (previewableLocalHref) {
         return (
@@ -426,7 +434,10 @@ function makeMarkdownComponents(workingDirectory: string): Components {
             path={previewableLocalHref.path}
             type={previewableLocalHref.type}
             workingDirectory={workingDirectory}
-            linkLabel={children}
+            // Use the source AST text. Rendered `children` may already contain
+            // a FilePreview from the code override, which would otherwise put
+            // an interactive link inside this link and violate HTML nesting.
+            linkLabel={hastText(node) || previewableLocalHref.path}
           />
         );
       }

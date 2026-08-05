@@ -28,12 +28,52 @@ export const TURN_TERMINAL_CAUSES = [
   'process_killed',
   'process_exit',
   'spawn_failed',
+  'idle_timeout',
+  'bridge_timeout',
+  'provider_idle_timeout',
+  'max_runtime_timeout',
+  // Kept for backwards compatibility with journals written before timeout
+  // causes were split by watchdog.
   'timeout',
   'server_restart',
   'unknown',
 ] as const;
 
 export type TurnTerminalCause = (typeof TURN_TERMINAL_CAUSES)[number];
+
+export const TURN_ACTIVITY_SOURCES = [
+  'runtime',
+  'provider_event',
+  'agent_cli_heartbeat',
+  'native_session',
+  'legacy_unknown',
+] as const;
+
+export type TurnActivitySource = (typeof TURN_ACTIVITY_SOURCES)[number];
+
+export interface TurnHeartbeatDiagnostics {
+  unifiedEventSilentSeconds?: number;
+  rawStdoutSilentSeconds?: number;
+  phase?: 'startup' | 'running';
+  stdoutStreamEvent?: 'attached' | 'resume' | 'pause' | 'close';
+  stdoutReadableFlowing?: boolean | null;
+  stdoutReadableLengthBytes?: number;
+  nativeSessionAvailable?: boolean;
+  nativeSessionAdvanced?: boolean;
+  nativeSessionSilentSeconds?: number;
+  nativeSessionSizeBytes?: number;
+}
+
+/**
+ * Privacy-safe metadata describing the event that proved a turn was alive.
+ * Prompt, response, tool input, stderr, and other content never belong here.
+ */
+export interface TurnAttemptActivity {
+  source: TurnActivitySource;
+  providerEventType: string;
+  providerEventSource?: string;
+  heartbeat?: TurnHeartbeatDiagnostics;
+}
 
 export interface TurnAttemptIdentity {
   attemptId: string;
@@ -49,6 +89,10 @@ export interface TurnAttemptSnapshot extends TurnAttemptIdentity {
   terminalCause?: TurnTerminalCause;
   createdAt: string;
   updatedAt: string;
+  lastActivityAt?: string;
+  lastActivity?: TurnAttemptActivity;
+  lastBridgeActivityAt?: string;
+  lastProviderProgressAt?: string;
   startedAt?: string;
   terminalAt?: string;
 }
@@ -84,6 +128,7 @@ export interface AttemptProviderSessionBoundEvent extends JournalEventBase, Turn
 export interface AttemptActivityEvent extends JournalEventBase, TurnAttemptIdentity {
   kind: 'attempt_activity';
   state: TurnAttemptState;
+  activity: TurnAttemptActivity;
 }
 
 export interface AttemptTerminalEvent extends JournalEventBase, TurnAttemptIdentity {

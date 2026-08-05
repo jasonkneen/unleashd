@@ -26,6 +26,7 @@ export interface PersistedPendingCreation {
   initialMessage?: string;
   buddyContext?: BuddyContext;
   error?: string;
+  errorCode?: string;
 }
 
 interface PendingCreationStoreV2 {
@@ -43,6 +44,22 @@ export interface CreateConversationArgs {
 }
 
 const PENDING_CREATION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const RETRYABLE_CREATION_ERROR_CODES = new Set(['server_draining', 'server_starting']);
+const LEGACY_RETRYABLE_CREATION_ERRORS = [
+  'Backend reload is draining active turns; try again after reconnecting',
+];
+
+export function isRetryableCreationRejection(
+  errorCode: string | undefined,
+  error: string | undefined
+): boolean {
+  return (
+    (errorCode !== undefined && RETRYABLE_CREATION_ERROR_CODES.has(errorCode)) ||
+    (errorCode === undefined &&
+      error !== undefined &&
+      LEGACY_RETRYABLE_CREATION_ERRORS.includes(error))
+  );
+}
 
 export function normalizeWorkingDirectory(input: string): string {
   const trimmed = input.trim();
@@ -100,6 +117,7 @@ function parsePersistedPendingCreation(value: unknown): PersistedPendingCreation
       typeof candidate.initialMessage === 'string' ? candidate.initialMessage : undefined,
     buddyContext: parseBuddyContext(candidate.buddyContext),
     error: typeof candidate.error === 'string' ? candidate.error : undefined,
+    errorCode: typeof candidate.errorCode === 'string' ? candidate.errorCode : undefined,
   };
 }
 
@@ -188,11 +206,36 @@ export function removePendingConversation(id: string, commandId?: string): void 
   if (pending.length !== existing.length) persistPendingConversations(pending);
 }
 
-export function markPendingCreationRejected(commandId: string, error: string): void {
+export function markPendingCreationRejected(
+  commandId: string,
+  error: string,
+  errorCode?: string
+): void {
   const creations = loadPendingConversations();
   const creation = creations.find((candidate) => candidate.commandId === commandId);
   if (!creation) return;
   creation.error = error;
+  creation.errorCode = errorCode;
+  persistPendingConversations(creations);
+}
+
+/**
+ * A reconnect establishes a new authoritative server epoch. Admission failures
+ * from the previous draining/starting epoch may be retried with the original
+ * idempotency identifiers; validation and provider failures must remain failed.
+ */
+export function preparePendingCreationForReconnect(
+  creation: PersistedPendingCreation
+): PersistedPendingCreation {
+  if (!isRetryableCreationRejection(creation.errorCode, creation.error)) return creation;
+  return { ...creation, error: undefined, errorCode: undefined };
+}
+
+export function persistPendingCreationRetry(creation: PersistedPendingCreation): void {
+  const creations = loadPendingConversations();
+  const index = creations.findIndex((candidate) => candidate.commandId === creation.commandId);
+  if (index === -1) return;
+  creations[index] = creation;
   persistPendingConversations(creations);
 }
 

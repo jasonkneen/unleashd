@@ -4,6 +4,7 @@ import {
   fromCodexModelId,
   isEffortValidForProvider,
   isModelIdValidForProvider,
+  normalizeModelId,
 } from '@unleashd/shared';
 import type { ConfigProvenance } from './config-store';
 
@@ -52,6 +53,12 @@ export function migrateLegacyConversationConfig(
       modelId = decoded.baseModel;
       compositeEffort = decoded.effort;
     }
+  }
+
+  // Collapse provider aliases (e.g. composer-2 → composer-2.5) before validation
+  // so historical session labels land on the current catalog id.
+  if (modelId) {
+    modelId = normalizeModelId(evidence.provider, modelId) ?? modelId;
   }
 
   const modelValid = modelId !== undefined && isModelIdValidForProvider(evidence.provider, modelId);

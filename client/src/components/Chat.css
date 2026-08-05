@@ -86,6 +86,13 @@
   display: inline-flex;
 }
 
+.header-config-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .provider-picker-trigger {
   display: inline-flex;
   align-items: center;
@@ -105,6 +112,12 @@
 .provider-picker-trigger:hover {
   border-color: color-mix(in srgb, var(--warning) 40%, transparent);
   background: color-mix(in srgb, var(--warning) 22%, transparent);
+}
+
+.provider-picker-trigger:disabled,
+.model-picker-trigger:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .provider-picker-trigger.claude {
@@ -213,6 +226,16 @@
   background: color-mix(in srgb, var(--warning) 30%, transparent);
 }
 
+.reasoning-picker-trigger {
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  color: var(--accent-primary);
+}
+
+.reasoning-picker-trigger:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 24%, transparent);
+}
+
 .model-picker-caret {
   font-size: 9px;
   opacity: 0.7;
@@ -269,6 +292,28 @@
   background: color-mix(in srgb, var(--text-muted) 20%, transparent);
   color: var(--text-muted);
   font-weight: 400;
+}
+
+.reasoning-picker-menu .model-picker-option:hover {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+.reasoning-picker-menu .model-picker-option.selected {
+  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
+  color: var(--accent-primary);
+}
+
+.config-save-state {
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.config-save-state.error {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--error, #dc322f);
+  text-overflow: ellipsis;
 }
 
 /* Wrapper for virtualized message list — contains the list + overlays */
@@ -559,6 +604,14 @@
   margin: 0;
   position: relative;
   align-items: center; /* Center buttons vertically */
+}
+
+.submission-error {
+  padding: 8px 12px;
+  border: 1px solid var(--error, #dc322f);
+  border-radius: 6px;
+  color: var(--error, #dc322f);
+  font-size: 12px;
 }
 
 .input-actions {
@@ -1456,16 +1509,4 @@
   color: var(--text-secondary);
   white-space: pre-wrap;
   line-height: 1.5;
-}
-.conversation-config-menu {
-  width: min(42rem, calc(100vw - 2rem));
-  max-height: min(70vh, 42rem);
-  overflow: auto;
-  padding: 0.75rem;
-}
-
-.config-picker-error {
-  margin-top: 0.75rem;
-  color: var(--error, #dc322f);
-  font-size: 0.8rem;
 }

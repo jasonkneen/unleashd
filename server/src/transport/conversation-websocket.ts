@@ -22,6 +22,7 @@ import type {
 } from '../conversations/runtime';
 import { summarizeConversation } from '../conversations/serialization';
 import {
+  sendCommandAccepted,
   sendCommandRejected,
   sendProtocolError,
   sendToClient,
@@ -52,6 +53,7 @@ export interface ConversationWebSocketDependencies {
   resolveBuddyConversation(context: BuddyContext): Promise<ResolvedBuddyConversation>;
   createConversation(options: ConversationOptions): ConversationRuntime;
   createConversationLink(conversation: ConversationRuntime): Promise<void>;
+  cancelBuddyConversation(conversation: ConversationRuntime): void;
   dispatchInitialMessage(conversation: ConversationRuntime): Promise<void>;
   creationFingerprint(input: {
     workingDirectory: string;
@@ -279,6 +281,10 @@ export function registerConversationWebSocket(
             const deletedDurably = await dependencies.configService.delete(data.conversationId);
             if (conversation) {
               conversation.stop();
+              // stop() only closes Buddy ownership while a provider process is
+              // running. Deleting an idle persistent Buddy thread must also
+              // terminalize its durable link (and delegated/review work).
+              dependencies.cancelBuddyConversation(conversation);
               dependencies.registry.delete(data.conversationId);
               dependencies.sessions.markDeleted(conversation.sessionId);
               for (const [sessionId, conversationId] of dependencies.sessions.aliasEntries()) {
@@ -343,9 +349,17 @@ export function registerConversationWebSocket(
 
           case 'queue_message':
             dependencies.registry.get(data.conversationId)?.enqueueMessage(data.content);
+            sendCommandAccepted(socket, {
+              commandId: data.commandId,
+              conversationId: data.conversationId,
+            });
             break;
           case 'interrupt_and_send':
             dependencies.registry.get(data.conversationId)?.interruptAndSend(data.content);
+            sendCommandAccepted(socket, {
+              commandId: data.commandId,
+              conversationId: data.conversationId,
+            });
             break;
           case 'cancel_queued_message':
             dependencies.registry.get(data.conversationId)?.cancelQueuedMessage(data.messageId);

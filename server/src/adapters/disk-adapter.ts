@@ -18,7 +18,12 @@ import type {
   Provider,
   SubAgent,
 } from '@unleashd/shared';
-import { ModelIdSchema, fromCodexModelId, isModelIdValidForProvider } from '@unleashd/shared';
+import {
+  ModelIdSchema,
+  fromCodexModelId,
+  isModelIdValidForProvider,
+  normalizeModelId,
+} from '@unleashd/shared';
 import {
   extractBuddyBuilderPurpose,
   extractBuddyContext,
@@ -172,7 +177,8 @@ function recoverModelAndEffort(session: ParsedSession): {
 
   if (session.provider === 'codex') {
     const { baseModel, effort } = fromCodexModelId(session.model);
-    const parsedBase = ModelIdSchema.safeParse(baseModel);
+    const canonical = normalizeModelId(session.provider, baseModel) ?? baseModel;
+    const parsedBase = ModelIdSchema.safeParse(canonical);
     return {
       model:
         parsedBase.success && isModelIdValidForProvider(session.provider, parsedBase.data)
@@ -182,7 +188,8 @@ function recoverModelAndEffort(session: ParsedSession): {
     };
   }
 
-  const parsed = ModelIdSchema.safeParse(session.model);
+  const canonical = normalizeModelId(session.provider, session.model) ?? session.model;
+  const parsed = ModelIdSchema.safeParse(canonical);
   return {
     model:
       parsed.success && isModelIdValidForProvider(session.provider, parsed.data)

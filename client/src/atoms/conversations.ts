@@ -30,6 +30,7 @@ export interface PendingConversationCreation {
   buddyContext?: BuddyContext;
   createdAt: Date;
   error?: string;
+  errorCode?: string;
 }
 
 export interface PendingConfigCommand {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { missingRuntimeArtifacts } from './watch-runtime-readiness.mjs';
+import { snapshotDirectory } from './watch-snapshot.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const serverRoot = path.join(repositoryRoot, 'server');
@@ -13,6 +13,13 @@ const watchedRoots = [
   serverSourceRoot,
   path.join(repositoryRoot, 'shared', 'dist'),
   path.join(repositoryRoot, 'vendor', 'agent-cli-tool', 'dist'),
+];
+const requiredRuntimeArtifacts = [
+  path.join(repositoryRoot, 'shared', 'dist', 'index.js'),
+  path.join(repositoryRoot, 'shared', 'dist', 'cjs', 'index.js'),
+  path.join(repositoryRoot, 'shared', 'dist', 'cjs', 'package.json'),
+  path.join(repositoryRoot, 'vendor', 'agent-cli-tool', 'dist', 'index.js'),
+  path.join(repositoryRoot, 'vendor', 'agent-cli-tool', 'dist', 'package.json'),
 ];
 const POLL_INTERVAL_MS = 300;
 const RELOAD_SETTLE_MS = 600;
@@ -34,47 +41,12 @@ function isRuntimeRelevant(file) {
   return RUNTIME_EXTENSIONS.has(path.extname(file));
 }
 
-async function contentDigest(file) {
-  return createHash('sha256')
-    .update(await readFile(file))
-    .digest('base64url');
-}
-
-async function snapshotDirectory(directory, snapshot, previousSnapshot) {
-  let entries;
-  try {
-    entries = await readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT') return;
-    throw error;
-  }
-
-  await Promise.all(
-    entries.map(async (entry) => {
-      const absolutePath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await snapshotDirectory(absolutePath, snapshot, previousSnapshot);
-        return;
-      }
-      if (!entry.isFile() || !isRuntimeRelevant(absolutePath)) return;
-      const metadata = await stat(absolutePath);
-      const metadataKey = `${metadata.mtimeMs}:${metadata.size}`;
-      const previous = previousSnapshot.get(absolutePath);
-      snapshot.set(absolutePath, {
-        metadataKey,
-        digest:
-          previous?.metadataKey === metadataKey
-            ? previous.digest
-            : await contentDigest(absolutePath),
-      });
-    })
-  );
-}
-
 async function takeSnapshot(previousSnapshot = new Map()) {
   const snapshot = new Map();
   await Promise.all(
-    watchedRoots.map((root) => snapshotDirectory(root, snapshot, previousSnapshot))
+    watchedRoots.map((root) =>
+      snapshotDirectory(root, snapshot, previousSnapshot, isRuntimeRelevant)
+    )
   );
   return snapshot;
 }
@@ -94,6 +66,7 @@ let reloadTimer = null;
 let fatalError = false;
 let pollInFlight = false;
 let snapshot = await takeSnapshot();
+let waitingForArtifacts = false;
 
 function failWatcher(error) {
   console.error('[server-watch] Could not queue backend reload; stopping dev runtime:', error);
@@ -108,7 +81,30 @@ function failWatcher(error) {
   process.exitCode = 1;
 }
 
-function startServer() {
+function scheduleReload(delayMs = RELOAD_SETTLE_MS) {
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    void queueReload().catch(failWatcher);
+  }, delayMs);
+}
+
+async function startServer() {
+  const missing = await missingRuntimeArtifacts(requiredRuntimeArtifacts);
+  if (missing.length > 0) {
+    if (!waitingForArtifacts) {
+      console.log(
+        `[server-watch] Waiting for ${missing.length} runtime artifact(s) before starting backend`
+      );
+      waitingForArtifacts = true;
+    }
+    reloadPending = true;
+    scheduleReload(POLL_INTERVAL_MS);
+    return;
+  }
+  if (waitingForArtifacts) {
+    console.log('[server-watch] Runtime artifacts restored; starting backend');
+    waitingForArtifacts = false;
+  }
   reloadPending = false;
   child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
     cwd: serverRoot,
@@ -124,7 +120,7 @@ function startServer() {
     }
     if (reloadPending) {
       console.log('[server-watch] Active turns finished; starting the updated backend');
-      startServer();
+      void startServer().catch(failWatcher);
       return;
     }
     stopping = true;
@@ -144,15 +140,29 @@ async function poll() {
   snapshot = nextSnapshot;
 
   if (reloadPending) return;
-  if (reloadTimer) clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(queueReload, RELOAD_SETTLE_MS);
+  scheduleReload();
 }
 
-function queueReload() {
+async function queueReload() {
   reloadTimer = null;
+  const missing = await missingRuntimeArtifacts(requiredRuntimeArtifacts);
+  if (missing.length > 0) {
+    if (!waitingForArtifacts) {
+      console.log(
+        `[server-watch] Deferring backend reload until ${missing.length} runtime artifact(s) are rebuilt`
+      );
+      waitingForArtifacts = true;
+    }
+    scheduleReload(POLL_INTERVAL_MS);
+    return;
+  }
+  if (waitingForArtifacts) {
+    console.log('[server-watch] Runtime artifacts restored; backend reload may proceed');
+    waitingForArtifacts = false;
+  }
   if (!child) {
     console.log('[server-watch] Source changed; starting backend');
-    startServer();
+    await startServer();
     return;
   }
 
@@ -195,4 +205,4 @@ const pollTimer = setInterval(() => {
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
 
-startServer();
+void startServer().catch(failWatcher);

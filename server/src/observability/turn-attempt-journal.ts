@@ -7,8 +7,10 @@ import {
   type AttemptQuery,
   type RecentEventQuery,
   TERMINAL_TURN_ATTEMPT_STATES,
+  TURN_ACTIVITY_SOURCES,
   TURN_TERMINAL_CAUSES,
   type TerminalTurnAttemptState,
+  type TurnAttemptActivity,
   type TurnAttemptIdentity,
   type TurnAttemptJournalEvent,
   type TurnAttemptSnapshot,
@@ -73,6 +75,7 @@ export interface BindTurnAttemptProviderSessionInput {
 
 export interface TouchTurnAttemptInput {
   attemptId: string;
+  activity: TurnAttemptActivity;
   providerSessionId?: string;
 }
 
@@ -247,12 +250,65 @@ export class TurnAttemptJournal {
     return this.runExclusive(async () => {
       this.assertInitialized();
       const current = this.requireAttempt(input.attemptId);
+      const previousActivitySource = current.lastActivity?.source;
       const event = this.baseEvent({
         kind: 'attempt_activity',
         ...mergeIdentity(current, input.providerSessionId),
         state: current.state,
+        activity: input.activity,
       });
       await this.appendUnlocked(event);
+      if (
+        input.activity.source === 'agent_cli_heartbeat' ||
+        previousActivitySource !== input.activity.source
+      ) {
+        this.logger.info('attempt_activity', {
+          serverBootId: this.serverBootId,
+          attemptId: input.attemptId,
+          conversationId: current.conversationId,
+          activitySource: input.activity.source,
+          providerEventType: input.activity.providerEventType,
+          ...(input.activity.providerEventSource
+            ? { providerEventSource: input.activity.providerEventSource }
+            : {}),
+          ...(input.activity.heartbeat?.phase
+            ? { heartbeatPhase: input.activity.heartbeat.phase }
+            : {}),
+          ...(input.activity.heartbeat?.unifiedEventSilentSeconds !== undefined
+            ? {
+                unifiedEventSilentSeconds: input.activity.heartbeat.unifiedEventSilentSeconds,
+              }
+            : {}),
+          ...(input.activity.heartbeat?.rawStdoutSilentSeconds !== undefined
+            ? { rawStdoutSilentSeconds: input.activity.heartbeat.rawStdoutSilentSeconds }
+            : {}),
+          ...(input.activity.heartbeat?.stdoutStreamEvent !== undefined
+            ? { stdoutStreamEvent: input.activity.heartbeat.stdoutStreamEvent }
+            : {}),
+          ...(input.activity.heartbeat?.stdoutReadableFlowing !== undefined
+            ? { stdoutReadableFlowing: input.activity.heartbeat.stdoutReadableFlowing }
+            : {}),
+          ...(input.activity.heartbeat?.stdoutReadableLengthBytes !== undefined
+            ? {
+                stdoutReadableLengthBytes: input.activity.heartbeat.stdoutReadableLengthBytes,
+              }
+            : {}),
+          ...(input.activity.heartbeat?.nativeSessionAvailable !== undefined
+            ? { nativeSessionAvailable: input.activity.heartbeat.nativeSessionAvailable }
+            : {}),
+          ...(input.activity.heartbeat?.nativeSessionAdvanced !== undefined
+            ? { nativeSessionAdvanced: input.activity.heartbeat.nativeSessionAdvanced }
+            : {}),
+          ...(input.activity.heartbeat?.nativeSessionSilentSeconds !== undefined
+            ? {
+                nativeSessionSilentSeconds: input.activity.heartbeat.nativeSessionSilentSeconds,
+              }
+            : {}),
+          ...(input.activity.heartbeat?.nativeSessionSizeBytes !== undefined
+            ? { nativeSessionSizeBytes: input.activity.heartbeat.nativeSessionSizeBytes }
+            : {}),
+        });
+      }
       return cloneAttempt(this.attempts.get(input.attemptId)!);
     });
   }
@@ -479,6 +535,14 @@ function applyEvent(
   if (event.kind !== 'attempt_provider_session_bound' && event.kind !== 'attempt_activity') {
     current.stateTimestamps[event.state] = event.timestamp;
   }
+  if (event.kind === 'attempt_activity') {
+    current.lastActivityAt = event.timestamp;
+    current.lastActivity = cloneActivity(event.activity);
+    current.lastBridgeActivityAt = event.timestamp;
+    if (event.activity.source === 'provider_event' || event.activity.source === 'native_session') {
+      current.lastProviderProgressAt = event.timestamp;
+    }
+  }
   current.updatedAt = event.timestamp;
   if (event.providerSessionId) current.providerSessionId = event.providerSessionId;
   if (event.state === 'running' && !current.startedAt) current.startedAt = event.timestamp;
@@ -541,10 +605,13 @@ function parseJournalEvent(line: string): TurnAttemptJournalEvent | undefined {
       };
     }
     if (value.kind === 'attempt_activity' && isAttemptState(value.state)) {
+      const activity = parseActivity(value.activity);
+      if (!activity) return undefined;
       return {
         kind: 'attempt_activity',
         ...identity,
         state: value.state,
+        activity,
         ...base,
       };
     }
@@ -617,6 +684,92 @@ function isAttemptState(value: unknown): value is TurnAttemptState {
   return isNonterminalState(value) || isOneOf(value, TERMINAL_TURN_ATTEMPT_STATES);
 }
 
+function parseActivity(value: unknown): TurnAttemptActivity | undefined {
+  // Version-1 journals originally omitted source metadata. Preserve those
+  // records while making the uncertainty explicit in the projection.
+  if (value === undefined) {
+    return { source: 'legacy_unknown', providerEventType: 'unknown' };
+  }
+  if (!isRecord(value)) return undefined;
+  if (
+    !isOneOf(value.source, TURN_ACTIVITY_SOURCES) ||
+    typeof value.providerEventType !== 'string' ||
+    !value.providerEventType ||
+    (value.providerEventSource !== undefined && typeof value.providerEventSource !== 'string')
+  ) {
+    return undefined;
+  }
+  const heartbeat = parseHeartbeat(value.heartbeat);
+  if (value.heartbeat !== undefined && !heartbeat) return undefined;
+  return {
+    source: value.source,
+    providerEventType: value.providerEventType,
+    ...(value.providerEventSource ? { providerEventSource: value.providerEventSource } : {}),
+    ...(heartbeat ? { heartbeat } : {}),
+  };
+}
+
+function parseHeartbeat(value: unknown): TurnAttemptActivity['heartbeat'] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return undefined;
+  const unified = optionalNonnegativeNumber(value.unifiedEventSilentSeconds);
+  const stdout = optionalNonnegativeNumber(value.rawStdoutSilentSeconds);
+  const stdoutReadableLength = optionalNonnegativeNumber(value.stdoutReadableLengthBytes);
+  const nativeSilent = optionalNonnegativeNumber(value.nativeSessionSilentSeconds);
+  const nativeSize = optionalNonnegativeNumber(value.nativeSessionSizeBytes);
+  if (
+    (value.unifiedEventSilentSeconds !== undefined && unified === undefined) ||
+    (value.rawStdoutSilentSeconds !== undefined && stdout === undefined) ||
+    (value.stdoutReadableLengthBytes !== undefined && stdoutReadableLength === undefined) ||
+    (value.stdoutStreamEvent !== undefined &&
+      value.stdoutStreamEvent !== 'attached' &&
+      value.stdoutStreamEvent !== 'resume' &&
+      value.stdoutStreamEvent !== 'pause' &&
+      value.stdoutStreamEvent !== 'close') ||
+    (value.stdoutReadableFlowing !== undefined &&
+      value.stdoutReadableFlowing !== null &&
+      typeof value.stdoutReadableFlowing !== 'boolean') ||
+    (value.nativeSessionSilentSeconds !== undefined && nativeSilent === undefined) ||
+    (value.nativeSessionSizeBytes !== undefined && nativeSize === undefined) ||
+    (value.nativeSessionAvailable !== undefined &&
+      typeof value.nativeSessionAvailable !== 'boolean') ||
+    (value.nativeSessionAdvanced !== undefined &&
+      typeof value.nativeSessionAdvanced !== 'boolean') ||
+    (value.phase !== undefined && value.phase !== 'startup' && value.phase !== 'running')
+  ) {
+    return undefined;
+  }
+  return {
+    ...(unified !== undefined ? { unifiedEventSilentSeconds: unified } : {}),
+    ...(stdout !== undefined ? { rawStdoutSilentSeconds: stdout } : {}),
+    ...(value.phase === 'startup' || value.phase === 'running' ? { phase: value.phase } : {}),
+    ...(value.stdoutStreamEvent === 'attached' ||
+    value.stdoutStreamEvent === 'resume' ||
+    value.stdoutStreamEvent === 'pause' ||
+    value.stdoutStreamEvent === 'close'
+      ? { stdoutStreamEvent: value.stdoutStreamEvent }
+      : {}),
+    ...(typeof value.stdoutReadableFlowing === 'boolean' || value.stdoutReadableFlowing === null
+      ? { stdoutReadableFlowing: value.stdoutReadableFlowing }
+      : {}),
+    ...(stdoutReadableLength !== undefined
+      ? { stdoutReadableLengthBytes: stdoutReadableLength }
+      : {}),
+    ...(typeof value.nativeSessionAvailable === 'boolean'
+      ? { nativeSessionAvailable: value.nativeSessionAvailable }
+      : {}),
+    ...(typeof value.nativeSessionAdvanced === 'boolean'
+      ? { nativeSessionAdvanced: value.nativeSessionAdvanced }
+      : {}),
+    ...(nativeSilent !== undefined ? { nativeSessionSilentSeconds: nativeSilent } : {}),
+    ...(nativeSize !== undefined ? { nativeSessionSizeBytes: nativeSize } : {}),
+  };
+}
+
+function optionalNonnegativeNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 function isOneOf<const Values extends readonly string[]>(
   value: unknown,
   values: Values
@@ -663,7 +816,18 @@ function normalizeLimit(limit: number | undefined): number {
 }
 
 function cloneAttempt(attempt: TurnAttemptSnapshot): TurnAttemptSnapshot {
-  return { ...attempt, stateTimestamps: { ...attempt.stateTimestamps } };
+  return {
+    ...attempt,
+    stateTimestamps: { ...attempt.stateTimestamps },
+    ...(attempt.lastActivity ? { lastActivity: cloneActivity(attempt.lastActivity) } : {}),
+  };
+}
+
+function cloneActivity(activity: TurnAttemptActivity): TurnAttemptActivity {
+  return {
+    ...activity,
+    ...(activity.heartbeat ? { heartbeat: { ...activity.heartbeat } } : {}),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

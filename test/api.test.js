@@ -38,7 +38,10 @@ function startServer({ reuseDataDir = false } = {}) {
       PORT: PORT,
       UNLEASHD_DATA_DIR: testDataDir,
     };
-    serverProcess = spawn('npx', ['tsx', 'src/server.ts'], {
+    // Use the installed loader directly. `npx tsx` may perform package
+    // resolution/update checks and exhaust the startup timeout before Node is
+    // even spawned, especially on a cold or offline machine.
+    serverProcess = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
       cwd: path.join(__dirname, '..', 'server'),
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -612,12 +615,19 @@ async function runTests() {
       const created = await waitForMessage(ws, 'conversation_created');
       const convId = created.conversation.id;
 
+      const commandId = crypto.randomUUID();
       send(ws, {
         type: 'interrupt_and_send',
+        commandId,
         conversationId: convId,
         content: 'follow-up after interrupt',
       });
       const queueUpdated = await waitForMessage(ws, 'queue_updated');
+      const accepted = await waitForMessage(ws, 'command_accepted');
+
+      if (accepted.commandId !== commandId || accepted.conversationId !== convId) {
+        throw new Error(`Expected acknowledgement for ${commandId}, got ${accepted.commandId}`);
+      }
 
       if (queueUpdated.conversationId !== convId) {
         throw new Error(`Expected queue update for ${convId}, got ${queueUpdated.conversationId}`);

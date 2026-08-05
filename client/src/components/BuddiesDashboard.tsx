@@ -1,6 +1,8 @@
+import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
+import { allConversationIdsAtom } from '../atoms/conversations';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { BuddyAutomationsTab } from './buddies/BuddyAutomationsTab';
 import { BuddyDirectory } from './buddies/BuddyDirectory';
@@ -50,6 +52,8 @@ function compactPath(path: string | null): string {
 export function BuddiesDashboard() {
   const navigate = useNavigate();
   const { buddyId } = useParams();
+  const conversationIds = useAtomValue(allConversationIdsAtom);
+  const availableConversationIds = useMemo(() => new Set(conversationIds), [conversationIds]);
   const [overview, setOverview] = useState<BuddyOverview | null>(null);
   const [employee, setEmployee] = useState<EmployeeRecord | null>(null);
   const [memory, setMemory] = useState<BuddyMemory>(EMPTY_MEMORY);
@@ -57,7 +61,9 @@ export function BuddiesDashboard() {
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<EmployeeTab>('work');
+  const [activeTab, setActiveTab] = useState<EmployeeTab>(() =>
+    buddyId ? 'conversations' : 'work'
+  );
   const [showReviewConversations, setShowReviewConversations] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -193,6 +199,7 @@ export function BuddiesDashboard() {
     const controller = new AbortController();
     setError(null);
     if (buddyId) {
+      setActiveTab('conversations');
       setEmployee(null);
       setMemory(EMPTY_MEMORY);
       setAutomations([]);
@@ -200,6 +207,8 @@ export function BuddiesDashboard() {
       setAutomationError(null);
       setSelectedWorkspaceId('');
       setShowReviewConversations(false);
+    } else {
+      setActiveTab('work');
     }
     const loading = buddyId
       ? loadEmployee(controller.signal, generation)
@@ -251,12 +260,25 @@ export function BuddiesDashboard() {
   );
   const visibleConversations = useMemo(
     () =>
-      (employee?.conversations ?? []).filter(
-        (conversation) =>
-          conversation.kind !== 'automation' &&
-          (showReviewConversations || conversation.kind !== 'review')
-      ),
-    [employee?.conversations, showReviewConversations]
+      (employee?.conversations ?? [])
+        .filter(
+          (conversation) =>
+            conversation.kind !== 'automation' &&
+            (showReviewConversations || conversation.kind !== 'review')
+        )
+        .sort((left, right) => {
+          const leftId = left.conversation_id ?? left.unleashd_conversation_id;
+          const rightId = right.conversation_id ?? right.unleashd_conversation_id;
+          const availabilityDifference =
+            Number(Boolean(rightId && availableConversationIds.has(rightId))) -
+            Number(Boolean(leftId && availableConversationIds.has(leftId)));
+          if (availabilityDifference !== 0) return availabilityDifference;
+          return (
+            new Date(right.last_active_at ?? 0).getTime() -
+            new Date(left.last_active_at ?? 0).getTime()
+          );
+        }),
+    [availableConversationIds, employee?.conversations, showReviewConversations]
   );
   const reviewConversationCount = useMemo(
     () =>
@@ -266,9 +288,7 @@ export function BuddiesDashboard() {
   );
   const automationConversations = useMemo(
     () =>
-      (employee?.conversations ?? []).filter(
-        (conversation) => conversation.kind === 'automation'
-      ),
+      (employee?.conversations ?? []).filter((conversation) => conversation.kind === 'automation'),
     [employee?.conversations]
   );
   const latestWorkspaceConversation = useMemo(
@@ -352,7 +372,14 @@ export function BuddiesDashboard() {
 
   const openProjectConversation = (targetWorkspace: Workspace, projectId: string) => {
     const existing = [...(employee?.conversations ?? [])]
-      .filter((conversation) => conversation.buddy_project_id === projectId)
+      .filter((conversation) => {
+        const conversationId =
+          conversation.conversation_id ?? conversation.unleashd_conversation_id;
+        return (
+          conversation.buddy_project_id === projectId &&
+          Boolean(conversationId && availableConversationIds.has(conversationId))
+        );
+      })
       .sort(
         (left, right) =>
           new Date(right.last_active_at ?? 0).getTime() -
@@ -397,80 +424,97 @@ export function BuddiesDashboard() {
   return (
     <div className="buddies-dashboard">
       <header className="buddies-hero">
-        <div className="buddy-identity">
-          <button
-            type="button"
-            className="buddy-back-button"
-            onClick={() => navigate('/buddies')}
-            aria-label="Back to all Buddies"
-          >
-            ←
-          </button>
-          <div className="buddy-avatar" aria-hidden="true">
-            {initials(employee.buddy.name)}
-          </div>
-          <div className="buddy-identity-copy">
-            <div className="buddy-identity-title">
-              <h1>{employee.buddy.name}</h1>
-              <span>{employee.buddy.status}</span>
+        <div className="buddies-hero-main">
+          <div className="buddy-identity">
+            <button
+              type="button"
+              className="buddy-back-button"
+              onClick={() => navigate('/buddies')}
+              aria-label="Back to all Buddies"
+            >
+              ←
+            </button>
+            <div className="buddy-avatar" aria-hidden="true">
+              {initials(employee.buddy.name)}
             </div>
-            <p>{employee.buddy.role}</p>
-            <div className="buddy-identity-meta">
-              <span>
-                Reports to <strong>{employee.manager?.name ?? 'Owner'}</strong>
-              </span>
-              {employee.directReports.length > 0 ? (
-                <details className="buddy-report-menu">
-                  <summary>
-                    <strong>{employee.directReports.length}</strong>{' '}
-                    {employee.directReports.length === 1 ? 'report' : 'reports'}
-                  </summary>
-                  <div>
-                    {employee.directReports.map((report) => (
-                      <Link to={`/buddies/${report.id}`} key={report.id}>
-                        <strong>{report.name}</strong>
-                        <span>{report.role ?? 'Direct report'} →</span>
-                      </Link>
-                    ))}
-                  </div>
-                </details>
-              ) : (
+            <div className="buddy-identity-copy">
+              <div className="buddy-identity-title">
+                <h1>{employee.buddy.name}</h1>
+                <span>{employee.buddy.status}</span>
+              </div>
+              <p>{employee.buddy.role}</p>
+              <div className="buddy-identity-meta">
                 <span>
-                  <strong>0</strong> reports
+                  Reports to <strong>{employee.manager?.name ?? 'Owner'}</strong>
                 </span>
-              )}
-              <span
-                title={
-                  employee.skills.length > 0
-                    ? employee.skills.map((skill) => skill.name).join(', ')
-                    : 'No structured skills'
-                }
-              >
-                <strong>{employee.skills.length}</strong>{' '}
-                {employee.skills.length === 1 ? 'skill' : 'skills'}
-              </span>
-              <BuddyExecutionProfile
-                key={`${employee.buddy.id}:${employee.buddy.provider}:${employee.buddy.model}:${employee.buddy.reasoning_effort}`}
-                buddy={employee.buddy}
-                busy={busy !== null}
-                onSave={(profile) =>
-                  mutate('profile', () =>
-                    api(`/api/buddies/${encodeURIComponent(employee.buddy.id)}/profile`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(profile),
-                    })
-                  )
-                }
-              />
+                {employee.directReports.length > 0 ? (
+                  <details className="buddy-report-menu">
+                    <summary>
+                      {employee.directReports.length}{' '}
+                      {employee.directReports.length === 1 ? 'report' : 'reports'}
+                    </summary>
+                    <div>
+                      {employee.directReports.map((report) => (
+                        <Link to={`/buddies/${report.id}`} key={report.id}>
+                          <strong>{report.name}</strong>
+                          <span>{report.role ?? 'Direct report'} →</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </details>
+                ) : (
+                  <span>0 reports</span>
+                )}
+                <span
+                  title={
+                    employee.skills.length > 0
+                      ? employee.skills.map((skill) => skill.name).join(', ')
+                      : 'No structured skills'
+                  }
+                >
+                  {employee.skills.length} {employee.skills.length === 1 ? 'skill' : 'skills'}
+                </span>
+              </div>
             </div>
+          </div>
+          <div className="buddy-hero-actions">
+            <BuddyExecutionProfile
+              key={`${employee.buddy.id}:${employee.buddy.provider}:${employee.buddy.model}:${employee.buddy.reasoning_effort}`}
+              buddy={employee.buddy}
+              busy={busy !== null}
+              onSave={(profile) =>
+                mutate('profile', () =>
+                  api(`/api/buddies/${encodeURIComponent(employee.buddy.id)}/profile`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(profile),
+                  })
+                )
+              }
+            />
+            {workspace && (
+              <button className="buddy-start-button" type="button" onClick={() => talk(workspace)}>
+                Start conversation
+              </button>
+            )}
           </div>
         </div>
-        {workspace && (
-          <button className="buddy-start-button" type="button" onClick={() => talk(workspace)}>
-            Start conversation
-          </button>
-        )}
+        <nav
+          className="buddy-section-tabs buddy-section-tabs--header"
+          aria-label="Employee sections"
+        >
+          {(['work', 'conversations', 'memory', 'automations'] as EmployeeTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={activeTab === tab ? 'active' : ''}
+              aria-current={activeTab === tab ? 'page' : undefined}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab[0].toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </nav>
       </header>
 
       <main className="buddies-content">
@@ -592,20 +636,6 @@ export function BuddiesDashboard() {
           </details>
         )}
 
-        <nav className="buddy-section-tabs" aria-label="Employee sections">
-          {(['work', 'conversations', 'memory', 'automations'] as EmployeeTab[]).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={activeTab === tab ? 'active' : ''}
-              aria-current={activeTab === tab ? 'page' : undefined}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab[0].toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </nav>
-
         {activeTab === 'work' && (
           <section className="buddy-section">
             <div className="buddy-toolbar">
@@ -665,13 +695,14 @@ export function BuddiesDashboard() {
                 .filter((project) => !['done', 'cancelled'].includes(project.status))
                 .map((project) => {
                   const todoProgress = buddyProjectTodoProgress(project);
-                  const existingConversation = employee.conversations.some(
-                    (conversation) =>
+                  const existingConversation = employee.conversations.some((conversation) => {
+                    const conversationId =
+                      conversation.conversation_id ?? conversation.unleashd_conversation_id;
+                    return (
                       conversation.buddy_project_id === project.id &&
-                      Boolean(
-                        conversation.conversation_id ?? conversation.unleashd_conversation_id
-                      )
-                  );
+                      Boolean(conversationId && availableConversationIds.has(conversationId))
+                    );
+                  });
                   return (
                     <article
                       className={`buddy-work-card status-${project.status}`}
@@ -711,9 +742,7 @@ export function BuddiesDashboard() {
                       <button
                         type="button"
                         disabled={!workspace}
-                        onClick={() =>
-                          workspace && openProjectConversation(workspace, project.id)
-                        }
+                        onClick={() => workspace && openProjectConversation(workspace, project.id)}
                       >
                         {existingConversation ? 'Open conversation' : 'Start conversation'}
                       </button>
@@ -768,29 +797,49 @@ export function BuddiesDashboard() {
               {visibleConversations.map((link) => {
                 const conversationId = link.conversation_id ?? link.unleashd_conversation_id;
                 if (!conversationId) return null;
+                const isAvailable = availableConversationIds.has(conversationId);
+                const cardContents = (
+                  <>
+                    <div>
+                      <strong>
+                        {link.kind === 'review'
+                          ? 'Employee review'
+                          : link.buddy_project_id
+                            ? (employee.projects.find(
+                                (project) => project.id === link.buddy_project_id
+                              )?.title ?? 'Project conversation')
+                            : 'General conversation'}
+                      </strong>
+                      <span>
+                        {link.status} ·{' '}
+                        {link.last_active_at
+                          ? new Date(link.last_active_at).toLocaleString()
+                          : 'No activity recorded'}
+                      </span>
+                    </div>
+                    <span className="buddy-conversation-card__action">
+                      {isAvailable ? 'Open →' : 'Deleted'}
+                    </span>
+                  </>
+                );
+                if (!isAvailable) {
+                  return (
+                    <div
+                      aria-disabled="true"
+                      className="buddy-conversation-card buddy-conversation-card--unavailable"
+                      key={link.id ?? conversationId}
+                    >
+                      {cardContents}
+                    </div>
+                  );
+                }
                 return (
                   <Link
                     className="buddy-conversation-card"
                     to={`/chat/${conversationId}`}
                     key={link.id ?? conversationId}
                   >
-                  <div>
-                    <strong>
-                      {link.kind === 'review'
-                        ? 'Employee review'
-                        : link.buddy_project_id
-                        ? (employee.projects.find((project) => project.id === link.buddy_project_id)
-                            ?.title ?? 'Project conversation')
-                        : 'General conversation'}
-                    </strong>
-                    <span>
-                      {link.status} ·{' '}
-                      {link.last_active_at
-                        ? new Date(link.last_active_at).toLocaleString()
-                        : 'No activity recorded'}
-                    </span>
-                  </div>
-                  <span className="buddy-conversation-card__action">Open →</span>
+                    {cardContents}
                   </Link>
                 );
               })}

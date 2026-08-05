@@ -2,6 +2,14 @@ import type { Conversation } from '@unleashd/shared';
 import { Link } from 'react-router-dom';
 import './ResumeThreadWidget.css';
 
+/**
+ * UI badge for Chat "Fork" soft-handoff lineage (`resumedFromConversationId`).
+ *
+ * Shows which conversation this thread was forked from. It does NOT mean the
+ * CLI inherited a provider session — that is merge's spawnMergeReviewFork /
+ * FORK_CAPABLE_PROVIDERS path. Soft handoff context lives in the draft /
+ * first message (historically a pasted transcript).
+ */
 interface ResumeThreadWidgetProps {
   sourceConversationId: string;
   sourceConversation: Conversation | null;

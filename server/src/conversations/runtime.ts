@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
-import { executeCommand } from '@nbardy/agent-cli';
+import { type UnifiedAgentEvent, executeCommand } from '@nbardy/agent-cli';
 import type {
   BuddyContext,
   ConfigResolution,
@@ -27,11 +27,17 @@ import { buddyBuilderCodexMcpArgs, buddyCodexMcpArgs } from '../buddies/mcp-conf
 import {
   SWARM_POLL_INTERVAL_MS,
   SWARM_POLL_THROTTLE_MS,
-  TURN_IDLE_TIMEOUT_MS,
+  TURN_BRIDGE_TIMEOUT_MS,
   TURN_MAX_RUNTIME_MS,
+  TURN_PROVIDER_IDLE_TIMEOUT_MS,
   TURN_TIMEOUT_KILL_GRACE_MS,
 } from '../constants/timeouts';
-import type { RuntimeTurnAttemptObserver, TurnTerminalCause } from '../observability';
+import type {
+  RuntimeTurnAttemptObserver,
+  TurnActivitySource,
+  TurnAttemptActivity,
+  TurnTerminalCause,
+} from '../observability';
 import type { ProviderEvent } from '../providers';
 import { resolveConfigAgainstProviderCatalog } from '../providers/catalog-service';
 import {
@@ -107,7 +113,14 @@ export interface ConversationRuntimeDependencies {
     status: 'complete' | 'failed' | 'cancelled',
     outcome?: string
   ): void;
-  getConversation(id: string): { isRunning: boolean } | undefined;
+  getConversation(id: string):
+    | {
+        isRunning: boolean;
+        provider: ProviderName;
+        sessionId: string;
+        hasStartedSession(): boolean;
+      }
+    | undefined;
   readLatestOompaRuntime(projectRoot: string): OompaRuntimeSnapshot;
   createSessionId(): string;
   turnAttempts?: RuntimeTurnAttemptObserver;
@@ -117,6 +130,125 @@ const VERBOSE = process.env.VERBOSE === '1' || process.argv.includes('--verbose'
 const AGENT_CLI_DEBUG_EVENTS = process.env.AGENT_CLI_DEBUG_EVENTS === '1';
 const LOG_CONTENT_PREVIEW_CHARS = 140;
 const ATTEMPT_ACTIVITY_INTERVAL_MS = 5_000;
+
+export type TurnTimeoutKind = 'bridge' | 'provider' | 'max';
+
+const AGENT_CLI_HEARTBEAT_SOURCE = 'agent-cli.heartbeat';
+const AGENT_CLI_NATIVE_SESSION_SOURCE = 'agent-cli.native-session';
+
+export function isProviderProgressEvent(event: UnifiedAgentEvent): boolean {
+  if (
+    event.type === 'progress' &&
+    event.source === AGENT_CLI_HEARTBEAT_SOURCE &&
+    event.data?.nativeSessionAdvanced === true
+  ) {
+    return true;
+  }
+  return !(event.type === 'progress' && event.source === AGENT_CLI_HEARTBEAT_SOURCE);
+}
+
+export function turnAttemptActivityFromEvent(event: UnifiedAgentEvent): TurnAttemptActivity {
+  if (event.type === 'progress' && event.source === AGENT_CLI_HEARTBEAT_SOURCE) {
+    const unifiedEventSilentSeconds = nonnegativeFiniteNumber(
+      event.data?.unifiedEventSilentSeconds
+    );
+    const rawStdoutSilentSeconds = nonnegativeFiniteNumber(event.data?.rawStdoutSilentSeconds);
+    const phase =
+      event.data?.phase === 'startup' || event.data?.phase === 'running'
+        ? event.data.phase
+        : undefined;
+    const nativeSessionAdvanced = event.data?.nativeSessionAdvanced === true;
+    const nativeSessionAvailable =
+      typeof event.data?.nativeSessionAvailable === 'boolean'
+        ? event.data.nativeSessionAvailable
+        : undefined;
+    const nativeSessionSilentSeconds = nonnegativeFiniteNumber(
+      event.data?.nativeSessionSilentSeconds
+    );
+    const stdoutStreamEvent =
+      event.data?.stdoutStreamEvent === 'attached' ||
+      event.data?.stdoutStreamEvent === 'resume' ||
+      event.data?.stdoutStreamEvent === 'pause' ||
+      event.data?.stdoutStreamEvent === 'close'
+        ? event.data.stdoutStreamEvent
+        : undefined;
+    const stdoutReadableFlowing =
+      typeof event.data?.stdoutReadableFlowing === 'boolean' ||
+      event.data?.stdoutReadableFlowing === null
+        ? event.data.stdoutReadableFlowing
+        : undefined;
+    const stdoutReadableLengthBytes = nonnegativeFiniteNumber(
+      event.data?.stdoutReadableLengthBytes
+    );
+    const nativeSessionSizeBytes = nonnegativeFiniteNumber(event.data?.nativeSessionSizeBytes);
+    return {
+      source: nativeSessionAdvanced ? 'native_session' : 'agent_cli_heartbeat',
+      providerEventType: event.type,
+      providerEventSource: event.source,
+      heartbeat: {
+        ...(unifiedEventSilentSeconds !== undefined ? { unifiedEventSilentSeconds } : {}),
+        ...(rawStdoutSilentSeconds !== undefined ? { rawStdoutSilentSeconds } : {}),
+        ...(phase ? { phase } : {}),
+        ...(stdoutStreamEvent ? { stdoutStreamEvent } : {}),
+        ...(stdoutReadableFlowing !== undefined ? { stdoutReadableFlowing } : {}),
+        ...(stdoutReadableLengthBytes !== undefined ? { stdoutReadableLengthBytes } : {}),
+        ...(nativeSessionAvailable !== undefined ? { nativeSessionAvailable } : {}),
+        ...(nativeSessionAdvanced ? { nativeSessionAdvanced: true } : {}),
+        ...(nativeSessionSilentSeconds !== undefined ? { nativeSessionSilentSeconds } : {}),
+        ...(nativeSessionSizeBytes !== undefined ? { nativeSessionSizeBytes } : {}),
+      },
+    };
+  }
+  if (event.type === 'progress' && event.source === AGENT_CLI_NATIVE_SESSION_SOURCE) {
+    return {
+      source: 'native_session',
+      providerEventType: event.type,
+      providerEventSource: event.source,
+    };
+  }
+  return {
+    source: 'provider_event',
+    providerEventType: event.type,
+    ...(event.type === 'progress' ? { providerEventSource: event.source } : {}),
+  };
+}
+
+export function describeTurnTimeout(
+  kind: TurnTimeoutKind,
+  input: {
+    elapsedSeconds: number;
+    bridgeIdleSeconds: number;
+    providerIdleSeconds: number;
+    sawMeaningfulOutput: boolean;
+  }
+): {
+  terminalCause: 'bridge_timeout' | 'provider_idle_timeout' | 'max_runtime_timeout';
+  message: string;
+} {
+  const outputDetail = input.sawMeaningfulOutput
+    ? ''
+    : ' (no assistant text or tool output reached Unleashd)';
+  if (kind === 'bridge') {
+    return {
+      terminalCause: 'bridge_timeout',
+      message: `Turn event bridge stalled: no unified event or bridge heartbeat for ${input.bridgeIdleSeconds}s${outputDetail}`,
+    };
+  }
+  if (kind === 'provider') {
+    return {
+      terminalCause: 'provider_idle_timeout',
+      message: `Turn stalled: no provider event or native-session advancement for ${input.providerIdleSeconds}s${outputDetail}`,
+    };
+  }
+  return {
+    terminalCause: 'max_runtime_timeout',
+    message: `Turn reached its maximum runtime after ${input.elapsedSeconds}s${outputDetail}`,
+  };
+}
+
+function nonnegativeFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
 
 function formatLogPreview(content: string, maxChars = LOG_CONTENT_PREVIEW_CHARS): string {
   return content.replace(/\s+/g, ' ').slice(0, maxChars);
@@ -288,8 +420,9 @@ export function createConversationRuntime(
     // Parent conversation id for provider-native spawned sub-agent threads.
     // For Codex this is resolved from thread_spawn.parent_thread_id.
     parentConversationId: string | null;
-    // Source conversation id for user-created fork/resume threads.
-    resumedFromConversationId: string | null;
+  // Chat "Fork" soft-handoff lineage (UI). Not a provider-session fork.
+  // See shared FORK_CAPABLE_PROVIDERS comment for the two "fork" concepts.
+  resumedFromConversationId: string | null;
     // Full model name from CLI (e.g., "claude-sonnet-4-5-20250929") — more specific than provider.
     modelName: string | null;
     // Debug prefix for swarm conversations — prepended to first CLI message.
@@ -315,14 +448,18 @@ export function createConversationRuntime(
     private _hasStartedSession: boolean;
     // Buffer stderr for this process run so silent failures can be surfaced to UI.
     private _stderrBuffer: string;
-    // Tracks whether we received provider stream events for this process run.
-    private _sawStdoutEventThisRun: boolean;
+    // Tracks whether assistant text or a tool event reached the unified stream.
+    private _sawMeaningfulProviderOutputThisRun: boolean;
     // Start time of the current CLI process run (for duration tracking).
     private _processStartTime = 0;
-    // Last provider event timestamp for idle-hang detection.
-    private _lastTurnEventAt = 0;
+    // Bridge activity and provider progress are intentionally independent.
+    // A synthetic wrapper heartbeat proves transport health but not that the
+    // provider is making progress.
+    private _lastBridgeEventAt = 0;
+    private _lastProviderProgressAt = 0;
     // Per-turn watchdog timers.
-    private _turnIdleTimer: NodeJS.Timeout | null = null;
+    private _turnBridgeTimer: NodeJS.Timeout | null = null;
+    private _turnProviderIdleTimer: NodeJS.Timeout | null = null;
     private _turnMaxTimer: NodeJS.Timeout | null = null;
     // Track last known swarm run ID to detect newly launched swarms.
     private _lastSwarmRunId: string | null = null;
@@ -344,6 +481,8 @@ export function createConversationRuntime(
     private _terminalCauseHint: TurnTerminalCause | null = null;
     private _stopCause: 'user_stop' | 'server_restart' | null = null;
     private _lastAttemptActivityAt = 0;
+    private _lastAttemptActivitySource: TurnActivitySource | null = null;
+    private _lastObservedTurnActivity: TurnAttemptActivity | null = null;
     private _runToken = 0;
     private _activeTurnStop: ((signal?: NodeJS.Signals) => void) | null = null;
 
@@ -403,7 +542,7 @@ export function createConversationRuntime(
       // Mark session as started if loading existing (use --resume for next message)
       this._hasStartedSession = existingSessionId !== undefined;
       this._stderrBuffer = '';
-      this._sawStdoutEventThisRun = false;
+      this._sawMeaningfulProviderOutputThisRun = false;
       this._lastSwarmRunId = null;
       this._hasSwarmBaseline = false;
     }
@@ -485,21 +624,37 @@ export function createConversationRuntime(
 
       const forking = !!forkSourceSessionId;
       const shouldResume = !forking && this._hasStartedSession;
+      const executionMode = forking ? 'fork' : shouldResume ? 'resume' : 'fresh';
       console.log(
-        `[${this.id}] Spawning ${this.provider} (provider-session=${this.sessionId.substring(0, 8)}..., resume=${shouldResume}, fork=${forking})`
+        `[${this.id}] Spawning ${this.provider} (mode=${executionMode}, provider-session=${this.sessionId.substring(0, 8)}...${forkSourceSessionId ? `, fork-source-session=${forkSourceSessionId.substring(0, 8)}...` : ''}${this.resumedFromConversationId ? `, parent-conversation=${this.resumedFromConversationId.substring(0, 8)}...` : ''})`
       );
       console.log(`[${this.id}] Message: "${content.substring(0, 50)}"`);
 
       // Reset per-run buffers
       this._stderrBuffer = '';
-      this._sawStdoutEventThisRun = false;
+      this._sawMeaningfulProviderOutputThisRun = false;
       this._turnCompletedCleanly = false;
       this._terminalCauseHint = null;
       this._stopCause = null;
       this._processStartTime = Date.now();
       this._lastAttemptActivityAt = 0;
+      this._lastAttemptActivitySource = null;
+      this._lastObservedTurnActivity = null;
       this._primeSwarmBaseline();
-      if (this._activeAttemptId) turnAttempts.starting(this._activeAttemptId);
+      if (this._activeAttemptId) {
+        turnAttempts.starting(this._activeAttemptId);
+        turnAttempts.activity(
+          this._activeAttemptId,
+          {
+            source: 'runtime',
+            providerEventType: `execution.${executionMode}`,
+            providerEventSource: this.resumedFromConversationId
+              ? `parent-conversation:${this.resumedFromConversationId}`
+              : 'unleashd.runtime',
+          },
+          this.sessionId
+        );
+      }
 
       // Per-provider narrowing: ExecuteCommandRequest is a discriminated union
       // keyed on `harness`. Reasoning effort is a pass-through string — the
@@ -560,7 +715,11 @@ export function createConversationRuntime(
       const consumeEvents = async (): Promise<void> => {
         for await (const event of turn.events) {
           if (runToken !== this._runToken) return;
-          this._noteTurnActivity();
+          // A timeout finalizes the user-visible turn before the child has
+          // necessarily acknowledged SIGTERM. Ignore any buffered/late
+          // provider events so they cannot resurrect or complete it twice.
+          if (this._turnCompletedCleanly) continue;
+          this._noteTurnActivity(event);
           switch (event.type) {
             case 'session.started': {
               if (event.sessionId !== this.sessionId) {
@@ -584,12 +743,12 @@ export function createConversationRuntime(
               break;
             }
             case 'text.delta': {
-              this._sawStdoutEventThisRun = true;
+              this._sawMeaningfulProviderOutputThisRun = true;
               this.handleOutput({ type: 'text_delta', text: event.text });
               break;
             }
             case 'tool.use': {
-              this._sawStdoutEventThisRun = true;
+              this._sawMeaningfulProviderOutputThisRun = true;
               this.handleOutput({
                 type: 'tool_use',
                 name: event.name,
@@ -656,7 +815,7 @@ export function createConversationRuntime(
       });
 
       void turn.completed
-        .then(async ({ exitCode, sessionId, reason }) => {
+        .then(async ({ exitCode, signal, sessionId, reason }) => {
           if (runToken !== this._runToken) return;
           this._clearTurnWatchdogs();
           if (sessionId && sessionId !== this.sessionId) {
@@ -672,7 +831,7 @@ export function createConversationRuntime(
 
           const durationMs = Date.now() - this._processStartTime;
           console.log(
-            `[${this.id}] Process closed with code ${exitCode} (reason=${reason}) after ${durationMs}ms`
+            `[${this.id}] Process closed with code ${exitCode} signal=${signal ?? 'none'} (reason=${reason}) after ${durationMs}ms`
           );
 
           // message_complete already handled state cleanup and broadcast.
@@ -736,7 +895,7 @@ export function createConversationRuntime(
                   : 'Provider exited before completing the turn';
             console.error(`[${this.id}] ${errorMsg}`);
             emitSystemMessage(errorMsg);
-          } else if (exitCode === 0 && !this._sawStdoutEventThisRun) {
+          } else if (exitCode === 0 && !this._sawMeaningfulProviderOutputThisRun) {
             // Silent zero-exit without any streamed output is treated as provider failure.
             const content = details
               ? `Provider reported an error without response output: ${details}`
@@ -1300,6 +1459,48 @@ export function createConversationRuntime(
         return;
       }
 
+      // --- Chat Fork vs merge session-fork (easy to confuse) ---
+      //
+      // Chat "Fork" (soft handoff): resumedFromConversationId is UI lineage.
+      // Context is supposed to live in the draft / first user message
+      // (originally a pasted transcript). Changing provider before send is
+      // intentional and must still work — do not require same-provider CLI
+      // session inheritance for that path.
+      //
+      // Merge review children: spawnMergeReviewFork() below, which ALWAYS
+      // passes forkSourceSessionId into the harness (--fork / emulateFork).
+      // That path is gated by FORK_CAPABLE_PROVIDERS.
+      //
+      // The block below currently tries provider-session inheritance on the
+      // first send of ANY resumedFromConversationId thread. That conflates
+      // the two concepts and rejects cross-provider Chat Forks. Keep this
+      // distinction in mind before extending it.
+      let forkSourceSessionId: string | undefined;
+      if (
+        !this._hasStartedSession &&
+        this.messages.length === 0 &&
+        this.resumedFromConversationId
+      ) {
+        const source = getConversation(this.resumedFromConversationId);
+        if (!source) {
+          this.rejectFork(
+            `Cannot fork: source conversation ${this.resumedFromConversationId} is not loaded`
+          );
+          return;
+        }
+        if (source.provider !== this.provider) {
+          this.rejectFork(
+            `Cannot fork a ${source.provider} session into a ${this.provider} conversation`
+          );
+          return;
+        }
+        if (!source.hasStartedSession()) {
+          this.rejectFork('Cannot fork: the source conversation has no provider session yet');
+          return;
+        }
+        forkSourceSessionId = source.sessionId;
+      }
+
       this._prepareTurnAttempt();
       const executionConfig = this.preflightExecution();
       if (!executionConfig) {
@@ -1318,6 +1519,10 @@ export function createConversationRuntime(
         buddyBriefing: this._buddyBriefing,
         swarmDebugPrefix: this.swarmDebugPrefix,
       });
+      // When provider-session inheritance ran above, skip first-turn briefing /
+      // pasted-context prefixes — the CLI already has the source transcript.
+      // Soft Chat Forks (no forkSourceSessionId) keep buildFirstTurnCliContent.
+      if (forkSourceSessionId) cliContent = content;
 
       // Merge feature: on the very first user send of a merge parent thread,
       // inject a prefix containing the contents of each child's review doc.
@@ -1397,18 +1602,35 @@ export function createConversationRuntime(
       });
 
       // Spawn CLI process with possibly-prefixed content
-      this.spawnForMessage(cliContent, executionConfig);
+      this.spawnForMessage(cliContent, executionConfig, forkSourceSessionId);
+    }
+
+    private rejectFork(message: string): void {
+      console.error(`[${this.id}] ${message}`);
+      this.messages.push({ role: 'system', content: message, timestamp: new Date() });
+      this.broadcastMessage({
+        type: 'message',
+        role: 'system',
+        content: message,
+        conversationId: this.id,
+      });
+      broadcast({
+        type: 'conversations_updated',
+        conversations: [this.toJSON()],
+      });
     }
 
     /**
-     * Merge feature: spawn a CLI turn by FORKING from another session.
-     * `forkSourceSessionId` is the provider session id of the source conversation
-     * (NOT its UI id). The CLI harness inherits the full transcript (tool_use
-     * + tool_result) into a new session id without polluting the source.
-     * Requires the provider to have sessionForkFlags defined (claude, opencode).
+     * Merge feature ONLY: spawn a turn by inheriting another conversation's
+     * provider session (CLI --fork / emulateFork). `forkSourceSessionId` is the
+     * provider session id, NOT the Unleashd conversation UUID.
      *
-     * Only safe to call on a fresh Conversation (no prior messages). The user
-     * message is recorded and broadcast exactly like sendMessage.
+     * This is NOT the Chat "Fork" button. Chat Fork is a soft handoff via
+     * resumedFromConversationId + draft/first-message text (often a pasted
+     * transcript) and must not be routed through here.
+     *
+     * Requires FORK_CAPABLE_PROVIDERS / harness sessionForkFlags or emulateFork.
+     * Only safe on a fresh Conversation (no prior messages).
      */
     spawnMergeReviewFork(content: string, forkSourceSessionId: string): void {
       if (this.process || this.isRunning) {
@@ -1540,38 +1762,63 @@ export function createConversationRuntime(
 
     private _startTurnWatchdogs(): void {
       this._clearTurnWatchdogs();
-      this._lastTurnEventAt = Date.now();
-      this._refreshIdleWatchdog();
+      const now = Date.now();
+      this._lastBridgeEventAt = now;
+      this._lastProviderProgressAt = now;
+      this._refreshBridgeWatchdog();
+      this._refreshProviderIdleWatchdog();
       this._startSwarmPoller();
       this._turnMaxTimer = setTimeout(() => {
         this._handleTurnTimeout('max');
       }, TURN_MAX_RUNTIME_MS);
     }
 
-    private _noteTurnActivity(): void {
+    private _noteTurnActivity(event: UnifiedAgentEvent): void {
       if (!this.isRunning) return;
       const now = Date.now();
-      this._lastTurnEventAt = now;
+      const activity = turnAttemptActivityFromEvent(event);
+      this._lastObservedTurnActivity = activity;
       if (
         this._activeAttemptId &&
-        now - this._lastAttemptActivityAt >= ATTEMPT_ACTIVITY_INTERVAL_MS
+        (now - this._lastAttemptActivityAt >= ATTEMPT_ACTIVITY_INTERVAL_MS ||
+          this._lastAttemptActivitySource !== activity.source)
       ) {
         this._lastAttemptActivityAt = now;
-        turnAttempts.activity(this._activeAttemptId, this.sessionId);
+        this._lastAttemptActivitySource = activity.source;
+        turnAttempts.activity(this._activeAttemptId, activity, this.sessionId);
       }
-      this._refreshIdleWatchdog();
+      // Every normalized event proves the wrapper -> queue -> Unleashd bridge
+      // is alive. Only provider events and typed native-session advancement
+      // prove provider progress; the wrapper's timer heartbeat does not.
+      this._lastBridgeEventAt = now;
+      this._refreshBridgeWatchdog();
+      if (isProviderProgressEvent(event)) {
+        this._lastProviderProgressAt = now;
+        this._refreshProviderIdleWatchdog();
+      }
       this._pollForNewSwarms();
     }
 
-    private _refreshIdleWatchdog(): void {
-      if (this._turnIdleTimer) {
-        clearTimeout(this._turnIdleTimer);
-        this._turnIdleTimer = null;
+    private _refreshBridgeWatchdog(): void {
+      if (this._turnBridgeTimer) {
+        clearTimeout(this._turnBridgeTimer);
+        this._turnBridgeTimer = null;
       }
       if (!this.isRunning) return;
-      this._turnIdleTimer = setTimeout(() => {
-        this._handleTurnTimeout('idle');
-      }, TURN_IDLE_TIMEOUT_MS);
+      this._turnBridgeTimer = setTimeout(() => {
+        this._handleTurnTimeout('bridge');
+      }, TURN_BRIDGE_TIMEOUT_MS);
+    }
+
+    private _refreshProviderIdleWatchdog(): void {
+      if (this._turnProviderIdleTimer) {
+        clearTimeout(this._turnProviderIdleTimer);
+        this._turnProviderIdleTimer = null;
+      }
+      if (!this.isRunning) return;
+      this._turnProviderIdleTimer = setTimeout(() => {
+        this._handleTurnTimeout('provider');
+      }, TURN_PROVIDER_IDLE_TIMEOUT_MS);
     }
 
     /**
@@ -1616,9 +1863,13 @@ export function createConversationRuntime(
 
     private _clearTurnWatchdogs(): void {
       this._stopSwarmPoller();
-      if (this._turnIdleTimer) {
-        clearTimeout(this._turnIdleTimer);
-        this._turnIdleTimer = null;
+      if (this._turnBridgeTimer) {
+        clearTimeout(this._turnBridgeTimer);
+        this._turnBridgeTimer = null;
+      }
+      if (this._turnProviderIdleTimer) {
+        clearTimeout(this._turnProviderIdleTimer);
+        this._turnProviderIdleTimer = null;
       }
       if (this._turnMaxTimer) {
         clearTimeout(this._turnMaxTimer);
@@ -1626,33 +1877,63 @@ export function createConversationRuntime(
       }
     }
 
-    private _handleTurnTimeout(kind: 'idle' | 'max'): void {
+    private _handleTurnTimeout(kind: TurnTimeoutKind): void {
       if (!this.process || !this.isRunning) return;
       const now = Date.now();
       const elapsedSec = Math.round((now - this._processStartTime) / 1000);
-      const idleSec = Math.round((now - this._lastTurnEventAt) / 1000);
-      const sawContent = this._sawStdoutEventThisRun;
-      const detail = !sawContent ? ' (no content ever received — likely API-level hang)' : '';
-      const message =
-        kind === 'idle'
-          ? `Turn stalled: no provider events for ${idleSec}s${detail} (timed out)`
-          : `Turn exceeded max runtime after ${elapsedSec}s${detail} (timed out)`;
+      const bridgeIdleSec = Math.round((now - this._lastBridgeEventAt) / 1000);
+      const providerIdleSec = Math.round((now - this._lastProviderProgressAt) / 1000);
+      const sawMeaningfulOutput = this._sawMeaningfulProviderOutputThisRun;
+      const timeout = describeTurnTimeout(kind, {
+        elapsedSeconds: elapsedSec,
+        bridgeIdleSeconds: bridgeIdleSec,
+        providerIdleSeconds: providerIdleSec,
+        sawMeaningfulOutput,
+      });
+      const lastActivity = this._lastObservedTurnActivity;
 
       console.error(
-        `[${this.id}] ${message} | sawContent=${sawContent} elapsed=${elapsedSec}s idle=${idleSec}s stderr=${this._stderrBuffer.length > 0 ? 'yes' : 'no'}`
+        `[${this.id}] ${timeout.message} | timeoutKind=${kind} terminalCause=${timeout.terminalCause} sawMeaningfulOutput=${sawMeaningfulOutput} elapsed=${elapsedSec}s bridgeIdle=${bridgeIdleSec}s providerIdle=${providerIdleSec}s lastActivitySource=${lastActivity?.source ?? 'none'} lastProviderEvent=${lastActivity?.providerEventType ?? 'none'} stderr=${this._stderrBuffer.length > 0 ? 'yes' : 'no'}`
       );
       this._clearTurnWatchdogs();
-      this.handleOutput({ type: 'error', message });
-      this._finishTurnAttempt('failed', 'timeout');
-      // Clear busy state now so processQueue() sees isRunning=false and can dequeue.
-      // Without this, the close handler's fast path (_turnCompletedCleanly) skips
-      // state reset, leaving isRunning=true and stalling the queue permanently.
+      this.handleOutput({ type: 'error', message: timeout.message });
+      this._finishTurnAttempt('failed', timeout.terminalCause);
+
+      const completedAt = new Date();
+      const lastMsg = this.messages[this.messages.length - 1];
+      if (lastMsg?.role === 'assistant' && !lastMsg.completedAt) {
+        lastMsg.completedAt = completedAt;
+        lastMsg.completionReason = 'error';
+      }
+      for (const agent of this.subAgents) {
+        if (agent.status !== 'running') continue;
+        agent.status = 'error';
+        agent.completedAt = completedAt;
+        agent.currentAction = 'Parent turn timed out';
+      }
+      this._pendingTaskTools.clear();
+      // Commit buffered text before status:false makes the client discard its
+      // transient streaming buffer, then publish the authoritative transcript.
+      this.broadcastChunk({
+        type: 'message_complete',
+        conversationId: this.id,
+        reason: 'error',
+      });
       this.isStreaming = false;
       this.isRunning = false;
+      clearExternalRunningStatus(this.id, this.sessionId);
+      markLocalCompletionSuppression(this.id, this.sessionId);
       this.broadcastStatus();
+      broadcast({
+        type: 'conversations_updated',
+        conversations: [this.toJSON()],
+      });
       // Mark turn as cleanly completed so the close handler (triggered by SIGTERM
       // below) takes the fast path and doesn't emit a duplicate system message.
       this._turnCompletedCleanly = true;
+      updateBuddyConversationLink(this, 'failed');
+      settleBuddyDelegation(this, 'failed', timeout.message);
+      this.emit('buddy-turn-failed', timeout.message);
 
       const proc = this.process;
       const stopTurn = this._activeTurnStop;

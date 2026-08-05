@@ -22,45 +22,68 @@
 }
 
 .buddies-directory-content {
-  padding: 24px 32px;
+  width: min(100%, 1240px);
+  margin: 0 auto;
+  padding: 28px 32px 40px;
 }
 
 .buddy-card-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .buddy-directory-card {
   display: flex;
-  align-items: center;
+  position: relative;
+  align-items: stretch;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 20px;
-  padding: 20px 24px;
+  min-height: 238px;
+  gap: 22px;
+  padding: 24px;
+  overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-left: 4px solid var(--ai);
-  border-radius: 2px;
-  background: var(--bg-card);
+  border-left: 3px solid var(--ai);
+  border-radius: 10px;
+  background: linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--ai) 7%, transparent),
+      transparent 48%
+    ), var(--bg-card);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.buddy-directory-card::after {
+  position: absolute;
+  right: -52px;
+  bottom: -68px;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ai) 8%, transparent);
+  content: "";
+  pointer-events: none;
 }
 
 .buddy-directory-card--new {
-  min-height: 74px;
-  justify-content: center;
-  border-style: dashed;
-  border-left-width: 1px;
+  justify-content: flex-start;
+  border: 1px dashed color-mix(in srgb, var(--ai) 55%, var(--border-subtle));
+  background: radial-gradient(
+      circle at 85% 15%,
+      color-mix(in srgb, var(--ai) 18%, transparent),
+      transparent 34%
+    ), linear-gradient(145deg, color-mix(in srgb, var(--ai) 13%, transparent), var(--bg-card));
   color: var(--ai-bright);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
 }
 
 .buddy-directory-card--new:hover {
-  border-left-color: var(--border-default);
+  border-color: var(--ai);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--ai) 12%, transparent);
 }
 
 .buddy-directory-card--new:disabled {
@@ -69,16 +92,17 @@
 }
 
 .buddy-directory-card:hover {
-  transform: translateY(-1px);
+  transform: translateY(-3px);
   border-color: var(--border-default);
   border-left-color: var(--ai);
   background: var(--bg-panel);
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--pole-bg-deep) 26%, transparent);
 }
 
 .buddy-directory-card-info {
   display: flex;
-  align-items: center;
-  gap: 20px;
+  align-items: flex-start;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -88,10 +112,56 @@
 
 .buddy-directory-card-actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   flex-shrink: 0;
+}
+
+.buddy-new-card-mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid color-mix(in srgb, var(--ai) 50%, transparent);
+  border-radius: 12px;
+  color: var(--ai-bright);
+  background: color-mix(in srgb, var(--ai) 16%, transparent);
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.buddy-new-card-copy {
+  display: grid;
+  gap: 7px;
+  max-width: 280px;
+}
+
+.buddy-new-card-eyebrow {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.buddy-new-card-copy strong {
+  color: var(--text-bright);
+  font-size: 18px;
+}
+
+.buddy-new-card-copy > span:last-child {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.buddy-new-card-action {
+  align-self: flex-start;
+  color: var(--ai-bright);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .buddy-presence {
@@ -165,6 +235,12 @@
 .buddy-card-stats span {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+@media (max-width: 720px) {
+  .buddy-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .buddy-current-summary {
@@ -323,19 +399,23 @@
 }
 
 .buddies-hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 24px;
-  padding: 20px 32px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 18px 32px 0;
   background: color-mix(in oklch, var(--bg-card) 86%, transparent);
+}
+
+.buddies-hero-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding-bottom: 18px;
 }
 
 .buddy-identity {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
 }
 
 .buddy-back-button {
@@ -359,8 +439,8 @@
 .buddy-avatar {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border: 1px solid color-mix(in srgb, var(--ai) 55%, transparent);
   border-radius: 4px;
   color: var(--ai-bright);
@@ -415,7 +495,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 5px 0;
-  margin-top: 7px;
+  margin-top: 8px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -433,7 +513,7 @@
 .buddy-identity-meta > * + *::before {
   margin: 0 8px;
   color: var(--border-strong);
-  content: '·';
+  content: "·";
 }
 
 .buddy-identity-meta strong {
@@ -581,13 +661,50 @@
 
 .buddy-start-button {
   flex-shrink: 0;
-  padding: 9px 15px;
+  padding: 10px 15px;
   border: 1px solid var(--ai);
-  border-radius: 2px;
+  border-radius: 3px;
   color: var(--text-on-accent);
   background: var(--ai);
   font-weight: 700;
   cursor: pointer;
+}
+
+.buddy-hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 20px;
+  flex-shrink: 0;
+}
+
+.buddy-hero-actions .buddy-execution-profile summary {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+
+.buddy-hero-actions .buddy-execution-profile summary span {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.buddy-hero-actions .buddy-execution-profile summary strong {
+  max-width: 260px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.buddy-hero-actions .buddy-execution-profile form,
+.buddy-hero-actions .buddy-execution-profile p {
+  right: 0;
+  left: auto;
 }
 
 .buddy-start-button:disabled,
@@ -806,9 +923,14 @@
     border-left: 0;
   }
 
-  .buddies-hero {
+  .buddies-hero-main {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .buddy-hero-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .campaign-grid {
@@ -837,9 +959,13 @@
 
 .buddy-section-tabs {
   display: flex;
-  gap: 24px;
-  margin-bottom: 20px;
+  gap: 26px;
+  margin: 0;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.buddy-section-tabs--header {
+  min-height: 42px;
 }
 
 .buddy-lead-tools > summary,
@@ -893,12 +1019,13 @@
 
 .buddy-section-tabs button {
   margin-bottom: -1px;
-  padding: 10px 1px 9px;
+  padding: 11px 1px 10px;
   border: 0;
   border-bottom: 2px solid transparent;
   color: var(--text-muted);
   background: transparent;
   font-size: 12px;
+  letter-spacing: 0.01em;
   cursor: pointer;
 }
 
@@ -1100,6 +1227,18 @@
   border-color: var(--border-default);
   border-left-color: var(--ai-bright);
   background: var(--bg-raised-1);
+}
+
+.buddy-conversation-card--unavailable,
+.buddy-conversation-card--unavailable:hover {
+  border-color: var(--border-subtle);
+  border-left-color: var(--text-muted);
+  background: var(--bg-card);
+  opacity: 0.62;
+}
+
+.buddy-conversation-card--unavailable .buddy-conversation-card__action {
+  color: var(--text-muted);
 }
 
 .buddy-conversation-card > div {
@@ -1458,6 +1597,10 @@
   }
   .buddy-section-tabs {
     overflow-x: auto;
+  }
+
+  .buddy-section-tabs--header {
+    gap: 20px;
   }
 
   .buddy-form,

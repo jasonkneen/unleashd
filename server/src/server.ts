@@ -194,6 +194,10 @@ registerConversationWebSocket(wss, {
   resolveBuddyConversation,
   createConversation: (options) => new Conversation(options),
   createConversationLink: createBuddyConversationLink,
+  cancelBuddyConversation: (conversation) => {
+    updateBuddyConversationLink(conversation, 'cancelled');
+    void settleBuddyDelegation(conversation, 'cancelled');
+  },
   dispatchInitialMessage: buddyCreationService.dispatchInitialMessageIfPending,
   creationFingerprint: buddyCreationService.creationFingerprint,
   broadcast: applicationContext.broadcast,
