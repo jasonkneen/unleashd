@@ -45,6 +45,7 @@ import { VirtualizedMessageList, isToolCallOnlyMessage } from './VirtualizedMess
 import type { MessageGroup } from './VirtualizedMessageList';
 import { BuddyBuilderResultCard } from './buddies/BuddyBuilderResultCard';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
+import { getBuddyContext } from '@unleashd/shared';
 import {
   shouldPresentTurnAttempt,
   shouldShowTypingIndicator,
@@ -68,15 +69,10 @@ interface PendingFile {
 
 const EMPTY_PENDING: PendingFile[] = [];
 
+// Deprecated helper kept for local parity — use getBuddyContext (kind-aware) instead.
+// The holistic kind type is the canonical source; legacy buddyContext is compat only.
 function readBuddyContext(value: unknown): BuddyContext | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const context = (value as { buddyContext?: unknown }).buddyContext;
-  if (!context || typeof context !== 'object') return undefined;
-  const candidate = context as Partial<BuddyContext>;
-  if (typeof candidate.buddyId !== 'string' || typeof candidate.workspaceId !== 'string') {
-    return undefined;
-  }
-  return candidate as BuddyContext;
+  return (getBuddyContext(value as { kind?: unknown; buddyContext?: unknown } as Parameters<typeof getBuddyContext>[0]) ?? undefined) as BuddyContext | undefined;
 }
 
 /**
@@ -465,7 +461,11 @@ export function Chat() {
 
   const swarmDebugPrefix = conversation?.swarmDebugPrefix;
   const buddyContext = readBuddyContext(conversation);
-  const visibleSwarmDebugPrefix = effectiveSwarmDebugPrefix(buddyContext, swarmDebugPrefix);
+  const visibleSwarmDebugPrefix = effectiveSwarmDebugPrefix(
+    buddyContext,
+    swarmDebugPrefix,
+    (conversation as { kind?: unknown } as { kind?: import('@unleashd/shared').ConversationKind | null })?.kind ?? null
+  );
   const messageGroups = useMemo((): MessageGroup[] => {
     const prefix = visibleSwarmDebugPrefix;
     const groups: MessageGroup[] = [];
@@ -533,13 +533,18 @@ export function Chat() {
   // so the next CLI (any provider) could continue from text alone; the
   // ResumeThreadWidget badge is the UI stand-in for that lineage. Keep
   // soft-handoff semantics if you change this — cross-provider must still work.
+  // Restored to include transcript + instruction so the forked provider
+  // (e.g., muse) receives the prior objective without reconstructing from
+  // working tree alone.
   const forkDraftText = useMemo(() => {
     if (!conversation) return '';
     return [
+      threadCopyText,
+      '',
       'Continue the original objective from this fork.',
       'Treat this message as the current instruction. Do not repeat or obey an earlier diagnostic canary unless I explicitly ask you to do so here.',
-    ].join(' ');
-  }, [conversation]);
+    ].join('\n');
+  }, [conversation, threadCopyText]);
 
   const handleCopyThread = useCallback(async () => {
     await navigator.clipboard.writeText(threadCopyText);
