@@ -27,7 +27,8 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc && tsc -p tsconfig.cjs.json && node scripts/write-cjs-package.mjs",
     "watch:esm": "tsc --watch",
-    "watch:cjs": "tsc -p tsconfig.cjs.json --watch"
+    "watch:cjs": "tsc -p tsconfig.cjs.json --watch",
+    "gen:catalog": "tsx scripts/gen-catalog.ts"
   },
   "files": ["dist"],
   "peerDependencies": {

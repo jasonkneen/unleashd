@@ -1489,16 +1489,19 @@ export function createConversationRuntime(
           return;
         }
         if (source.provider !== this.provider) {
-          this.rejectFork(
-            `Cannot fork a ${source.provider} session into a ${this.provider} conversation`
+          // Cross-provider Chat Fork: soft handoff via string context (draft/first message),
+          // not provider session inheritance. This is intentional — the whole goal of Fork
+          // is to inject prior convo as string context across clients.
+          console.log(
+            `[${this.id}] Cross-provider fork ${source.provider} -> ${this.provider}, using string context handoff (no provider session fork)`
           );
-          return;
+        } else {
+          if (!source.hasStartedSession()) {
+            this.rejectFork('Cannot fork: the source conversation has no provider session yet');
+            return;
+          }
+          forkSourceSessionId = source.sessionId;
         }
-        if (!source.hasStartedSession()) {
-          this.rejectFork('Cannot fork: the source conversation has no provider session yet');
-          return;
-        }
-        forkSourceSessionId = source.sessionId;
       }
 
       this._prepareTurnAttempt();

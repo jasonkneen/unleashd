@@ -168,27 +168,60 @@ export {
 // We require at least one "/" segment to avoid collisions with Claude/Codex IDs.
 // =============================================================================
 
-export const ClaudeModelSchema = z.enum(['fable', 'opus', 'sonnet', 'haiku']);
+// =============================================================================
+// Generated catalog — single source of truth is vendor/agent-cli-tool/catalog.jsonc
+// Run `pnpm --filter @unleashd/shared gen:catalog` after editing catalog.jsonc.
+// This block derives schemas and helpers from the generated catalog to avoid
+// duplicate enum literals in shared/src/index.ts.
+// =============================================================================
+import {
+  CLAUDE_MODEL_IDS as GEN_CLAUDE_MODEL_IDS,
+  GEMINI_MODEL_IDS as GEN_GEMINI_MODEL_IDS,
+  MUSE_MODEL_IDS as GEN_MUSE_MODEL_IDS,
+  CURSOR_MODEL_REGISTRY as GEN_CURSOR_MODEL_REGISTRY,
+  CODEX_MODEL_REGISTRY as GEN_CODEX_MODEL_REGISTRY,
+  CLAUDE_EFFORT_LEVELS as GEN_CLAUDE_EFFORT_LEVELS,
+  CODEX_EFFORT_LEVELS as GEN_CODEX_EFFORT_LEVELS,
+  MUSE_EFFORT_LEVELS as GEN_MUSE_EFFORT_LEVELS,
+  CODEX_THINKING_OPTIONS as GEN_CODEX_THINKING_OPTIONS,
+  NO_CODEX_THINKING as GEN_NO_CODEX_THINKING,
+  CODEX_UNIFIED_THINKING_OPTIONS as GEN_CODEX_UNIFIED_THINKING_OPTIONS,
+} from './generated/catalog.js';
+
+// Re-export generated arrays so consumers can import from shared entry point
+export const CLAUDE_EFFORT_LEVELS = GEN_CLAUDE_EFFORT_LEVELS;
+export const CODEX_EFFORT_LEVELS = GEN_CODEX_EFFORT_LEVELS;
+export const MUSE_EFFORT_LEVELS = GEN_MUSE_EFFORT_LEVELS;
+export const CODEX_THINKING_OPTIONS = GEN_CODEX_THINKING_OPTIONS;
+export const NO_CODEX_THINKING = GEN_NO_CODEX_THINKING;
+export const CODEX_UNIFIED_THINKING_OPTIONS = GEN_CODEX_UNIFIED_THINKING_OPTIONS;
+export const CURSOR_MODEL_REGISTRY = GEN_CURSOR_MODEL_REGISTRY;
+export const CODEX_MODEL_REGISTRY = GEN_CODEX_MODEL_REGISTRY;
+
+export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
+export type CodexEffortLevel = (typeof CODEX_EFFORT_LEVELS)[number];
+export type MuseEffortLevel = (typeof MUSE_EFFORT_LEVELS)[number];
+export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
+export type CodexThinkingMode = typeof NO_CODEX_THINKING | CodexThinkingOption;
+
+export type CodexModelRegistryEntry = {
+  modelName: string;
+  displayName: string;
+  thinkingOptions: readonly CodexThinkingMode[];
+  defaultThinkingOption?: CodexThinkingMode;
+  isDefault?: boolean;
+};
+
+// Type assertion: generated registry conforms to CodexModelRegistryEntry[]
+// (cast avoids circular const-assertion issues while keeping runtime identical)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _codexRegistryCheck: ReadonlyArray<CodexModelRegistryEntry> = CODEX_MODEL_REGISTRY;
+
+export const ClaudeModelSchema = z.enum(GEN_CLAUDE_MODEL_IDS as unknown as [string, ...string[]]);
 export type ClaudeModel = z.infer<typeof ClaudeModelSchema>;
 
-export const GeminiModelSchema = z.enum([
-  'gemini-3.1-pro-preview',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-]);
+export const GeminiModelSchema = z.enum(GEN_GEMINI_MODEL_IDS as unknown as [string, ...string[]]);
 export type GeminiModel = z.infer<typeof GeminiModelSchema>;
-
-// Cursor CLI `--model` ids. Canonical IDs only — aliases live in
-// CURSOR_MODEL_ALIASES and are collapsed by normalizeModelId before validation.
-// Verified via Cursor docs / CLI catalog: Grok 4.5 effort = high|medium|low;
-// Composer 2 is retired and reroutes to Composer 2.5.
-export const CURSOR_MODEL_REGISTRY = [
-  { id: 'composer-2.5', displayName: 'Composer 2.5', isDefault: true },
-  { id: 'cursor-grok-4.5-high', displayName: 'Grok 4.5 High', isDefault: false },
-  { id: 'cursor-grok-4.5-medium', displayName: 'Grok 4.5 Medium', isDefault: false },
-  { id: 'cursor-grok-4.5-low', displayName: 'Grok 4.5 Low', isDefault: false },
-] as const;
 
 export type CursorModel = (typeof CURSOR_MODEL_REGISTRY)[number]['id'];
 export const CURSOR_MODEL_IDS = CURSOR_MODEL_REGISTRY.map((entry) => entry.id);
@@ -196,7 +229,7 @@ export const CursorModelSchema = z.enum(
   CURSOR_MODEL_IDS as unknown as [CursorModel, ...CursorModel[]]
 );
 
-export const MuseModelSchema = z.enum(['muse-spark-1.1', 'muse-spark-1.2-contributor']);
+export const MuseModelSchema = z.enum(GEN_MUSE_MODEL_IDS as unknown as [string, ...string[]]);
 export type MuseModel = z.infer<typeof MuseModelSchema>;
 
 /** Retired / shorthand ids → canonical Cursor `--model` value. */
@@ -207,85 +240,6 @@ export const CURSOR_MODEL_ALIASES: Readonly<Record<string, CursorModel>> = {
   'composer-2.5-fast': 'composer-2.5',
   'grok-4.5': 'cursor-grok-4.5-high',
 };
-
-// Codex's own accepted effort levels -- NOT the union across all providers.
-// Must match CODEX_EFFORT_LEVELS defined below. Ordering is low → high for UI.
-export const CODEX_THINKING_OPTIONS = [
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-  'ultra',
-] as const;
-export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
-export const NO_CODEX_THINKING = 'none' as const;
-export type CodexThinkingMode = typeof NO_CODEX_THINKING | CodexThinkingOption;
-export const CODEX_UNIFIED_THINKING_OPTIONS = [
-  NO_CODEX_THINKING,
-  ...CODEX_THINKING_OPTIONS,
-] as const;
-
-export type CodexModelRegistryEntry = {
-  modelName: string;
-  displayName: string;
-  thinkingOptions: readonly CodexThinkingMode[];
-  defaultThinkingOption?: CodexThinkingMode;
-  isDefault?: boolean;
-};
-
-export const CODEX_MODEL_REGISTRY = [
-  {
-    modelName: 'gpt-5.6-sol',
-    displayName: 'GPT-5.6 Sol',
-    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'ultra',
-    isDefault: true,
-  },
-  {
-    modelName: 'gpt-5.6-terra',
-    displayName: 'GPT-5.6 Terra',
-    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'xhigh',
-    isDefault: false,
-  },
-  {
-    modelName: 'gpt-5.6-luna',
-    displayName: 'GPT-5.6 Luna',
-    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'xhigh',
-    isDefault: false,
-  },
-  {
-    modelName: 'gpt-5.5',
-    displayName: 'GPT-5.5',
-    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'xhigh',
-    isDefault: false,
-  },
-  {
-    modelName: 'gpt-5.4',
-    displayName: 'GPT-5.4',
-    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'xhigh',
-    isDefault: false,
-  },
-  {
-    modelName: 'gpt-5.4-mini',
-    displayName: 'GPT-5.4 Mini',
-    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'xhigh',
-    isDefault: false,
-  },
-  {
-    modelName: 'gpt-5.3-codex-spark',
-    displayName: 'Codex Spark',
-    thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS,
-    defaultThinkingOption: 'xhigh',
-    isDefault: false,
-  },
-] as const satisfies ReadonlyArray<CodexModelRegistryEntry>;
 
 type CodexModelRegistryItem = (typeof CODEX_MODEL_REGISTRY)[number];
 
@@ -567,20 +521,7 @@ export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 // string at the schema layer. The per-provider arrays below are for UI rendering
 // and server-side validation only; the submodule only "aligns" the flag name,
 // and each CLI does the final runtime reject if something slips through.
-export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
-export const CODEX_EFFORT_LEVELS = [
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-  'ultra',
-] as const;
-export const MUSE_EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra'] as const;
-export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
-export type CodexEffortLevel = (typeof CODEX_EFFORT_LEVELS)[number];
-export type MuseEffortLevel = (typeof MUSE_EFFORT_LEVELS)[number];
+// Effort-level arrays and types are re-exported from generated/catalog.ts (single source: vendor/agent-cli-tool/catalog.jsonc)
 
 const EFFORT_LEVELS_BY_PROVIDER: Partial<Record<Provider, readonly string[]>> = {
   claude: CLAUDE_EFFORT_LEVELS,
