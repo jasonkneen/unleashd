@@ -137,13 +137,25 @@ export function registerConversationWebSocket(
             const workingDirectory = dependencies.resolveWorkingDirectory(
               buddyResolution?.workingDirectory ?? data.workingDirectory
             );
+            // Fork retention: if forking a buddy conversation but client didn't send top-level buddyContext,
+            // retain the source's buddyContext (e.g., forking codex buddy -> muse). The config's buddyContext
+            // is not used for creation.buddyContext, so we must copy from source.
+            let effectiveBuddyContext = buddyResolution?.context ?? null;
+            if (!effectiveBuddyContext && data.resumedFromConversationId) {
+              const sourceForBuddy = dependencies.registry.get(data.resumedFromConversationId);
+              if (sourceForBuddy?.buddyContext) {
+                effectiveBuddyContext = sourceForBuddy.buddyContext;
+              } else if ((data.config as { buddyContext?: unknown })?.buddyContext) {
+                effectiveBuddyContext = (data.config as { buddyContext: typeof effectiveBuddyContext }).buddyContext;
+              }
+            }
             const fingerprint = dependencies.creationFingerprint({
               workingDirectory,
               config: data.config,
               initialMessage: data.initialMessage,
               swarmDebugPrefix: data.swarmDebugPrefix,
               resumedFromConversationId: data.resumedFromConversationId,
-              buddyContext: buddyResolution?.context,
+              buddyContext: effectiveBuddyContext,
             });
             const existingConversation = dependencies.registry.get(data.conversationId);
             if (existingConversation) {
@@ -158,7 +170,7 @@ export function registerConversationWebSocket(
                     initialMessage: data.initialMessage,
                     swarmDebugPrefix: data.swarmDebugPrefix,
                     resumedFromConversationId: data.resumedFromConversationId,
-                    buddyContext: buddyResolution?.context,
+                    buddyContext: effectiveBuddyContext,
                   },
                 });
                 sendToClient(socket, {
@@ -205,7 +217,7 @@ export function registerConversationWebSocket(
                   initialMessage: data.initialMessage,
                   swarmDebugPrefix: data.swarmDebugPrefix,
                   resumedFromConversationId: data.resumedFromConversationId,
-                  buddyContext: buddyResolution?.context,
+                  buddyContext: effectiveBuddyContext,
                 },
               });
               // Matching create commands are deliberately at-least-once across
