@@ -6,6 +6,7 @@ import type { DiskAdapter, ParsedSession } from './disk-adapter';
 import {
   CLAUDE_PROJECTS_DIR,
   CODEX_SESSIONS_DIR,
+  CURSOR_PROJECTS_DIR,
   GEMINI_SESSIONS_DIR,
   OPENCODE_MESSAGE_DIR,
   OPENCODE_PART_DIR,
@@ -13,6 +14,7 @@ import {
   extractMessagesFromEntries,
   extractSubAgentsFromEntries,
   getCodexSessionDirectories,
+  getCursorSessionFiles,
   getGeminiSessionFiles,
   getOpenCodeSessionDirectories,
   getOpenCodeSessionMetadataIndex,
@@ -20,11 +22,13 @@ import {
   getProjectDirectories,
   inferProviderFromModel,
   parseCodexJsonlFile,
+  parseCursorTranscriptFile,
   parseGeminiSessionFile,
   parseJsonlFile,
   parseOpenCodeSessionDirectory,
   scanSessionDirectory,
 } from './jsonl';
+import { museAdapter } from './muse-adapter';
 
 // Oompa's gemini harness uses GEMINI_CLI_HOME=~/.gemini-sandbox/acc{N} to isolate
 // multiple gemini workers. Their sessions live under {home}/tmp/ instead of ~/.gemini/tmp/.
@@ -215,13 +219,54 @@ const geminiAdapter: DiskAdapter = {
 };
 
 // =============================================================================
+// Cursor adapter
+//
+// Hydrates readable IDE agent-transcripts from:
+//   ~/.cursor/projects/{encoded-project}/agent-transcripts/{sessionId}/*.jsonl
+//
+// The companion Composer storage at ~/.cursor/chats - store.db is a
+// content-addressed Merkle blob store (blobs + meta tables) -- opaque and not
+// a stable JSON rehydration source, intentionally excluded.
+// The headless `cursor-agent` CLI is cloud-backed (api2.cursor.sh) --
+// `cursor-agent --resume <chatId>` hits the Cursor cloud -- so CLI sessions
+// spawned by unleashd remain ephemeral (in-memory only) and are not on-disk.
+// This adapter covers only the local, readable IDE agent-transcripts JSONL.
+// =============================================================================
+
+const cursorAdapter: DiskAdapter = {
+  provider: 'cursor',
+
+  async discoverFiles(): Promise<string[]> {
+    return getCursorSessionFiles(CURSOR_PROJECTS_DIR);
+  },
+
+  async parseFile(filePath: string): Promise<ParsedSession | null> {
+    const session = await parseCursorTranscriptFile(filePath);
+    if (session.messages.length === 0) return null;
+
+    return {
+      sessionId: session.sessionId,
+      filePath: session.filePath,
+      workingDirectory: session.workingDirectory,
+      provider: 'cursor',
+      model: session.model,
+      createdAt: session.createdAt,
+      modifiedAt: session.modifiedAt,
+      messages: session.messages,
+      subAgents: [],
+      parentSessionId: null,
+    };
+  },
+};
+
+// =============================================================================
 // Registry — ordered list of all adapters
 //
 // To add a new provider (e.g. Grok): implement DiskAdapter, append here.
 // The load/poll loop in loader.ts iterates this list with no other changes.
-// Note: cursor has no disk adapter intentionally — its chats are sqlite/cloud-
-// backed under ~/.cursor/chats/ and ephemeral (no stable on-disk JSON to
-// hydrate). It is not listed here by design.
+// Cursor's adapter hydrates local IDE agent-transcripts only; see the
+// Cursor adapter comment above for why chats/store.db and cloud CLI sessions
+// are excluded.
 // =============================================================================
 
 export const diskAdapters: DiskAdapter[] = [
@@ -229,6 +274,8 @@ export const diskAdapters: DiskAdapter[] = [
   codexAdapter,
   opencodeAdapter,
   geminiAdapter,
+  cursorAdapter,
+  museAdapter,
 ];
 
 export function getDiskAdapter(provider: DiskAdapter['provider']): DiskAdapter {

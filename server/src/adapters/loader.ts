@@ -15,7 +15,7 @@ import type { DiscoveredConversation } from '@unleashd/shared';
 import { shouldIgnoreWorkingDirectory } from '../config';
 import type { DiskAdapter, LoadProgressCallback, LoadResult, PollResult } from './disk-adapter';
 import { sessionToConversation } from './disk-adapter';
-import { extractCodexSessionIdFromFilename } from './jsonl';
+import { extractCodexSessionIdFromFilename, extractMuseSessionIdFromFilePath } from './jsonl';
 import { diskAdapters } from './registry';
 import { OPENCODE_PART_DIR, getOpenCodeSessionMtime } from './registry';
 import type { NormalizedSessionCache } from './session-cache';
@@ -523,6 +523,19 @@ export async function pollForChanges(
           // Gemini session files are named session-{ts}-{uuid}.json
           const sessionId = path.basename(filePath, '.json');
           if (activeIds.has(sessionId)) {
+            deferredDirtyPaths.add(filePath);
+            continue;
+          }
+        } else if (adapter.provider === 'cursor') {
+          // Cursor transcript files are named {uuid}.jsonl under agent-transcripts/{uuid}/
+          const sessionId = path.basename(filePath, '.jsonl');
+          if (activeIds.has(sessionId)) {
+            deferredDirtyPaths.add(filePath);
+            continue;
+          }
+        } else if (adapter.provider === 'muse') {
+          const sessionIdHint = extractMuseSessionIdFromFilePath(filePath);
+          if (sessionIdHint && activeIds.has(sessionIdHint)) {
             deferredDirtyPaths.add(filePath);
             continue;
           }

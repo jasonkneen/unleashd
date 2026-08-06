@@ -10,6 +10,7 @@ import type {
   ConversationConfig,
   ConversationConfigState,
   Conversation as ConversationData,
+  ConversationKind,
   ConversationPurpose,
   Message,
   ModelId,
@@ -20,7 +21,15 @@ import type {
   ServerMessage,
   SubAgent,
 } from '@unleashd/shared';
-import { mergeReviewDocPath } from '@unleashd/shared';
+import {
+  buddyContextFromKind,
+  buddyKindFromContext,
+  conversationKindFromLegacy,
+  getConversationKind,
+  isBuddyKind,
+  matchConversationKind,
+  mergeReviewDocPath,
+} from '@unleashd/shared';
 import { formatToolUse, isCompletionOnlyToolUse } from '../adapters/tool-format';
 import { BUDDY_BUILDER_BRIEFING } from '../buddies/builder';
 import { buddyBuilderCodexMcpArgs, buddyCodexMcpArgs } from '../buddies/mcp-config';
@@ -89,6 +98,7 @@ export interface ConversationRuntimeView {
   config: ConversationConfig;
   readonly provider: ProviderName;
   buddyContext: BuddyContext | null;
+  kind: ConversationKind;
   isRunning: boolean;
   toJSON(): ConversationData;
 }
@@ -289,6 +299,7 @@ export interface ConversationOptions {
   buddyContext?: BuddyContext | null;
   buddyBriefing?: string | null;
   purpose?: ConversationPurpose;
+  kind?: ConversationKind | null;
   mergeParentMeta?: MergeParentMeta | null;
   mergeChildMeta?: MergeChildMeta | null;
 }
@@ -354,25 +365,38 @@ export function buildFirstTurnCliContent(input: {
   buddyBriefing: string | null;
   swarmDebugPrefix: string | null;
   purpose?: ConversationPurpose;
+  kind?: ConversationKind | null;
 }): string {
   const firstUnstartedTurn = input.messageCount === 0 && !input.hasStartedSession;
-  // Buddy and Swarm are mutually exclusive conversation modes. If malformed
-  // legacy state supplies both, the typed Buddy context wins and no Swarm
-  // prefix reaches the provider.
-  if (input.buddyContext !== null) {
-    if (!firstUnstartedTurn || input.buddyBriefing === null) return input.content;
-    const encodedContext = Buffer.from(JSON.stringify(input.buddyContext), 'utf8').toString(
-      'base64url'
-    );
-    return `<!-- unleashd:buddy-context-v2 ${encodedContext} ${input.buddyBriefing.length} -->\n${input.buddyBriefing}\n<!-- /unleashd:buddy-context-v2 -->\n\n${input.content}`;
-  }
-  if (input.purpose === 'buddy_builder' && firstUnstartedTurn) {
-    return `<!-- unleashd:buddy-builder-v1 ${BUDDY_BUILDER_BRIEFING.length} -->\n${BUDDY_BUILDER_BRIEFING}\n<!-- /unleashd:buddy-builder-v1 -->\n\n${input.content}`;
-  }
-  if (input.swarmDebugPrefix !== null && firstUnstartedTurn) {
-    return `<!-- unleashd:swarm-prefix -->\n${input.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${input.content}`;
-  }
-  return input.content;
+  const effectiveKind: ConversationKind =
+    input.kind ??
+    conversationKindFromLegacy({
+      buddyContext: input.buddyContext,
+      purpose: input.purpose ?? null,
+      kind: null,
+    });
+  // Thin dispatcher δ — selects handler per kind (R1/D1). Each handler has one path.
+  return matchConversationKind(effectiveKind, {
+    buddy: (k) => {
+      if (!firstUnstartedTurn || input.buddyBriefing === null) return input.content;
+      // Re-derive BuddyContext from kind when available (kind is canonical).
+      const ctx: BuddyContext = isBuddyKind(effectiveKind)
+        ? buddyContextFromKind(k)
+        : input.buddyContext!;
+      const encodedContext = Buffer.from(JSON.stringify(ctx), 'utf8').toString('base64url');
+      return `<!-- unleashd:buddy-context-v2 ${encodedContext} ${input.buddyBriefing.length} -->\n${input.buddyBriefing}\n<!-- /unleashd:buddy-context-v2 -->\n\n${input.content}`;
+    },
+    buddy_builder: () => {
+      if (!firstUnstartedTurn) return input.content;
+      return `<!-- unleashd:buddy-builder-v1 ${BUDDY_BUILDER_BRIEFING.length} -->\n${BUDDY_BUILDER_BRIEFING}\n<!-- /unleashd:buddy-builder-v1 -->\n\n${input.content}`;
+    },
+    general: () => {
+      if (input.swarmDebugPrefix !== null && firstUnstartedTurn) {
+        return `<!-- unleashd:swarm-prefix -->\n${input.swarmDebugPrefix}\n<!-- /unleashd:swarm-prefix -->\n\n${input.content}`;
+      }
+      return input.content;
+    },
+  });
 }
 
 export function createConversationRuntime(
@@ -430,6 +454,7 @@ export function createConversationRuntime(
     swarmDebugPrefix: string | null;
     buddyContext: BuddyContext | null;
     purpose: ConversationPurpose;
+    kind: ConversationKind;
     // Hidden first-turn context. Never serialized to clients; the typed
     // buddyContext is the durable/UI-facing metadata.
     private _buddyBriefing: string | null;
@@ -504,6 +529,7 @@ export function createConversationRuntime(
         buddyContext = null,
         buddyBriefing = null,
         purpose = 'general',
+        kind = null,
         mergeParentMeta = null,
         mergeChildMeta = null,
       } = opts;
@@ -522,7 +548,19 @@ export function createConversationRuntime(
       this.config = configState.config;
       this.configRevision = configState.revision;
       this.configResolution = configState.resolution;
-      const isBuddyConversation = buddyContext !== null;
+      // Canonical kind — derive from legacy when absent (migration on load).
+      this.kind =
+        kind ??
+        conversationKindFromLegacy({
+          buddyContext: buddyContext ?? null,
+          purpose: purpose ?? null,
+          kind: null,
+        });
+      // Keep legacy fields in sync (compat for disk parsers / old clients).
+      const derivedBuddyContext = isBuddyKind(this.kind) ? buddyContextFromKind(this.kind) : null;
+      const effectiveBuddyContext = derivedBuddyContext ?? buddyContext;
+      const effectivePurpose = this.kind.kind === 'buddy_builder' ? 'buddy_builder' : purpose;
+      const isBuddyConversation = effectiveBuddyContext !== null;
       this.isWorker = isBuddyConversation ? false : isWorker;
       this.swarmId = isBuddyConversation ? null : swarmId;
       this.workerId = isBuddyConversation ? null : workerId;
@@ -531,9 +569,9 @@ export function createConversationRuntime(
       this.resumedFromConversationId = resumedFromConversationId;
       this.modelName = modelName;
       this.swarmDebugPrefix = isBuddyConversation ? null : swarmDebugPrefix;
-      this.buddyContext = buddyContext;
+      this.buddyContext = effectiveBuddyContext;
       this._buddyBriefing = buddyBriefing;
-      this.purpose = purpose;
+      this.purpose = effectivePurpose as ConversationPurpose;
       this.mergeParentMeta = mergeParentMeta;
       this.mergeChildMeta = mergeChildMeta;
       this.subAgents = [];
@@ -686,12 +724,11 @@ export function createConversationRuntime(
                   harness: 'codex',
                   ...baseRequest,
                   reasoningEffort: executionConfig.reasoningEffort,
-                  extraArgs:
-                    this.buddyContext !== null
-                      ? buddyCodexMcpArgs(this.buddyContext, this.id)
-                      : this.purpose === 'buddy_builder'
-                        ? buddyBuilderCodexMcpArgs(this.id)
-                        : undefined,
+                  extraArgs: matchConversationKind(this.kind, {
+                    buddy: (k) => buddyCodexMcpArgs(buddyContextFromKind(k), this.id),
+                    buddy_builder: () => buddyBuilderCodexMcpArgs(this.id),
+                    general: () => undefined,
+                  }),
                 }
               : { harness: executionConfig.provider, ...baseRequest }
         );
@@ -1519,6 +1556,7 @@ export function createConversationRuntime(
         hasStartedSession: this._hasStartedSession,
         buddyContext: this.buddyContext,
         purpose: this.purpose,
+        kind: this.kind,
         buddyBriefing: this._buddyBriefing,
         swarmDebugPrefix: this.swarmDebugPrefix,
       });
@@ -2233,6 +2271,7 @@ export function createConversationRuntime(
         resumedFromConversationId: this.resumedFromConversationId,
         modelName: this.modelName,
         swarmDebugPrefix: this.swarmDebugPrefix,
+        kind: this.kind,
         buddyContext: this.buddyContext,
         purpose: this.purpose,
         mergeParentMeta: this.mergeParentMeta,

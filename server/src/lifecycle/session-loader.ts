@@ -4,6 +4,7 @@ import type {
   DiscoveredConversation,
   Message,
 } from '@unleashd/shared';
+import { conversationKindFromLegacy } from '@unleashd/shared';
 import { validate as isUuid } from 'uuid';
 import type { loadAllConversations, pollForChanges } from '../adapters/loader';
 import type {
@@ -168,6 +169,7 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       modelName: source.modelName ?? null,
       mergeParentMeta: source.mergeParentMeta ?? null,
       mergeChildMeta: source.mergeChildMeta ?? null,
+      kind: source.kind ?? null,
       buddyContext: source.buddyContext ?? hydratedConfig.record.creation?.buddyContext ?? null,
       purpose: source.purpose ?? hydratedConfig.record.creation?.purpose ?? 'general',
     });
@@ -206,6 +208,13 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
         existingSessionId: record.currentSession?.sessionId,
         swarmDebugPrefix: record.creation?.swarmDebugPrefix ?? null,
         resumedFromConversationId: record.creation?.resumedFromConversationId ?? null,
+        kind: recoveredBuddy?.context
+          ? { kind: 'buddy', buddyId: recoveredBuddy.context.buddyId, workspaceId: recoveredBuddy.context.workspaceId, buddyProjectId: recoveredBuddy.context.buddyProjectId ?? null, legacyWorkItemId: recoveredBuddy.context.legacyWorkItemId ?? null, automationRunId: recoveredBuddy.context.automationRunId ?? null, delegatedByBuddyId: recoveredBuddy.context.delegatedByBuddyId ?? null, parentBuddyConversationId: recoveredBuddy.context.parentBuddyConversationId ?? null, allowedBuddyOperations: recoveredBuddy.context.allowedBuddyOperations }
+          : record.creation?.buddyContext
+            ? { kind: 'buddy', buddyId: record.creation.buddyContext.buddyId, workspaceId: record.creation.buddyContext.workspaceId, buddyProjectId: record.creation.buddyContext.buddyProjectId ?? null, legacyWorkItemId: record.creation.buddyContext.legacyWorkItemId ?? null, automationRunId: record.creation.buddyContext.automationRunId ?? null, delegatedByBuddyId: record.creation.buddyContext.delegatedByBuddyId ?? null, parentBuddyConversationId: record.creation.buddyContext.parentBuddyConversationId ?? null, allowedBuddyOperations: record.creation.buddyContext.allowedBuddyOperations }
+            : record.creation?.purpose === 'buddy_builder'
+              ? { kind: 'buddy_builder' }
+              : null,
         buddyContext: recoveredBuddy?.context ?? record.creation?.buddyContext ?? null,
         buddyBriefing: recoveredBuddy?.briefing ?? null,
         purpose: record.creation?.purpose ?? 'general',
@@ -363,6 +372,15 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       // must never erase the durable parent recorded at child creation.
       existing.resumedFromConversationId =
         source.resumedFromConversationId ?? existing.resumedFromConversationId;
+      // Holistic kind is canonical; keep legacy fields mirrored for old clients.
+      if (source.kind) existing.kind = source.kind;
+      else if (source.buddyContext) {
+        existing.kind = conversationKindFromLegacy({
+          buddyContext: source.buddyContext,
+          purpose: source.purpose ?? null,
+          kind: existing.kind,
+        });
+      }
       existing.buddyContext = source.buddyContext ?? existing.buddyContext;
       existing.purpose = source.purpose ?? existing.purpose;
       existing.modelName = source.modelName ?? source.model ?? null;

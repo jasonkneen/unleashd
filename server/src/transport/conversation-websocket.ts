@@ -2,11 +2,18 @@ import type {
   BuddyContext,
   ClientMessage,
   ConversationConfig,
+  ConversationKind,
   ModelId,
   Provider,
   UIState,
 } from '@unleashd/shared';
-import { PROTOCOL_INFO, safeParseClientMessage } from '@unleashd/shared';
+import {
+  buddyContextFromKind,
+  buddyKindFromContext,
+  conversationKindFromLegacy,
+  PROTOCOL_INFO,
+  safeParseClientMessage,
+} from '@unleashd/shared';
 import { WebSocket, type WebSocketServer } from 'ws';
 import type {
   CompletionSuppression,
@@ -137,17 +144,33 @@ export function registerConversationWebSocket(
             const workingDirectory = dependencies.resolveWorkingDirectory(
               buddyResolution?.workingDirectory ?? data.workingDirectory
             );
-            // Fork retention: if forking a buddy conversation but client didn't send top-level buddyContext,
-            // retain the source's buddyContext (e.g., forking codex buddy -> muse). The config's buddyContext
-            // is not used for creation.buddyContext, so we must copy from source.
-            // Use `undefined` (not `null`) for absent buddy — Zod expects `object | undefined`, not `null`.
-            let effectiveBuddyContext: typeof buddyResolution extends { context: infer T } ? T : unknown = buddyResolution?.context;
-            if (!effectiveBuddyContext && data.resumedFromConversationId) {
+            // Fork retention: if forking a buddy conversation but client didn't send top-level buddyContext/kind,
+            // retain the source's kind (and derived buddyContext). Uses kind as canonical source; legacy fallback
+            // keeps old persisted state working. buddyContext is mirrored for compat.
+            let effectiveBuddyContext: BuddyContext | undefined = buddyResolution?.context;
+            let effectiveKind: ConversationKind | undefined = data.kind;
+            if (!effectiveKind && data.buddyContext) {
+              effectiveKind = buddyKindFromContext(data.buddyContext);
+            }
+            if ((!effectiveBuddyContext || !effectiveKind) && data.resumedFromConversationId) {
               const sourceForBuddy = dependencies.registry.get(data.resumedFromConversationId);
-              if (sourceForBuddy?.buddyContext) {
-                effectiveBuddyContext = sourceForBuddy.buddyContext as typeof effectiveBuddyContext;
-              } else if ((data.config as { buddyContext?: unknown })?.buddyContext) {
-                effectiveBuddyContext = (data.config as { buddyContext: typeof effectiveBuddyContext }).buddyContext;
+              if (sourceForBuddy?.kind) {
+                const srcKind = conversationKindFromLegacy({
+                  kind: sourceForBuddy.kind,
+                  buddyContext: sourceForBuddy.buddyContext ?? null,
+                  purpose: (sourceForBuddy as { purpose?: string }).purpose ?? null,
+                });
+                if (srcKind.kind === 'buddy' && !effectiveBuddyContext) {
+                  effectiveBuddyContext = buddyContextFromKind(srcKind);
+                }
+                if (!effectiveKind) effectiveKind = srcKind.kind === 'general' ? undefined : srcKind;
+              }
+              if (!effectiveBuddyContext && sourceForBuddy?.buddyContext) {
+                effectiveBuddyContext = sourceForBuddy.buddyContext ?? undefined;
+              }
+              if (!effectiveKind && (data.config as unknown as { buddyContext?: BuddyContext })?.buddyContext) {
+                const legacyCtx = (data.config as unknown as { buddyContext?: BuddyContext }).buddyContext;
+                if (legacyCtx) effectiveKind = buddyKindFromContext(legacyCtx);
               }
             }
             const fingerprint = dependencies.creationFingerprint({
@@ -234,6 +257,12 @@ export function registerConversationWebSocket(
                 });
                 break;
               }
+              const createdKind =
+                effectiveKind ??
+                (buddyResolution?.context ? buddyKindFromContext(buddyResolution.context) : undefined) ??
+                (effectiveBuddyContext
+                  ? buddyKindFromContext(effectiveBuddyContext as BuddyContext)
+                  : undefined);
               const conversation = dependencies.createConversation({
                 id: data.conversationId,
                 workingDirectory: creation.record.workingDirectory ?? workingDirectory,
@@ -241,7 +270,8 @@ export function registerConversationWebSocket(
                 existingSessionId: creation.record.currentSession?.sessionId,
                 swarmDebugPrefix: data.swarmDebugPrefix ?? null,
                 resumedFromConversationId: data.resumedFromConversationId ?? null,
-                buddyContext: buddyResolution?.context ?? null,
+                kind: createdKind ?? null,
+                buddyContext: buddyResolution?.context ?? (effectiveBuddyContext as BuddyContext | null) ?? null,
                 buddyBriefing: buddyResolution?.briefing ?? null,
               });
               dependencies.registry.set(conversation);

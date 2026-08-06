@@ -16,6 +16,7 @@ import {
   ConversationPurposeSchema,
   ModelIdSchema,
 } from './conversation-config.js';
+import { ConversationKindSchema } from './conversation-kind.js';
 import {
   decodeLegacyCodexCompositeModel,
   encodeLegacyCodexCompositeModel,
@@ -31,6 +32,7 @@ import {
 } from './provider-catalog.js';
 
 export * from './conversation-config.js';
+export * from './conversation-kind.js';
 export * from './buddy.js';
 export * from './provider-catalog.js';
 export * from './legacy/codex-composite-model.js';
@@ -622,12 +624,14 @@ export const ConversationSchema = z.object({
   // UI sees clean user content; CLI process gets the prefix + content.
   // Stays on the object so toJSON() includes it for client rendering.
   swarmDebugPrefix: z.string().nullish(),
-  // Persistent employee ownership. This is intentionally independent of all
-  // Oompa/swarm fields: a Buddy conversation is an ordinary provider thread
-  // with durable employee context.
+  // Canonical kind — holistic sum type. `buddyContext`/`purpose` remain for
+  // compat and are derived from `kind` on write; `getConversationKind()` derives
+  // `kind` from legacy fields on read. New code should use `kind`.
+  kind: ConversationKindSchema.optional(),
+  // Persistent employee ownership (deprecated in favor of kind.buddy). Kept for
+  // compat; new writes mirror kind → buddyContext.
   buddyContext: BuddyContextSchema.nullish(),
-  // Application-owned purpose selects a narrow first-turn briefing/tool profile.
-  // `general` is implicit for historical conversations.
+  // Application-owned purpose (deprecated in favor of kind). `general` is implicit.
   purpose: ConversationPurposeSchema.optional(),
 
   // Merge feature metadata. Parent threads that aggregate review docs from
@@ -833,6 +837,7 @@ export const CreateConversationCommandSchema = z.object({
   // Chat "Fork" soft-handoff lineage only — not merge provider-session fork.
   resumedFromConversationId: z.string().uuid().optional(),
   buddyContext: BuddyContextSchema.optional(),
+  kind: ConversationKindSchema.optional(),
 });
 export type CreateConversationCommand = z.infer<typeof CreateConversationCommandSchema>;
 

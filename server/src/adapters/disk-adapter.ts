@@ -12,6 +12,7 @@
  */
 
 import type {
+  BuddyContext,
   Conversation,
   DiscoveredConversation,
   Message,
@@ -20,6 +21,8 @@ import type {
 } from '@unleashd/shared';
 import {
   ModelIdSchema,
+  buddyKindFromContext,
+  conversationKindFromLegacy,
   fromCodexModelId,
   isModelIdValidForProvider,
   normalizeModelId,
@@ -51,6 +54,10 @@ export interface ParsedSession {
   messages: Message[];
   subAgents?: SubAgent[]; // Claude only — extracted from JSONL entries
   parentSessionId?: string | null; // Codex only — for nested thread display
+  buddyContext?: BuddyContext | null;
+  swarmDebugPrefix?: string | null;
+  resumedFromConversationId?: string | null;
+  purpose?: string | null;
 }
 
 // =============================================================================
@@ -110,10 +117,27 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
   // first because its hidden block is outermost for a Buddy's first turn.
   // Typed Buddy ownership is authoritative and mutually exclusive with Oompa:
   // do not interpret the visible Buddy prompt as a worker tag.
-  const buddyContext = extractBuddyContext(session.messages);
-  const isBuddyBuilder = buddyContext ? false : extractBuddyBuilderPurpose(session.messages);
+  // Muse durable path: record.creation.buddyContext is authoritative when present
+  // (new sessions store buddy metadata in durable record, not hidden prefix).
+  // Legacy fallback: hidden prefix in first message (extractBuddyContext).
+  const durableBuddy = session.buddyContext ?? null;
+  const durableSwarmPrefix = session.swarmDebugPrefix ?? null;
+  const durableResumed = session.resumedFromConversationId ?? null;
+  const durablePurpose = session.purpose ?? null;
+
+  const extractedBuddy = extractBuddyContext(session.messages);
+  const buddyContext = durableBuddy ?? extractedBuddy;
+  const isBuddyBuilder = buddyContext
+    ? false
+    : durablePurpose === 'buddy_builder'
+      ? true
+      : extractBuddyBuilderPurpose(session.messages);
+  const extractedSwarmPrefix = extractSwarmDebugPrefix(session.messages);
   const swarmDebugPrefix =
-    buddyContext || isBuddyBuilder ? null : extractSwarmDebugPrefix(session.messages);
+    buddyContext || isBuddyBuilder ? null : (durableSwarmPrefix ?? extractedSwarmPrefix);
+  // Resumed lineage durable wins; otherwise keep any prefix-extracted lineage
+  // (none currently from extractors, but preserve future extraction).
+  const resumedFromConversationId = durableResumed ?? null;
   const worker =
     buddyContext || isBuddyBuilder
       ? {
@@ -130,6 +154,14 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
   // For codex, decompose any legacy composite (e.g. "gpt-5.4-xhigh") into its
   // base + reasoningEffort so they live as separate fields (matches claude shape).
   const { model: recoveredModel, reasoningEffort } = recoverModelAndEffort(session);
+
+  // Holistic kind — migration on load from hidden markers or durable record.
+  const durableKindPurpose = durablePurpose as 'buddy_builder' | null;
+  const kind = conversationKindFromLegacy({
+    buddyContext,
+    purpose: isBuddyBuilder ? 'buddy_builder' : durableKindPurpose,
+    kind: null,
+  });
 
   return {
     sessionId: session.sessionId,
@@ -151,8 +183,10 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
     parentConversationId: session.parentSessionId ?? null,
     modelName: session.model !== 'unknown' ? session.model : null,
     swarmDebugPrefix: swarmDebugPrefix ?? null,
+    resumedFromConversationId,
+    kind,
     buddyContext,
-    purpose: isBuddyBuilder ? 'buddy_builder' : undefined,
+    purpose: isBuddyBuilder ? 'buddy_builder' : (durablePurpose as 'buddy_builder' | 'general' | undefined) ?? undefined,
   };
 }
 

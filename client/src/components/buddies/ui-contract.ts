@@ -1,4 +1,5 @@
-import type { BuddyContext } from '@unleashd/shared';
+import type { BuddyContext, ConversationKind } from '@unleashd/shared';
+import { isBuddyKind } from '@unleashd/shared';
 import type { BuddyOverview, BuddyOverviewEmployee, BuddyProject } from './types';
 
 export function selectDirectoryEmployees(overview: BuddyOverview): BuddyOverviewEmployee[] {
@@ -16,8 +17,11 @@ export function buddyCardMetrics(employee: BuddyOverviewEmployee) {
 
 export function effectiveSwarmDebugPrefix(
   buddyContext: BuddyContext | null | undefined,
-  swarmDebugPrefix: string | null | undefined
+  swarmDebugPrefix: string | null | undefined,
+  kind?: ConversationKind | null
 ): string | null {
+  // Kind is canonical when present; legacy buddyContext fallback keeps old payloads working.
+  if (kind && isBuddyKind(kind)) return null;
   return buddyContext ? null : (swarmDebugPrefix ?? null);
 }
 

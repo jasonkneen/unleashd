@@ -67,6 +67,12 @@ const OPENCODE_SESSION_DIR = path.join(OPENCODE_STORAGE_DIR, 'session');
 /** Default location of Gemini CLI session files */
 export const GEMINI_SESSIONS_DIR = path.join(os.homedir(), '.gemini', 'tmp');
 
+/** Default location of Muse sessions */
+export const MUSE_SESSIONS_DIR = path.join(os.homedir(), '.local', 'share', 'muse', 'sessions');
+
+/** Default location of Cursor IDE project metadata (agent-transcripts live here) */
+export const CURSOR_PROJECTS_DIR = path.join(os.homedir(), '.cursor', 'projects');
+
 // =============================================================================
 // Directory Scanning
 // =============================================================================
@@ -1518,6 +1524,434 @@ export async function parseGeminiSessionFile(filePath: string): Promise<GeminiSe
     modifiedAt: lastUpdated,
     messages,
     subAgents,
+  };
+}
+
+// =============================================================================
+// Cursor Agent Transcript Reading
+//
+// Cursor IDE persists agent transcripts to
+//   ~/.cursor/projects/{encoded-project}/agent-transcripts/{sessionId}/{sessionId}.jsonl
+//
+// Each file is a JSONL stream with entries:
+//   { role: "user"|"assistant", message: { content: [{type: text|tool_use, ...}] } }
+//   { type: "turn_ended", status: "success"|"error", error?: string }  (control, ignored for messages)
+//
+// Cursor's ~/.cursor/chats - store.db (Composer chats) uses an opaque
+// content-addressed Merkle blob store (blobs + meta tables) that is not a
+// stable JSON rehydration source -- it is intentionally excluded. The
+// headless `cursor-agent` CLI (cursor-agent --print --output-format stream-json)
+// is cloud-backed (api2.cursor.sh) and resume is via cursor-agent --resume <chatId>
+// against the Cursor cloud, so CLI sessions are ephemeral and not on-disk.
+// This adapter hydrates the readable local agent-transcripts JSONL only.
+// =============================================================================
+
+export interface CursorSession {
+  sessionId: string;
+  filePath: string;
+  workingDirectory: string;
+  model: string;
+  createdAt: Date;
+  modifiedAt: Date;
+  messages: Message[];
+}
+
+/**
+ * Discover all Cursor agent-transcript JSONL files.
+ * Structure: ~/.cursor/projects/{encoded}/agent-transcripts/{sessionId}/{sessionId}.jsonl
+ */
+export async function getCursorSessionFiles(
+  projectsDir: string = CURSOR_PROJECTS_DIR
+): Promise<string[]> {
+  const files: string[] = [];
+  const projectDirs = await getProjectDirectories(projectsDir);
+
+  for (const projectDir of projectDirs) {
+    const transcriptsDir = path.join(projectDir, 'agent-transcripts');
+    const sessionDirs = await getProjectDirectories(transcriptsDir);
+    for (const sessionDir of sessionDirs) {
+      const sessionFiles = await scanSessionDirectory(sessionDir);
+      for (const f of sessionFiles) {
+        files.push(f);
+      }
+    }
+  }
+
+  return files;
+}
+
+function extractCursorContent(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  const textParts: string[] = [];
+  const toolParts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const b = block as Record<string, unknown>;
+    if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
+      textParts.push(b.text);
+    } else if (b.type === 'tool_use' && typeof b.name === 'string') {
+      const args = b.input as Record<string, unknown> | undefined;
+      toolParts.push(formatToolUse(b.name as string, args));
+    }
+  }
+  const text = textParts.join('\n');
+  if (text && toolParts.length === 0) return text;
+  if (!text && toolParts.length > 0) return toolParts.join('\n');
+  if (text && toolParts.length > 0) return `${text}\n${toolParts.join('\n')}`;
+  return '';
+}
+
+/**
+ * Parse a Cursor agent-transcript JSONL file.
+ *
+ * The file contains per-turn JSON lines with `{role, message}` shape.
+ * No explicit model or cwd is stored -- workingDirectory is derived from
+ * the encoded project dir name, model is `unknown`.
+ */
+export async function parseCursorTranscriptFile(filePath: string): Promise<CursorSession> {
+  const messages: Message[] = [];
+  let createdAt: Date | null = null;
+  let modifiedAt: Date | null = null;
+
+  // File mtime is authoritative for cursor -- transcript lines carry no timestamp.
+  try {
+    const stat = await fs.promises.stat(filePath);
+    createdAt = new Date(stat.mtimeMs);
+    modifiedAt = new Date(stat.mtimeMs);
+  } catch {
+    createdAt = new Date();
+    modifiedAt = new Date();
+  }
+
+  const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: fileStream, crlfDelay: Number.POSITIVE_INFINITY });
+
+  let skippedLines = 0;
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    // Fast skip for control entries -- they are the only lines with "turn_ended"
+    if (line.includes('"turn_ended"')) continue;
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      const role = entry.role as string | undefined;
+      if (role !== 'user' && role !== 'assistant') continue;
+      const message = entry.message as Record<string, unknown> | undefined;
+      if (!message || !Array.isArray(message.content)) continue;
+      const content = extractCursorContent(message.content);
+      if (!content) continue;
+
+      const timestamp = createdAt ?? new Date();
+
+      if (role === 'assistant') {
+        const completedAt = modifiedAt ?? timestamp;
+        messages.push({
+          role,
+          content,
+          timestamp,
+          completedAt,
+          completionReason: 'success' as const,
+        });
+      } else {
+        messages.push({ role: role as 'user' | 'assistant', content, timestamp });
+      }
+    } catch {
+      skippedLines++;
+    }
+  }
+
+  if (skippedLines > 0) {
+    console.warn(`Skipped ${skippedLines} malformed line${skippedLines > 1 ? 's' : ''} in ${filePath}`);
+  }
+
+  const sessionId = path.basename(filePath, '.jsonl');
+
+  // Derive workingDirectory from the encoded project dir:
+  // filePath = ~/.cursor/projects/{encoded}/agent-transcripts/{sessionId}/{sessionId}.jsonl
+  // Cursor encodes as `Users-nicholasbardy-git-foo` (no leading dash), unlike
+  // Claude's `-Users-nicholasbardy-git-foo`. Handle both.
+  let workingDirectory = '';
+  try {
+    const agentTranscriptsDir = path.dirname(path.dirname(filePath)); // .../agent-transcripts
+    const encodedProject = path.basename(path.dirname(agentTranscriptsDir));
+    // Prefer shared decodeProjectPath when it has a leading dash; otherwise
+    // treat every '-' as '/' and ensure an absolute path.
+    const decoded = decodeProjectPath(encodedProject);
+    workingDirectory =
+      decoded === encodedProject && !encodedProject.startsWith('-') && encodedProject.includes('-')
+        ? '/' + encodedProject.replace(/-/g, '/')
+        : decoded;
+  } catch {
+    workingDirectory = process.cwd();
+  }
+
+  // Parse explicit timestamps if present in first user message's <timestamp> tag for createdAt
+  // This is best-effort; file mtime remains authoritative for ordering
+  if (messages.length > 0 && messages[0].role === 'user') {
+    const tsMatch = messages[0].content.match(/<timestamp>([^<]+)<\/timestamp>/);
+    if (tsMatch) {
+      const parsed = new Date(tsMatch[1]);
+      if (!Number.isNaN(parsed.getTime())) {
+        createdAt = parsed;
+      }
+    }
+  }
+
+  return {
+    sessionId,
+    filePath,
+    workingDirectory: normalizeDirPath(workingDirectory || process.cwd()),
+    model: 'unknown',
+    createdAt: createdAt ?? new Date(),
+    modifiedAt: modifiedAt ?? new Date(),
+    messages: dedupeConsecutiveMessages(messages),
+  };
+}
+
+// =============================================================================
+// Muse Session Reading
+//
+// Muse persists sessions to ~/.local/share/muse/sessions/YYYY/MM/DD/{sessionId}/session.jsonl
+// Each file is JSONL with schema_version 1, stream.kind "session", stream.id = sessionId.
+// Working directory from runtime.session.route_facts.cwd, model from run.model.configured.
+// Messages from runtime.session events: "started".prompt (user) and
+// "assistant_message_committed".text (assistant). Tool calls are rendered via
+// formatToolUse. Buddy context may be embedded as hidden prefix in first prompt
+// (legacy) or as durable record.creation.buddyContext (new).
+// =============================================================================
+
+export interface MuseSession {
+  sessionId: string;
+  filePath: string;
+  workingDirectory: string;
+  model: string;
+  createdAt: Date;
+  modifiedAt: Date;
+  messages: Message[];
+  buddyContext: BuddyContext | null;
+  swarmDebugPrefix: string | null;
+  resumedFromConversationId: string | null;
+  purpose: string | null;
+}
+
+function parseMuseTimestamp(recordedAt: unknown): Date | null {
+  if (typeof recordedAt === 'number' && Number.isFinite(recordedAt)) {
+    const ms = recordedAt / 1000;
+    const date = new Date(ms);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return parseTimestamp(recordedAt);
+}
+
+async function collectMuseSessionFiles(dir: string, out: string[]): Promise<void> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectMuseSessionFiles(full, out);
+    } else if (entry.isFile() && (entry.name.endsWith('.jsonl') || entry.name.endsWith('.json'))) {
+      out.push(full);
+    }
+  }
+}
+
+export async function getMuseSessionFiles(
+  sessionsDir: string = MUSE_SESSIONS_DIR
+): Promise<string[]> {
+  const files: string[] = [];
+  await collectMuseSessionFiles(sessionsDir, files);
+  // Subagent sessions (…/subagent/{id}/session.jsonl) are task children, not top-level
+  // conversations. Exclude them so they don't appear as separate Buddy threads.
+  // Scanning still covers YYYY/MM/DD/** for future layout changes.
+  return files.filter((filePath) => !filePath.includes('/subagent/'));
+}
+
+export function extractMuseSessionIdFromFilePath(filePath: string): string | null {
+  const parent = path.basename(path.dirname(filePath));
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(parent)) {
+    return parent;
+  }
+  const stem = path.basename(filePath, path.extname(filePath));
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem)) {
+    return stem;
+  }
+  return null;
+}
+
+export async function parseMuseSessionFile(filePath: string): Promise<MuseSession> {
+  let workingDirectory = '';
+  let model = 'unknown';
+  let sessionIdFromStream: string | null = null;
+  let createdAt: Date | null = null;
+  let modifiedAt: Date | null = null;
+  let buddyContext: BuddyContext | null = null;
+  let swarmDebugPrefix: string | null = null;
+  let resumedFromConversationId: string | null = null;
+  let purpose: string | null = null;
+
+  const rawMessages: Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }> = [];
+
+  let fileStream: fs.ReadStream | null = null;
+  let rl: readline.Interface | null = null;
+  try {
+    fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+    rl = readline.createInterface({ input: fileStream, crlfDelay: Number.POSITIVE_INFINITY });
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      if (line.includes('omitted_live_only')) continue;
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      const stream = asObject(obj.stream);
+      const sid = asString(stream?.id);
+      if (sid && !sessionIdFromStream) {
+        if (asString(stream?.kind) === 'session') sessionIdFromStream = sid;
+      }
+
+      const recordedAt = parseMuseTimestamp((obj as { recorded_at?: unknown }).recorded_at);
+      if (recordedAt) {
+        if (!createdAt || recordedAt < createdAt) createdAt = recordedAt;
+        if (!modifiedAt || recordedAt > modifiedAt) modifiedAt = recordedAt;
+      }
+
+      const payloadType = asString((obj as { payload_type?: unknown }).payload_type);
+      const payload = asObject((obj as { payload?: unknown }).payload);
+
+      if (payloadType === 'runtime.session.route_facts') {
+        const record = asObject(payload?.record);
+        const cwd = asString(record?.cwd);
+        if (cwd && !workingDirectory) workingDirectory = cwd;
+      }
+
+      if (payloadType === 'run.model.configured') {
+        const record = asObject(payload?.record);
+        const modelId = asString(record?.model_id);
+        if (modelId) model = modelId;
+      }
+
+      if (payloadType === 'record.creation' || payloadType === 'record.creation.observed') {
+        const record = asObject(payload?.record) ?? payload;
+        const bc = asObject((record as Record<string, unknown>)?.buddyContext);
+        if (bc) {
+          const parsed = BuddyContextSchema.safeParse(bc);
+          if (parsed.success) buddyContext = parsed.data;
+        }
+        const sdp = asString((record as Record<string, unknown>)?.swarmDebugPrefix);
+        if (sdp) swarmDebugPrefix = sdp;
+        const rfc = asString((record as Record<string, unknown>)?.resumedFromConversationId);
+        if (rfc) resumedFromConversationId = rfc;
+        const purp = asString((record as Record<string, unknown>)?.purpose);
+        if (purp) purpose = purp;
+      }
+      if (!buddyContext && payload) {
+        const maybeBc = asObject((payload as Record<string, unknown>).buddyContext);
+        if (maybeBc) {
+          const parsed = BuddyContextSchema.safeParse(maybeBc);
+          if (parsed.success) buddyContext = parsed.data;
+        }
+      }
+
+      if (payloadType !== 'runtime.session') continue;
+      const payloadKind = asString(payload?.kind);
+      if (payloadKind !== 'run' && payloadKind !== 'task' && payloadKind !== 'agent_tree_initialized') {
+        if (payloadKind !== 'run') continue;
+      }
+      const event = asObject((payload as Record<string, unknown>).event);
+      if (!event) continue;
+      const eventKind = asString(event.kind);
+      const ts = recordedAt ?? new Date();
+
+      if (eventKind === 'started' && typeof event.prompt === 'string') {
+        const prompt = (event.prompt as string).trim();
+        if (prompt.length > 0) {
+          rawMessages.push({ role: 'user', content: prompt, timestamp: ts });
+        }
+      } else if (eventKind === 'user_prompt_display' && typeof event.prompt === 'string') {
+        const prompt = (event.prompt as string).trim();
+        if (prompt.length > 0) {
+          rawMessages.push({ role: 'user', content: prompt, timestamp: ts });
+        }
+      } else if (eventKind === 'assistant_message_committed' && typeof event.text === 'string') {
+        const text = (event.text as string).trim();
+        if (text.length > 0) {
+          rawMessages.push({ role: 'assistant', content: text, timestamp: ts });
+        }
+      } else if (eventKind === 'assistant_tool_calls_committed') {
+        const toolCalls = Array.isArray(event.tool_calls) ? event.tool_calls : [];
+        const parts: string[] = [];
+        for (const tc of toolCalls) {
+          const call = tc as Record<string, unknown>;
+          const name = asString(call.name) ?? 'tool';
+          const argsRaw = asString(call.args);
+          let args: Record<string, unknown> | undefined;
+          if (argsRaw) {
+            try {
+              args = JSON.parse(argsRaw) as Record<string, unknown>;
+            } catch {
+              args = undefined;
+            }
+          }
+          parts.push(formatToolUse(name, args));
+        }
+        if (parts.length > 0) {
+          rawMessages.push({ role: 'assistant', content: parts.join('\n'), timestamp: ts });
+        }
+      } else if (eventKind === 'reasoning_committed' && typeof event.text === 'string') {
+        const text = (event.text as string).trim();
+        if (text.length > 0) {
+          rawMessages.push({ role: 'assistant', content: text, timestamp: ts });
+        }
+      }
+    }
+  } finally {
+    if (rl) rl.close();
+    if (fileStream) fileStream.destroy();
+  }
+
+  rawMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  const messages: Message[] = [];
+  for (const m of rawMessages) {
+    const prev = messages[messages.length - 1];
+    if (prev && prev.role === m.role && prev.content === m.content) continue;
+    if (m.role === 'assistant') {
+      const startedAt = messages.length > 0 ? messages[messages.length - 1].timestamp : m.timestamp;
+      messages.push({
+        role: m.role,
+        content: m.content,
+        timestamp: startedAt,
+        completedAt: m.timestamp,
+        completionReason: 'success',
+      });
+    } else {
+      messages.push({ role: m.role, content: m.content, timestamp: m.timestamp });
+    }
+  }
+
+  const sessionId =
+    sessionIdFromStream ??
+    extractMuseSessionIdFromFilePath(filePath) ??
+    path.basename(filePath, path.extname(filePath));
+
+  return {
+    sessionId,
+    filePath,
+    workingDirectory: normalizeDirPath(workingDirectory || process.cwd()),
+    model,
+    createdAt: createdAt ?? new Date(),
+    modifiedAt: modifiedAt ?? new Date(),
+    messages: dedupeConsecutiveMessages(messages),
+    buddyContext,
+    swarmDebugPrefix,
+    resumedFromConversationId,
+    purpose,
   };
 }
 

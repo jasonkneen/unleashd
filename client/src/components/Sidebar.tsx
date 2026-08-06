@@ -1,5 +1,5 @@
 import type { Conversation } from '@unleashd/shared';
-import { providerSupportsFork } from '@unleashd/shared';
+import { isBuddyConversation, providerSupportsFork } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -127,7 +127,7 @@ export function Sidebar() {
   // O(1) lookup instead of O(n) Array.includes — avoids O(n*m) in visibleConversations filter
   const doneSet = useMemo(() => new Set(doneConversations), [doneConversations]);
   const buddyConversations = useMemo(
-    () => allConversations.filter((conversation) => conversation.buddyContext != null),
+    () => allConversations.filter((conversation) => isBuddyConversation(conversation)),
     [allConversations]
   );
 
@@ -165,7 +165,7 @@ export function Sidebar() {
           // parent's MergeProgressStrip, not as standalone sidebar entries.
           !conv.mergeChildMeta &&
           // Buddy conversations live in the virtual Buddies recent-project group.
-          conv.buddyContext == null
+          !isBuddyConversation(conv)
       ),
     [allConversations, promotedSet]
   );
