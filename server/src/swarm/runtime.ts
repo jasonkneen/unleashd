@@ -158,30 +158,47 @@ export function readLatestSwarmRuntime(
   const startedAt = Date.parse(String(started['started-at'] ?? ''));
   const runAge = dependencies.now() - startedAt;
 
+  const workersStateDirectory = path.join(latestRun.path, 'workers');
   const workers = Array.from(workerIds)
     .map((id) => {
       const cycle = latestCycleByWorker.get(id);
+      // Oompa (since 2026-08-07) writes runs/<id>/workers/<worker>.json at every
+      // cycle start and at worker terminal exit. This is the liveness authority:
+      // cycle files are only written at cycle END, so deriving status from the
+      // latest cycle rendered a mid-cycle worker as dead/red for the whole cycle.
+      const state = safeReadJson(path.join(workersStateDirectory, `${id}.json`));
       let status: OompaWorkerStatus;
-      if (cycle) {
-        status = normalizeWorkerStatus(cycle.outcome);
+      let lastEvent: string;
+      if (state && typeof state.status === 'string') {
+        if (state.status === 'running' && isLive) {
+          status = 'running';
+          lastEvent = cycle
+            ? `Cycle ${state.cycle ?? '?'} in progress (cycle ${cycleNumber(cycle) || '?'}: ${cycle.outcome ?? 'unknown'})`
+            : `Cycle ${state.cycle ?? '?'} in progress`;
+        } else if (state.status === 'stopped') {
+          status = normalizeWorkerStatus(String(state.reason ?? 'done'));
+          lastEvent = `Stopped after cycle ${state.cycle ?? '?'}: ${state.reason ?? 'unknown'}`;
+        } else {
+          // state says running but the swarm process is gone — crashed mid-cycle
+          status = 'done';
+          lastEvent = `Swarm exited mid-cycle ${state.cycle ?? '?'}`;
+        }
+      } else if (cycle) {
+        // Legacy runs without worker state files: last cycle outcome is the best
+        // available signal, but on a live run a finished cycle means the worker
+        // is already in its next cycle (or backing off) — render it as running.
+        status = isLive ? 'running' : normalizeWorkerStatus(cycle.outcome);
+        lastEvent = `Cycle ${cycleNumber(cycle) || '?'}: ${cycle.outcome ?? 'unknown'}`;
       } else if (isLive) {
         status = !Number.isFinite(runAge) || runAge > 60_000 ? 'running' : 'starting';
+        lastEvent = 'Starting';
       } else {
         status = 'done';
+        lastEvent = isStopped ? 'Worker completed' : 'No data';
       }
       if (!isLive && !isTerminalWorkerStatus(status)) status = 'done';
 
-      return {
-        id,
-        status,
-        lastEvent: cycle
-          ? `Cycle ${cycleNumber(cycle) || '?'}: ${cycle.outcome ?? 'unknown'}`
-          : isStopped
-            ? 'Worker completed'
-            : isLive
-              ? 'Starting'
-              : 'No data',
-      };
+      return { id, status, lastEvent };
     })
     .sort((left, right) => left.id.localeCompare(right.id));
 
