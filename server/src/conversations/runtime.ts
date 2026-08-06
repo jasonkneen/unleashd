@@ -361,28 +361,27 @@ export function buildFirstTurnCliContent(input: {
   content: string;
   messageCount: number;
   hasStartedSession: boolean;
-  buddyContext: BuddyContext | null;
+  kind?: ConversationKind | null;
+  buddyContext?: BuddyContext | null;
   buddyBriefing: string | null;
   swarmDebugPrefix: string | null;
   purpose?: ConversationPurpose;
-  kind?: ConversationKind | null;
 }): string {
   const firstUnstartedTurn = input.messageCount === 0 && !input.hasStartedSession;
   const effectiveKind: ConversationKind =
     input.kind ??
     conversationKindFromLegacy({
-      buddyContext: input.buddyContext,
+      buddyContext: input.buddyContext ?? null,
       purpose: input.purpose ?? null,
       kind: null,
     });
-  // Thin dispatcher δ — selects handler per kind (R1/D1). Each handler has one path.
+  // Thin dispatcher δ — one clean handler per kind (D1, R1). Each handler has one semantic path.
+  // New sessions must not rely on hidden HTML comments; kind is canonical. The comment
+  // format is kept here for CLI backward compat but disk hydration no longer parses it for new writes.
   return matchConversationKind(effectiveKind, {
     buddy: (k) => {
       if (!firstUnstartedTurn || input.buddyBriefing === null) return input.content;
-      // Re-derive BuddyContext from kind when available (kind is canonical).
-      const ctx: BuddyContext = isBuddyKind(effectiveKind)
-        ? buddyContextFromKind(k)
-        : input.buddyContext!;
+      const ctx: BuddyContext = buddyContextFromKind(k);
       const encodedContext = Buffer.from(JSON.stringify(ctx), 'utf8').toString('base64url');
       return `<!-- unleashd:buddy-context-v2 ${encodedContext} ${input.buddyBriefing.length} -->\n${input.buddyBriefing}\n<!-- /unleashd:buddy-context-v2 -->\n\n${input.content}`;
     },
@@ -452,9 +451,29 @@ export function createConversationRuntime(
     // Debug prefix for swarm conversations — prepended to first CLI message.
     // Stays on the object (never cleared) so toJSON() includes it for client rendering.
     swarmDebugPrefix: string | null;
-    buddyContext: BuddyContext | null;
-    purpose: ConversationPurpose;
     kind: ConversationKind;
+    // Legacy compat: buddyContext/purpose are derived from kind. New code must use `kind` + `matchConversationKind`.
+    // Kept as getters so old readers (buddies integration, client) keep working.
+    get buddyContext(): BuddyContext | null {
+      return isBuddyKind(this.kind) ? buddyContextFromKind(this.kind) : null;
+    }
+    set buddyContext(value: BuddyContext | null) {
+      if (value) {
+        this.kind = buddyKindFromContext(value, this._buddyBriefing ?? undefined);
+      } else if (isBuddyKind(this.kind)) {
+        this.kind = { kind: 'general' };
+      }
+    }
+    get purpose(): ConversationPurpose {
+      return this.kind.kind === 'buddy_builder' ? 'buddy_builder' : 'general';
+    }
+    set purpose(value: ConversationPurpose) {
+      if (value === 'buddy_builder' && this.kind.kind !== 'buddy_builder') {
+        this.kind = { kind: 'buddy_builder' };
+      } else if (value !== 'buddy_builder' && this.kind.kind === 'buddy_builder') {
+        this.kind = { kind: 'general' };
+      }
+    }
     // Hidden first-turn context. Never serialized to clients; the typed
     // buddyContext is the durable/UI-facing metadata.
     private _buddyBriefing: string | null;
@@ -556,11 +575,7 @@ export function createConversationRuntime(
           purpose: purpose ?? null,
           kind: null,
         });
-      // Keep legacy fields in sync (compat for disk parsers / old clients).
-      const derivedBuddyContext = isBuddyKind(this.kind) ? buddyContextFromKind(this.kind) : null;
-      const effectiveBuddyContext = derivedBuddyContext ?? buddyContext;
-      const effectivePurpose = this.kind.kind === 'buddy_builder' ? 'buddy_builder' : purpose;
-      const isBuddyConversation = effectiveBuddyContext !== null;
+      const isBuddyConversation = isBuddyKind(this.kind);
       this.isWorker = isBuddyConversation ? false : isWorker;
       this.swarmId = isBuddyConversation ? null : swarmId;
       this.workerId = isBuddyConversation ? null : workerId;
@@ -569,9 +584,7 @@ export function createConversationRuntime(
       this.resumedFromConversationId = resumedFromConversationId;
       this.modelName = modelName;
       this.swarmDebugPrefix = isBuddyConversation ? null : swarmDebugPrefix;
-      this.buddyContext = effectiveBuddyContext;
       this._buddyBriefing = buddyBriefing;
-      this.purpose = effectivePurpose as ConversationPurpose;
       this.mergeParentMeta = mergeParentMeta;
       this.mergeChildMeta = mergeChildMeta;
       this.subAgents = [];
@@ -1554,8 +1567,6 @@ export function createConversationRuntime(
         content,
         messageCount: this.messages.length,
         hasStartedSession: this._hasStartedSession,
-        buddyContext: this.buddyContext,
-        purpose: this.purpose,
         kind: this.kind,
         buddyBriefing: this._buddyBriefing,
         swarmDebugPrefix: this.swarmDebugPrefix,

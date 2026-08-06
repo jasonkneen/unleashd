@@ -152,6 +152,24 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       );
     }
 
+    // Kind is canonical; durable record creation may still carry legacy buddyContext/purpose for old sessions.
+    // Prefer source.kind (from disk-adapter, already migrated), else derive from creation legacy.
+    const kindForHydrate =
+      source.kind ??
+      (hydratedConfig.record.creation?.buddyContext || hydratedConfig.record.creation?.purpose
+        ? conversationKindFromLegacy({
+            buddyContext: hydratedConfig.record.creation?.buddyContext ?? null,
+            purpose: hydratedConfig.record.creation?.purpose ?? null,
+            kind: null,
+          })
+        : null) ??
+      (source.buddyContext || source.purpose
+        ? conversationKindFromLegacy({
+            buddyContext: source.buddyContext ?? null,
+            purpose: source.purpose ?? null,
+            kind: null,
+          })
+        : null);
     const conversation = dependencies.createConversation({
       id: hydratedConfig.record.conversationId,
       workingDirectory: hydratedConfig.record.workingDirectory ?? source.workingDirectory,
@@ -169,7 +187,7 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       modelName: source.modelName ?? null,
       mergeParentMeta: source.mergeParentMeta ?? null,
       mergeChildMeta: source.mergeChildMeta ?? null,
-      kind: source.kind ?? null,
+      kind: kindForHydrate,
       buddyContext: source.buddyContext ?? hydratedConfig.record.creation?.buddyContext ?? null,
       purpose: source.purpose ?? hydratedConfig.record.creation?.purpose ?? 'general',
     });
@@ -372,17 +390,16 @@ export function createSessionLoader(dependencies: SessionLoaderDependencies): Se
       // must never erase the durable parent recorded at child creation.
       existing.resumedFromConversationId =
         source.resumedFromConversationId ?? existing.resumedFromConversationId;
-      // Holistic kind is canonical; keep legacy fields mirrored for old clients.
-      if (source.kind) existing.kind = source.kind;
-      else if (source.buddyContext) {
+      // Holistic kind is canonical; buddyContext/purpose are derived. Only set kind.
+      if (source.kind) {
+        existing.kind = source.kind;
+      } else if (source.buddyContext || source.purpose) {
         existing.kind = conversationKindFromLegacy({
-          buddyContext: source.buddyContext,
+          buddyContext: source.buddyContext ?? null,
           purpose: source.purpose ?? null,
           kind: existing.kind,
         });
       }
-      existing.buddyContext = source.buddyContext ?? existing.buddyContext;
-      existing.purpose = source.purpose ?? existing.purpose;
       existing.modelName = source.modelName ?? source.model ?? null;
       existing.refreshConfigResolution();
       const serialized = existing.toJSON();

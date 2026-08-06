@@ -1,5 +1,9 @@
 import type { Conversation } from '@unleashd/shared';
-import { isBuddyConversation, providerSupportsFork } from '@unleashd/shared';
+import {
+  getBuddyContext,
+  isBuddyConversation,
+  providerSupportsFork,
+} from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -194,7 +198,10 @@ export function Sidebar() {
     [topLevelConversations]
   );
   const buddyPendingCreations = useMemo(
-    () => pendingCreations.filter((creation) => creation.buddyContext != null),
+    () =>
+      pendingCreations.filter((creation) =>
+        isBuddyConversation(creation as unknown as Conversation)
+      ),
     [pendingCreations]
   );
   // Grouped view: split conversations into recent (48h, by folder) + older (flat)
@@ -292,7 +299,7 @@ export function Sidebar() {
   const buddySidebarItems = useMemo(() => {
     const latestConversationByBuddy = new Map<string, Conversation>();
     for (const conversation of topLevelBuddyConversations) {
-      const buddyId = conversation.buddyContext?.buddyId;
+      const buddyId = getBuddyContext(conversation)?.buddyId;
       if (!buddyId || latestConversationByBuddy.has(buddyId)) continue;
       latestConversationByBuddy.set(buddyId, conversation);
     }
@@ -304,7 +311,7 @@ export function Sidebar() {
 
     const pendingByBuddy = new Map<string, PendingConversationCreation>();
     for (const creation of buddyPendingCreations) {
-      const buddyId = creation.buddyContext?.buddyId;
+      const buddyId = getBuddyContext(creation as unknown as Conversation)?.buddyId;
       if (!buddyId || pendingByBuddy.has(buddyId)) continue;
       pendingByBuddy.set(buddyId, creation);
     }
@@ -334,8 +341,8 @@ export function Sidebar() {
         const lastActiveMs = Math.max(...timestamps.filter(Number.isFinite));
         const directoryEntry = buddyDirectory.find((employee) => employee.id === buddyId);
         const workspaceId =
-          latestConversation?.buddyContext?.workspaceId ??
-          pendingCreation?.buddyContext?.workspaceId;
+          getBuddyContext(latestConversation as unknown as Conversation)?.workspaceId ??
+          getBuddyContext(pendingCreation as unknown as Conversation)?.workspaceId;
 
         return {
           buddyId,
@@ -724,7 +731,7 @@ export function Sidebar() {
 
       <div className="conversations-list">
         {pendingCreations
-          .filter((creation) => !creation.buddyContext)
+          .filter((creation) => !isBuddyConversation(creation as unknown as Conversation))
           .map((creation) => (
             <button
               type="button"
@@ -1182,7 +1189,7 @@ function ConversationItem({
             }}
             title={dirDisplay}
           >
-            {conv.buddyContext ? 'Buddies' : folderName}
+            {isBuddyConversation(conv) ? 'Buddies' : folderName}
           </span>
         )}
         <div className="conversation-header-right">

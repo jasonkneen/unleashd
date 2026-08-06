@@ -28,7 +28,7 @@ import type {
   Provider,
   SubAgent,
 } from '@unleashd/shared';
-import { BuddyContextSchema } from '@unleashd/shared';
+import { BuddyContextSchema, ConversationKindSchema } from '@unleashd/shared';
 import {
   isCodexAgentMessageEvent,
   isCodexResponseMessage,
@@ -1727,6 +1727,7 @@ export interface MuseSession {
   createdAt: Date;
   modifiedAt: Date;
   messages: Message[];
+  kind?: import('@unleashd/shared').ConversationKind | null;
   buddyContext: BuddyContext | null;
   swarmDebugPrefix: string | null;
   resumedFromConversationId: string | null;
@@ -1788,6 +1789,7 @@ export async function parseMuseSessionFile(filePath: string): Promise<MuseSessio
   let sessionIdFromStream: string | null = null;
   let createdAt: Date | null = null;
   let modifiedAt: Date | null = null;
+  let kind: import('@unleashd/shared').ConversationKind | null = null;
   let buddyContext: BuddyContext | null = null;
   let swarmDebugPrefix: string | null = null;
   let resumedFromConversationId: string | null = null;
@@ -1839,6 +1841,11 @@ export async function parseMuseSessionFile(filePath: string): Promise<MuseSessio
 
       if (payloadType === 'record.creation' || payloadType === 'record.creation.observed') {
         const record = asObject(payload?.record) ?? payload;
+        const rawKind = (record as Record<string, unknown>)?.kind;
+        if (rawKind) {
+          const parsedKind = ConversationKindSchema.safeParse(rawKind);
+          if (parsedKind.success) kind = parsedKind.data;
+        }
         const bc = asObject((record as Record<string, unknown>)?.buddyContext);
         if (bc) {
           const parsed = BuddyContextSchema.safeParse(bc);
@@ -1948,6 +1955,7 @@ export async function parseMuseSessionFile(filePath: string): Promise<MuseSessio
     createdAt: createdAt ?? new Date(),
     modifiedAt: modifiedAt ?? new Date(),
     messages: dedupeConsecutiveMessages(messages),
+    kind,
     buddyContext,
     swarmDebugPrefix,
     resumedFromConversationId,

@@ -144,33 +144,36 @@ export function registerConversationWebSocket(
             const workingDirectory = dependencies.resolveWorkingDirectory(
               buddyResolution?.workingDirectory ?? data.workingDirectory
             );
-            // Fork retention: if forking a buddy conversation but client didn't send top-level buddyContext/kind,
-            // retain the source's kind (and derived buddyContext). Uses kind as canonical source; legacy fallback
-            // keeps old persisted state working. buddyContext is mirrored for compat.
-            let effectiveBuddyContext: BuddyContext | undefined = buddyResolution?.context;
+            // Fork retention: if forking a conversation but client didn't send top-level kind/buddyContext,
+            // retain the source's kind (canonical). buddyContext is derived from kind for compat.
             let effectiveKind: ConversationKind | undefined = data.kind;
             if (!effectiveKind && data.buddyContext) {
               effectiveKind = buddyKindFromContext(data.buddyContext);
+            }
+            let effectiveBuddyContext: BuddyContext | undefined = buddyResolution?.context;
+            if (!effectiveBuddyContext && effectiveKind && effectiveKind.kind === 'buddy') {
+              effectiveBuddyContext = buddyContextFromKind(
+                effectiveKind as Extract<ConversationKind, { kind: 'buddy' }>
+              );
             }
             if ((!effectiveBuddyContext || !effectiveKind) && data.resumedFromConversationId) {
               const sourceForBuddy = dependencies.registry.get(data.resumedFromConversationId);
               if (sourceForBuddy?.kind) {
                 const srcKind = conversationKindFromLegacy({
                   kind: sourceForBuddy.kind,
-                  buddyContext: sourceForBuddy.buddyContext ?? null,
+                  buddyContext: (sourceForBuddy as { buddyContext?: BuddyContext | null }).buddyContext ?? null,
                   purpose: (sourceForBuddy as { purpose?: string }).purpose ?? null,
                 });
-                if (srcKind.kind === 'buddy' && !effectiveBuddyContext) {
+                if (!effectiveKind && srcKind.kind !== 'general') effectiveKind = srcKind;
+                if (!effectiveBuddyContext && srcKind.kind === 'buddy') {
                   effectiveBuddyContext = buddyContextFromKind(srcKind);
                 }
-                if (!effectiveKind) effectiveKind = srcKind.kind === 'general' ? undefined : srcKind;
               }
-              if (!effectiveBuddyContext && sourceForBuddy?.buddyContext) {
-                effectiveBuddyContext = sourceForBuddy.buddyContext ?? undefined;
-              }
-              if (!effectiveKind && (data.config as unknown as { buddyContext?: BuddyContext })?.buddyContext) {
-                const legacyCtx = (data.config as unknown as { buddyContext?: BuddyContext }).buddyContext;
-                if (legacyCtx) effectiveKind = buddyKindFromContext(legacyCtx);
+              // Legacy fallback: direct buddyContext on source without kind
+              if (!effectiveBuddyContext && (sourceForBuddy as { buddyContext?: BuddyContext | null })?.buddyContext) {
+                effectiveBuddyContext =
+                  (sourceForBuddy as { buddyContext?: BuddyContext | null }).buddyContext ?? undefined;
+                if (!effectiveKind && effectiveBuddyContext) effectiveKind = buddyKindFromContext(effectiveBuddyContext);
               }
             }
             const fingerprint = dependencies.creationFingerprint({

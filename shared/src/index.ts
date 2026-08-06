@@ -624,12 +624,13 @@ export const ConversationSchema = z.object({
   // UI sees clean user content; CLI process gets the prefix + content.
   // Stays on the object so toJSON() includes it for client rendering.
   swarmDebugPrefix: z.string().nullish(),
-  // Canonical kind — holistic sum type. `buddyContext`/`purpose` remain for
-  // compat and are derived from `kind` on write; `getConversationKind()` derives
-  // `kind` from legacy fields on read. New code should use `kind`.
-  kind: ConversationKindSchema.optional(),
+  // Canonical kind — holistic sum type. Single source of truth.
+  // `buddyContext`/`purpose` are legacy compat only: new writes set kind
+  // and mirror to legacy fields for old clients/parsers; reads derive kind
+  // from legacy via `getConversationKind()` when kind is absent.
+  kind: ConversationKindSchema,
   // Persistent employee ownership (deprecated in favor of kind.buddy). Kept for
-  // compat; new writes mirror kind → buddyContext.
+  // compat; new writes mirror kind → buddyContext. Read via `getBuddyContext()` or `isBuddyConversation()`.
   buddyContext: BuddyContextSchema.nullish(),
   // Application-owned purpose (deprecated in favor of kind). `general` is implicit.
   purpose: ConversationPurposeSchema.optional(),

@@ -14,6 +14,7 @@
 import type {
   BuddyContext,
   Conversation,
+  ConversationKind,
   DiscoveredConversation,
   Message,
   Provider,
@@ -54,6 +55,9 @@ export interface ParsedSession {
   messages: Message[];
   subAgents?: SubAgent[]; // Claude only — extracted from JSONL entries
   parentSessionId?: string | null; // Codex only — for nested thread display
+  // Canonical kind — new sessions set this directly. Legacy sessions may only have
+  // buddyContext/purpose + hidden HTML prefix; we migrate via conversationKindFromLegacy.
+  kind?: ConversationKind | null;
   buddyContext?: BuddyContext | null;
   swarmDebugPrefix?: string | null;
   resumedFromConversationId?: string | null;
@@ -112,29 +116,63 @@ export type LoadProgressCallback = (
  * geminiSessionToConversation functions that previously existed in jsonl.ts.
  */
 export function sessionToConversation(session: ParsedSession): DiscoveredConversation | null {
-  // Both extractors mutate messages (strip markers from first user message).
-  // Buddy and swarm metadata have independent sentinels. Buddy extraction runs
-  // first because its hidden block is outermost for a Buddy's first turn.
-  // Typed Buddy ownership is authoritative and mutually exclusive with Oompa:
-  // do not interpret the visible Buddy prompt as a worker tag.
-  // Muse durable path: record.creation.buddyContext is authoritative when present
-  // (new sessions store buddy metadata in durable record, not hidden prefix).
-  // Legacy fallback: hidden prefix in first message (extractBuddyContext).
+  // Canonical kind is the single source. For new sessions, `session.kind` is set
+  // directly by the adapter from durable storage and we do NOT parse hidden HTML.
+  // For old sessions lacking `kind`, we migrate once from either durable buddyContext/purpose
+  // or hidden HTML prefix (extractBuddyContext). Hidden parsing mutates messages to strip the marker.
+  const durableKind = session.kind ?? null;
   const durableBuddy = session.buddyContext ?? null;
   const durableSwarmPrefix = session.swarmDebugPrefix ?? null;
   const durableResumed = session.resumedFromConversationId ?? null;
   const durablePurpose = session.purpose ?? null;
 
-  const extractedBuddy = extractBuddyContext(session.messages);
-  const buddyContext = durableBuddy ?? extractedBuddy;
-  const isBuddyBuilder = buddyContext
-    ? false
-    : durablePurpose === 'buddy_builder'
-      ? true
-      : extractBuddyBuilderPurpose(session.messages);
-  const extractedSwarmPrefix = extractSwarmDebugPrefix(session.messages);
-  const swarmDebugPrefix =
-    buddyContext || isBuddyBuilder ? null : (durableSwarmPrefix ?? extractedSwarmPrefix);
+  // Only parse hidden markers when durable kind/buddyContext is absent — one-time migration for old sessions.
+  // This keeps new sessions from depending on prose markers; they rely on `kind` instead.
+  let buddyContext: BuddyContext | null = durableBuddy;
+  let isBuddyBuilder = false;
+  let swarmDebugPrefix: string | null = durableSwarmPrefix;
+
+  if (durableKind) {
+    // Kind already present — derive legacy fields for compat without touching messages.
+    // Still strip swarm prefix if present in durable, else lazily extract (swarm prefix not yet migrated to kind).
+    if (!swarmDebugPrefix) {
+      const extractedSwarm = extractSwarmDebugPrefix(session.messages);
+      swarmDebugPrefix = extractedSwarm ?? null;
+    }
+    // Derive buddyContext/isBuddyBuilder from kind for later worker check
+    if (durableKind.kind === 'buddy') {
+      buddyContext = {
+        buddyId: durableKind.buddyId,
+        workspaceId: durableKind.workspaceId,
+        buddyProjectId: durableKind.buddyProjectId ?? undefined,
+        legacyWorkItemId: durableKind.legacyWorkItemId ?? undefined,
+        automationRunId: durableKind.automationRunId ?? undefined,
+        delegatedByBuddyId: durableKind.delegatedByBuddyId ?? undefined,
+        parentBuddyConversationId: durableKind.parentBuddyConversationId ?? undefined,
+        allowedBuddyOperations: durableKind.allowedBuddyOperations,
+      } as BuddyContext;
+      isBuddyBuilder = false;
+    } else if (durableKind.kind === 'buddy_builder') {
+      isBuddyBuilder = true;
+      buddyContext = null;
+    } else {
+      isBuddyBuilder = false;
+      buddyContext = null;
+    }
+    // For kind-present sessions, don't parse hidden buddy markers — they shouldn't exist anymore.
+    // But keep messages mutation for swarm/worker detection below.
+  } else {
+    const extractedBuddy = extractBuddyContext(session.messages);
+    buddyContext = durableBuddy ?? extractedBuddy;
+    isBuddyBuilder = buddyContext
+      ? false
+      : durablePurpose === 'buddy_builder'
+        ? true
+        : extractBuddyBuilderPurpose(session.messages);
+    const extractedSwarmPrefix = extractSwarmDebugPrefix(session.messages);
+    swarmDebugPrefix =
+      buddyContext || isBuddyBuilder ? null : (durableSwarmPrefix ?? extractedSwarmPrefix);
+  }
   // Resumed lineage durable wins; otherwise keep any prefix-extracted lineage
   // (none currently from extractors, but preserve future extraction).
   const resumedFromConversationId = durableResumed ?? null;
@@ -155,13 +193,15 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
   // base + reasoningEffort so they live as separate fields (matches claude shape).
   const { model: recoveredModel, reasoningEffort } = recoverModelAndEffort(session);
 
-  // Holistic kind — migration on load from hidden markers or durable record.
+  // Holistic kind — canonical when session.kind present, else migration from legacy.
   const durableKindPurpose = durablePurpose as 'buddy_builder' | null;
-  const kind = conversationKindFromLegacy({
-    buddyContext,
-    purpose: isBuddyBuilder ? 'buddy_builder' : durableKindPurpose,
-    kind: null,
-  });
+  const kind =
+    durableKind ??
+    conversationKindFromLegacy({
+      buddyContext,
+      purpose: isBuddyBuilder ? 'buddy_builder' : durableKindPurpose,
+      kind: null,
+    });
 
   return {
     sessionId: session.sessionId,

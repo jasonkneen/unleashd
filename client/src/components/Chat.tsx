@@ -45,7 +45,7 @@ import { VirtualizedMessageList, isToolCallOnlyMessage } from './VirtualizedMess
 import type { MessageGroup } from './VirtualizedMessageList';
 import { BuddyBuilderResultCard } from './buddies/BuddyBuilderResultCard';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
-import { getBuddyContext } from '@unleashd/shared';
+import { getBuddyContext, isBuddyBuilderConversation } from '@unleashd/shared';
 import {
   shouldPresentTurnAttempt,
   shouldShowTypingIndicator,
@@ -1024,7 +1024,7 @@ export function Chat() {
           )}
           <div className="empty-state">
             {confirmed
-              ? conversation.purpose === 'buddy_builder'
+              ? isBuddyBuilderConversation(conversation)
                 ? 'Describe the Buddy you want to create.'
                 : 'Send a message to start the conversation.'
               : `Waiting for ${conversation.provider || 'claude'} to be ready...` /* fallback 'claude' matches shared DEFAULT_PROVIDER */}
@@ -1047,7 +1047,7 @@ export function Chat() {
             swarmId={conversation.swarmId ?? null}
             buddyContext={buddyContext}
           />
-          {conversation.purpose === 'buddy_builder' && (
+          {isBuddyBuilderConversation(conversation) && (
             <div className="buddy-builder-result-slot">
               <BuddyBuilderResultCard
                 conversationId={conversation.id}
@@ -1167,7 +1167,7 @@ export function Chat() {
                 ? `Waiting for ${conversation.provider || 'claude'}...` // fallback 'claude' matches shared DEFAULT_PROVIDER
                 : hasActiveTurn
                   ? 'Enter to interrupt, Tab to queue...'
-                  : conversation.purpose === 'buddy_builder'
+                  : isBuddyBuilderConversation(conversation)
                     ? 'I want a new Buddy for…'
                     : 'Type your message...'
             }

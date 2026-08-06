@@ -35,6 +35,17 @@ const RUNTIME_EXTENSIONS = new Set(['.js', '.cjs', '.mjs', '.json']);
  *
  * This avoids orphaning a detached CLI or losing its final events while still
  * giving idle backend edits a normal fast reload.
+ *
+ * Resilience to transient build failures (2026-08-06):
+ * `node --import tsx src/server.ts` does an esbuild transform on startup.
+ * A typo (e.g. `jsonl.ts:13:42 Expected ";" but found "is"`) makes that
+ * transform fail and the child exits 1 in <1s. Previously the `exit` handler
+ * treated every non-zero exit as fatal (`stopping=true`, `process.exitCode=1`),
+ * and `dev-supervisor`'s `concurrently --kill-others-on-fail` then SIGTERM'd
+ * shared-esm/shared-cjs/cli/client — requiring `pnpm dev:replace` for every
+ * typo. That is inconsistent with vite HMR for the client, which overlays the
+ * error and recovers on the next save. See the quick-exit guard in
+ * `child.once('exit', ...)` below for the recovery heuristic and its tradeoff.
  */
 function isRuntimeRelevant(file) {
   if (file.startsWith(`${serverSourceRoot}${path.sep}`)) return true;
@@ -60,6 +71,7 @@ function snapshotsMatch(left, right) {
 }
 
 let child = null;
+let childStartMs = 0;
 let stopping = false;
 let reloadPending = false;
 let reloadTimer = null;
@@ -67,18 +79,47 @@ let fatalError = false;
 let pollInFlight = false;
 let snapshot = await takeSnapshot();
 let waitingForArtifacts = false;
+let backendDownRetryTimer = null;
+let backendDownReminderTimer = null;
+let failWatcherConsecutive = 0;
+let lastStderr = '';
+const STDERR_RING_LIMIT = 8192;
 
 function failWatcher(error) {
-  console.error('[server-watch] Could not queue backend reload; stopping dev runtime:', error);
-  stopping = true;
-  fatalError = true;
-  clearInterval(pollTimer);
-  if (reloadTimer) clearTimeout(reloadTimer);
-  if (child?.exitCode === null) {
-    child.kill('SIGTERM');
+  // Poll/snapshot errors are transient (e.g. transient FS race during a save).
+  // Previously this killed the entire dev runtime via `concurrently --kill-others-on-fail`,
+  // requiring `pnpm dev:replace` for what should be a retryable tick.
+  // Now we log and schedule a retry, keeping the poll loop alive — consistent
+  // with the quick-exit recovery above and with vite HMR.
+  // Only `stop()` / SIGINT/SIGTERM set `stopping`; this handler never does.
+  failWatcherConsecutive += 1;
+  if (failWatcherConsecutive >= 20) {
+    console.error(
+      `[server-watch] Transient watcher error persisted for ${failWatcherConsecutive} attempts — escalating to fatal:`,
+      error
+    );
+    stopping = true;
+    fatalError = true;
+    clearInterval(pollTimer);
+    if (reloadTimer) clearTimeout(reloadTimer);
+    if (backendDownRetryTimer) clearTimeout(backendDownRetryTimer);
+    if (backendDownReminderTimer) clearInterval(backendDownReminderTimer);
+    if (child?.exitCode === null) {
+      child.kill('SIGTERM');
+      return;
+    }
+    process.exitCode = 1;
     return;
   }
-  process.exitCode = 1;
+  const backoffMs = Math.min(5000, POLL_INTERVAL_MS * 2 ** (failWatcherConsecutive - 1));
+  console.error(
+    `[server-watch] Transient watcher error (attempt ${failWatcherConsecutive}/20, retry in ${backoffMs}ms):`,
+    error
+  );
+  if (reloadTimer) clearTimeout(reloadTimer);
+  // Don't clear pollTimer, don't set fatalError, don't kill child.
+  // Backoff prevents 3.3Hz spew on persistent EACCES; poll will self-heal.
+  scheduleReload(backoffMs);
 }
 
 function scheduleReload(delayMs = RELOAD_SETTLE_MS) {
@@ -106,11 +147,31 @@ async function startServer() {
     waitingForArtifacts = false;
   }
   reloadPending = false;
+  childStartMs = Date.now();
+  lastStderr = '';
+  // A successful spawn resets the transient-error counters and clears any
+  // backend-down reminders from a prior quick failure.
+  failWatcherConsecutive = 0;
+  if (backendDownRetryTimer) {
+    clearTimeout(backendDownRetryTimer);
+    backendDownRetryTimer = null;
+  }
+  if (backendDownReminderTimer) {
+    clearInterval(backendDownReminderTimer);
+    backendDownReminderTimer = null;
+  }
   child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
     cwd: serverRoot,
     env: { ...process.env, NODE_ENV: 'development' },
-    stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    // Pipe stderr so we can classify Transform failures (B-minus). Tee to parent so logs are still visible.
+    stdio: ['inherit', 'inherit', 'pipe', 'ipc'],
   });
+  if (child.stderr) {
+    child.stderr.on('data', (chunk) => {
+      process.stderr.write(chunk);
+      lastStderr = (lastStderr + chunk.toString()).slice(-STDERR_RING_LIMIT);
+    });
+  }
   child.once('exit', (code, signal) => {
     child = null;
     if (stopping) {
@@ -121,6 +182,57 @@ async function startServer() {
     if (reloadPending) {
       console.log('[server-watch] Active turns finished; starting the updated backend');
       void startServer().catch(failWatcher);
+      return;
+    }
+    // --- Transient build failure recovery (B-minus: stderr classification) ---
+    // Why: `tsx` transforms the server on every fresh `node --import tsx` spawn.
+    // A syntax typo causes an immediate `Transform failed ...` and exit 1.
+    // Killing the watcher here would cascade via `concurrently --kill-others-on-fail`
+    // and require a manual `pnpm dev:replace` for every typo (the 2026-08-06 incident).
+    // So we keep the poll loop alive and retry on the next file change, matching vite HMR.
+    //
+    // Classification: B-minus pipes stderr (tee'd to parent) into a ring buffer and
+    // matches `Transform failed` / `ERROR: Expected` as the primary signal. Uptime
+    // <3s is kept only as a fallback for crashes that don't emit that string.
+    // This avoids the false premise that `tsc` never emits bad dist and distinguishes
+    // env crashes (EADDRINUSE) that also happen quickly but don't match Transform.
+    const uptimeMs = Date.now() - childStartMs;
+    const isTransformFailure =
+      /Transform failed/i.test(lastStderr) || /ERROR:\s+Expected/i.test(lastStderr);
+    const isQuickBuildFailure =
+      !signal && code !== 0 && code !== null && (isTransformFailure || uptimeMs < 3000);
+    if (isQuickBuildFailure) {
+      const reason = isTransformFailure ? 'Transform failure' : `quick exit after ${uptimeMs}ms`;
+      console.error(
+        `[server-watch] Backend failed to start (exit ${code}, ${reason}) — likely a syntax/type error. Waiting for file change to retry...`
+      );
+      // Intentionally do NOT set stopping/fatalError, do NOT clear pollTimer, do NOT set exitCode.
+      // `poll()` will call `startServer()` again when `snapshot` changes.
+      // HIGH finding: an environmental quick crash (e.g. EADDRINUSE on 7499 via
+      // handleStartupFailure) also looks like a build failure and would otherwise
+      // leave the backend silently DOWN with no file change to trigger a retry.
+      // Schedule one delayed retry and a periodic reminder so the failure is visible.
+      if (!backendDownRetryTimer) {
+        backendDownRetryTimer = setTimeout(() => {
+          backendDownRetryTimer = null;
+          if (!stopping && !child) {
+            console.log('[server-watch] Retrying backend after quick failure...');
+            void startServer().catch(failWatcher);
+          }
+        }, 5000);
+      }
+      if (!backendDownReminderTimer) {
+        backendDownReminderTimer = setInterval(() => {
+          if (!stopping && !child) {
+            console.error(
+              `[server-watch] Backend is DOWN (last exit ${code} after ${uptimeMs}ms) — fix the error or touch a server file to retry`
+            );
+          } else {
+            clearInterval(backendDownReminderTimer);
+            backendDownReminderTimer = null;
+          }
+        }, 30000);
+      }
       return;
     }
     stopping = true;
@@ -136,8 +248,14 @@ async function startServer() {
 
 async function poll() {
   const nextSnapshot = await takeSnapshot(snapshot);
-  if (snapshotsMatch(snapshot, nextSnapshot)) return;
+  if (snapshotsMatch(snapshot, nextSnapshot)) {
+    // Successful poll — reset transient-error backoff.
+    failWatcherConsecutive = 0;
+    return;
+  }
   snapshot = nextSnapshot;
+  // Successful snapshot — reset backoff.
+  failWatcherConsecutive = 0;
 
   if (reloadPending) return;
   scheduleReload();
@@ -181,6 +299,8 @@ function stop(signal) {
   if (stopping) return;
   stopping = true;
   if (reloadTimer) clearTimeout(reloadTimer);
+  if (backendDownRetryTimer) clearTimeout(backendDownRetryTimer);
+  if (backendDownReminderTimer) clearInterval(backendDownReminderTimer);
   if (child?.exitCode === null) {
     child.kill(signal);
     return;
