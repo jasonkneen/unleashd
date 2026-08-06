@@ -140,11 +140,12 @@ export function registerConversationWebSocket(
             // Fork retention: if forking a buddy conversation but client didn't send top-level buddyContext,
             // retain the source's buddyContext (e.g., forking codex buddy -> muse). The config's buddyContext
             // is not used for creation.buddyContext, so we must copy from source.
-            let effectiveBuddyContext = buddyResolution?.context ?? null;
+            // Use `undefined` (not `null`) for absent buddy — Zod expects `object | undefined`, not `null`.
+            let effectiveBuddyContext: typeof buddyResolution extends { context: infer T } ? T : unknown = buddyResolution?.context;
             if (!effectiveBuddyContext && data.resumedFromConversationId) {
               const sourceForBuddy = dependencies.registry.get(data.resumedFromConversationId);
               if (sourceForBuddy?.buddyContext) {
-                effectiveBuddyContext = sourceForBuddy.buddyContext;
+                effectiveBuddyContext = sourceForBuddy.buddyContext as typeof effectiveBuddyContext;
               } else if ((data.config as { buddyContext?: unknown })?.buddyContext) {
                 effectiveBuddyContext = (data.config as { buddyContext: typeof effectiveBuddyContext }).buddyContext;
               }
