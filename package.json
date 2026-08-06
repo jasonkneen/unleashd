@@ -22,6 +22,7 @@
     "test:package": "node test/package-smoke.js",
     "test:api": "node test/api.test.js",
     "vendor:buddies": "node tools/vendor-buddies.mjs",
+    "check:catalog": "pnpm --filter @unleashd/shared check:catalog",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write ."
