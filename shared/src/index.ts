@@ -34,6 +34,7 @@ export * from './conversation-config.js';
 export * from './buddy.js';
 export * from './provider-catalog.js';
 export * from './legacy/codex-composite-model.js';
+export { stripJsonc } from './utils/jsonc.js';
 
 // =============================================================================
 // Provider-Specific Types (re-exported)
@@ -194,6 +195,9 @@ export const CURSOR_MODEL_IDS = CURSOR_MODEL_REGISTRY.map((entry) => entry.id);
 export const CursorModelSchema = z.enum(
   CURSOR_MODEL_IDS as unknown as [CursorModel, ...CursorModel[]]
 );
+
+export const MuseModelSchema = z.enum(['muse-spark-1.1', 'muse-spark-1.2-contributor']);
+export type MuseModel = z.infer<typeof MuseModelSchema>;
 
 /** Retired / shorthand ids → canonical Cursor `--model` value. */
 export const CURSOR_MODEL_ALIASES: Readonly<Record<string, CursorModel>> = {
@@ -381,7 +385,7 @@ export function defaultReasoningEffortForProvider(
   provider: Provider,
   model?: string
 ): string | undefined {
-  if (provider === 'claude') return 'high';
+  if (provider === 'claude' || provider === 'muse') return 'high';
   if (provider !== 'codex') return undefined;
 
   const entry: CodexModelRegistryEntry =
@@ -423,6 +427,8 @@ export function isModelIdValidForProvider(provider: Provider, modelId?: string):
       return OpenCodeModelSchema.safeParse(canonical).success;
     case 'cursor':
       return CursorModelSchema.safeParse(canonical).success;
+    case 'muse':
+      return MuseModelSchema.safeParse(canonical).success;
   }
 }
 
@@ -438,6 +444,8 @@ export function modelValidationHint(provider: Provider): string {
       return "'provider/model' format (e.g. 'opencode/big-pickle')";
     case 'cursor':
       return `one of: ${CURSOR_MODEL_IDS.map((id) => `'${id}'`).join(', ')}`;
+    case 'muse':
+      return `one of: ${MuseModelSchema.options.map((id) => `'${id}'`).join(', ')}`;
   }
 }
 
@@ -569,12 +577,15 @@ export const CODEX_EFFORT_LEVELS = [
   'max',
   'ultra',
 ] as const;
+export const MUSE_EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra'] as const;
 export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
 export type CodexEffortLevel = (typeof CODEX_EFFORT_LEVELS)[number];
+export type MuseEffortLevel = (typeof MUSE_EFFORT_LEVELS)[number];
 
 const EFFORT_LEVELS_BY_PROVIDER: Partial<Record<Provider, readonly string[]>> = {
   claude: CLAUDE_EFFORT_LEVELS,
   codex: CODEX_EFFORT_LEVELS,
+  muse: MUSE_EFFORT_LEVELS,
 };
 
 export function effortLevelsForProvider(provider: Provider): readonly string[] {

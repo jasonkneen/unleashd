@@ -219,6 +219,9 @@ const geminiAdapter: DiskAdapter = {
 //
 // To add a new provider (e.g. Grok): implement DiskAdapter, append here.
 // The load/poll loop in loader.ts iterates this list with no other changes.
+// Note: cursor has no disk adapter intentionally — its chats are sqlite/cloud-
+// backed under ~/.cursor/chats/ and ephemeral (no stable on-disk JSON to
+// hydrate). It is not listed here by design.
 // =============================================================================
 
 export const diskAdapters: DiskAdapter[] = [

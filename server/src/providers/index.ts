@@ -10,6 +10,7 @@ import claudeProvider from './claude';
 import codexProvider from './codex';
 import cursorProvider from './cursor';
 import geminiProvider from './gemini';
+import museProvider from './muse';
 import opencodeProvider from './opencode';
 
 /**
@@ -38,6 +39,7 @@ const providers: Record<ProviderName, Provider> = {
   opencode: opencodeProvider,
   gemini: geminiProvider,
   cursor: cursorProvider,
+  muse: museProvider,
 };
 
 /**

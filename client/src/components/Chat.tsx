@@ -515,7 +515,7 @@ export function Chat() {
     const folderDisplay = conversation.workingDirectory.replace(/^\/Users\/[^/]+/, '~');
     const header = [
       `Conversation: ${conversation.id}`,
-      `Provider:     ${conversation.provider ?? 'claude'}`,
+      `Provider:     ${conversation.provider ?? 'claude'}`, // fallback matches shared DEFAULT_PROVIDER ('claude')
       `Model:        ${modelDisplay}`,
       `Folder:       ${folderDisplay}`,
       '---',
@@ -1022,7 +1022,7 @@ export function Chat() {
               ? conversation.purpose === 'buddy_builder'
                 ? 'Describe the Buddy you want to create.'
                 : 'Send a message to start the conversation.'
-              : `Waiting for ${conversation.provider || 'claude'} to be ready...`}
+              : `Waiting for ${conversation.provider || 'claude'} to be ready...` /* fallback 'claude' matches shared DEFAULT_PROVIDER */}
           </div>
         </div>
       ) : (
@@ -1159,7 +1159,7 @@ export function Chat() {
             onPaste={handlePaste}
             placeholder={
               !confirmed
-                ? `Waiting for ${conversation.provider || 'claude'}...`
+                ? `Waiting for ${conversation.provider || 'claude'}...` // fallback 'claude' matches shared DEFAULT_PROVIDER
                 : hasActiveTurn
                   ? 'Enter to interrupt, Tab to queue...'
                   : conversation.purpose === 'buddy_builder'

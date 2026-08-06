@@ -277,8 +277,14 @@ export function Sidebar() {
   const [directory, setDirectory] = useState('');
   const [hasPendingDefault, setHasPendingDefault] = useState(false);
   const [isDirectoryValid, setIsDirectoryValid] = useState(true);
-  const [configDraft, setConfigDraft] = useState(() => createDefaultDraft('codex'));
   const { catalog, error: catalogError, retry: retryCatalog } = useProviderCatalog();
+  // Default provider is catalog-derived; fallback 'claude' matches
+  // shared/src/provider-catalog.ts DEFAULT_PROVIDER and shared/src/conversation-config.ts
+  // createDefaultConversationConfig(). Catalog is authoritative once loaded.
+  const defaultProvider = (catalog?.providers[0]?.id ?? 'claude') as Parameters<
+    typeof createDefaultDraft
+  >[0];
+  const [configDraft, setConfigDraft] = useState(() => createDefaultDraft(defaultProvider));
   const [isCreatingSwarm, setIsCreatingSwarm] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [buddyDirectory, setBuddyDirectory] = useState<BuddySidebarEmployee[]>([]);
@@ -384,9 +390,10 @@ export function Sidebar() {
     setDirectory(lastDir);
     setHasPendingDefault(true);
     setModalError(null);
-    setConfigDraft(createDefaultDraft('codex'));
+    // Provider default is catalog-derived; fallback 'claude' matches shared DEFAULT_PROVIDER.
+    setConfigDraft(createDefaultDraft(defaultProvider));
     setShowPicker(true);
-  }, [allConversations, lastWorkingDirectory, defaultCwd]);
+  }, [allConversations, lastWorkingDirectory, defaultCwd, defaultProvider]);
 
   const handleOpenNewSwarmFlow = useCallback(() => {
     handleNewConversation();

@@ -11,7 +11,10 @@ import type {
 
 export type ConversationConfigDraft = ConversationConfig;
 
-export function createDefaultDraft(provider: Provider = 'codex'): ConversationConfigDraft {
+// Default aligns with shared/src/conversation-config.ts createDefaultConversationConfig()
+// and shared/src/provider-catalog.ts DEFAULT_PROVIDER ('claude') — the server's
+// provider catalog first entry. Fallback 'claude' is intentional; catalog is authoritative.
+export function createDefaultDraft(provider: Provider = 'claude'): ConversationConfigDraft {
   return {
     provider,
     model: { mode: 'default' },

@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Stable provider identity. Provider-native model and effort values deliberately
  * remain opaque strings and are validated against a ProviderCatalog.
  */
-export const ProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini', 'cursor']);
+export const ProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini', 'cursor', 'muse']);
 export type Provider = z.infer<typeof ProviderSchema>;
 
 export interface ProviderMetadata {
@@ -20,6 +20,7 @@ export const PROVIDER_METADATA: Record<Provider, Omit<ProviderMetadata, 'id'>> =
   opencode: { label: 'OpenCode', shortLabel: 'O', cssClass: 'opencode' },
   gemini: { label: 'Gemini', shortLabel: 'G', cssClass: 'gemini' },
   cursor: { label: 'Cursor', shortLabel: 'Cu', cssClass: 'cursor' },
+  muse: { label: 'Muse', shortLabel: 'M', cssClass: 'muse' },
 };
 
 export const PROVIDER_OPTIONS: readonly ProviderMetadata[] = ProviderSchema.options.map((id) => ({
@@ -28,6 +29,14 @@ export const PROVIDER_OPTIONS: readonly ProviderMetadata[] = ProviderSchema.opti
 }));
 
 export const PROVIDER_IDS: readonly Provider[] = ProviderSchema.options;
+
+/**
+ * Default provider when no explicit selection exists.
+ * Single source for client draft defaults and server fallbacks.
+ * Keep aligned with shared/src/conversation-config.ts createDefaultConversationConfig()
+ * and server catalog-service.
+ */
+export const DEFAULT_PROVIDER: Provider = 'claude';
 
 export const getProviderMetadata = (provider: Provider): ProviderMetadata => ({
   id: provider,
