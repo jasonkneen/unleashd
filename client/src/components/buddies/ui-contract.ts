@@ -2,8 +2,8 @@ import type { BuddyContext, ConversationKind } from '@unleashd/shared';
 import { isBuddyKind } from '@unleashd/shared';
 import type { BuddyOverview, BuddyOverviewEmployee, BuddyProject } from './types';
 
-export function selectDirectoryEmployees(overview: BuddyOverview): BuddyOverviewEmployee[] {
-  return overview.topLevel;
+export function selectDirectoryEmployees(overview: BuddyOverview | null | undefined): BuddyOverviewEmployee[] {
+  return overview?.topLevel ?? [];
 }
 
 export function buddyCardMetrics(employee: BuddyOverviewEmployee) {
