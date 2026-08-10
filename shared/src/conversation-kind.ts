@@ -172,11 +172,14 @@ export function conversationKindFromLegacy(input: {
 }
 
 // Effective kind for any Conversation-shaped object (compat: derives when field absent).
-export function getConversationKind(value: {
-  kind?: ConversationKind | null;
-  buddyContext?: BuddyContext | null;
-  purpose?: string | null;
-}): ConversationKind {
+export function getConversationKind(
+  value: {
+    kind?: ConversationKind | null;
+    buddyContext?: BuddyContext | null;
+    purpose?: string | null;
+  } | null | undefined,
+): ConversationKind {
+  if (!value) return { kind: 'general' };
   return conversationKindFromLegacy({
     buddyContext: value.buddyContext ?? null,
     purpose: value.purpose ?? null,
@@ -184,35 +187,45 @@ export function getConversationKind(value: {
   });
 }
 
-export function isBuddyConversation(value: {
-  kind?: ConversationKind | null;
-  buddyContext?: BuddyContext | null;
-  purpose?: string | null;
-}): boolean {
+export function isBuddyConversation(
+  value: {
+    kind?: ConversationKind | null;
+    buddyContext?: BuddyContext | null;
+    purpose?: string | null;
+  } | null | undefined,
+): boolean {
   return getConversationKind(value).kind === 'buddy';
 }
 
-export function isBuddyBuilderConversation(value: {
-  kind?: ConversationKind | null;
-  buddyContext?: BuddyContext | null;
-  purpose?: string | null;
-}): boolean {
+export function isBuddyBuilderConversation(
+  value: {
+    kind?: ConversationKind | null;
+    buddyContext?: BuddyContext | null;
+    purpose?: string | null;
+  } | null | undefined,
+): boolean {
   return getConversationKind(value).kind === 'buddy_builder';
 }
 
-export function getBuddyContext(value: {
-  kind?: ConversationKind | null;
-  buddyContext?: BuddyContext | null;
-}): BuddyContext | null {
+export function getBuddyContext(
+  value: {
+    kind?: ConversationKind | null;
+    buddyContext?: BuddyContext | null;
+  } | null | undefined,
+): BuddyContext | null {
+  if (!value) return null;
   const kind = getConversationKind(value as { kind?: ConversationKind | null; buddyContext?: BuddyContext | null });
   if (isBuddyKind(kind)) return buddyContextFromKind(kind);
   return value.buddyContext ?? null;
 }
 
-export function getBuddyId(value: {
-  kind?: ConversationKind | null;
-  buddyContext?: BuddyContext | null;
-}): string | null {
+export function getBuddyId(
+  value: {
+    kind?: ConversationKind | null;
+    buddyContext?: BuddyContext | null;
+  } | null | undefined,
+): string | null {
+  if (!value) return null;
   const kind = getConversationKind(value as { kind?: ConversationKind | null; buddyContext?: BuddyContext | null });
   return isBuddyKind(kind) ? kind.buddyId : null;
 }
