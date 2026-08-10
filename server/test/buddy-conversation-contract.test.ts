@@ -14,6 +14,21 @@ const buddyContext: BuddyContext = {
   buddyProjectId: null,
 };
 
+// Canonical BuddyContext absence invariant (shared/src/conversation-kind.ts):
+// every `.nullish()` field round-trips as an explicit `null`, while the
+// `.optional()` allowedBuddyOperations is omitted when absent. Anything that
+// stores a BuddyContext goes through kind ⇄ context, so reads come back in this
+// shape regardless of which subset of fields was supplied at construction.
+const canonicalBuddyContext: BuddyContext = {
+  buddyId: 'buddy-1',
+  workspaceId: 'workspace-1',
+  buddyProjectId: null,
+  legacyWorkItemId: null,
+  automationRunId: null,
+  delegatedByBuddyId: null,
+  parentBuddyConversationId: null,
+};
+
 function runtimeFixture() {
   const broadcasts: unknown[] = [];
   const config = createDefaultConversationConfig('codex');
@@ -67,7 +82,7 @@ test('empty Buddy conversation construction is inert and suppresses incompatible
   assert.equal(conversation.process, null);
   assert.deepEqual(conversation.messages, []);
   assert.deepEqual(fixture.broadcasts, []);
-  assert.deepEqual(conversation.buddyContext, buddyContext);
+  assert.deepEqual(conversation.buddyContext, canonicalBuddyContext);
   assert.equal(conversation.isWorker, false);
   assert.equal(conversation.swarmId, null);
   assert.equal(conversation.workerId, null);

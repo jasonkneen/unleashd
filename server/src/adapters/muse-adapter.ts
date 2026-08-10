@@ -38,7 +38,7 @@ export const museAdapter: DiskAdapter = {
       messages: session.messages,
       subAgents: [],
       parentSessionId: null,
-      kind: (session as { kind?: import('@unleashd/shared').ConversationKind | null }).kind ?? null,
+      kind: session.kind ?? null,
       buddyContext: session.buddyContext,
       swarmDebugPrefix: session.swarmDebugPrefix,
       resumedFromConversationId: session.resumedFromConversationId,

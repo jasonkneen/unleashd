@@ -193,10 +193,6 @@ export function Sidebar() {
       ),
     [buddyConversations, conversationIds]
   );
-  const flatSidebarConversations = useMemo(
-    () => [...topLevelConversations],
-    [topLevelConversations]
-  );
   const buddyPendingCreations = useMemo(
     () =>
       pendingCreations.filter((creation) =>
@@ -754,7 +750,7 @@ export function Sidebar() {
               </div>
             </button>
           ))}
-        {(flatSidebarConversations.length > 0 ||
+        {(topLevelConversations.length > 0 ||
           pendingCreations.length > 0 ||
           buddySidebarItems.length > 0) && (
           <div
@@ -874,7 +870,7 @@ export function Sidebar() {
           </div>
         )}
         {sidebarViewMode === 'list' ? (
-          flatSidebarConversations
+          topLevelConversations
             .filter((conv) => !doneSet.has(conv.sessionId ?? conv.id))
             .map((conv) => (
               <ConversationItem

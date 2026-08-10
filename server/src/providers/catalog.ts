@@ -8,6 +8,8 @@ import { stripJsonc, type ModelInfo } from '@unleashd/shared';
 
 function findCatalogPath(): string | null {
   const candidates: string[] = [];
+  // Explicit override for checkouts where the catalog lives outside the repo.
+  if (process.env.UNLEASHD_CATALOG_PATH) candidates.push(process.env.UNLEASHD_CATALOG_PATH);
   try {
     // @ts-ignore - import.meta requires es module, but runtime may be cjs/esm
     const metaUrl = (import.meta as unknown as { url?: string })?.url;
@@ -22,7 +24,6 @@ function findCatalogPath(): string | null {
   }
   candidates.push(join(process.cwd(), 'vendor/agent-cli-tool/catalog.jsonc'));
   candidates.push(join(process.cwd(), '../agent-cli-tool/catalog.jsonc'));
-  candidates.push('/Users/nicholasbardy/git/agent-cli-tool/catalog.jsonc');
   for (const p of candidates) if (existsSync(p)) return p;
   return null;
 }

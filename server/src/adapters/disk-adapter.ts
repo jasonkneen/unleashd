@@ -22,8 +22,10 @@ import type {
 } from '@unleashd/shared';
 import {
   ModelIdSchema,
+  buddyContextFromKind,
   buddyKindFromContext,
   conversationKindFromLegacy,
+  matchConversationKind,
   fromCodexModelId,
   isModelIdValidForProvider,
   normalizeModelId,
@@ -139,26 +141,19 @@ export function sessionToConversation(session: ParsedSession): DiscoveredConvers
       const extractedSwarm = extractSwarmDebugPrefix(session.messages);
       swarmDebugPrefix = extractedSwarm ?? null;
     }
-    // Derive buddyContext/isBuddyBuilder from kind for later worker check
-    if (durableKind.kind === 'buddy') {
-      buddyContext = {
-        buddyId: durableKind.buddyId,
-        workspaceId: durableKind.workspaceId,
-        buddyProjectId: durableKind.buddyProjectId ?? undefined,
-        legacyWorkItemId: durableKind.legacyWorkItemId ?? undefined,
-        automationRunId: durableKind.automationRunId ?? undefined,
-        delegatedByBuddyId: durableKind.delegatedByBuddyId ?? undefined,
-        parentBuddyConversationId: durableKind.parentBuddyConversationId ?? undefined,
-        allowedBuddyOperations: durableKind.allowedBuddyOperations,
-      } as BuddyContext;
-      isBuddyBuilder = false;
-    } else if (durableKind.kind === 'buddy_builder') {
-      isBuddyBuilder = true;
-      buddyContext = null;
-    } else {
-      isBuddyBuilder = false;
-      buddyContext = null;
-    }
+    // Thin dispatcher δ over the canonical kind — one clean handler per variant (D1/D2).
+    // Handlers must not re-derive the buddy context field-by-field: `buddyContextFromKind`
+    // is the single canonical projection and owns the null/omit absence invariant.
+    const derived = matchConversationKind<{
+      buddyContext: BuddyContext | null;
+      isBuddyBuilder: boolean;
+    }>(durableKind, {
+      buddy: (k) => ({ buddyContext: buddyContextFromKind(k), isBuddyBuilder: false }),
+      buddy_builder: () => ({ buddyContext: null, isBuddyBuilder: true }),
+      general: () => ({ buddyContext: null, isBuddyBuilder: false }),
+    });
+    buddyContext = derived.buddyContext;
+    isBuddyBuilder = derived.isBuddyBuilder;
     // For kind-present sessions, don't parse hidden buddy markers — they shouldn't exist anymore.
     // But keep messages mutation for swarm/worker detection below.
   } else {

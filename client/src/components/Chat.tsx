@@ -460,11 +460,16 @@ export function Chat() {
   }, [conversation, streamingText]);
 
   const swarmDebugPrefix = conversation?.swarmDebugPrefix;
-  const buddyContext = readBuddyContext(conversation);
+  // readBuddyContext derives a FRESH object from conversation.kind on every call, so
+  // calling it inline made buddyContext a new reference each render and invalidated the
+  // memos in VirtualizedMessageList on every streaming chunk. Streaming text lives in a
+  // separate atom (streamingAtomFamily), so the `conversation` reference only changes on
+  // structural updates — it is a safe memo key.
+  const buddyContext = useMemo(() => readBuddyContext(conversation), [conversation]);
   const visibleSwarmDebugPrefix = effectiveSwarmDebugPrefix(
     buddyContext,
     swarmDebugPrefix,
-    (conversation as { kind?: unknown } as { kind?: import('@unleashd/shared').ConversationKind | null })?.kind ?? null
+    conversation?.kind ?? null
   );
   const messageGroups = useMemo((): MessageGroup[] => {
     const prefix = visibleSwarmDebugPrefix;
@@ -1050,6 +1055,10 @@ export function Chat() {
           {isBuddyBuilderConversation(conversation) && (
             <div className="buddy-builder-result-slot">
               <BuddyBuilderResultCard
+                // Keyed so switching builder conversations remounts the card; without it
+                // the previous conversation's result (and its "Start conversation" button)
+                // leaks across navigation.
+                key={conversation.id}
                 conversationId={conversation.id}
                 isRunning={conversation.isRunning}
               />

@@ -113,6 +113,14 @@ test('Buddy context is typed conversation metadata independent of swarm state', 
       catalogRevision: 'test',
       value: { provider: 'claude', modelId: 'opus' },
     },
+    // ConversationSchema requires the canonical `kind`; it must agree with the
+    // legacy buddyContext mirror below (same buddyId/workspaceId).
+    kind: {
+      kind: 'buddy',
+      buddyId: 'buddy-1',
+      workspaceId: 'workspace-1',
+      automationRunId: null,
+    },
     buddyContext,
   });
   assert.deepEqual(conversation.buddyContext, buddyContext);

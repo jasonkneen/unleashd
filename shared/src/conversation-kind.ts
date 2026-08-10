@@ -71,6 +71,29 @@ export function isBuddyBuilderKind(kind: ConversationKind): kind is BuddyBuilder
 }
 
 // ── canonical constructors (κ at the ingestion boundary) ─────────────────────
+/**
+ * CANONICAL ABSENCE INVARIANT (BuddyKind ⇄ BuddyContext).
+ *
+ * The two directions used to disagree: `buddyKindFromContext` normalized absence to
+ * `null` while `buddyContextFromKind` normalized it back to `undefined`, so a
+ * round-trip of `{ buddyProjectId: null }` silently became `undefined` (and every
+ * absent field materialized as a present-but-undefined key, breaking deepStrictEqual
+ * and JSON shape stability). The invariant is now:
+ *
+ *   - `.nullish()` scalar fields (buddyProjectId, legacyWorkItemId, automationRunId,
+ *     delegatedByBuddyId, parentBuddyConversationId) → absence is ALWAYS `null`,
+ *     present as an explicit key in both directions. `null` (not `undefined`) is the
+ *     representation the rest of the repo already writes and persists — see
+ *     server/src/buddies/routes.ts, integration.ts, session-loader.ts and the client
+ *     dashboard, which all emit `buddyProjectId: null`. JSON round-trips preserve
+ *     `null` but drop `undefined`, so `null` is the only stable durable form.
+ *   - `allowedBuddyOperations` is `.optional()` (NOT nullish) in both schemas, so
+ *     `null` is invalid; absence is represented by OMITTING the key entirely.
+ *   - `briefing` is likewise omit-when-absent.
+ *
+ * Consequence: `buddyContextFromKind(buddyKindFromContext(ctx))` is idempotent and
+ * deep-equal-stable. Do not reintroduce `?? undefined` on the nullish fields.
+ */
 export function buddyKindFromContext(
   context: BuddyContext,
   briefing?: string
@@ -84,7 +107,9 @@ export function buddyKindFromContext(
     automationRunId: context.automationRunId ?? null,
     delegatedByBuddyId: context.delegatedByBuddyId ?? null,
     parentBuddyConversationId: context.parentBuddyConversationId ?? null,
-    allowedBuddyOperations: context.allowedBuddyOperations,
+    ...(context.allowedBuddyOperations !== undefined
+      ? { allowedBuddyOperations: context.allowedBuddyOperations }
+      : {}),
     ...(briefing !== undefined ? { briefing } : {}),
   };
 }
@@ -93,18 +118,38 @@ export function buddyContextFromKind(kind: BuddyKind): BuddyContext {
   return {
     buddyId: kind.buddyId,
     workspaceId: kind.workspaceId,
-    buddyProjectId: kind.buddyProjectId ?? undefined,
-    legacyWorkItemId: kind.legacyWorkItemId ?? undefined,
-    automationRunId: kind.automationRunId ?? undefined,
-    delegatedByBuddyId: kind.delegatedByBuddyId ?? undefined,
-    parentBuddyConversationId: kind.parentBuddyConversationId ?? undefined,
-    allowedBuddyOperations: kind.allowedBuddyOperations,
+    buddyProjectId: kind.buddyProjectId ?? null,
+    legacyWorkItemId: kind.legacyWorkItemId ?? null,
+    automationRunId: kind.automationRunId ?? null,
+    delegatedByBuddyId: kind.delegatedByBuddyId ?? null,
+    parentBuddyConversationId: kind.parentBuddyConversationId ?? null,
+    ...(kind.allowedBuddyOperations !== undefined
+      ? { allowedBuddyOperations: kind.allowedBuddyOperations }
+      : {}),
   };
 }
 
-// Legacy → kind (used on load). Pure, exhaustive, no silent fallback beyond
-// the typed 'general' default. Unknown buddyContext fails open to null and the
-// caller maps to general via this function.
+// Bounded, throw-free rendering of an arbitrary rejected value for a log line.
+function truncateForLog(value: unknown, max = 400): string {
+  const text = ((): string => {
+    try {
+      return JSON.stringify(value) ?? String(value);
+    } catch {
+      return String(value);
+    }
+  })();
+  return text.length > max ? `${text.slice(0, max)}…[truncated ${text.length - max} chars]` : text;
+}
+
+// Legacy → kind (used on load). This is the ingestion boundary κ: messy legacy
+// records in, canonical ConversationKind out.
+//
+// RULE T4 (no silent fallbacks): a MALFORMED `input.kind` must never be quietly
+// downgraded. It is loud-logged with the zod issues plus a truncated dump of the
+// offending value, then we continue the legacy derivation chain. (A typed Unknown
+// variant would be the fully-correct model, but that is a schema change; the
+// scoped fix here is a logged fallback.) A legitimately ABSENT `kind` is not a
+// fallback — it is the documented legacy shape — so it logs nothing.
 export function conversationKindFromLegacy(input: {
   buddyContext?: BuddyContext | null;
   purpose?: string | null;
@@ -113,6 +158,10 @@ export function conversationKindFromLegacy(input: {
   if (input.kind) {
     const parsed = ConversationKindSchema.safeParse(input.kind);
     if (parsed.success) return parsed.data;
+    console.warn(
+      '[conversation-kind] invalid `kind` rejected by ConversationKindSchema; falling back to legacy derivation.',
+      { issues: parsed.error.issues, raw: truncateForLog(input.kind) }
+    );
   }
   if (input.buddyContext) {
     const ctx = BuddyContextSchema.safeParse(input.buddyContext);

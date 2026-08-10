@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-06 (updated 2026-08-06 with review feedback)  
 **Incident:** `server/src/adapters/jsonl.ts:13:42 Expected ";" but found "is"` → `esbuild Transform failed` → `watch-server` exit 1 → `concurrently --kill-others-on-fail` killed `shared-esm/shared-cjs/cli/client` → required `pnpm dev:replace` for every typo.  
-**Status:** Bandaid + tweaks + **B-minus + hardening (4 fixes) shipped** in `tools/watch-server.mjs`. Plan updated per 3-agent review — Option A rejected, B-minus implemented, pre-flight deferred.
+**Status:** Bandaid + tweaks + **B-minus + hardening (4 fixes) + Option D pre-flight shipped** in `tools/watch-server.mjs`. Plan updated per 3-agent review — Option A rejected, B-minus and Option D implemented.
 
 ## 1. Current Architecture (what changed)
 

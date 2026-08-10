@@ -82,6 +82,24 @@ git log --oneline -1  # copy hash into PR description
 - Modified but not yet committed: `tools/watch-server.mjs` (+ plan/note as untracked)
 - Other `M` files (`client/src/components/Chat.tsx`, `server/src/adapters/*`, `shared/src/index.ts`, `vendor/agent-cli-tool`) are unrelated to this PR — do not include in this commit.
 
+## Cleanup Disposition (Repo Janitor — 2026-08-10)
+
+Reviewed remaining dirty/untracked files named in janitor task against `git diff` and history:
+
+| File | `git diff` vs HEAD | Disposition | Rationale |
+|---|---|---|---|
+| `client/src/components/Sidebar.tsx` | clean (0 diff) | **committed** — no action | Part of aa97bdf follow-ups, committed in `91aea25` (Sidebar kind-aware, 23 lines). Not part of watch-server fix (`c7040ee` only touches `tools/watch-server.mjs` + docs). |
+| `client/src/components/Chat.tsx` | clean | **committed** — no action | Same — committed in `91aea25` (fork transcript, 8 lines). |
+| `server/src/adapters/*` (`disk-adapter.ts`, `jsonl.ts`, `muse-adapter.ts`, `loader.ts`, `registry.ts`) | clean, tracked (`git ls-files` lists 8 files) | **committed** — no action | Holistic `ConversationKind` + Muse/Cursor rehydration adapters introduced in `aa97bdf` (905 ins), polished in `91aea25` (88+ lines disk-adapter, etc.). Not watch-server. |
+| `server/src/conversations/runtime.ts` | clean | **committed** — no action | Kind dispatcher + fork retention — `aa97bdf` → `91aea25` (49 lines). |
+| `server/src/lifecycle/session-loader.ts` | clean | **committed** — no action | Loader mtime handling — `aa97bdf` (18 lines) → `91aea25` (31 lines). |
+| `server/src/transport/conversation-websocket.ts` | clean | **committed** — no action | WS kind handling — `aa97bdf` (54 lines) → `91aea25` (29 lines). |
+| `shared/src/index.ts` | clean | **committed** — no action | Re-export of `conversation-kind` — `aa97bdf` (15 lines) → `91aea25` (11 lines). |
+| `vendor/agent-cli-tool` | clean, submodule at `1977de2` | **committed** — no action | Submodule bump `dda24d6→1977de2` committed in `91aea25`. `git submodule status` shows `-1977de20...` (not initialized locally, but recorded in index). Not discarding. |
+| `product/` (`PLANNING_MOBILE.md`, 297 lines) | untracked, never in `git log --all -- product/` | **gitignored** — not committed, not removed | Standalone Mobile PWA planning doc (v2, "planned, not yet coded"), unrelated to both watch-server fix and aa97bdf follow-ups. Preserved on disk; added `product/` to `.gitignore:38` so `git status` is clean. To publish: `git add -f product/PLANNING_MOBILE.md` and commit separately. |
+
+**Result:** `git status --porcelain` now shows only `M .gitignore` (the new ignore entry). After that is committed or stashed, working tree is clean. `git diff HEAD` for all 8 claimed code paths is empty — nothing to stash or discard. `vendor/agent-cli-tool` dist artifacts are inside submodule and ignored by parent. No collateral `yarn.lock`/`node_modules` changes.
+
 ## PR Reviewer Checklist
 
 - [ ] Confirm `stdio: pipe` + tee doesn't lose logs (should appear exactly as before)

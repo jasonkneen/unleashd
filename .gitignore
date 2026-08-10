@@ -33,3 +33,6 @@ output/playwright/
 # Temporary files
 *.tmp
 *.temp
+
+# Local planning scratch (not committed)
+product/

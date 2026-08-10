@@ -74,6 +74,13 @@ export function BuddyBuilderResultCard({
 
   useEffect(() => {
     if (isRunning) return;
+    // `result` is component-local state that used to be write-only: a 404 (no builder
+    // result for this conversation) left the previous conversation's card on screen,
+    // and its "Start conversation" button carried the wrong buddy context. Always
+    // write the fetch outcome — including null — and ignore late resolutions from a
+    // previous conversationId so a stale response can't overwrite the current one.
+    // (Render site in Chat.tsx also passes key={conversation.id} to force a remount.)
+    let cancelled = false;
     const controller = new AbortController();
     void fetch(`/api/buddies/builder/${encodeURIComponent(conversationId)}/result`, {
       signal: controller.signal,
@@ -84,13 +91,17 @@ export function BuddyBuilderResultCard({
         return BuddyBuilderResultSchema.parse(await response.json());
       })
       .then((value) => {
-        if (value) setResult(value);
+        if (!cancelled) setResult(value);
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         console.warn('[buddies] Could not load Builder result:', error);
+        if (!cancelled) setResult(null);
       });
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [conversationId, isRunning]);
 
   return result ? <BuddyCreatedCard result={result} /> : null;
