@@ -1,4 +1,4 @@
-import type { Conversation, SwarmReviewLog, SwarmRunLog, SwarmRunSummary } from '@unleashd/shared';
+import type { Conversation } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -6,11 +6,21 @@ import { workersByProjectAtom } from '../atoms/conversations';
 import { useUIStore } from '../stores/uiStore';
 import { getProjectColor } from '../utils/projectColors';
 import { getProjectName, getProjectRoot } from '../utils/swarmUtils';
+import {
+  buildTimelineData,
+  computeSwarmStats,
+  type IterationSpan,
+  type RunData,
+} from '../utils/swarmAnalyticsParsers';
 import { formatDuration, formatTimeAgo } from '../utils/time';
 import './SwarmAnalytics.css';
 
+// Re-export analytics parsers for mobile (utils is canonical)
+export { buildTimelineData, computeSwarmStats } from '../utils/swarmAnalyticsParsers';
+export type { IterationSpan, RunData, SwarmStats, WorkerTimeline } from '../utils/swarmAnalyticsParsers';
+
 // =============================================================================
-// Types
+// Types (component-local)
 // =============================================================================
 
 interface SwarmProject {
@@ -21,41 +31,9 @@ interface SwarmProject {
   accentColor: string;
 }
 
-interface RunData {
-  swarmId: string;
-  run: SwarmRunLog | null;
-  summary: SwarmRunSummary | null;
-  reviews: SwarmReviewLog[];
-}
-
-interface IterationSpan {
-  id: string;
-  workerId: string;
-  iteration: number;
-  startTime: number;
-  endTime: number | null;
-  status: 'running' | 'completed' | 'error' | 'pending';
-  verdict: 'approved' | 'rejected' | 'needs-changes' | null;
-  merges: number;
-  reviewRounds: number;
-  diffFiles: number;
-  output?: string;
-}
-
-interface WorkerTimeline {
-  workerId: string;
-  model: string;
-  harness: string;
-  spans: IterationSpan[];
-}
-
 // =============================================================================
-// Helper functions
+// Helper functions (presentation only)
 // =============================================================================
-
-function parseTimestamp(ts: string): number {
-  return new Date(ts).getTime();
-}
 
 function shortWorkerId(id: string): string {
   // Extract short identifier from worker ID
@@ -124,102 +102,8 @@ function TimelineChart({ runData, onWorkerClick }: TimelineChartProps) {
     workerId: string;
   } | null>(null);
 
-  // Build timeline data from run summary and reviews
-  const { timelines, timeRange, isEstimated } = useMemo(() => {
-    if (!runData.summary)
-      return { timelines: [], timeRange: { start: 0, end: 0, duration: 0 }, isEstimated: false };
-
-    const summary = runData.summary;
-    const reviews = runData.reviews || [];
-    const run = runData.run;
-
-    // Get time range
-    const startTime = run?.['started-at'] ? parseTimestamp(run['started-at']) : Date.now();
-    const endTime = summary['finished-at'] ? parseTimestamp(summary['finished-at']) : Date.now();
-    const duration = Math.max(endTime - startTime, 60000); // Minimum 1 minute
-
-    // Build worker timelines
-    const workerMap = new Map<string, WorkerTimeline>();
-
-    // Initialize workers from summary
-    for (const worker of summary.workers) {
-      workerMap.set(worker.id, {
-        workerId: worker.id,
-        model: worker.model || 'unknown',
-        harness: worker.harness || 'default',
-        spans: [],
-      });
-    }
-
-    // Group reviews by worker and iteration
-    const reviewsByWorkerIter = new Map<string, Map<number, SwarmReviewLog[]>>();
-    for (const review of reviews) {
-      if (!reviewsByWorkerIter.has(review['worker-id'])) {
-        reviewsByWorkerIter.set(review['worker-id'], new Map());
-      }
-      const workerReviews = reviewsByWorkerIter.get(review['worker-id'])!;
-      if (!workerReviews.has(review.iteration)) {
-        workerReviews.set(review.iteration, []);
-      }
-      workerReviews.get(review.iteration)!.push(review);
-    }
-
-    // Track whether timing is estimated (no per-iteration timestamps available).
-    // Currently all iteration timing is distributed evenly across the run duration.
-    let isEstimated = false;
-
-    // Create iteration spans for each worker
-    for (const worker of summary.workers) {
-      const timeline = workerMap.get(worker.id);
-      if (!timeline) continue;
-
-      const workerReviews = reviewsByWorkerIter.get(worker.id);
-      const iterations = Math.max(worker.iterations, worker.completed);
-
-      for (let i = 1; i <= iterations; i++) {
-        const iterationReviews = workerReviews?.get(i) || [];
-        const latestReview = iterationReviews[iterationReviews.length - 1];
-
-        // Estimate timing (distribute iterations evenly across the time range).
-        // Per-iteration timestamps are not available from the run data.
-        isEstimated = true;
-        const iterDuration = duration / iterations;
-        const iterStart = startTime + (i - 1) * iterDuration;
-        const iterEnd = i <= worker.completed ? iterStart + iterDuration * 0.9 : null;
-
-        const span: IterationSpan = {
-          id: `${worker.id}-i${i}`,
-          workerId: worker.id,
-          iteration: i,
-          startTime: iterStart,
-          endTime: iterEnd,
-          status:
-            i <= worker.completed
-              ? 'completed'
-              : i === worker.completed + 1 && !summary['finished-at']
-                ? 'running'
-                : 'pending',
-          verdict: (latestReview?.verdict as IterationSpan['verdict']) || null,
-          merges: i <= worker.completed ? worker.merges / worker.completed : 0,
-          reviewRounds: iterationReviews.length,
-          diffFiles: latestReview?.['diff-files']?.length || 0,
-          output: latestReview?.output,
-        };
-
-        timeline.spans.push(span);
-      }
-    }
-
-    return {
-      timelines: Array.from(workerMap.values()),
-      timeRange: {
-        start: startTime,
-        end: endTime || Date.now(),
-        duration: endTime - startTime || 60000,
-      },
-      isEstimated,
-    };
-  }, [runData]);
+  // Build timeline data from run summary and reviews (pure parser in utils)
+  const { timelines, timeRange, isEstimated } = useMemo(() => buildTimelineData(runData), [runData]);
 
   // Chart dimensions
   const rowHeight = 40;
@@ -418,33 +302,7 @@ interface StatsPanelProps {
 }
 
 function StatsPanel({ runData }: StatsPanelProps) {
-  const stats = useMemo(() => {
-    if (!runData.summary) return null;
-
-    const summary = runData.summary;
-    const totalMerges = summary.workers.reduce((s, w) => s + w.merges, 0);
-    const totalRejections = summary.workers.reduce((s, w) => s + w.rejections, 0);
-    const totalErrors = summary.workers.reduce((s, w) => s + w.errors, 0);
-    const totalReviewRounds = summary.workers.reduce((s, w) => s + w['review-rounds-total'], 0);
-
-    const completedWorkers = summary.workers.filter((w) => w.status === 'completed').length;
-    const runningWorkers = summary.workers.filter((w) => w.status === 'running').length;
-    const errorWorkers = summary.workers.filter((w) => w.status === 'error').length;
-
-    return {
-      totalWorkers: summary['total-workers'],
-      completedIterations: summary['total-completed'],
-      totalIterations: summary['total-iterations'],
-      totalMerges,
-      totalRejections,
-      totalErrors,
-      totalReviewRounds,
-      completedWorkers,
-      runningWorkers,
-      errorWorkers,
-      finishedAt: summary['finished-at'],
-    };
-  }, [runData]);
+  const stats = useMemo(() => computeSwarmStats(runData), [runData]);
 
   if (!stats) return null;
 

@@ -285,16 +285,11 @@ function Chat() {
 
 ### 1) Provider abstraction is the integration seam
 
-Provider-specific CLI details are expressed through a shared contract, split into:
-
-- Build-time contract in `agent-cli-tool`
-  - Harnesses: `agent-cli-tool/src/harnesses/*`
-  - Shared builder: `agent-cli-tool/src/build.ts`
-  - Types: `agent-cli-tool/src/types.ts`
-- Server provider runtime in `server`
-  - Provider interface + registry: `server/src/providers/index.ts`
-  - Provider implementations: `server/src/providers/{claude,codex,opencode,gemini}.ts`
-- Shared provider IDs: `shared/src/index.ts`
+Provider-specific CLI details are expressed through a shared contract, split
+between the build-time contract in `agent-cli-tool` (harnesses + builder +
+types), the server provider runtime (`server/src/providers/*`), and shared
+provider IDs in `shared/src/index.ts`. File-level roles: see the code tree map
+at the top of this file.
 
 ### 1.5) Shared agent CLI stays a thin wrapper
 
@@ -306,18 +301,8 @@ The `vendor/agent-cli-tool` submodule is deliberately small. Its job is:
 4. parse harness-specific stdout/stderr
 5. emit one unified event stream
 
-Keep the architecture split explicit:
-
-- `vendor/agent-cli-tool/src/build.ts`
-  - unified input → harness command/argv
-- `vendor/agent-cli-tool/src/process-runner.ts`
-  - spawn + stdio wiring only
-- `vendor/agent-cli-tool/src/parsers/*`
-  - harness-native JSON/events → unified events
-- `vendor/agent-cli-tool/src/execute.ts`
-  - glue layer for session capture, completion, buffering, heartbeat
-- `vendor/agent-cli-tool/src/runtime-types.ts`
-  - canonical request + canonical unified event union
+Which file owns which step is in the code tree map at the top of this file
+(build.ts / process-runner.ts / parsers / execute.ts / runtime-types.ts).
 
 ### Core rules for `vendor/agent-cli-tool`
 
@@ -365,11 +350,8 @@ Keep the architecture split explicit:
 
 ### 2) Registry-first persistence
 
-Persisted sessions are loaded through adapter registry:
-
-- `server/src/adapters/registry.ts`
-- `server/src/adapters/disk-adapter.ts`
-- `server/src/adapters/loader.ts`
+Persisted sessions are loaded through the adapter registry
+(`server/src/adapters/{registry,disk-adapter,loader}.ts`).
 
 Adding a provider means adding:
 - a harness,
@@ -397,10 +379,8 @@ Streaming is separated from structural state:
 - Structural: `conversationsAtom`, `allConversationsAtom`, IDs.
 - High-frequency stream text: dedicated stream buffers / streaming atoms.
 
-Relevant files:
-- `client/src/atoms/conversations.ts`
-- `client/src/atoms/actions.ts`
-- `client/src/atoms/store.ts`
+Details and code patterns: "Writing state subscriptions" / "Writing state
+mutations" above.
 
 ## Test Strategy: Useful vs Overkill
 
