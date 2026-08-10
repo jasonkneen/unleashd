@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { stripJsonc, type ModelInfo } from '@unleashd/shared';
 
 // Shared loader for vendor/agent-cli-tool/catalog.jsonc
@@ -10,18 +9,14 @@ function findCatalogPath(): string | null {
   const candidates: string[] = [];
   // Explicit override for checkouts where the catalog lives outside the repo.
   if (process.env.UNLEASHD_CATALOG_PATH) candidates.push(process.env.UNLEASHD_CATALOG_PATH);
-  try {
-    // @ts-ignore - import.meta requires es module, but runtime may be cjs/esm
-    const metaUrl = (import.meta as unknown as { url?: string })?.url;
-    if (metaUrl) {
-      const dir = dirname(fileURLToPath(metaUrl));
-      candidates.push(join(dir, '../../../vendor/agent-cli-tool/catalog.jsonc'));
-      candidates.push(join(dir, '../../vendor/agent-cli-tool/catalog.jsonc'));
-      candidates.push(join(dir, '../vendor/agent-cli-tool/catalog.jsonc'));
-    }
-  } catch {
-    // ignore
-  }
+  // __dirname, NOT import.meta: this package compiles to CommonJS, and `import.meta`
+  // is ESM-only SYNTAX — Node's module-syntax detection sees it in the emitted .js,
+  // classifies the whole file as ESM, and boot dies with "exports is not defined in
+  // ES module scope" (the @ts-ignore that used to sit here was silencing exactly
+  // this). Regression guard: server boot itself; see also `node dist/server.js`.
+  candidates.push(join(__dirname, '../../../vendor/agent-cli-tool/catalog.jsonc'));
+  candidates.push(join(__dirname, '../../vendor/agent-cli-tool/catalog.jsonc'));
+  candidates.push(join(__dirname, '../vendor/agent-cli-tool/catalog.jsonc'));
   candidates.push(join(process.cwd(), 'vendor/agent-cli-tool/catalog.jsonc'));
   candidates.push(join(process.cwd(), '../agent-cli-tool/catalog.jsonc'));
   for (const p of candidates) if (existsSync(p)) return p;
