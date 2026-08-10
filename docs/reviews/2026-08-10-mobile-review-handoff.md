@@ -1,5 +1,35 @@
 # Handoff — Mobile PWA v1 review + AGENTS.md restructure (2026-08-10)
 
+## RESOLUTION (2026-08-11) — all items closed except one
+
+The muse session read this doc and fixed its own issues (commits `837931d`,
+`35f0bee`, `f036172`); the review session then independently verified each fix:
+
+- **Issue 1 (slim AGENTS.md)** — restored at 58 lines; 7-step checklist moved
+  into `docs/pass-through-pattern.md`. Verified on disk.
+- **Issue 2 (G3 gate holes)** — rewritten as a path-resolving node script.
+  Adversarially verified: a planted `import ... from '../components/Chat'` in
+  `mobile/index.ts` (the exact hole) is now caught; gate fails as intended.
+- **Issue 3 (alias)** — `MobileSearchStateAtom` removed; zero rg hits.
+- **Issue 4 (BuddyDetail split)** — tabs split into sibling files
+  (`BuddyDetail{ProfileEditor,AutomationsTab,MemoryTab,...}.tsx`); main file
+  down to ~18K.
+- **Issue 5 (stale link)** — `/swarms/project` gone; zero rg hits.
+- **Follow-up 3 (runtime verification)** — done in-browser at 375×812:
+  `/` (913 convos), `/search` (live filtering, 207 matches), `/buddies`,
+  `/workers`, `/chat/:id` (streaming indicator, composer) all render with
+  live data. Exactly one `WebSocket connected` per page load (single-bridge
+  invariant holds); WS init 2001 conversations + live `conversations_updated`
+  pushes. Only console errors were transient dev-server-restart blips.
+- **Follow-up 4 (CI)** — `pnpm check:client-invariants` runs in
+  `.github/workflows/publish.yml`. `tsc --noEmit` exit 0, all 3 gates PASS at
+  final verification.
+
+**Still open:** Follow-up 8 — fold uiStore shared/local partition into jotai
+`atomWithStorage` (post-v1 by design, PLANNING_MOBILE.md §4).
+
+---
+
 Context: mobile v1 was built by a muse-spark-1.2 session while a parallel
 Claude session reviewed the work and restructured AGENTS.md. This doc is the
 single list of issues found and follow-up work. Read top to bottom before
