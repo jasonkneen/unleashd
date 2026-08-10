@@ -10,30 +10,37 @@ export interface UsePolledFetchResult<T> {
 }
 
 /**
+ * A poll source is either a plain URL (the common case — one GET per cycle)
+ * or a fetcher function for callers that need to issue multiple requests per
+ * cycle (e.g. one fetch per project root) and merge them into a single T.
+ * The fetcher receives this cycle's AbortSignal so it can thread it through
+ * to every underlying fetch call; an AbortError it throws/rejects with is
+ * treated the same as the built-in fetch path's abort (silently dropped).
+ */
+export type PolledSource<T> = string | ((signal: AbortSignal) => Promise<T>);
+
+/**
  * Generic polling helper for live swarm / catalog data.
  *
  * Provides the polling primitive for mobile (SwarmsMobile, SwarmDetailMobile, SearchMobile)
- * and is available for desktop. Desktop hooks useSwarmRuntimeSnapshots (10s) and
- * useSwarmProjects (15s) are not yet migrated — follow-up to replace their
- * hand-rolled setInterval with this helper. Adds the two mobile-critical
- * behaviors those hooks
- * lacked:
+ * and desktop (useSwarmRuntimeSnapshots, useSwarmProjects — both migrated onto this
+ * helper). Adds the two mobile-critical behaviors hand-rolled setInterval hooks lacked:
  *   1) pause/resume on document.visibilitychange (backgrounded PWA)
  *   2) immediate refetch on WS reconnect (post-drain, after init snapshot)
  *
  * NOT tanstack-query — just useEffect + setInterval + visibilitychange (PLANNING §7 #8).
  *
- * @param url - fetch URL or null to disable
+ * @param source - fetch URL, a fetcher function for multi-request cycles, or null to disable
  * @param intervalMs - polling interval in ms
  * @param enabled - when false, no fetch and no interval (default true)
  */
 export function usePolledFetch<T>(
-  url: string | null,
+  source: PolledSource<T> | null,
   intervalMs: number,
   enabled = true,
 ): UsePolledFetchResult<T> {
   const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState<boolean>(enabled && url !== null);
+  const [loading, setLoading] = useState<boolean>(enabled && source !== null);
   const [error, setError] = useState<Error | null>(null);
 
   const wsStatus = useAtomValue(wsStatusAtom);
@@ -41,21 +48,25 @@ export function usePolledFetch<T>(
 
   const abortRef = useRef<AbortController | null>(null);
   const intervalRef = useRef<number | null>(null);
-  const urlRef = useRef<string | null>(url);
-  urlRef.current = url;
+  const sourceRef = useRef<PolledSource<T> | null>(source);
+  sourceRef.current = source;
 
   const fetchData = useCallback(async () => {
-    const currentUrl = urlRef.current;
-    if (!enabled || !currentUrl) return;
+    const currentSource = sourceRef.current;
+    if (!enabled || !currentSource) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(currentUrl, { signal: controller.signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as T;
+      const json =
+        typeof currentSource === 'function'
+          ? await currentSource(controller.signal)
+          : await fetch(currentSource, { signal: controller.signal }).then((res) => {
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return res.json() as Promise<T>;
+            });
       if (controller.signal.aborted) return;
       setData(json);
     } catch (e) {
@@ -68,7 +79,7 @@ export function usePolledFetch<T>(
 
   // Initial fetch + interval + visibilitychange pause/resume
   useEffect(() => {
-    if (!enabled || !url) {
+    if (!enabled || !source) {
       setLoading(false);
       if (intervalRef.current !== null) {
         window.clearInterval(intervalRef.current);
@@ -108,7 +119,7 @@ export function usePolledFetch<T>(
       }
       abortRef.current?.abort();
     };
-  }, [url, intervalMs, enabled, fetchData]);
+  }, [source, intervalMs, enabled, fetchData]);
 
   // Immediate refetch on WS reconnect (post-drain)
   const prevWsRef = useRef(wsStatus);
