@@ -12,13 +12,13 @@ import {
   type IterationSpan,
   type RunData,
 } from '../utils/swarmAnalyticsParsers';
+import type { SwarmRunLog, SwarmRunSummary } from '@unleashd/shared';
 import { formatDuration, formatTimeAgo } from '../utils/time';
 import './SwarmAnalytics.css';
 
 // Re-export analytics parsers for mobile (utils is canonical)
 export { buildTimelineData, computeSwarmStats } from '../utils/swarmAnalyticsParsers';
 export type { IterationSpan, RunData, SwarmStats, WorkerTimeline } from '../utils/swarmAnalyticsParsers';
-
 // =============================================================================
 // Types (component-local)
 // =============================================================================

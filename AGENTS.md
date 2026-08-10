@@ -37,10 +37,8 @@ client/src/components/ProviderModelPicker.tsx → Shared picker UI (used inside 
 client/src/stores/uiStore.ts            → Persisted UI prefs (localStorage).
 ```
 
-**Rule of thumb — when adding a per-conversation setting, you touch roughly:**
-shared schema → server Conversation + WS handlers + (maybe) disk-adapter →
-agent-cli harness reasoningFlags-style hook → client atoms actions → 2–3 UI
-surfaces (modal + header + optional list). See the "per-conversation setting
+**Rule of thumb:** a per-conversation setting touches shared schema → server →
+harness → client atoms → 2–3 UI surfaces. Full list: "per-conversation setting
 checklist" below.
 
 ---
@@ -92,6 +90,78 @@ const pref = useUIStore((s) => s.yourPreference);
 **Red flag:** if you wrote `useAtomValue(conversationsAtom)` — stop.
 That subscribes to every structural event across all conversations.
 Use one of the patterns above instead.
+
+---
+
+## Mobile view tree (PWA) — two view trees over one core
+
+Mobile is a second view tree over the same shared core, not a fork. One `jotaiStore` (`atoms/store.ts:14`), one WS socket, one `handleMessage` spine.
+
+### What mobile may import
+
+```
+atoms/*, hooks/*, utils/*, shared/*, components/buddies/{api,types,ui-contract,buddies-shaping}.ts
+```
+
+Never import another `components/*.tsx` or its CSS. Swarm parsers were moved to `utils/swarmConvoParsers.ts` / `utils/swarmAnalyticsParsers.ts` precisely so mobile can reuse logic without pulling desktop view trees. `components/buddies/*` is the one allowed exception — its `buddies-shaping.ts` is pure shaping (no JSX/CSS side-effects) co-located with `api.ts`/`types.ts`/`ui-contract.ts`.
+
+Grep gates (run `pnpm check:client-invariants` / `bash tools/check-client-invariants.sh`):
+- **G1** — `jotaiStore.set` only inside `client/src/atoms/` (`mutate()` wraps it there). Components call actions.
+- **G2** — no raw `.buddyContext` / `.purpose` reads in `client/src/mobile/` — use `getConversationKind` / `matchConversationKind` / `buddyContextFromKind` (`shared/src/conversation-kind.ts`).
+- **G3** — no `components/` imports in `mobile/` except `components/buddies/` (see above).
+
+### DeviceKind — the only sum type at the shell
+
+```ts
+// client/src/mobile/hooks/useDeviceKind.ts
+export type DeviceKind = 'mobile' | 'desktop';
+export function useDeviceKind(): DeviceKind { /* sticky per page load */ }
+```
+
+`T1`: `'mobile'|'desktop'` not `boolean isMobile` — anonymous `true⊕false` leaks `if(isMobile)` downstream. Computed once at module load via `matchMedia('(max-width: 768px)')` and cached for the page load (`sticky`, not resize-reactive — live swap would remount the tree and lose composer drafts). `matchMedia` missing → typed `throw` (`T4`, no silent desktop default). Single dispatch point is `App.tsx: const device = useDeviceKind()` → `SHELLS[device]` (δ #1) → `pick(r)` leaf factory (δ #2). Leaf handlers never re-ask `isMobile`.
+
+### Where device-specific view state lives
+
+`AGENTS.md: Adding a new collection view` says "all collection views in `derived atoms.ts`". **Exception:** device-specific derived views live in `mobile/atoms/`, not `conversations.ts`, to keep the canonical core clean. Canonical example:
+
+```ts
+// client/src/mobile/atoms/search.ts
+export type MobileSearchState = { kind: 'idle' } | { kind: 'searching'; query: string };
+export const mobileSearchStateAtom = atom<MobileSearchState>({ kind: 'idle' });
+export const mobileSearchResultsAtom = atom((get) => get(mobileSearchStateAtom).kind === 'idle'
+  ? get(allConversationsAtom)
+  : filter(allConversationsAtom, query) /* via utils/fuzzyMatch */);
+```
+
+`T2`: `MobileSearchState` sum type, never `atom<string>('')` sentinel. `mobile/atoms/search.ts → atoms/conversations.ts` is allowed; core never imports mobile.
+
+### UI state partition
+
+`stores/uiStore.ts` `partitionUiState(state) => { shared, local }` is the v1 fork without a schema change:
+
+- **shared** (POST to `POST /api/ui-state`) — `{ doneConversations, promotedWorkers, lastSeenMessageIndex, lastWorkingDirectory }` (4)
+- **local** (written to `localStorage['unleashd-ui-local']` piggybacking the same 500ms debounce) — `{ activeConversationId, galleryExpandedProjects, galleryCollapsedProjects, showTempSessions, showDoneConversations, showWorkerConversations, sidebarViewMode }` (7)
+
+`syncToServer` POSTs only `shared`; the same timer writes `local` to localStorage. Store init reads that blob via `UIStateSchema.partial().safeParse` before `hydrateFromServer` (discard whole blob on failure — no silent half-merge). Phone never mutates desktop-local fields; desktop never mutates mobile search tab. Post-v1: fold into jotai `atomWithStorage` (see `PLANNING_MOBILE.md` §4).
+
+### Mutation rule
+
+Partial updates of collection atoms go through `mutate()` (`atoms/mutate.ts` / `atoms/actions.ts`):
+
+```ts
+const mutate = <T>(a, recipe) => jotaiStore.set(a, produce(jotaiStore.get(a), recipe));
+```
+
+Scalar / full-replace sets stay plain `jotaiStore.set`. Current code already conforms: ~20 produce sites use `mutate()`, rest are scalars/snapshot replacements. Keeps every atom one uniform kind (no `jotai-immer` dep).
+
+### Single-bridge + single-handler rules
+
+- **Single bridge:** only `App.tsx` `AppInner` mounts `useWebSocketBridge` (hoisted above `AppRoutes`). Never mount a second bridge in `mobile/` — it would double-connect and fight over `sendFnAtom`/`wsStatusAtom`.
+- **Never a second `handleMessage`:** the WS-push → `handleMessage` (`atoms/actions.ts`) dispatcher is the single shared spine. Mobile consumes it through the hoisted bridge; no mobile file defines its own handler.
+
+### Stale link note
+
+`client/src/components/SubAgentPanel.tsx:158` previously linked to `/swarms/project` — dead link matching no `App.tsx` route. Retarget to `/workers/detail` or remove; do not copy the stale path into mobile.
 
 ---
 
@@ -167,8 +237,7 @@ committing:
    changes; dispatch a `set_*` WS action (mirror `setReasoningEffort` in
    `actions.ts`, remembering optimistic writes need schema-complete stubs).
 
-See "Pass-through pattern" at the bottom of this file for the full rules and
-anti-patterns.
+Full rules and anti-patterns: `docs/pass-through-pattern.md`.
 
 ---
 
@@ -253,14 +322,7 @@ ALL hooks must appear before any early `return` statement.
 Hooks after early returns crash React when the condition flips (null → non-null).
 
 ```ts
-// BAD
-function Chat() {
-  const conv = useAtomValue(conversationAtomFamily(id));
-  if (!conv) return <Loading />;     // early return
-  const x = useMemo(...);            // crash: hook after conditional return
-}
-
-// GOOD
+// GOOD (the BAD version early-returns before useMemo — crashes when conv flips)
 function Chat() {
   const conv = useAtomValue(conversationAtomFamily(id));
   const x = useMemo(() => {
@@ -283,104 +345,13 @@ function Chat() {
 
 ## Architecture in One Page
 
-### 1) Provider abstraction is the integration seam
-
-Provider-specific CLI details are expressed through a shared contract, split
-between the build-time contract in `agent-cli-tool` (harnesses + builder +
-types), the server provider runtime (`server/src/providers/*`), and shared
-provider IDs in `shared/src/index.ts`. File-level roles: see the code tree map
-at the top of this file.
-
-### 1.5) Shared agent CLI stays a thin wrapper
-
-The `vendor/agent-cli-tool` submodule is deliberately small. Its job is:
-
-1. take one canonical request shape
-2. map that request into harness-specific argv
-3. run the real CLI process
-4. parse harness-specific stdout/stderr
-5. emit one unified event stream
-
-Which file owns which step is in the code tree map at the top of this file
-(build.ts / process-runner.ts / parsers / execute.ts / runtime-types.ts).
-
-### Core rules for `vendor/agent-cli-tool`
-
-1. **One input model, one output model.**
-   Callers should pass one canonical request object. Harnesses may have
-   different raw JSON/event formats, but the submodule emits one shared event
-   union (`session.started`, `turn.started`, `text.delta`, `tool.use`,
-   `progress`, `stderr`, `error`, `out_of_tokens`, `turn.complete`).
-
-2. **Harness-specific differences belong at the edges.**
-   Harness config owns argv syntax. Harness parsers own raw-output translation.
-   Do not spread provider conditionals through the generic executor.
-
-3. **The submodule is not an app runtime.**
-   No conversation model, no merge/swarm orchestration, no sidebar/UI state, no
-   product-specific subagent data model. The submodule only reports normalized
-   runtime facts.
-
-4. **Per-harness JSON in, unified JSON out.**
-   Think of each parser as:
-   `raw harness JSON/events -> unified events`
-   The parser may keep small local state when the provider protocol requires
-   it (for example streamed tool-call reconstruction), but that state must stay
-   parser-local.
-
-5. **Session helpers are separate from parsing.**
-   Resume/fork/session-id capture are executor/session concerns, not parser
-   concerns. Keep filesystem/session emulation out of harness config except as
-   explicit helper hooks.
-
-6. **When adding a harness, prefer extension over branching.**
-   Usually this means:
-   - add/update harness config in `src/harnesses/*`
-   - add/update one parser in `src/parsers/*`
-   - add a focused session helper only if the harness truly needs one
-   Avoid growing `execute.ts` into another monolith.
-
-7. **Test the contract, not implementation trivia.**
-   High-value coverage for the submodule is:
-   - build-command contract tests
-   - parser/executor integration tests with shim CLIs
-   - opt-in real-harness captures under `vendor/agent-cli-tool/manual_tests/`
-   Use manual tests to study harness drift; do not turn every live-debug script
-   into an automated test.
-
-### 2) Registry-first persistence
-
-Persisted sessions are loaded through the adapter registry
-(`server/src/adapters/{registry,disk-adapter,loader}.ts`).
-
-Adding a provider means adding:
-- a harness,
-- a server provider,
-- a disk adapter (if persisted artifacts are needed).
-
-### 3) Conversation lifecycle and state authority
-
-Authoritative in-memory model is `Conversation` in:
-
-- `server/src/server.ts`
-
-Flow is:
-1. Client creates conversation.
-2. Server validates + spawns provider process.
-3. Chunk + message events are streamed into buffers/state.
-4. On completion/close, queue/status/message boundaries are reconciled and broadcast.
-
-`server` state remains authoritative while the provider process is active. Poller/loader merges skip active in-memory IDs.
-
-### 4) Client state frequency budget
-
-Streaming is separated from structural state:
-
-- Structural: `conversationsAtom`, `allConversationsAtom`, IDs.
-- High-frequency stream text: dedicated stream buffers / streaming atoms.
-
-Details and code patterns: "Writing state subscriptions" / "Writing state
-mutations" above.
+Moved to `docs/architecture.md` (kept AGENTS.md under the startup-context
+size limit). Read it before changing the provider seam, the
+`vendor/agent-cli-tool` submodule, adapter persistence, or conversation
+lifecycle. Headline rules: the submodule is a thin wrapper (one canonical
+request in, one unified event stream out; harness differences live at the
+edges, never in the generic executor), persistence is registry-first, and
+server state is authoritative while a provider process is active.
 
 ## Test Strategy: Useful vs Overkill
 
@@ -430,55 +401,10 @@ If you want exactly three tests:
 
 ## Pass-through pattern for provider-bespoke values
 
-Use this pattern for **any per-conversation setting whose accepted values are
-bespoke per provider/CLI** (effort levels, reasoning modes, sandbox policies,
-output formats, anything the upstream CLI owns).
-
-**Canonical example: `reasoningEffort` (claude `--effort`, codex `-c model_reasoning_effort=`).**
-Each CLI accepts a different set, and those sets change as vendors ship updates.
-
-### Rules
-
-1. **Wire and storage = plain `z.string()`.** Do not invent a shared union Zod
-   enum. A shared enum forces a schema bump every time a CLI adds/removes a
-   level, and it implies a "canonical" vocabulary we don't own.
-2. **Submodule (`vendor/agent-cli-tool`) knows the FLAG, not the VALUES.** Each
-   harness's `reasoningFlags(level)` maps `level` into the CLI's flag shape
-   (e.g. `['--effort', level]` vs `['-c', 'model_reasoning_effort=<level>']`).
-   The value string passes through unchanged — we never rename or translate.
-3. **Per-provider accepted lists live in `shared/src/index.ts` as `as const`
-   string arrays**, one per provider. Derive literal-union types from them if
-   useful for UI typing, but do NOT export them as the wire type.
-   - Today: `CLAUDE_EFFORT_LEVELS`, `CODEX_EFFORT_LEVELS`.
-4. **Validation helpers are functions, not schemas.** Expose
-   `xLevelsForProvider(p): readonly string[]` and
-   `isXValidForProvider(p, v): boolean`. Use them in:
-   - the UI, to render only valid options per provider;
-   - the server, at every WS boundary that accepts the value (both create and
-     update handlers), with a typed rejection that lists the valid set.
-5. **Defaults live in the server's Conversation constructor**, not in UI state.
-   A single `defaultXForProvider(p)` helper keeps every creation path (WS,
-   merge fork, swarm spawn, test setup) consistent. The UI sends `undefined`
-   when the user didn't pick; server applies the canonical default.
-6. **Source of truth for each CLI's accepted values = `<cli> --help` and the
-   runtime rejection message** (for codex, passing an invalid `-c foo=bogus`
-   prints `expected one of ...`). Record the verification command in a comment
-   next to the per-provider array so the next update is a grep-and-bump.
-7. **Keep pass-through through the entire spine:** do not coerce, rename, or
-   alias values at any layer. UI string → WS string → server string → submodule
-   string → CLI flag argument. Every hop is identity on the value.
-
-Step-by-step touch points: see "Adding a per-conversation setting (quick
-checklist)" above — same seven steps, same order.
-
-### Anti-patterns (don't do these)
-
-- A shared `z.enum([...union of all providers...])` on the wire. Couples every
-  CLI's vocabulary together and breaks when any one vendor ships an update.
-- Translating/renaming values at the submodule layer. If you're tempted to
-  write `valueMap['medium'] = 'moderate'`, stop — use the CLI's name directly.
-- UI-state defaults (e.g. `useState('high')`). Defaults belong server-side so
-  alt clients (CLI, API, tests) get them too.
-- Async `useEffect` to reset user-picked state on provider change. Races user
-  clicks. Reset synchronously inside the click handler.
-
+Moved to `docs/pass-through-pattern.md`. Read it before adding any
+per-conversation setting whose accepted values are bespoke per provider/CLI
+(effort levels, sandbox policies, etc.). Headline rules: wire/storage is plain
+`z.string()` (never a shared enum); the submodule knows the FLAG, not the
+VALUES; per-provider `as const` lists + validator/default helpers live in
+`shared/src/index.ts`; defaults are server-side; every hop is identity on the
+value. Operational steps: "Adding a per-conversation setting" checklist above.

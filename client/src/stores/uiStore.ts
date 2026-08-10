@@ -324,7 +324,6 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
    * 500ms timer (no second timer).
    */
   syncToServer: () => {
-    if (!hydrated) return; // Don't overwrite server state with empty defaults
     if (syncToServerTimer) {
       clearTimeout(syncToServerTimer);
     }
@@ -340,6 +339,7 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
       } catch {
         // quota or private-mode failure — server sync still proceeds
       }
+      if (!hydrated) return; // gated: don't POST shared before hydration
       fetch('/api/ui-state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

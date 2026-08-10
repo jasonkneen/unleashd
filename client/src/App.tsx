@@ -1,6 +1,6 @@
 import { Provider, useAtomValue } from 'jotai';
 import { useEffect, useRef, type ComponentType, type ReactElement } from 'react';
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { handleMessage, setSendFn, setWsStatus } from './atoms/actions';
 import { allConversationsAtom, conversationsAtom } from './atoms/conversations';
 import { jotaiStore } from './atoms/store';
@@ -13,30 +13,11 @@ import { SwarmAnalytics } from './components/SwarmAnalytics';
 import { SwarmDashboard } from './components/SwarmDashboard';
 import { SwarmDetail } from './components/SwarmDetail';
 import { useWebSocket } from './hooks/useWebSocket';
+import { ShellMobile } from './mobile/components/ShellMobile';
+import { useDeviceKind, type DeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
 import { useUIStore } from './stores/uiStore';
 import './App.css';
-
-// =============================================================================
-// DeviceKind — canonical sum type at the shell (§3, PLANNING_MOBILE.md §3).
-// Agent 2 owns client/src/mobile/hooks/useDeviceKind.ts as the canonical
-// definition; this local type keeps the shell compiling until that file lands.
-// When Agent 2 lands, replace the stub hook below with:
-//   import { useDeviceKind, type DeviceKind } from './mobile/hooks/useDeviceKind';
-// and remove the local type + stub.
-// =============================================================================
-export type DeviceKind = 'mobile' | 'desktop';
-
-/**
- * Stub hook — sticky per page load, not resize-reactive.
- * Agent 2 will replace with matchMedia('(max-width: 768px)') κ that throws
- * a typed Error when matchMedia is missing (T4, no silent desktop default).
- * Until then, desktop is the safe default so restore-on-load keeps working.
- */
-function useDeviceKind(): DeviceKind {
-  // TODO(Agent 2): import real hook from './mobile/hooks/useDeviceKind'
-  return 'desktop';
-}
 
 // =============================================================================
 // κ: location.protocol → ws:// | wss://  (exhaustive D3, no silent fallback)
@@ -107,42 +88,15 @@ function useRestoreOnLoad(device: DeviceKind) {
 // =============================================================================
 type RouteDef = { path: string; desktop: () => ReactElement; mobile: () => ReactElement };
 
-// ---------------------------------------------------------------------------
-// Mobile placeholders — Agent 6-9 will replace these stubs with real imports
-// from client/src/mobile/* . Keeping factories here preserves the RouteTable
-// shape and lets `npx tsc --noEmit` pass before those files exist.
-// Each stub is a distinct symbol so ROUTES rows remain one-clean-path per leaf.
-// ---------------------------------------------------------------------------
-function MainScreen() {
-  return null as unknown as ReactElement;
-}
-function ChatMobile() {
-  return null as unknown as ReactElement;
-}
-function BuddiesMobile() {
-  return null as unknown as ReactElement;
-}
-function BuddyDetailMobile() {
-  return null as unknown as ReactElement;
-}
-function SwarmsMobile() {
-  return null as unknown as ReactElement;
-}
-function SwarmDetailMobile() {
-  return null as unknown as ReactElement;
-}
-function SwarmAnalyticsMobile() {
-  return null as unknown as ReactElement;
-}
-function ConversationListMobile() {
-  return null as unknown as ReactElement;
-}
-
-// ShellMobile placeholder — Agent 6 owns client/src/mobile/components/ShellMobile.tsx.
-// Until it lands, mobile shell renders just <Outlet/> so routes still mount.
-function ShellMobile() {
-  return <Outlet />;
-}
+import { MainScreen } from './mobile/components/MainScreen';
+import { ChatMobile } from './mobile/conversations/ChatMobile';
+import { BuddiesMobile } from './mobile/buddies/BuddiesMobile';
+import { BuddyDetailMobile } from './mobile/buddies/BuddyDetailMobile';
+import { SwarmsMobile } from './mobile/swarms/SwarmsMobile';
+import { SwarmDetailMobile } from './mobile/swarms/SwarmDetailMobile';
+import { SwarmAnalyticsMobile } from './mobile/swarms/SwarmAnalyticsMobile';
+import { ConversationListMobile } from './mobile/conversations/ConversationListMobile';
+import { SearchMobile } from './mobile/search/SearchMobile';
 
 const ROUTES: RouteDef[] = [
   { path: '/', desktop: () => <Gallery />, mobile: () => <MainScreen /> },
@@ -153,6 +107,7 @@ const ROUTES: RouteDef[] = [
   { path: '/workers/detail', desktop: () => <SwarmDetail />, mobile: () => <SwarmDetailMobile /> },
   { path: '/workers/analytics', desktop: () => <SwarmAnalytics />, mobile: () => <SwarmAnalyticsMobile /> },
   { path: '/done', desktop: () => <Gallery filter="done" />, mobile: () => <ConversationListMobile /> },
+  { path: '/search', desktop: () => <Gallery />, mobile: () => <SearchMobile /> },
 ];
 
 const SHELLS: Record<DeviceKind, ComponentType> = {
