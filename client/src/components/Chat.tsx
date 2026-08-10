@@ -2,7 +2,8 @@ import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 // Solarized Dark theme for syntax highlighting - matches app aesthetic
-import 'highlight.js/styles/base16/solarized-dark.css';
+// highlight.js + katex stylesheets load lazily with their plugins —
+// see utils/lazyMarkdownPlugins.ts. Do not re-add a static CSS import here.
 import type { ConversationConfig } from '@unleashd/shared';
 import { useDropzone } from 'react-dropzone';
 import {

@@ -1,52 +1,12 @@
 import type { Message } from '@unleashd/shared';
-import { memo, useEffect, useState } from 'react';
+import { memo } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { PluggableList } from 'unified';
 import { parseBuddyReviewRequest, parseBuddyReviewResult } from '../../utils/buddy-review-message';
+import { useLazyMarkdownPlugins } from '../../utils/lazyMarkdownPlugins';
 import { splitStructuredMessageContent } from '../../utils/structured-message-segments';
-
-type LazyRehypePlugins = {
-  katex: PluggableList | null;
-  highlight: PluggableList | null;
-};
-
-/**
- * Lazy-load heavy rehype plugins (katex + highlight) on first render.
- * Cellular first-paint never pays for math typesetting until a message needs it.
- * Dynamic import keeps the mobile shell chunk small (PLANNING Phase 1 lazy-load).
- */
-function useLazyRehypePlugins(): LazyRehypePlugins {
-  const [plugins, setPlugins] = useState<LazyRehypePlugins>({ katex: null, highlight: null });
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const [katexMod, highlightMod] = await Promise.all([
-          import('rehype-katex'),
-          import('rehype-highlight'),
-        ]);
-        if (cancelled) return;
-        const katex = (katexMod.default ?? (katexMod as unknown as { default: unknown })) as unknown;
-        const highlight = (highlightMod.default ?? (highlightMod as unknown as { default: unknown })) as unknown;
-        setPlugins({
-          katex: katex ? [katex as never] : null,
-          highlight: highlight ? [highlight as never] : null,
-        });
-      } catch {
-        // Plugins are optional — markdown still renders without them.
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return plugins;
-}
 
 function BuddyReviewRequestCard({ content }: { content: string }) {
   const parsed = parseBuddyReviewRequest(content);
@@ -106,13 +66,9 @@ function BuddyReviewResultCard({ json }: { json: string }) {
   );
 }
 
-function MarkdownBlock({ content, plugins }: { content: string; plugins: LazyRehypePlugins }) {
-  const rehypePlugins: PluggableList = [];
-  if (plugins.katex) rehypePlugins.push(...plugins.katex);
-  if (plugins.highlight) rehypePlugins.push(...plugins.highlight);
-
+function MarkdownBlock({ content, plugins }: { content: string; plugins: PluggableList }) {
   return (
-    <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={rehypePlugins}>
+    <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={plugins}>
       {content}
     </Markdown>
   );
@@ -129,7 +85,8 @@ export const MessageRow = memo(function MessageRow({
   lastMessageRef?: React.RefObject<HTMLDivElement | null>;
   subAgents?: Array<{ id: string; description?: string; status?: string; currentAction?: string }>;
 }) {
-  const plugins = useLazyRehypePlugins();
+  // Shared lazy loader (utils/lazyMarkdownPlugins) — one loading path with desktop.
+  const plugins = useLazyMarkdownPlugins();
   const isUser = message.role === 'user';
   const segments = splitStructuredMessageContent(message.content);
 

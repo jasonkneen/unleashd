@@ -14,12 +14,10 @@ import {
 } from 'react';
 import Markdown from 'react-markdown';
 import type { Components } from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { Plugin } from 'unified';
-import 'katex/dist/katex.min.css';
+import { useLazyMarkdownPlugins } from '../utils/lazyMarkdownPlugins';
 import type { BuddyContext } from '../atoms/pending-creations';
 import { AskUserQuestionWidget, parseAskUserQuestion } from './AskUserQuestion';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
@@ -554,6 +552,10 @@ const MemoizedMessage = memo(
     forwardedRef,
     workingDirectory,
   }: MemoizedMessageProps) {
+    // katex + highlight.js arrive asynchronously; markdown renders immediately
+    // with the remark plugins and re-renders once the chunk lands.
+    const rehypePlugins = useLazyMarkdownPlugins();
+
     // Collapse consecutive tool-emoji lines in assistant messages to reduce noise.
     // User/system messages pass through unchanged.
     const displayContent = useMemo(() => {
@@ -603,7 +605,7 @@ const MemoizedMessage = memo(
                   <Markdown
                     key={i}
                     remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-                    rehypePlugins={[rehypeHighlight, rehypeKatex]}
+                    rehypePlugins={rehypePlugins}
                     components={mdComponents}
                   >
                     {trimmed}
@@ -634,7 +636,7 @@ const MemoizedMessage = memo(
             // Fast path: no widgets, render as pure Markdown
             <Markdown
               remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-              rehypePlugins={[rehypeHighlight, rehypeKatex]}
+              rehypePlugins={rehypePlugins}
               components={mdComponents}
             >
               {displayContent}
