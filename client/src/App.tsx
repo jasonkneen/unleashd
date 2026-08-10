@@ -55,7 +55,7 @@ function useWebSocketBridge() {
 /**
  * DeviceKind-aware restore on load (§5 #1).
  * Desktop: restores "/" → /chat/:id from uiStore.activeConversationId.
- * Mobile: keeps MainScreen hub — no redirect (MainScreen is the hub at "/").
+ * Mobile: keeps the Chats inbox at "/" — never auto-opens an old conversation.
  * Must be hoisted above AppRoutes so the nav fires once before the shell mounts.
  */
 function useRestoreOnLoad(device: DeviceKind) {
@@ -66,7 +66,7 @@ function useRestoreOnLoad(device: DeviceKind) {
   const didRestore = useRef(false);
 
   useEffect(() => {
-    // Mobile keeps the hub — never auto-redirect to a chat (PLANNING §5 #1).
+    // Mobile keeps the inbox — never auto-redirect to a chat (PLANNING §5 #1).
     if (device === 'mobile') return;
     if (didRestore.current || allConversations.length === 0) return;
     didRestore.current = true;

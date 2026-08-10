@@ -8,6 +8,13 @@ import { useUIStore } from '../../stores/uiStore';
 import { getProjectName, getProjectRoot } from '../../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getLastMessageTime } from '../../utils/time';
+import {
+  MobileBadge,
+  MobileCardButton,
+  MobileEmptyPanel,
+  MobilePage,
+  MobilePath,
+} from '../components/MobileUI';
 
 interface SwarmProjectEntry {
   projectRoot: string;
@@ -105,44 +112,36 @@ export function SwarmsMobile() {
 
   if (projectCards.length === 0) {
     return (
-      <div className="mobile-swarms">
-        <div className="mobile-swarms__header">
-          <h1>Swarms</h1>
-        </div>
-        <div className="mobile-swarms__empty">
+      <MobilePage title="Swarms" subtitle="Worker groups by project" className="mobile-swarms">
+        <MobileEmptyPanel>
           No swarms running. Workers appear when an oompa swarm starts.
-        </div>
-      </div>
+        </MobileEmptyPanel>
+      </MobilePage>
     );
   }
 
   return (
-    <div className="mobile-swarms">
-      <div className="mobile-swarms__header">
-        <h1>Swarms</h1>
-        <span className="mobile-swarms__count">
-          {projectCards.length} project{projectCards.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-      <div className="mobile-swarms__list">
+    <MobilePage
+      title="Swarms"
+      subtitle={`${projectCards.length} project${projectCards.length !== 1 ? 's' : ''}`}
+      className="mobile-swarms"
+    >
+      <div className="mobile-ui-stack mobile-swarms__list">
         {projectCards.map((p) => (
-          <button
+          <MobileCardButton
             key={p.projectRoot}
-            type="button"
             className={`mobile-swarm-card ${p.runningCount > 0 ? 'mobile-swarm-card--running' : ''}`}
             onClick={() => navigate(`/workers/detail?project=${encodeURIComponent(p.projectRoot)}`)}
           >
             <div className="mobile-swarm-card__top">
               <span className="mobile-swarm-card__name">{p.projectName}</span>
-              <span
-                className={`mobile-swarm-card__badge ${p.runningCount > 0 ? 'badge-running' : 'badge-idle'}`}
-              >
+              <MobileBadge tone={p.runningCount > 0 ? 'active' : 'neutral'}>
                 {p.runningCount > 0 ? `${p.runningCount} running` : 'idle'}
-              </span>
+              </MobileBadge>
             </div>
-            <div className="mobile-swarm-card__path" title={p.projectRoot}>
+            <MobilePath title={p.projectRoot}>
               {p.projectRoot.replace(/^\/Users\/[^/]+/, '~')}
-            </div>
+            </MobilePath>
             <div className="mobile-swarm-card__stats">
               <span>
                 {p.workerCount} worker{p.workerCount !== 1 ? 's' : ''}
@@ -155,9 +154,9 @@ export function SwarmsMobile() {
                 <span className="stat-time"> · {formatTimeAgo(p.latestActivity)}</span>
               )}
             </div>
-          </button>
+          </MobileCardButton>
         ))}
       </div>
-    </div>
+    </MobilePage>
   );
 }

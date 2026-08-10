@@ -4,6 +4,7 @@ import { buddyApi } from '../../components/buddies/api';
 import type { BuddyOverview } from '../../components/buddies/types';
 import { buddyCardMetrics, selectDirectoryEmployees } from '../../components/buddies/ui-contract';
 import { EmptyState } from '../components/EmptyState';
+import { MobileCardButton, MobilePage } from '../components/MobileUI';
 
 /**
  * BuddiesMobile — directory at /buddies (mobile @ /buddies).
@@ -125,12 +126,7 @@ export function BuddiesMobile() {
   }
 
   return (
-    <div className="mobile-hub mobile-buddies">
-      <header className="mobile-hub__header">
-        <h1 className="mobile-hub__title">Buddies</h1>
-        <p className="mobile-hub__subtitle">{employees.length} buddies</p>
-      </header>
-
+    <MobilePage title="Buddies" subtitle={`${employees.length} buddies`} className="mobile-buddies">
       <div className="mobile-buddies__controls">
         <label className="mobile-search__field" aria-label="Filter buddies">
           <input
@@ -165,8 +161,7 @@ export function BuddiesMobile() {
             const metrics = buddyCardMetrics(entry);
             return (
               <li key={entry.buddy.id}>
-                <button
-                  type="button"
+                <MobileCardButton
                   className="mobile-buddy-card"
                   onClick={() => navigate(`/buddies/${encodeURIComponent(entry.buddy.id)}`)}
                   aria-label={`Open ${entry.buddy.name}, ${entry.buddy.role}`}
@@ -214,12 +209,12 @@ export function BuddiesMobile() {
                       <span>blocked</span>
                     </span>
                   </div>
-                </button>
+                </MobileCardButton>
               </li>
             );
           })}
         </ul>
       )}
-    </div>
+    </MobilePage>
   );
 }

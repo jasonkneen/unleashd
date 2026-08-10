@@ -4,6 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { conversationAtomFamily } from '../../atoms/conversations';
 import { formatTimeAgo, getConversationLastActivity } from '../../utils/time';
 import { mobileSearchResultsAtom, mobileSearchStateAtom } from '../atoms/search';
+import {
+  MobileCardButton,
+  MobileEmptyPanel,
+  MobilePage,
+  MobileSection,
+  MobileSurface,
+} from '../components/MobileUI';
 import '../styles/search-mobile.css';
 
 const IDLE_RESULT_LIMIT = 20;
@@ -36,7 +43,7 @@ function ClientResultRow({ id, onOpen }: { id: string; onOpen: (id: string) => v
   const timeAgo = formatTimeAgo(getConversationLastActivity(conv));
   const shortDir = conv.workingDirectory.replace(/^\/Users\/[^/]+/, '~') || conv.id.slice(0, 8);
   return (
-    <button type="button" className="mobile-search-row" onClick={() => onOpen(conv.id)}>
+    <MobileCardButton className="mobile-search-row" onClick={() => onOpen(conv.id)}>
       <div className="mobile-search-row__top">
         <span className="mobile-search-row__dir" title={conv.workingDirectory}>
           {shortDir}
@@ -45,7 +52,7 @@ function ClientResultRow({ id, onOpen }: { id: string; onOpen: (id: string) => v
         <span className="mobile-search-row__time">{timeAgo}</span>
       </div>
       <div className="mobile-search-row__snippet">{preview}</div>
-    </button>
+    </MobileCardButton>
   );
 }
 
@@ -60,7 +67,7 @@ function ServerGroupCard({
   const shortDir =
     group.workingDirectory.replace(/^\/Users\/[^/]+/, '~') || group.conversationId.slice(0, 8);
   return (
-    <div className="mobile-search-group">
+    <MobileSurface className="mobile-search-group">
       <button
         type="button"
         className="mobile-search-group__header"
@@ -90,7 +97,7 @@ function ServerGroupCard({
           <span className="mobile-search-hit__more">+{group.hits.length - 3} more</span>
         )}
       </div>
-    </div>
+    </MobileSurface>
   );
 }
 
@@ -175,11 +182,11 @@ export function SearchMobile() {
       : `${clientResults.length} conversation${clientResults.length === 1 ? '' : 's'} matched`;
 
   return (
-    <div className="mobile-search">
-      <header className="mobile-search__title-block">
-        <h1 className="mobile-search__title">Search</h1>
-        <p className="mobile-search__subtitle">Find a conversation or search message history.</p>
-      </header>
+    <MobilePage
+      title="Search"
+      subtitle="Find a conversation or search message history."
+      className="mobile-search"
+    >
       <div className="mobile-search__header">
         <input
           type="search"
@@ -208,12 +215,11 @@ export function SearchMobile() {
       </div>
 
       {/* Client-filtered results (fuzzyMatch over workingDirectory + preview) */}
-      <div className="mobile-search__section">
-        <div className="mobile-search__section-title">
-          {searchState.kind === 'idle' ? 'Recent conversations' : 'On this device'}
-        </div>
+      <MobileSection
+        title={searchState.kind === 'idle' ? 'Recent conversations' : 'On this device'}
+      >
         {clientResults.length === 0 ? (
-          <div className="mobile-search__empty">No matches on this device.</div>
+          <MobileEmptyPanel>No matches on this device.</MobileEmptyPanel>
         ) : (
           <div className="mobile-search__list">
             {clientResults.slice(0, visibleClientLimit).map((conv) => (
@@ -228,19 +234,18 @@ export function SearchMobile() {
             )}
           </div>
         )}
-      </div>
+      </MobileSection>
 
       {/* Deep history via /api/search?q= — dispatcher on MobileSearchState.kind */}
       {searchState.kind === 'searching' && query.trim().length >= 2 && (
-        <div className="mobile-search__section">
-          <div className="mobile-search__section-title">
-            Deep history{' '}
-            {serverLoading ? '· searching…' : `· ${groupedServerHits.length} conversations`}
-          </div>
+        <MobileSection
+          title="Deep history"
+          meta={serverLoading ? 'Searching…' : `${groupedServerHits.length} conversations`}
+        >
           {serverLoading && serverHits.length === 0 ? (
-            <div className="mobile-search__empty">Searching history…</div>
+            <MobileEmptyPanel>Searching history…</MobileEmptyPanel>
           ) : groupedServerHits.length === 0 ? (
-            <div className="mobile-search__empty">No deep-history matches.</div>
+            <MobileEmptyPanel>No deep-history matches.</MobileEmptyPanel>
           ) : (
             <div className="mobile-search__list">
               {groupedServerHits.slice(0, DEEP_RESULT_LIMIT).map((g) => (
@@ -248,13 +253,13 @@ export function SearchMobile() {
               ))}
             </div>
           )}
-        </div>
+        </MobileSection>
       )}
       {searchState.kind === 'searching' && query.trim().length === 1 && (
         <div className="mobile-search__hint">
           Type one more character to search full message history.
         </div>
       )}
-    </div>
+    </MobilePage>
   );
 }

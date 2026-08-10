@@ -9,6 +9,13 @@ import {
 } from '../../atoms/conversations';
 import { useUIStore } from '../../stores/uiStore';
 import { formatTimeAgo, getConversationLastActivity } from '../../utils/time';
+import {
+  MobileBadge,
+  MobileCardButton,
+  MobileEmptyPanel,
+  MobilePage,
+  MobilePath,
+} from '../components/MobileUI';
 
 function useTimeTick(ms = 30_000) {
   const [, setTick] = useState(0);
@@ -42,148 +49,36 @@ const ConversationListItem = memo(function ConversationListItem({
   const dirDisplay = conv.workingDirectory.replace(/^\/Users\/[^/]+/, '~');
   const folderName = conv.workingDirectory.split('/').filter(Boolean).pop() ?? dirDisplay;
   return (
-    <button
-      type="button"
+    <MobileCardButton
       onClick={() => navigate(`/chat/${conv.id}`)}
       className="mobile-conversation-item"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-        width: '100%',
-        textAlign: 'left',
-        padding: '12px 16px',
-        borderBottom: '1px solid var(--border-subtle, #2a2a2a)',
-        background: 'transparent',
-        borderLeft: 'none',
-        borderRight: 'none',
-        borderTop: 'none',
-        cursor: 'pointer',
-      }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          minWidth: 0,
-        }}
-      >
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 13,
-            fontWeight: 600,
-            color: 'var(--text-primary, #e8e8e8)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={dirDisplay}
-        >
+      <div className="mobile-conversation-item__top">
+        <span className="mobile-conversation-item__title" title={dirDisplay}>
           {folderName}
         </span>
-        <span
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            flexShrink: 0,
-          }}
-        >
-          {done && (
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                padding: '2px 6px',
-                borderRadius: 999,
-                background: 'var(--bg-raised-2, #222)',
-                color: 'var(--text-muted, #888)',
-                border: '1px solid var(--border-subtle, #333)',
-              }}
-            >
-              DONE
-            </span>
-          )}
-          {unseen && (
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                padding: '2px 6px',
-                borderRadius: 999,
-                background: 'var(--accent, #7c5cff)',
-                color: '#fff',
-              }}
-            >
-              NEW
-            </span>
-          )}
-          <span
-            style={{
-              fontSize: 11,
-              color: 'var(--text-muted, #888)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {timeAgo}
-          </span>
+        <span className="mobile-conversation-item__meta">
+          {done ? <MobileBadge>Done</MobileBadge> : null}
+          {unseen ? <MobileBadge tone="accent">New</MobileBadge> : null}
+          <span className="mobile-conversation-item__time">{timeAgo}</span>
           {conv.isRunning ? (
             <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: '#22c55e',
-                display: 'inline-block',
-                flexShrink: 0,
-              }}
+              className="mobile-conversation-item__status mobile-conversation-item__status--running"
               aria-label="running"
             />
           ) : conv.queue?.length ? (
             <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: '#eab308',
-                display: 'inline-block',
-                flexShrink: 0,
-              }}
+              className="mobile-conversation-item__status mobile-conversation-item__status--queued"
               aria-label="queued"
             />
           ) : null}
         </span>
       </div>
-      <div
-        style={{
-          fontSize: 12,
-          color: 'var(--text-muted, #999)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={preview}
-      >
+      <div className="mobile-conversation-item__preview" title={preview}>
         {preview}
       </div>
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-muted, #777)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {dirDisplay}
-      </div>
-    </button>
+      <MobilePath>{dirDisplay}</MobilePath>
+    </MobileCardButton>
   );
 });
 
@@ -196,39 +91,27 @@ export function ConversationListMobile({
   const chatInbox = useAtomValue(chatConversationInboxAtom);
   useTimeTick();
 
+  const list =
+    ids.length === 0 ? (
+      <MobileEmptyPanel>No conversations yet. Create one from desktop or via API.</MobileEmptyPanel>
+    ) : (
+      <div className="mobile-ui-stack mobile-conversation-list">
+        {ids.map((id) => (
+          <ConversationListItem key={id} id={id} />
+        ))}
+      </div>
+    );
+
+  if (scope !== 'chats') return <div className="mobile-ui-page">{list}</div>;
+
+  const subtitle =
+    chatInbox.total > ids.length
+      ? `${ids.length} most recent · ${chatInbox.total} total`
+      : `${chatInbox.total} ${chatInbox.total === 1 ? 'conversation' : 'conversations'}`;
+
   return (
-    <div className={scope === 'chats' ? 'mobile-chats' : undefined}>
-      {scope === 'chats' && (
-        <header className="mobile-chats__header">
-          <h1 className="mobile-chats__title">Chats</h1>
-          <p className="mobile-chats__count">
-            {chatInbox.total > ids.length
-              ? `${ids.length} most recent \u00b7 ${chatInbox.total} total`
-              : `${chatInbox.total} ${chatInbox.total === 1 ? 'conversation' : 'conversations'}`}
-          </p>
-        </header>
-      )}
-      {ids.length === 0 ? (
-        <div
-          style={{
-            padding: '32px 16px',
-            textAlign: 'center',
-            color: 'var(--text-muted, #888)',
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No conversations yet</div>
-          <div style={{ fontSize: 13 }}>Create one from the desktop or via API.</div>
-        </div>
-      ) : (
-        <div
-          className="mobile-conversation-list"
-          style={{ display: 'flex', flexDirection: 'column' }}
-        >
-          {ids.map((id) => (
-            <ConversationListItem key={id} id={id} />
-          ))}
-        </div>
-      )}
-    </div>
+    <MobilePage title="Chats" subtitle={subtitle} className="mobile-chats">
+      {list}
+    </MobilePage>
   );
 }

@@ -43,6 +43,7 @@ client/src/stores/uiStore.ts       → persisted UI prefs
 |---|---|
 | Client state: subscriptions, mutations, perf, hook ordering | `docs/client-state.md` |
 | Mobile view tree, grep gates, DeviceKind, UI-state partition | `docs/mobile-view-tree.md` |
+| Mobile UI primitives, styling layers, extraction rules | `docs/mobile-ui.md` |
 | Architecture: provider seam, submodule rules, lifecycle | `docs/architecture.md` |
 | Per-conversation settings + pass-through pattern (7-step checklist) | `docs/pass-through-pattern.md` |
 | WS contract surprises (`conversation_created` reused for updates, optimistic stubs) | `docs/ws-contract-surprises.md` |

@@ -8,10 +8,18 @@
  * This barrel itself respects that boundary — it only re-exports from mobile/.
  */
 
-// Shell + hub
+// Shell + reusable mobile UI
 export { ShellMobile } from './components/ShellMobile';
-export { MainScreen } from './components/MainScreen';
 export { EmptyState } from './components/EmptyState';
+export {
+  MobileBadge,
+  MobileCardButton,
+  MobileEmptyPanel,
+  MobilePage,
+  MobilePath,
+  MobileSection,
+  MobileSurface,
+} from './components/MobileUI';
 
 // DeviceKind sum type (§3: 'mobile'|'desktop' — not boolean)
 export { useDeviceKind, type DeviceKind } from './hooks/useDeviceKind';

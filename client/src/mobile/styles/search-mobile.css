@@ -1,38 +1,3 @@
-.mobile-search {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  padding: 18px 14px 28px;
-  overflow-x: clip;
-}
-
-.mobile-search *,
-.mobile-search *::before,
-.mobile-search *::after {
-  box-sizing: border-box;
-}
-
-.mobile-search__title-block {
-  margin: 0 0 16px;
-}
-
-.mobile-search__title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 28px;
-  font-weight: 750;
-  line-height: 1.05;
-  letter-spacing: -0.035em;
-}
-
-.mobile-search__subtitle {
-  margin: 6px 0 0;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.4;
-}
-
 .mobile-search__header {
   position: relative;
   width: 100%;
@@ -81,19 +46,6 @@
   font-size: 12px;
 }
 
-.mobile-search__section + .mobile-search__section {
-  margin-top: 24px;
-}
-
-.mobile-search__section-title {
-  margin: 0 2px 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .mobile-search__list {
   display: grid;
   width: 100%;
@@ -101,24 +53,8 @@
   gap: 8px;
 }
 
-.mobile-search-row,
-.mobile-search-group {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: var(--bg-raised-1);
-}
-
 .mobile-search-row {
-  display: block;
   padding: 11px 12px;
-  text-align: left;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
 .mobile-search-row:active,
@@ -230,7 +166,6 @@
 
 .mobile-search-hit__more,
 .mobile-search__limit-note,
-.mobile-search__empty,
 .mobile-search__hint {
   color: var(--text-muted);
   font-size: 12px;
@@ -248,22 +183,12 @@
   border-radius: 10px;
 }
 
-.mobile-search__empty {
-  padding: 28px 16px;
-  border: 1px dashed var(--border-subtle);
-  border-radius: 12px;
-}
-
 .mobile-search__hint {
   margin-top: 18px;
   padding: 12px;
 }
 
 @media (max-width: 340px) {
-  .mobile-search {
-    padding-inline: 10px;
-  }
-
   .mobile-search-row__role,
   .mobile-search-group__count {
     display: none;

@@ -150,7 +150,7 @@
   outline-offset: 2px;
 }
 
-/* ---- MainScreen hub (§3 "/" mobile:MainScreen) ---- */
+/* ---- Legacy detail-page layout (primary routes use MobilePage) ---- */
 .mobile-hub {
   padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
 }
@@ -171,82 +171,6 @@
   margin-top: 6px;
   font-size: 13px;
   color: var(--text-muted);
-}
-
-.mobile-hub__grid {
-  display: grid;
-  gap: 12px;
-}
-
-.mobile-hub__card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  text-align: left;
-  padding: 16px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--bg-raised-1);
-  cursor: pointer;
-  transition:
-    border-color 120ms ease,
-    background 120ms ease,
-    transform 120ms ease;
-}
-
-.mobile-hub__card:active {
-  transform: scale(0.99);
-  border-color: var(--border-strong);
-}
-
-.mobile-hub__card:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.mobile-hub__card-icon {
-  flex-shrink: 0;
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--bg-raised-2);
-  font-size: 20px;
-  line-height: 1;
-}
-
-.mobile-hub__card-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.mobile-hub__card-label {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.mobile-hub__card-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.mobile-hub__card-count {
-  font-size: 12px;
-  color: var(--text-muted);
-  opacity: 0.9;
-}
-
-.mobile-hub__card-chevron {
-  flex-shrink: 0;
-  font-size: 22px;
-  color: var(--text-muted);
-  opacity: 0.6;
 }
 
 /* ---- EmptyState ---- */
@@ -390,21 +314,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-align: left;
-  padding: 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--bg-raised-1);
-  cursor: pointer;
-}
-
-.mobile-buddy-card:active {
-  transform: scale(0.985);
-  border-color: var(--border-strong);
 }
 
 .mobile-buddy-card__head {
@@ -512,55 +421,10 @@
 }
 
 /* ---- SwarmsMobile directory ---- */
-.mobile-swarms {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
-}
-
-.mobile-swarms__header {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 20px;
-}
-
-.mobile-swarms__header h1 {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
-}
-
-.mobile-swarms__count,
-.mobile-swarms__empty {
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-
-.mobile-swarms__list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  min-width: 0;
-}
-
 .mobile-swarm-card {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  padding: 14px;
-  overflow: hidden;
-  text-align: left;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--bg-raised-1);
 }
 
 .mobile-swarm-card--running {
@@ -585,33 +449,8 @@
   overflow-wrap: anywhere;
 }
 
-.mobile-swarm-card__badge {
-  flex-shrink: 0;
-  padding: 3px 7px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  background: var(--bg-raised-2);
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-.mobile-swarm-card__badge.badge-running,
 .mobile-swarm-card__stats .stat-running {
   color: var(--theme-success);
-}
-
-.mobile-swarm-card__path {
-  width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
 }
 
 .mobile-swarm-card__stats {
@@ -624,49 +463,73 @@
   line-height: 1.4;
 }
 
-.mobile-swarm-card:active {
-  transform: scale(0.985);
-  border-color: var(--border-strong);
-}
-
 /* ---- ChatsMobile list ---- */
-.mobile-chats {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
-}
-
-.mobile-chats__header {
-  margin-bottom: 12px;
-}
-
-.mobile-chats__title {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
-}
-
-.mobile-chats__count {
-  margin-top: 6px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
 .mobile-conversation-list {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--bg-raised-1);
+  gap: 8px;
 }
 
 .mobile-conversation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+}
+
+.mobile-conversation-item__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
-  max-width: 100%;
+}
+
+.mobile-conversation-item__title {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-conversation-item__meta {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+}
+
+.mobile-conversation-item__time {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mobile-conversation-item__status {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.mobile-conversation-item__status--running {
+  background: var(--theme-success);
+}
+
+.mobile-conversation-item__status--queued {
+  background: var(--theme-warning);
+}
+
+.mobile-conversation-item__preview {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mobile-buddy-card__stat {

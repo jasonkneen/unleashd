@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import '../styles/mobile.css';
+import '../styles/mobile-ui.css';
 
 /**
  * ShellMobile — mobile chrome around <Outlet/>.
