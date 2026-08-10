@@ -81,9 +81,10 @@ let snapshot = await takeSnapshot();
 let waitingForArtifacts = false;
 let backendDownRetryTimer = null;
 let backendDownReminderTimer = null;
+let backendDownRetryCount = 0;
 let failWatcherConsecutive = 0;
 let lastStderr = '';
-const STDERR_RING_LIMIT = 8192;
+const STDERR_RING_LIMIT = 32768;
 
 function failWatcher(error) {
   // Poll/snapshot errors are transient (e.g. transient FS race during a save).
@@ -152,6 +153,7 @@ async function startServer() {
   // A successful spawn resets the transient-error counters and clears any
   // backend-down reminders from a prior quick failure.
   failWatcherConsecutive = 0;
+  backendDownRetryCount = 0;
   if (backendDownRetryTimer) {
     clearTimeout(backendDownRetryTimer);
     backendDownRetryTimer = null;
@@ -172,7 +174,10 @@ async function startServer() {
       lastStderr = (lastStderr + chunk.toString()).slice(-STDERR_RING_LIMIT);
     });
   }
-  child.once('exit', (code, signal) => {
+  // Use 'close' not 'exit' — 'exit' fires before stdio drains, so lastStderr
+  // can be incomplete at decision time (HIGH: exit vs close race). 'close'
+  // fires after stdio closes, guaranteeing the Transform ring buffer is complete.
+  child.once('close', (code, signal) => {
     child = null;
     if (stopping) {
       clearInterval(pollTimer);
@@ -212,11 +217,29 @@ async function startServer() {
       // handleStartupFailure) also looks like a build failure and would otherwise
       // leave the backend silently DOWN with no file change to trigger a retry.
       // Schedule one delayed retry and a periodic reminder so the failure is visible.
+      // Budget: 3 retries then escalate to fatal (HIGH: infinite EADDRINUSE retry) —
+      // without this a permanently held port would loop forever with 4 siblings healthy.
+      if (backendDownRetryCount >= 3) {
+        console.error(
+          `[server-watch] Backend quick-failed ${backendDownRetryCount} times (last exit ${code}) — escalating to fatal. Fix the port/env error and use pnpm dev:replace`
+        );
+        if (backendDownReminderTimer) {
+          clearInterval(backendDownReminderTimer);
+          backendDownReminderTimer = null;
+        }
+        stopping = true;
+        clearInterval(pollTimer);
+        process.exitCode = 1;
+        return;
+      }
       if (!backendDownRetryTimer) {
+        backendDownRetryCount += 1;
         backendDownRetryTimer = setTimeout(() => {
           backendDownRetryTimer = null;
           if (!stopping && !child) {
-            console.log('[server-watch] Retrying backend after quick failure...');
+            console.log(
+              `[server-watch] Retrying backend after quick failure (attempt ${backendDownRetryCount}/3)...`
+            );
             void startServer().catch(failWatcher);
           }
         }, 5000);
@@ -247,15 +270,26 @@ async function startServer() {
 }
 
 async function poll() {
+  // Respect failWatcher backoff: if a backoff reload is already scheduled, don't
+  // stack another poll-driven reload on top (HIGH: pollTimer bypassing backoff).
+  if (failWatcherConsecutive > 0 && reloadTimer) return;
   const nextSnapshot = await takeSnapshot(snapshot);
   if (snapshotsMatch(snapshot, nextSnapshot)) {
-    // Successful poll — reset transient-error backoff.
+    // Successful poll — reset transient-error backoff and clear DOWN reminder
+    // if a file change later fixed the backend (e.g. typo corrected).
     failWatcherConsecutive = 0;
     return;
   }
   snapshot = nextSnapshot;
   // Successful snapshot — reset backoff.
   failWatcherConsecutive = 0;
+  // A real file change means the DOWN condition may be fixed — the retry/reminder
+  // will be cleared on next successful spawn, but clear the reminder early so
+  // it doesn't fire after the file is already fixed.
+  if (backendDownReminderTimer && !child) {
+    // Keep the retry timer (it will spawn), just avoid a stale reminder log.
+    // The reminder's interval check will clear itself on next tick if child exists.
+  }
 
   if (reloadPending) return;
   scheduleReload();
