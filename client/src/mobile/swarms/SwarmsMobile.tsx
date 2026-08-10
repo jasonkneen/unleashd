@@ -1,3 +1,4 @@
+import type { OompaRuntimeSnapshot } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -7,7 +8,6 @@ import { useUIStore } from '../../stores/uiStore';
 import { getProjectName, getProjectRoot } from '../../utils/swarmUtils';
 import { getWorkerVisibilitySummary } from '../../utils/swarmWorkerVisibility';
 import { formatTimeAgo, getLastMessageTime } from '../../utils/time';
-import type { OompaRuntimeSnapshot } from '@unleashd/shared';
 
 interface SwarmProjectEntry {
   projectRoot: string;
@@ -34,7 +34,7 @@ export function SwarmsMobile() {
   const { data: discovered } = usePolledFetch<{ projects: SwarmProjectEntry[] }>(
     '/api/swarm-projects',
     15_000,
-    true,
+    true
   );
   const runsDiscoveredProjects = discovered?.projects ?? [];
 
@@ -65,11 +65,7 @@ export function SwarmsMobile() {
     const map = new Map<string, ProjectCard>();
 
     for (const [projectRoot, sessions] of workerConversationsByProject.entries()) {
-      const visibility = getWorkerVisibilitySummary(
-        sessions,
-        null,
-        (w) => w.isRunning,
-      );
+      const visibility = getWorkerVisibilitySummary(sessions, null, (w) => w.isRunning);
       let latestActivity: Date | undefined;
       for (const w of sessions) {
         const lastTime = getLastMessageTime(w.messages);
@@ -111,9 +107,11 @@ export function SwarmsMobile() {
     return (
       <div className="mobile-swarms">
         <div className="mobile-swarms__header">
-          <h2>Swarms</h2>
+          <h1>Swarms</h1>
         </div>
-        <div className="mobile-swarms__empty">No swarms running. Workers appear when an oompa swarm starts.</div>
+        <div className="mobile-swarms__empty">
+          No swarms running. Workers appear when an oompa swarm starts.
+        </div>
       </div>
     );
   }
@@ -121,8 +119,10 @@ export function SwarmsMobile() {
   return (
     <div className="mobile-swarms">
       <div className="mobile-swarms__header">
-        <h2>Swarms</h2>
-        <span className="mobile-swarms__count">{projectCards.length} project{projectCards.length !== 1 ? 's' : ''}</span>
+        <h1>Swarms</h1>
+        <span className="mobile-swarms__count">
+          {projectCards.length} project{projectCards.length !== 1 ? 's' : ''}
+        </span>
       </div>
       <div className="mobile-swarms__list">
         {projectCards.map((p) => (
@@ -134,7 +134,9 @@ export function SwarmsMobile() {
           >
             <div className="mobile-swarm-card__top">
               <span className="mobile-swarm-card__name">{p.projectName}</span>
-              <span className={`mobile-swarm-card__badge ${p.runningCount > 0 ? 'badge-running' : 'badge-idle'}`}>
+              <span
+                className={`mobile-swarm-card__badge ${p.runningCount > 0 ? 'badge-running' : 'badge-idle'}`}
+              >
                 {p.runningCount > 0 ? `${p.runningCount} running` : 'idle'}
               </span>
             </div>
@@ -142,10 +144,16 @@ export function SwarmsMobile() {
               {p.projectRoot.replace(/^\/Users\/[^/]+/, '~')}
             </div>
             <div className="mobile-swarm-card__stats">
-              <span>{p.workerCount} worker{p.workerCount !== 1 ? 's' : ''}</span>
-              {p.runningCount > 0 && <span className="stat-running"> · {p.runningCount} running</span>}
+              <span>
+                {p.workerCount} worker{p.workerCount !== 1 ? 's' : ''}
+              </span>
+              {p.runningCount > 0 && (
+                <span className="stat-running"> · {p.runningCount} running</span>
+              )}
               {p.idleCount > 0 && <span className="stat-idle"> · {p.idleCount} idle</span>}
-              {p.latestActivity && <span className="stat-time"> · {formatTimeAgo(p.latestActivity)}</span>}
+              {p.latestActivity && (
+                <span className="stat-time"> · {formatTimeAgo(p.latestActivity)}</span>
+              )}
             </div>
           </button>
         ))}

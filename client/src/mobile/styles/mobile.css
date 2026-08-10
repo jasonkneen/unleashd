@@ -16,6 +16,10 @@
 /* ---- Shell: 100dvh + safe-area insets, not 100vh+overflow:hidden ---- */
 /* ShellMobile renders <div class="mobile-shell"><div class="mobile-content">… */
 .mobile-shell {
+  /* Mobile type is smaller, so use the more legible structural tones here. */
+  --text-muted: var(--theme-text-body);
+  --text-secondary: var(--theme-text-bright);
+
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -113,6 +117,7 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
+  min-height: 44px;
   padding: 6px 4px;
   text-decoration: none;
   color: var(--text-muted);
@@ -372,7 +377,13 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  margin: 0;
   padding: 16px 0 0;
+  list-style: none;
+}
+
+.mobile-buddies__grid > li {
+  min-width: 0;
 }
 
 .mobile-buddy-card {
@@ -515,7 +526,7 @@
   margin-bottom: 20px;
 }
 
-.mobile-swarms__header h2 {
+.mobile-swarms__header h1 {
   font-size: 28px;
   font-weight: 700;
   line-height: 1.1;

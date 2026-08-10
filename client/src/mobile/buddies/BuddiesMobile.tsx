@@ -69,7 +69,8 @@ export function BuddiesMobile() {
     const trimmed = query.trim().toLowerCase();
     if (!trimmed) return employees;
     return employees.filter((entry) => {
-      const haystack = `${entry.buddy.name} ${entry.buddy.role} ${entry.workspaces.map((w) => w.name).join(' ')}`.toLowerCase();
+      const haystack =
+        `${entry.buddy.name} ${entry.buddy.role} ${entry.workspaces.map((w) => w.name).join(' ')}`.toLowerCase();
       return haystack.includes(trimmed);
     });
   }, [employees, query]);
@@ -91,9 +92,9 @@ export function BuddiesMobile() {
 
   if (loading) {
     return (
-      <div className="mobile-hub" role="status" aria-live="polite" aria-busy="true">
+      <output className="mobile-hub" aria-live="polite" aria-busy="true">
         <p className="mobile-empty__message">Loading buddies…</p>
-      </div>
+      </output>
     );
   }
 
@@ -135,7 +136,7 @@ export function BuddiesMobile() {
           <input
             type="search"
             inputMode="search"
-            placeholder="Filter by name, role, workspace"
+            placeholder="Filter buddies…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="mobile-search__input"
@@ -159,63 +160,65 @@ export function BuddiesMobile() {
       {sorted.length === 0 ? (
         <EmptyState icon="⌕" message={`No buddies match “${query.trim()}”.`} />
       ) : (
-        <div className="mobile-buddies__grid" role="list">
+        <ul className="mobile-buddies__grid">
           {sorted.map((entry) => {
             const metrics = buddyCardMetrics(entry);
             return (
-              <button
-                key={entry.buddy.id}
-                type="button"
-                role="listitem"
-                className="mobile-buddy-card"
-                onClick={() => navigate(`/buddies/${encodeURIComponent(entry.buddy.id)}`)}
-                aria-label={`Open ${entry.buddy.name}, ${entry.buddy.role}`}
-              >
-                <div className="mobile-buddy-card__head">
-                  <span className="mobile-buddy-card__avatar" aria-hidden="true">
-                    {initials(entry.buddy.name)}
-                  </span>
-                  <div className="mobile-buddy-card__identity">
-                    <strong className="mobile-buddy-card__name">{entry.buddy.name}</strong>
-                    <span className="mobile-buddy-card__role">{entry.buddy.role}</span>
-                    <span className={`mobile-buddy-card__presence mobile-buddy-card__presence--${entry.buddy.status}`}>
-                      {entry.buddy.status}
+              <li key={entry.buddy.id}>
+                <button
+                  type="button"
+                  className="mobile-buddy-card"
+                  onClick={() => navigate(`/buddies/${encodeURIComponent(entry.buddy.id)}`)}
+                  aria-label={`Open ${entry.buddy.name}, ${entry.buddy.role}`}
+                >
+                  <div className="mobile-buddy-card__head">
+                    <span className="mobile-buddy-card__avatar" aria-hidden="true">
+                      {initials(entry.buddy.name)}
+                    </span>
+                    <div className="mobile-buddy-card__identity">
+                      <strong className="mobile-buddy-card__name">{entry.buddy.name}</strong>
+                      <span className="mobile-buddy-card__role">{entry.buddy.role}</span>
+                      <span
+                        className={`mobile-buddy-card__presence mobile-buddy-card__presence--${entry.buddy.status}`}
+                      >
+                        {entry.buddy.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  {entry.workspaces.length > 0 && (
+                    <div className="mobile-buddy-card__chips" aria-label="Workspaces">
+                      {entry.workspaces.map((workspace) => (
+                        <span key={workspace.id} className="mobile-buddy-card__chip">
+                          {workspace.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mobile-buddy-card__stats" aria-label="Work metrics via shaping">
+                    <span className="mobile-buddy-card__stat">
+                      <strong>{metrics.team}</strong>
+                      <span>team</span>
+                    </span>
+                    <span className="mobile-buddy-card__stat">
+                      <strong>{metrics.open}</strong>
+                      <span>open</span>
+                    </span>
+                    <span className="mobile-buddy-card__stat">
+                      <strong>{metrics.active}</strong>
+                      <span>active</span>
+                    </span>
+                    <span className="mobile-buddy-card__stat">
+                      <strong>{metrics.blocked}</strong>
+                      <span>blocked</span>
                     </span>
                   </div>
-                </div>
-
-                {entry.workspaces.length > 0 && (
-                  <div className="mobile-buddy-card__chips" aria-label="Workspaces">
-                    {entry.workspaces.map((workspace) => (
-                      <span key={workspace.id} className="mobile-buddy-card__chip">
-                        {workspace.name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="mobile-buddy-card__stats" aria-label="Work metrics via shaping">
-                  <span className="mobile-buddy-card__stat">
-                    <strong>{metrics.team}</strong>
-                    <span>team</span>
-                  </span>
-                  <span className="mobile-buddy-card__stat">
-                    <strong>{metrics.open}</strong>
-                    <span>open</span>
-                  </span>
-                  <span className="mobile-buddy-card__stat">
-                    <strong>{metrics.active}</strong>
-                    <span>active</span>
-                  </span>
-                  <span className="mobile-buddy-card__stat">
-                    <strong>{metrics.blocked}</strong>
-                    <span>blocked</span>
-                  </span>
-                </div>
-              </button>
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </div>
   );
