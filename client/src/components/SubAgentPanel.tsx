@@ -155,7 +155,7 @@ export function SubAgentPanel({ subAgents, workingDirectory }: SubAgentPanelProp
                   <span className="subagent-description">
                     {agent.id.startsWith('swarm-') ? (
                       <Link
-                        to={`/swarms/project?project=${encodeURIComponent(workingDirectory)}`}
+                        to={`/workers/detail?project=${encodeURIComponent(workingDirectory)}`}
                         className="swarm-link"
                       >
                         {truncateDescription(agent.description)}

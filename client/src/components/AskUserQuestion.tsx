@@ -10,7 +10,7 @@
  */
 
 import { useState } from 'react';
-import { ASK_USER_QUESTION_RE } from './structured-message-segments';
+import { ASK_USER_QUESTION_RE } from '../utils/structured-message-segments';
 import './AskUserQuestion.css';
 
 interface QuestionOption {

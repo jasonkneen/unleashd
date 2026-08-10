@@ -4,8 +4,8 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { PluggableList } from 'unified';
-import { parseBuddyReviewRequest, parseBuddyReviewResult } from '../../components/buddy-review-message';
-import { splitStructuredMessageContent } from '../../components/structured-message-segments';
+import { parseBuddyReviewRequest, parseBuddyReviewResult } from '../../utils/buddy-review-message';
+import { splitStructuredMessageContent } from '../../utils/structured-message-segments';
 
 type LazyRehypePlugins = {
   katex: PluggableList | null;

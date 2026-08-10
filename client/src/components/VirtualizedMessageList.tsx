@@ -28,11 +28,11 @@ import { FilePreview, getPreviewType, getPreviewableLocalHref } from './FilePrev
 import { InlineSwarmRunWidget } from './InlineSwarmRunWidget';
 import { SwarmConvoPrefix } from './SwarmConvoPrefix';
 import { effectiveSwarmDebugPrefix } from './buddies/ui-contract';
-import { parseBuddyReviewRequest, parseBuddyReviewResult } from './buddy-review-message';
+import { parseBuddyReviewRequest, parseBuddyReviewResult } from '../utils/buddy-review-message';
 import {
   OOMPA_RUN_TOOL_FRAGMENT_RE,
   splitStructuredMessageContent,
-} from './structured-message-segments';
+} from '../utils/structured-message-segments';
 
 // =============================================================================
 // remarkBreaks — inline remark plugin (replaces the `remark-breaks` npm package)

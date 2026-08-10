@@ -19,7 +19,6 @@ export { useDeviceKind, type DeviceKind } from './hooks/useDeviceKind';
 // Mobile search state (§4: lives in mobile/atoms/ — device-specific view, not canonical conversations.ts)
 export {
   mobileSearchStateAtom,
-  MobileSearchStateAtom,
   mobileSearchResultsAtom,
   type MobileSearchState,
 } from './atoms/search';

@@ -37,22 +37,42 @@ echo "==> Gate G3: components/*.tsx imports in mobile/ — except components/bud
 # mobile/ may import atoms/*, hooks/*, utils/*, shared/*, components/buddies/* — never other components/*.tsx
 # Parsers now live in utils/, not components/. CSS side-effect imports from components would couple trees.
 # Allow: components/buddies/{api,types,ui-contract,buddies-shaping}.ts — co-located shaping, not view trees.
-# Detect any import that mentions "components/" inside mobile/ and does NOT contain "components/buddies".
-# Also exclude mobile's own internal components (mobile/components/*, mobile/index.ts barrel) — only
-# ban imports that reach the desktop tree (client/src/components/* outside buddies/).
-# Pure .ts parsers (buddy-review-message, structured-message-segments) are allowed — they are
-# logic, not view trees, and have no CSS side-effects (see PLANNING §6 reuse inventory).
-if grep -R --include="*.ts" --include="*.tsx" -n "components/" client/src/mobile 2>/dev/null \
-  | grep -v "components/buddies" \
-  | grep -v "components/buddy-review-message" \
-  | grep -v "components/structured-message-segments" \
-  | grep -v "mobile/components" \
-  | grep -v "from './components" \
-  | grep -v 'from "./components' \
-  | grep -v "from '../components" \
-  | grep -v 'from "../components' \
-  | grep -v "never from components" \
-  | grep -v "node_modules" ; then
+# Path-resolving check: resolve each relative import against the importing file's dir and fail
+# if the resolved path is under client/src/components/ and not client/src/components/buddies/.
+# This catches the mobile/index.ts hole where "../components" text looks like mobile/components
+# but actually resolves to the desktop tree.
+if ! node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const ROOT = process.cwd();
+const mobileRoot = path.join(ROOT, 'client/src/mobile');
+const componentsRoot = path.join(ROOT, 'client/src/components') + path.sep;
+const buddiesRoot = path.join(ROOT, 'client/src/components/buddies') + path.sep;
+const importRe = /from\s+["']([^"']+)["']/g;
+let violations = [];
+function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (e.isFile() && (p.endsWith('.ts') || p.endsWith('.tsx'))) {
+      const src = fs.readFileSync(p, 'utf8');
+      let m;
+      while ((m = importRe.exec(src))) {
+        const spec = m[1];
+        if (!spec.startsWith('.')) continue;
+        const resolved = path.resolve(path.dirname(p), spec);
+        const norm = resolved + path.sep;
+        if (norm.startsWith(componentsRoot) && !norm.startsWith(buddiesRoot)) {
+          violations.push(`${path.relative(ROOT, p)} imports ${spec} -> ${path.relative(ROOT, resolved)}`);
+        }
+      }
+    }
+  }
+}
+walk(mobileRoot);
+if (violations.length) { violations.forEach(v => console.error('G3 violation: ' + v)); process.exit(1); }
+NODE
+then
   echo "G3 FAIL: mobile/ imports from components/* outside components/buddies/. Move shared logic to utils/ or atoms/."
   echo "  Allowed: components/buddies/{api,types,ui-contract,buddies-shaping}.ts only."
   FAIL=1

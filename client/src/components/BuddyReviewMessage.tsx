@@ -1,7 +1,7 @@
 import type {
   BuddyReviewRequest,
   BuddyReviewResult,
-} from './buddy-review-message';
+} from '../utils/buddy-review-message';
 import './BuddyReviewMessage.css';
 
 function shortId(value: string): string {
