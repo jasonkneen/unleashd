@@ -1,8 +1,6 @@
 # Pass-through pattern for provider-bespoke values
 
-Moved out of AGENTS.md (startup-context size limit). The operational
-seven-step checklist stays in AGENTS.md ("Adding a per-conversation setting");
-this doc is the full rules and rationale.
+Moved out of AGENTS.md (startup-context size limit).
 
 Use this pattern for **any per-conversation setting whose accepted values are
 bespoke per provider/CLI** (effort levels, reasoning modes, sandbox policies,
@@ -42,8 +40,33 @@ Each CLI accepts a different set, and those sets change as vendors ship updates.
    alias values at any layer. UI string → WS string → server string → submodule
    string → CLI flag argument. Every hop is identity on the value.
 
-Step-by-step touch points: AGENTS.md "Adding a per-conversation setting (quick
-checklist)" — same seven steps, same order.
+## Adding a per-conversation setting (quick checklist)
+
+For settings that differ per provider (effort levels, reasoning modes, sandbox
+policies, etc.), confirm each of the 7 touch points before committing:
+
+1. **shared/src/index.ts** — per-provider `as const` array(s) + literal types;
+   schema fields on `ConversationSchema`, `NewConversationMessage`, `Set*Message`
+   as `z.string().optional()`.
+2. **shared/src/index.ts** — `xLevelsForProvider`, `isXValidForProvider`,
+   `defaultXForProvider` helpers.
+3. **server/src/server.ts** — new field on the `Conversation` class;
+   constructor applies default via `defaultXForProvider`; WS `new_conversation`
+   + `set_*` handlers validate via `isXValidForProvider` and reject with a
+   message listing the valid set.
+4. **server/src/adapters/disk-adapter.ts** — decide what happens on session
+   reload. Most CLI session files DON'T store these fields; emit a warn on load.
+5. **vendor/agent-cli-tool** — extend the harness's `reasoningFlags`-style
+   hook. Pass the string verbatim; do not translate. Submodule commit → push
+   → bump outer pointer (see submodule commit dance).
+6. **client/src/components/Sidebar.tsx + ProviderModelPicker.tsx** — per-provider
+   option list; reset state on modal-open; reset on provider-switch **synchronously
+   inside the radio onChange**, NEVER an async `useEffect` that races user clicks.
+7. **client/src/components/Chat.tsx** — thread-header dropdown for mid-conversation
+   changes; dispatch a `set_*` WS action (mirror `setReasoningEffort` in
+   `actions.ts`, remembering optimistic writes need schema-complete stubs).
+
+Full rules and anti-patterns below.
 
 ## Anti-patterns (don't do these)
 
