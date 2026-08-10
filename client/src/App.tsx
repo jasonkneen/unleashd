@@ -1,5 +1,5 @@
 import { Provider, useAtomValue } from 'jotai';
-import { useEffect, useRef, type ComponentType, type ReactElement } from 'react';
+import { type ComponentType, type ReactElement, useEffect, useRef } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { handleMessage, setSendFn, setWsStatus } from './atoms/actions';
 import { allConversationsAtom, conversationsAtom } from './atoms/conversations';
@@ -14,7 +14,7 @@ import { SwarmDashboard } from './components/SwarmDashboard';
 import { SwarmDetail } from './components/SwarmDetail';
 import { useWebSocket } from './hooks/useWebSocket';
 import { ShellMobile } from './mobile/components/ShellMobile';
-import { useDeviceKind, type DeviceKind } from './mobile/hooks/useDeviceKind';
+import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
 import { initSettings } from './stores/settingsStore';
 import { useUIStore } from './stores/uiStore';
 import './App.css';
@@ -88,25 +88,40 @@ function useRestoreOnLoad(device: DeviceKind) {
 // =============================================================================
 type RouteDef = { path: string; desktop: () => ReactElement; mobile: () => ReactElement };
 
-import { MainScreen } from './mobile/components/MainScreen';
-import { ChatMobile } from './mobile/conversations/ChatMobile';
 import { BuddiesMobile } from './mobile/buddies/BuddiesMobile';
 import { BuddyDetailMobile } from './mobile/buddies/BuddyDetailMobile';
-import { SwarmsMobile } from './mobile/swarms/SwarmsMobile';
-import { SwarmDetailMobile } from './mobile/swarms/SwarmDetailMobile';
-import { SwarmAnalyticsMobile } from './mobile/swarms/SwarmAnalyticsMobile';
+import { ChatMobile } from './mobile/conversations/ChatMobile';
 import { ConversationListMobile } from './mobile/conversations/ConversationListMobile';
 import { SearchMobile } from './mobile/search/SearchMobile';
+import { SwarmAnalyticsMobile } from './mobile/swarms/SwarmAnalyticsMobile';
+import { SwarmDetailMobile } from './mobile/swarms/SwarmDetailMobile';
+import { SwarmsMobile } from './mobile/swarms/SwarmsMobile';
 
 const ROUTES: RouteDef[] = [
-  { path: '/', desktop: () => <Gallery />, mobile: () => <MainScreen /> },
+  {
+    path: '/',
+    desktop: () => <Gallery />,
+    mobile: () => <ConversationListMobile scope="chats" />,
+  },
   { path: '/chat/:id', desktop: () => <Chat />, mobile: () => <ChatMobile /> },
   { path: '/buddies', desktop: () => <BuddiesDashboard />, mobile: () => <BuddiesMobile /> },
-  { path: '/buddies/:buddyId', desktop: () => <BuddiesDashboard />, mobile: () => <BuddyDetailMobile /> },
+  {
+    path: '/buddies/:buddyId',
+    desktop: () => <BuddiesDashboard />,
+    mobile: () => <BuddyDetailMobile />,
+  },
   { path: '/workers', desktop: () => <SwarmDashboard />, mobile: () => <SwarmsMobile /> },
   { path: '/workers/detail', desktop: () => <SwarmDetail />, mobile: () => <SwarmDetailMobile /> },
-  { path: '/workers/analytics', desktop: () => <SwarmAnalytics />, mobile: () => <SwarmAnalyticsMobile /> },
-  { path: '/done', desktop: () => <Gallery filter="done" />, mobile: () => <ConversationListMobile /> },
+  {
+    path: '/workers/analytics',
+    desktop: () => <SwarmAnalytics />,
+    mobile: () => <SwarmAnalyticsMobile />,
+  },
+  {
+    path: '/done',
+    desktop: () => <Gallery filter="done" />,
+    mobile: () => <ConversationListMobile />,
+  },
   { path: '/search', desktop: () => <Gallery />, mobile: () => <SearchMobile /> },
 ];
 

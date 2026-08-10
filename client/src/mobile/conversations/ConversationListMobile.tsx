@@ -1,7 +1,12 @@
 import { useAtomValue } from 'jotai';
 import { memo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { allConversationIdsAtom, conversationAtomFamily } from '../../atoms/conversations';
+import {
+  allConversationIdsAtom,
+  chatConversationIdsAtom,
+  chatConversationInboxAtom,
+  conversationAtomFamily,
+} from '../../atoms/conversations';
 import { useUIStore } from '../../stores/uiStore';
 import { formatTimeAgo, getConversationLastActivity } from '../../utils/time';
 
@@ -10,13 +15,18 @@ function useTimeTick(ms = 30_000) {
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), ms);
     return () => clearInterval(id);
-  }, []);
+  }, [ms]);
 }
 
-const ConversationListItem = memo(function ConversationListItem({ id }: { id: string }) {
+const ConversationListItem = memo(function ConversationListItem({
+  id,
+}: {
+  id: string;
+}) {
   const conv = useAtomValue(conversationAtomFamily(id));
   const hasUnseenMessages = useUIStore((s) => s.hasUnseenMessages);
   const isDone = useUIStore((s) => s.isDone);
+  const navigate = useNavigate();
   const done = isDone(id);
 
   if (!conv) return null;
@@ -31,8 +41,6 @@ const ConversationListItem = memo(function ConversationListItem({ id }: { id: st
       : 'New conversation';
   const dirDisplay = conv.workingDirectory.replace(/^\/Users\/[^/]+/, '~');
   const folderName = conv.workingDirectory.split('/').filter(Boolean).pop() ?? dirDisplay;
-  const navigate = useNavigate();
-
   return (
     <button
       type="button"
@@ -53,9 +61,19 @@ const ConversationListItem = memo(function ConversationListItem({ id }: { id: st
         cursor: 'pointer',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          minWidth: 0,
+        }}
+      >
         <span
           style={{
+            flex: 1,
+            minWidth: 0,
             fontSize: 13,
             fontWeight: 600,
             color: 'var(--text-primary, #e8e8e8)',
@@ -67,7 +85,14 @@ const ConversationListItem = memo(function ConversationListItem({ id }: { id: st
         >
           {folderName}
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
           {done && (
             <span
               style={{
@@ -99,7 +124,13 @@ const ConversationListItem = memo(function ConversationListItem({ id }: { id: st
               NEW
             </span>
           )}
-          <span style={{ fontSize: 11, color: 'var(--text-muted, #888)', whiteSpace: 'nowrap' }}>
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--text-muted, #888)',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {timeAgo}
           </span>
           {conv.isRunning ? (
@@ -156,24 +187,48 @@ const ConversationListItem = memo(function ConversationListItem({ id }: { id: st
   );
 });
 
-export function ConversationListMobile() {
-  const ids = useAtomValue(allConversationIdsAtom);
+export function ConversationListMobile({
+  scope = 'all',
+}: {
+  scope?: 'all' | 'chats';
+}) {
+  const ids = useAtomValue(scope === 'chats' ? chatConversationIdsAtom : allConversationIdsAtom);
+  const chatInbox = useAtomValue(chatConversationInboxAtom);
   useTimeTick();
 
-  if (ids.length === 0) {
-    return (
-      <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted, #888)' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No conversations yet</div>
-        <div style={{ fontSize: 13 }}>Create one from the desktop or via API.</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="mobile-conversation-list" style={{ display: 'flex', flexDirection: 'column' }}>
-      {ids.map((id) => (
-        <ConversationListItem key={id} id={id} />
-      ))}
+    <div className={scope === 'chats' ? 'mobile-chats' : undefined}>
+      {scope === 'chats' && (
+        <header className="mobile-chats__header">
+          <h1 className="mobile-chats__title">Chats</h1>
+          <p className="mobile-chats__count">
+            {chatInbox.total > ids.length
+              ? `${ids.length} most recent \u00b7 ${chatInbox.total} total`
+              : `${chatInbox.total} ${chatInbox.total === 1 ? 'conversation' : 'conversations'}`}
+          </p>
+        </header>
+      )}
+      {ids.length === 0 ? (
+        <div
+          style={{
+            padding: '32px 16px',
+            textAlign: 'center',
+            color: 'var(--text-muted, #888)',
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No conversations yet</div>
+          <div style={{ fontSize: 13 }}>Create one from the desktop or via API.</div>
+        </div>
+      ) : (
+        <div
+          className="mobile-conversation-list"
+          style={{ display: 'flex', flexDirection: 'column' }}
+        >
+          {ids.map((id) => (
+            <ConversationListItem key={id} id={id} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

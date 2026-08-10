@@ -7,6 +7,7 @@ import type {
 } from '@unleashd/shared';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
+import { isWorktreeDirectory } from '../utils/swarmUtils';
 import { getConversationLastActivity } from '../utils/time';
 
 // =============================================================================
@@ -63,7 +64,9 @@ export const defaultCwdAtom = atom<string>('');
 
 // The WebSocket send function — set by useWebSocketBridge once the socket connects.
 // Stored as an atom so actions.ts can always call the current send fn without stale closures.
-export const sendFnAtom = atom<{ send: (msg: ClientMessage) => void }>({ send: () => {} });
+export const sendFnAtom = atom<{ send: (msg: ClientMessage) => void }>({
+  send: () => {},
+});
 
 // =============================================================================
 // Per-Item Derived Atoms (atomFamily)
@@ -145,6 +148,63 @@ export const allConversationsAtom = atom((get) => {
 // Stable sorted ID list — only changes on add/delete/reorder.
 // Use with atomFamily for per-item subtree pruning (see CLAUDE.md).
 export const allConversationIdsAtom = atom((get) => get(allConversationsAtom).map((c) => c.id));
+
+const CHAT_INBOX_LIMIT = 50;
+
+function isTemporaryDirectory(workingDirectory: string): boolean {
+  const directory = workingDirectory.toLowerCase();
+  return (
+    directory === '/tmp' ||
+    directory.startsWith('/tmp/') ||
+    directory === '/private/tmp' ||
+    directory.startsWith('/private/tmp/') ||
+    directory === '/var/tmp' ||
+    directory.startsWith('/var/tmp/') ||
+    directory.includes('/private/var/folders/') ||
+    directory.includes('/var/folders/') ||
+    directory.includes('/temporaryitems/') ||
+    directory.includes('/temp/')
+  );
+}
+
+function isNestedWorktreeDirectory(workingDirectory: string): boolean {
+  return (
+    isWorktreeDirectory(workingDirectory) ||
+    /\/\.w[^/]+-i\d+(?:\/|$)/.test(workingDirectory) ||
+    /\/\.workers\/worker-\d+(?:\/|$)/.test(workingDirectory) ||
+    workingDirectory.includes('/.claude/worktrees/')
+  );
+}
+
+function isUserChatConversation(conversation: Conversation): boolean {
+  return (
+    !conversation.isWorker &&
+    !conversation.parentConversationId &&
+    !isNestedWorktreeDirectory(conversation.workingDirectory) &&
+    !isTemporaryDirectory(conversation.workingDirectory)
+  );
+}
+
+export interface ChatConversationInbox {
+  /** Recent conversation IDs, already ordered newest-first and capped for rendering. */
+  ids: string[];
+  /** All user chat conversations before the render cap is applied. */
+  total: number;
+}
+
+// User-facing chat inbox. Swarm workers, provider-native child sessions,
+// worktrees, and temporary directories are operational noise rather than chats.
+// Keep both filtering and the render cap in this derived view so mobile list
+// components retain per-ID subscriptions and never materialize thousands of rows.
+export const chatConversationInboxAtom = atom((get): ChatConversationInbox => {
+  const conversations = get(allConversationsAtom).filter(isUserChatConversation);
+  return {
+    ids: conversations.slice(0, CHAT_INBOX_LIMIT).map((conversation) => conversation.id),
+    total: conversations.length,
+  };
+});
+
+export const chatConversationIdsAtom = atom((get) => get(chatConversationInboxAtom).ids);
 
 // Total count — cheaper than subscribing to allConversationsAtom for existence checks
 export const conversationCountAtom = atom((get) => get(conversationsAtom).size);

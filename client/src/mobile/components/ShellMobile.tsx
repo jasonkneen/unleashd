@@ -16,8 +16,7 @@ type TabDef = {
   ariaLabel: string;
 };
 
-// Tabs map to the RouteTable leaves (§3). Chats is the hub at "/" (MainScreen),
-// not a raw list — see ROUTES desktop:Gallery ↔ mobile:MainScreen.
+// Tabs map to the RouteTable leaves (§3). Chats is the non-worker inbox at "/".
 // Search lives at /search (query param variant is handled inside SearchMobile).
 const TABS: readonly TabDef[] = [
   { label: 'Chats', to: '/', end: true, icon: '◈', ariaLabel: 'Chats' },
