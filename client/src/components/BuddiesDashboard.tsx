@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createConversation } from '../atoms/actions';
 import { allConversationIdsAtom } from '../atoms/conversations';
-import type { BuddyContext } from '../atoms/pending-creations';
 import { BuddyAutomationsTab } from './buddies/BuddyAutomationsTab';
 import { BuddyDirectory } from './buddies/BuddyDirectory';
 import { BuddyExecutionProfile } from './buddies/BuddyExecutionProfile';
@@ -109,33 +108,7 @@ export function BuddiesDashboard() {
         from_buddy_name?: string;
         to_buddy_name?: string;
       }>(detail, 'relationships');
-      const reportsTo = relationships.find(
-        (relationship) =>
-          (relationship.from_buddy_id === buddy.id && relationship.kind === 'reports_to') ||
-          (relationship.to_buddy_id === buddy.id && relationship.kind === 'manager')
-      );
-      const reportRelationships = relationships.filter(
-        (relationship) =>
-          (relationship.to_buddy_id === buddy.id && relationship.kind === 'reports_to') ||
-          (relationship.from_buddy_id === buddy.id && relationship.kind === 'manager')
-      );
-      const directReports = Array.from(
-        new Map(
-          reportRelationships.map((relationship) => {
-            const report = {
-              id:
-                relationship.kind === 'reports_to'
-                  ? relationship.from_buddy_id
-                  : relationship.to_buddy_id,
-              name:
-                (relationship.kind === 'reports_to'
-                  ? relationship.from_buddy_name
-                  : relationship.to_buddy_name) ?? 'Direct report',
-            };
-            return [report.id, report] as const;
-          })
-        ).values()
-      );
+      const { manager, directReports } = deriveBuddyHierarchy(relationships, buddy.id);
       const legacyWorkItems = asArray<LegacyWorkItem>(detail, 'legacyWorkItems');
       const record: EmployeeRecord = {
         buddy,
@@ -148,15 +121,7 @@ export function BuddiesDashboard() {
           detail,
           'skills'
         ),
-        manager: reportsTo
-          ? {
-              id: reportsTo.kind === 'reports_to' ? reportsTo.to_buddy_id : reportsTo.from_buddy_id,
-              name:
-                (reportsTo.kind === 'reports_to'
-                  ? reportsTo.to_buddy_name
-                  : reportsTo.from_buddy_name) ?? 'Manager',
-            }
-          : null,
+        manager,
         directReports,
         reviews: asArray<EmployeeRecord['reviews'][number]>(detail, 'reviews'),
         approvals: asArray<EmployeeRecord['approvals'][number]>(detail, 'approvals'),
@@ -253,65 +218,38 @@ export function BuddiesDashboard() {
     return () => controller.abort();
   }, [activeTab, buddyId, employee, loadAutomations, loadMemory]);
 
-  const workspace =
-    employee?.workspaces.find((item) => item.id === selectedWorkspaceId) ?? employee?.workspaces[0];
+  const workspace = useMemo(
+    () => selectWorkspace(employee?.workspaces ?? [], selectedWorkspaceId),
+    [employee?.workspaces, selectedWorkspaceId]
+  );
   const workspaceProjects = useMemo(
-    () => (employee?.projects ?? []).filter((project) => project.workspace_id === workspace?.id),
+    () => selectWorkspaceProjects(employee?.projects ?? [], workspace?.id),
     [employee?.projects, workspace?.id]
   );
   const legacyWork = useMemo(
-    () => (employee?.legacyWorkItems ?? []).filter((item) => item.project_id === workspace?.id),
+    () => selectLegacyWorkForWorkspace(employee?.legacyWorkItems ?? [], workspace?.id),
     [employee?.legacyWorkItems, workspace?.id]
   );
-  const primaryProject = useMemo(
-    () =>
-      workspaceProjects.find((project) => project.status === 'in_progress') ??
-      workspaceProjects.find((project) => project.status === 'ready') ??
-      workspaceProjects.find((project) => !['done', 'cancelled'].includes(project.status)),
-    [workspaceProjects]
-  );
+  const primaryProject = useMemo(() => selectPrimaryProject(workspaceProjects), [workspaceProjects]);
   const visibleConversations = useMemo(
     () =>
-      (employee?.conversations ?? [])
-        .filter(
-          (conversation) =>
-            conversation.kind !== 'automation' &&
-            (showReviewConversations || conversation.kind !== 'review')
-        )
-        .sort((left, right) => {
-          const leftId = left.conversation_id ?? left.unleashd_conversation_id;
-          const rightId = right.conversation_id ?? right.unleashd_conversation_id;
-          const availabilityDifference =
-            Number(Boolean(rightId && availableConversationIds.has(rightId))) -
-            Number(Boolean(leftId && availableConversationIds.has(leftId)));
-          if (availabilityDifference !== 0) return availabilityDifference;
-          return (
-            new Date(right.last_active_at ?? 0).getTime() -
-            new Date(left.last_active_at ?? 0).getTime()
-          );
-        }),
+      filterVisibleConversations(
+        employee?.conversations ?? [],
+        showReviewConversations,
+        availableConversationIds
+      ),
     [availableConversationIds, employee?.conversations, showReviewConversations]
   );
   const reviewConversationCount = useMemo(
-    () =>
-      (employee?.conversations ?? []).filter((conversation) => conversation.kind === 'review')
-        .length,
+    () => countReviewConversations(employee?.conversations ?? []),
     [employee?.conversations]
   );
   const automationConversations = useMemo(
-    () =>
-      (employee?.conversations ?? []).filter((conversation) => conversation.kind === 'automation'),
+    () => filterAutomationConversations(employee?.conversations ?? []),
     [employee?.conversations]
   );
   const latestWorkspaceConversation = useMemo(
-    () =>
-      [...(employee?.conversations ?? [])]
-        .filter((conversation) => conversation.workspace_id === workspace?.id)
-        .sort(
-          (left, right) =>
-            new Date(right.last_active_at ?? 0).getTime() -
-            new Date(left.last_active_at ?? 0).getTime()
-        )[0],
+    () => getLatestWorkspaceConversation(employee?.conversations ?? [], workspace?.id),
     [employee?.conversations, workspace?.id]
   );
 
@@ -331,11 +269,11 @@ export function BuddiesDashboard() {
   const talk = useCallback(
     (targetWorkspace: Workspace, buddyProjectId?: string) => {
       if (!employee) return;
-      const context: BuddyContext = {
+      const context = buildBuddyContextForTalk({
         buddyId: employee.buddy.id,
         workspaceId: targetWorkspace.id,
         buddyProjectId: buddyProjectId ?? null,
-      };
+      });
       const id = createConversation({
         workingDirectory: targetWorkspace.root_path,
         config: {

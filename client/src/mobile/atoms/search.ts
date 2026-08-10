@@ -10,6 +10,9 @@ export type MobileSearchState = { kind: 'idle' } | { kind: 'searching'; query: s
 
 export const mobileSearchStateAtom = atom<MobileSearchState>({ kind: 'idle' });
 
+// PascalCase alias per spec naming
+export const MobileSearchStateAtom = mobileSearchStateAtom;
+
 // Derived: filtered conversation list. If idle → full sorted list, else
 // filter via fuzzyMatch over workingDirectory + last-message preview/id.
 // Conversation has no title field.

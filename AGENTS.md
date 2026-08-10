@@ -488,22 +488,8 @@ Each CLI accepts a different set, and those sets change as vendors ship updates.
    alias values at any layer. UI string → WS string → server string → submodule
    string → CLI flag argument. Every hop is identity on the value.
 
-### How to add a new bespoke-value setting
-
-1. Add the per-provider `as const` array(s) to `shared/src/index.ts` with a
-   comment citing the `--help` line or rejection message.
-2. Add the field to `ConversationSchema`, `NewConversationMessage`, and the
-   relevant `Set*Message` as `z.string().optional()` (or `.nullable()` for
-   clear-on-null update).
-3. Add `xLevelsForProvider` + `isXValidForProvider` helpers.
-4. Add `defaultXForProvider` and call it from the Conversation constructor.
-5. Wire the UI: per-provider option list, reset state on modal-open, reset on
-   provider-switch (synchronous — inside the radio onChange, NEVER an async
-   useEffect that races user clicks).
-6. Extend the relevant harness's `reasoningFlags`-style function in the
-   submodule. Pass the string verbatim; do not translate.
-7. Server rejects mismatches at both create and update boundaries with a
-   message that enumerates the valid set for the target provider.
+Step-by-step touch points: see "Adding a per-conversation setting (quick
+checklist)" above — same seven steps, same order.
 
 ### Anti-patterns (don't do these)
 
@@ -516,19 +502,3 @@ Each CLI accepts a different set, and those sets change as vendors ship updates.
 - Async `useEffect` to reset user-picked state on provider change. Races user
   clicks. Reset synchronously inside the click handler.
 
-## Integration Test Focus (Lean, No Mock-heavy Coverage)
-
-1. Runtime creation and visibility
-- `POST /api/conversations` + `POST /api/queue-message` + poll `/api/conversations/:id` + WS status.
-- Validate path normalization and sidebar visibility invariants.
-
-2. Registry loading + recovery
-- Write temporary fixtures for all registered providers under fake home dirs.
-- Invoke registry loader and validate:
-  - provider ids resolve from schema
-  - metadata normalizes consistently
-  - active in-memory convos are not overwritten
-
-3. Gemini command + protocol alignment
-- Validate command/parse behavior against real or deterministic Gemini harness path.
-- Assert stream-json args, message delta events, and completion event flow.
