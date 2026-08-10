@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "unleashd",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/dist/server.js"],
+      "port": 7489
+    }
+  ]
+}
