@@ -10,9 +10,112 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Unleashd</title>
+    <script>
+      if (window.location.protocol === 'file:') {
+        window.location.replace('http://unleashd.localhost/');
+      }
+    </script>
+    <style>
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+        background: #002b36;
+        color: #93a1a1;
+      }
+
+      #boot-diagnostic {
+        box-sizing: border-box;
+        max-width: 34rem;
+        margin: 20vh auto 0;
+        padding: 1.25rem;
+        font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+
+      #boot-diagnostic[hidden] {
+        display: none;
+      }
+
+      #boot-diagnostic strong {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: #eee8d5;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="boot-diagnostic" role="alert" hidden>
+      <strong id="boot-diagnostic-title">Unleashd is loading slowly</strong>
+      <span id="boot-diagnostic-detail">The app is taking longer than expected to load.</span>
+    </div>
+    <script>
+      (() => {
+        const diagnostic = document.getElementById('boot-diagnostic');
+        const title = document.getElementById('boot-diagnostic-title');
+        const detail = document.getElementById('boot-diagnostic-detail');
+        let booted = false;
+
+        const show = (heading, message) => {
+          if (booted) return;
+          title.textContent = heading;
+          detail.textContent = message;
+          diagnostic.hidden = false;
+        };
+
+        const slowTimer = window.setTimeout(() => {
+          show('Unleashd is loading slowly', 'Keep this page open while the app finishes loading.');
+        }, 8_000);
+        const timeout = window.setTimeout(() => {
+          show(
+            'Unleashd did not start',
+            'Startup timed out. Reload once, then copy this message if it happens again.'
+          );
+        }, 45_000);
+
+        window.__unleashdBoot = {
+          fail: (message) => show('Unleashd did not start', message),
+          ready: () => {
+            booted = true;
+            window.clearTimeout(slowTimer);
+            window.clearTimeout(timeout);
+            diagnostic.remove();
+          },
+        };
+
+        window.addEventListener(
+          'error',
+          (event) => {
+            const target = event.target;
+            if (target instanceof HTMLScriptElement) {
+              show(
+                'Unleashd did not start',
+                `Could not load ${target.src || 'the app module'}.`
+              );
+              return;
+            }
+            show(
+              'Unleashd did not start',
+              event.message || 'Safari reported an unknown startup error.'
+            );
+          },
+          true
+        );
+
+        window.addEventListener('unhandledrejection', (event) => {
+          const reason = event.reason;
+          show(
+            'Unleashd did not start',
+            reason instanceof Error ? reason.message : String(reason || 'Unhandled startup error.')
+          );
+        });
+      })();
+    </script>
+    <script type="module">
+      if (window.location.protocol !== 'file:') {
+        import('/src/main.tsx');
+      }
+    </script>
   </body>
 </html>

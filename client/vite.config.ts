@@ -7,6 +7,7 @@ import { type ViteDevServer, createLogger, defineConfig } from 'vite';
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
 const LOCAL_DOMAIN = 'unleashd.localhost';
+const TAILSCALE_DOMAIN = '.tail58a146.ts.net';
 const LOCAL_DEV_URL =
   process.env.UNLEASHD_LOCAL_DOMAIN_ENABLED === '1'
     ? `http://${LOCAL_DOMAIN}`
@@ -86,7 +87,7 @@ export default defineConfig({
     host: true,
     port: DEV_CLIENT_PORT,
     open: false,
-    allowedHosts: [LOCAL_DOMAIN],
+    allowedHosts: [LOCAL_DOMAIN, TAILSCALE_DOMAIN],
     proxy: {
       '/ws': {
         target: `ws://127.0.0.1:${API_SERVER_PORT}`,
