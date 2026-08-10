@@ -24,6 +24,18 @@ import {
   type Workspace,
 } from './buddies/types';
 import { buddyProjectTodoProgress } from './buddies/ui-contract';
+import {
+  buildBuddyContextForTalk,
+  countReviewConversations,
+  deriveBuddyHierarchy,
+  filterAutomationConversations,
+  filterVisibleConversations,
+  getLatestWorkspaceConversation,
+  selectLegacyWorkForWorkspace,
+  selectPrimaryProject,
+  selectWorkspace,
+  selectWorkspaceProjects,
+} from './buddies/buddies-shaping';
 import './BuddiesDashboard.css';
 
 const STATUS_LABELS: Record<WorkStatus, string> = {

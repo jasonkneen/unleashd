@@ -1,0 +1,99 @@
+/* =============================================================================
+   mobile.css — Mobile shell tokens + dvh/safe-area layout
+   Imported only by the mobile tree (ShellMobile). Never imported by desktop.
+   Desktop layout lives in App.css (100vh + overflow:hidden) — this file is
+   the Phase 0 layout hardening for PWA on iPhone (§9): 100dvh + env(safe-*)
+   so ChatMobile renders correctly with notches / home indicator / URL bar.
+   ============================================================================= */
+
+/* ---- Tokens (mobile-specific; app color tokens stay in index.css) ---- */
+:root {
+  --mobile-tab-bar-height: 56px;
+  --mobile-header-height: 52px;
+  --mobile-content-max-width: 720px;
+}
+
+/* ---- Shell: 100dvh + safe-area insets, not 100vh+overflow:hidden ---- */
+/* ShellMobile renders <div class="mobile-shell"><div class="mobile-content">… */
+.mobile-shell {
+  display: flex;
+  flex-direction: column;
+
+  /* dvh = dynamic viewport height (tracks URL bar collapse on iOS). */
+  /* svh fallback for older WebKit via @supports below. */
+  height: 100dvh;
+  min-height: 100dvh;
+
+  /* Notch / Dynamic Island / rounded corners — never hidden behind chrome. */
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+
+  /* Body scroll owns the page on mobile; inner panes handle own scroll. */
+  background: var(--bg-page);
+  color: var(--text-primary);
+}
+
+/* Fallback for browsers without dvh (older Safari). Prefer svh over vh
+   because svh is at least stable; last resort is 100vh. */
+@supports not (height: 100dvh) {
+  .mobile-shell {
+    height: 100svh;
+    min-height: 100svh;
+  }
+}
+@supports not (height: 100svh) {
+  .mobile-shell {
+    height: 100vh;
+    min-height: 100vh;
+  }
+}
+
+/* ---- Scrollable content area (between header and tab bar) ---- */
+.mobile-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* Constrain reading width on tablet-sized "mobile" viewports */
+.mobile-content__inner {
+  width: 100%;
+  max-width: var(--mobile-content-max-width);
+  margin: 0 auto;
+}
+
+/* ---- Bottom tab bar — safe area aware ---- */
+.mobile-tab-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  height: var(--mobile-tab-bar-height);
+  padding-bottom: env(safe-area-inset-bottom);
+  /* Expand tap target into home-indicator area without overlapping it */
+  box-sizing: content-box;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-raised-2);
+}
+
+/* When the tab bar uses content-box + padding-bottom: safe area, its
+   visual height is tab-bar-height + safe inset. Keep it above the indicator. */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .mobile-tab-bar {
+    /* No extra hack needed — padding already separates content from indicator */
+  }
+}
+
+/* ---- Header (optional top bar inside mobile shell) ---- */
+.mobile-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: var(--mobile-header-height);
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-raised-1);
+}

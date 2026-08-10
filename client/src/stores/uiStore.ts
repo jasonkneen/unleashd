@@ -1,4 +1,4 @@
-import type { UIState } from '@unleashd/shared';
+import { UIStateSchema, type UIState } from '@unleashd/shared';
 import { create } from 'zustand';
 
 // =============================================================================
@@ -16,6 +16,106 @@ import { create } from 'zustand';
 // last message becomes visible and calls markMessagesSeen to update this state.
 // See docs/new_badge_feature.md for full design rationale.
 // =============================================================================
+
+// ---------------------------------------------------------------------------
+// Partition: shared (server-synced) vs local (device-local, localStorage)
+// ---------------------------------------------------------------------------
+//
+// UIStateSchema has 11 fields. They are partitioned without changing the
+// schema shape (no migration needed — server tolerates partial via spread+
+// defaults):
+//
+//   shared (4) — cross-device, synced via POST /api/ui-state:
+//     doneConversations, promotedWorkers, lastSeenMessageIndex, lastWorkingDirectory
+//
+//   local (7) — per-device, persisted to localStorage under 'unleashd-ui-local':
+//     activeConversationId, galleryExpandedProjects, galleryCollapsedProjects,
+//     showTempSessions, showDoneConversations, showWorkerConversations, sidebarViewMode
+//
+// Rationale: two concurrent clients (phone + desktop) race on local fields
+// (e.g. activeConversationId from URL routing). Partitioning prevents last-
+// writer-wins cross-device churn. Phone never mutates desktop-local fields.
+//
+// syncToServer POSTs only `shared`. The `local` slice is written to
+// localStorage piggybacking the same 500ms debounce timer (no second timer).
+// Store init reads 'unleashd-ui-local' (Zod partial parse, discard whole blob
+// on failure) BEFORE hydrateFromServer, which then merges only `shared`.
+//
+// Post-v1: fold into jotai atomWithStorage (local) + debounced POST (shared).
+// partitionUiState boundaries become the migration map.
+// ---------------------------------------------------------------------------
+
+export const LOCAL_STORAGE_KEY = 'unleashd-ui-local';
+
+export type SharedSlice = Pick<
+  UIState,
+  'doneConversations' | 'promotedWorkers' | 'lastSeenMessageIndex' | 'lastWorkingDirectory'
+>;
+
+export type LocalSlice = Pick<
+  UIState,
+  | 'activeConversationId'
+  | 'galleryExpandedProjects'
+  | 'galleryCollapsedProjects'
+  | 'showTempSessions'
+  | 'showDoneConversations'
+  | 'showWorkerConversations'
+  | 'sidebarViewMode'
+>;
+
+/**
+ * Pure κ: partition a full UIState into shared (server) and local (device) slices.
+ */
+export function partitionUiState(state: UIState): { shared: SharedSlice; local: LocalSlice } {
+  return {
+    shared: {
+      doneConversations: state.doneConversations,
+      promotedWorkers: state.promotedWorkers,
+      lastSeenMessageIndex: state.lastSeenMessageIndex,
+      lastWorkingDirectory: state.lastWorkingDirectory,
+    },
+    local: {
+      activeConversationId: state.activeConversationId,
+      galleryExpandedProjects: state.galleryExpandedProjects,
+      galleryCollapsedProjects: state.galleryCollapsedProjects,
+      showTempSessions: state.showTempSessions,
+      showDoneConversations: state.showDoneConversations,
+      showWorkerConversations: state.showWorkerConversations,
+      sidebarViewMode: state.sidebarViewMode,
+    },
+  };
+}
+
+function loadLocalSlice(): Partial<LocalSlice> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const result = UIStateSchema.partial().safeParse(parsed);
+    if (!result.success) {
+      // Discard whole blob on failure — no silent half-merge
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
+      return {};
+    }
+    // Return only the local keys (defensive — ignore any shared keys if present)
+    const data = result.data;
+    const local: Partial<LocalSlice> = {};
+    if ('activeConversationId' in data) local.activeConversationId = data.activeConversationId as LocalSlice['activeConversationId'];
+    if ('galleryExpandedProjects' in data) local.galleryExpandedProjects = data.galleryExpandedProjects as LocalSlice['galleryExpandedProjects'];
+    if ('galleryCollapsedProjects' in data) local.galleryCollapsedProjects = data.galleryCollapsedProjects as LocalSlice['galleryCollapsedProjects'];
+    if ('showTempSessions' in data) local.showTempSessions = data.showTempSessions as LocalSlice['showTempSessions'];
+    if ('showDoneConversations' in data) local.showDoneConversations = data.showDoneConversations as LocalSlice['showDoneConversations'];
+    if ('showWorkerConversations' in data) local.showWorkerConversations = data.showWorkerConversations as LocalSlice['showWorkerConversations'];
+    if ('sidebarViewMode' in data) local.sidebarViewMode = data.sidebarViewMode as LocalSlice['sidebarViewMode'];
+    return local;
+  } catch {
+    // JSON parse or storage access failure — discard is implicit
+    return {};
+  }
+}
+
+const initialLocal = loadLocalSlice();
 
 // ---------------------------------------------------------------------------
 // External Keys (cannot live in Zustand — documented here for discoverability)
@@ -77,18 +177,18 @@ let syncToServerTimer: ReturnType<typeof setTimeout> | null = null;
 let hydrated = false;
 
 export const useUIStore = create<UIStoreState>((set, get) => ({
-  // State — defaults match UIStateSchema
-  activeConversationId: null,
+  // State — defaults match UIStateSchema, overlaid with localStorage local slice
+  activeConversationId: initialLocal.activeConversationId ?? null,
   lastWorkingDirectory: null,
-  galleryExpandedProjects: [],
-  galleryCollapsedProjects: [],
-  showTempSessions: false,
-  showDoneConversations: false,
+  galleryExpandedProjects: initialLocal.galleryExpandedProjects ?? [],
+  galleryCollapsedProjects: initialLocal.galleryCollapsedProjects ?? [],
+  showTempSessions: initialLocal.showTempSessions ?? false,
+  showDoneConversations: initialLocal.showDoneConversations ?? false,
   doneConversations: [],
   promotedWorkers: [],
-  showWorkerConversations: false,
+  showWorkerConversations: initialLocal.showWorkerConversations ?? false,
   lastSeenMessageIndex: {},
-  sidebarViewMode: 'grouped',
+  sidebarViewMode: initialLocal.sidebarViewMode ?? 'grouped',
 
   // =========================================================================
   // Actions — mutations
@@ -204,28 +304,24 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
   // =========================================================================
 
   /**
-   * Apply server state into the store. Called on init message.
-   * Server is authoritative — directly merge server state over client state.
-   * This ensures null values (e.g., clearing activeConversationId) are preserved.
+   * Apply server state into the store. Only merges the shared slice — local
+   * fields (activeConversationId, galleryExpandedProjects, etc.) are preserved.
+   * This keeps URL-derived activeConversationId intact and avoids overwriting
+   * device-local prefs with another client's stale values. Called on init message.
    */
   hydrateFromServer: (serverState) => {
-    // Capture pre-hydration activeConversationId — it comes from the URL-routed
-    // Chat component and is more current than the server's (previous-session) value.
-    const preHydrationActiveId = get().activeConversationId;
-    set((s) => ({ ...s, ...serverState }));
-    // Restore URL-derived active ID so it's not overwritten by stale server state.
-    if (preHydrationActiveId && preHydrationActiveId !== get().activeConversationId) {
-      set({ activeConversationId: preHydrationActiveId });
-    }
+    const { shared } = partitionUiState(serverState);
+    set((s) => ({ ...s, ...shared }));
     hydrated = true;
-    // Sync merged state back so pre-hydration mutations (activeConversationId,
-    // lastSeenMessageIndex) aren't lost if the server restarts before the next
-    // user-initiated mutation.
+    // Sync merged state back so pre-hydration mutations (lastSeenMessageIndex etc.)
+    // aren't lost if the server restarts before the next user-initiated mutation.
     get().syncToServer();
   },
 
   /**
-   * Debounced sync to server. Collects all mutations and sends once every 500ms.
+   * Debounced sync. POSTs only the shared slice to the server and writes the
+   * local slice to localStorage under 'unleashd-ui-local' piggybacking the same
+   * 500ms timer (no second timer).
    */
   syncToServer: () => {
     if (!hydrated) return; // Don't overwrite server state with empty defaults
@@ -235,23 +331,19 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
     syncToServerTimer = setTimeout(() => {
       syncToServerTimer = null;
       const state = get();
-      const payload: UIState = {
-        activeConversationId: state.activeConversationId,
-        lastWorkingDirectory: state.lastWorkingDirectory,
-        galleryExpandedProjects: state.galleryExpandedProjects,
-        galleryCollapsedProjects: state.galleryCollapsedProjects,
-        showTempSessions: state.showTempSessions,
-        showDoneConversations: state.showDoneConversations,
-        doneConversations: state.doneConversations,
-        promotedWorkers: state.promotedWorkers,
-        showWorkerConversations: state.showWorkerConversations,
-        lastSeenMessageIndex: state.lastSeenMessageIndex,
-        sidebarViewMode: state.sidebarViewMode,
-      };
+      const { shared, local } = partitionUiState(state);
+      // Persist device-local slice — same debounce, no new timer
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(local));
+        }
+      } catch {
+        // quota or private-mode failure — server sync still proceeds
+      }
       fetch('/api/ui-state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(shared),
       })
         .then((res) => {
           if (!res.ok) console.warn(`[UI State] Sync failed: ${res.status} ${res.statusText}`);

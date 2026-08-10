@@ -73,6 +73,10 @@ export const sendFnAtom = atom<{ send: (msg: ClientMessage) => void }>({ send: (
 // changes — not when unrelated conversations update. This is the Jotai equivalent
 // of the Zustand per-ID selector pattern and is more principled: the dependency
 // graph is explicit and tracked automatically.
+//
+// §5 #10 — atomFamily leaks: jotai-family memoizes per-ID atoms forever.
+// handleMessage's conversation_deleted handler calls .remove(id) on every
+// family below to free the memoized atom for long-lived (PWA) sessions.
 // =============================================================================
 
 // Single conversation by ID — use instead of s.conversations.get(id)
