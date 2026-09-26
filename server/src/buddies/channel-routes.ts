@@ -16,9 +16,9 @@ import {
   requireCanonicalPostMedia,
 } from './channel-media';
 import { announceChannelPost } from './channel-post-feed';
-import type { ChannelResponder } from './channel-responder';
+import type { ChannelResponder, MentionDispatch } from './channel-responder';
 import { mentionedBuddyIds } from './channel-text';
-import type { BuddiesStorePort } from './contract';
+import type { BuddiesStorePort, BuddyMailingList, BuddyMailingListPost } from './contract';
 import { withPostProvenanceFields } from './operations';
 import type { OwnerChannelReads } from './owner-channel-reads';
 
@@ -72,6 +72,57 @@ function mentionConfigsByBuddy(
     byBuddy.set(entry.buddyId, entry.config);
   }
   return byBuddy;
+}
+
+export type ListPostInput = {
+  author: z.infer<typeof ListAuthorSchema>;
+  key: string;
+  purpose: string;
+  body: string;
+  evidence: string[];
+  projectId: string | null;
+  threadRootId: string | null;
+  mentionConfigs: ReadonlyMap<string, ConversationConfig>;
+};
+
+/**
+ * The one way an owner-side post enters a channel: canonical media, the
+ * post, the feed announcement and — for the owner's own post — the Buddy
+ * turns its @mentions start (channel-responder.ts). The owner post route and
+ * the upstream update (upstream/routes.ts) both go through here.
+ *
+ * `createPost` runs before this function's first `await`, so a caller that
+ * checked the channel synchronously just before calling cannot interleave
+ * with another request between that check and the write.
+ */
+export async function publishListPost(
+  context: { buddies: BuddiesStorePort; responder: ChannelResponder; uploadsRoot: string },
+  list: BuddyMailingList,
+  input: ListPostInput
+): Promise<{ post: BuddyMailingListPost; mentions: MentionDispatch[] }> {
+  const { post } = context.buddies.createPost({
+    list: list.id,
+    author: input.author,
+    key: input.key,
+    purpose: input.purpose,
+    body: requireCanonicalPostMedia(input.body, {
+      uploadsRoot: context.uploadsRoot,
+      listId: list.id,
+    }),
+    evidence: input.evidence,
+    project: input.projectId,
+    threadRoot: input.threadRootId,
+    // Owner HTTP posts carry no conversation context: provenance stays null.
+    conversationId: null,
+    runId: null,
+  });
+  announceChannelPost(post);
+  // Only the owner's own mentions start turns (channel-responder.ts).
+  const mentions =
+    input.author.kind === 'owner'
+      ? await context.responder.respondToOwnerPost(list, post, input.mentionConfigs)
+      : [];
+  return { post, mentions };
 }
 
 // The Task index the channel needs for chips and the @ picker: identity,
@@ -144,26 +195,16 @@ export function registerChannelRoutes(app: Express, dependencies: ChannelRouteDe
       const input = OwnerPostSchema.parse(req.body);
       if (input.author.kind === 'buddy' && input.mentionConfigs.length > 0)
         throw new Error('mentionConfigs apply to owner posts only; Buddy mentions start no turn');
-      const mentionConfigs = mentionConfigsByBuddy(input.body, input.mentionConfigs);
-      const { post } = buddies.createPost({
-        list: list.id,
+      const { post, mentions } = await publishListPost({ buddies, responder, uploadsRoot }, list, {
         author: input.author,
         key: input.key,
         purpose: input.purpose,
-        body: requireCanonicalPostMedia(input.body, { uploadsRoot, listId: list.id }),
+        body: input.body,
         evidence: input.evidence ?? [],
-        project: input.projectId ?? null,
-        threadRoot: input.threadRootId ?? null,
-        // Owner HTTP posts carry no conversation context: provenance stays null.
-        conversationId: null,
-        runId: null,
+        projectId: input.projectId ?? null,
+        threadRootId: input.threadRootId ?? null,
+        mentionConfigs: mentionConfigsByBuddy(input.body, input.mentionConfigs),
       });
-      announceChannelPost(post);
-      // Only the owner's own mentions start turns (channel-responder.ts).
-      const mentions =
-        input.author.kind === 'owner'
-          ? await responder.respondToOwnerPost(list, post, mentionConfigs)
-          : [];
       res.status(201).json({ post: withPostProvenanceFields(post), mentions });
     })
   );

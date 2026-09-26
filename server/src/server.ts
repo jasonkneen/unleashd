@@ -72,6 +72,7 @@ import { registerSwarmReadModelRoutes } from './swarm/read-model-routes';
 import { registerSwarmRuntimeRoutes } from './swarm/routes';
 import { isProcessAlive, readLatestSwarmRuntime } from './swarm/runtime';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
+import { createUpstreamService } from './upstream/routes';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
 
 import { auditLocalAgents } from './audit.js';
@@ -581,6 +582,17 @@ registerChannelRoutes(app, {
   direct: createBuddyDirect({ getStore: getBuddiesStore, conversations: buddyConversations }),
 });
 
+// First-run "unleashd" workspace + fetch-only upstream check (upstream/routes.ts).
+// The update action posts through the same owner-post path as the route above.
+const upstream = createUpstreamService({
+  serverDirectory: __dirname,
+  getStore: getBuddiesStore,
+  responder: channelResponder,
+  uploadsRoot: UPLOADS_DIR,
+  sendError: sendBuddiesError,
+});
+upstream.registerRoutes(app);
+
 registerSearchRoutes(
   app,
   () => conversations.values(),
@@ -737,6 +749,9 @@ void runServerStartup(
       await errorJournal.initialize();
       installConsoleErrorCapture(errorJournal);
       startEventLoopStallMonitor(errorJournal);
+      // Background, never awaited: bootstrap and the upstream fetch must not
+      // hold startup, and their failures are logged after capture is installed.
+      upstream.start();
       // A dev backend has no compiled MCP helpers; bundle them once and keep
       // them fresh so each Buddy turn does not pay tsx startup (mcp-bundle.ts).
       if (process.env.NODE_ENV === 'development') {

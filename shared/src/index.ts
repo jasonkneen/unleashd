@@ -1230,3 +1230,4 @@ export {
 } from './buddy-message.js';
 
 export * from './buddy-observation.js';
+export * from './upstream.js';

@@ -167,6 +167,14 @@ pnpm screenshot:mobile --out /tmp/shots       # the older phone-only gallery (ch
   few days of real use. A top entry is a lead to investigate, not a verdict.
   It found the briefing re-sent on every Buddy turn (5c081f5). Findings and
   next steps: `agent_notes/review_token_usage/FOLLOWUPS.md`.
+- Every server start bootstraps the install's own checkout as the "unleashd"
+  Buddy workspace with an #upstream channel, Product Dev and the Upstream
+  Release Manager, and fetch-checks upstream `main` every 6 hours
+  (`server/src/upstream/`). The checkout is the MAIN worktree
+  (`git worktree list`), never `--show-toplevel`: servers run from agent
+  worktrees against the live ~/.buddies, and each would otherwise register
+  its own workspace and hire its own pair. The check only fetches; the merge
+  is the Release Manager's turn, started by `POST /api/upstream/update`.
 - Inspect unresolved operational failures with `pnpm errors:list`; do not read or
   mutate the JSONL journal directly. Its configured location and capture policy
   are documented in `docs/error-journal.md`.

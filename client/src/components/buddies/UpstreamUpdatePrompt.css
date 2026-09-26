@@ -1,0 +1,73 @@
+/* A quiet corner card, not a modal: it never blocks the app. On phones it
+   sits above the tab bar and the home indicator. */
+.upstream-update-prompt {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 900;
+  max-width: 320px;
+  padding: 12px 14px;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-default);
+  border-radius: var(--ui-radius);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--pole-bg-deep) 35%, transparent);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.upstream-update-prompt-text {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.upstream-update-prompt-ref {
+  color: var(--text-emphasis);
+}
+
+.upstream-update-prompt-error {
+  margin: 8px 0 0;
+  color: var(--theme-danger);
+  font-size: 12px;
+}
+
+.upstream-update-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.upstream-update-prompt-later,
+.upstream-update-prompt-update {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--ui-radius);
+  font: inherit;
+  cursor: pointer;
+}
+
+.upstream-update-prompt-later {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+.upstream-update-prompt-update {
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--text-on-accent);
+}
+
+.upstream-update-prompt-update:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 768px) {
+  .upstream-update-prompt {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}

@@ -13,6 +13,7 @@ import { type DirectChains, DIRECT_CHAINS_URL } from './atoms/dm-chain';
 import { startConversationPrefetch } from './atoms/prefetch';
 import { jotaiStore } from './atoms/store';
 import { useOwnerUnreadTitle } from './components/buddies/channel-data';
+import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
 import { usePolledFetch } from './hooks/usePolledFetch';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
@@ -333,6 +334,8 @@ function AppInner() {
     <>
       <DirectChainPoller />
       <AppRoutes device={device} />
+      {/* App-wide, outside both shells: it shows on every route of either tree. */}
+      <UpstreamUpdatePrompt />
     </>
   );
 }
