@@ -27,6 +27,12 @@
   letter-spacing: 0.04em;
 }
 
+.workspace-home-nav-end {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .workspace-home-nav-links {
   display: flex;
   gap: 20px;
@@ -56,6 +62,16 @@
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 28px;
+}
+
+.workspace-home-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspace-home-settings {
+  display: none;
 }
 
 .workspace-home-header h1 {
@@ -377,6 +393,10 @@ section + section .workspace-home-section {
 @media (max-width: 768px) {
   .workspace-home-nav {
     display: none;
+  }
+
+  .workspace-home-settings {
+    display: block;
   }
 
   .workspace-home-body {

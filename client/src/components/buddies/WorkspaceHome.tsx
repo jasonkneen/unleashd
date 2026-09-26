@@ -8,6 +8,7 @@ import { resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { useTimeTick } from '../../hooks/useTimeTick';
 import { shortenHomePath } from '../../utils/directories';
 import { formatTimeAgo } from '../../utils/time';
+import { ConfigDropdown } from '../ConfigDropdown';
 import { PathAutocomplete } from '../PathAutocomplete';
 import { BuddySigil, WorkspaceEmblem } from './BuddySigil';
 import { buddyApi } from './api';
@@ -68,12 +69,15 @@ export function WorkspaceHome() {
     <div className="workspace-home">
       <nav className="workspace-home-nav" aria-label="Pages">
         <span className="workspace-home-brand">unleashd</span>
-        <span className="workspace-home-nav-links">
-          {DESTINATIONS.map((destination) => (
-            <Link key={destination.to} to={destination.to}>
-              {destination.label}
-            </Link>
-          ))}
+        <span className="workspace-home-nav-end">
+          <span className="workspace-home-nav-links">
+            {DESTINATIONS.map((destination) => (
+              <Link key={destination.to} to={destination.to}>
+                {destination.label}
+              </Link>
+            ))}
+          </span>
+          <ConfigDropdown />
         </span>
       </nav>
 
@@ -83,14 +87,19 @@ export function WorkspaceHome() {
             Workspaces
             {records.length > 0 && <span className="workspace-home-count">{records.length}</span>}
           </h1>
-          <button
-            type="button"
-            className="workspace-home-button workspace-home-button--primary"
-            onClick={() => setCreating(true)}
-            disabled={creating}
-          >
-            New workspace
-          </button>
+          <div className="workspace-home-header-actions">
+            <div className="workspace-home-settings" aria-label="Settings">
+              <ConfigDropdown />
+            </div>
+            <button
+              type="button"
+              className="workspace-home-button workspace-home-button--primary"
+              onClick={() => setCreating(true)}
+              disabled={creating}
+            >
+              New workspace
+            </button>
+          </div>
         </header>
 
         {creating && (

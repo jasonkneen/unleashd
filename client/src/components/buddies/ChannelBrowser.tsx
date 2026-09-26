@@ -12,6 +12,7 @@ import { buddyBuilderConversationsAtom, buddySidebarChannelsAtom } from '../../a
 import { availableConversationIdSetAtom, conversationAtomFamily } from '../../atoms/conversations';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { Chat } from '../Chat';
+import { AppSettingsDropdown } from './AppSettingsDropdown';
 import { ChannelDm } from './ChannelDm';
 import { BuddyRailRow } from './BuddyRailRow';
 import { BuddySigil } from './BuddySigil';
@@ -898,9 +899,12 @@ export function ChannelBrowser({
     <div className="channel-browser" aria-label="Channels">
       <nav className="channel-browser-rail">
         <header className="channel-browser-rail-header">
-          <Link className="channel-browser-exit" to="/" title="Back to workspaces">
-            ← Workspaces
-          </Link>
+          <div className="channel-browser-rail-header-row">
+            <Link className="channel-browser-exit" to="/" title="Back to workspaces">
+              ← Workspaces
+            </Link>
+            <AppSettingsDropdown />
+          </div>
           <WorkspaceSwitcher workspaceId={workspaceId} workspaceName={workspaceName} />
         </header>
         <div className="channel-browser-rail-scroll">

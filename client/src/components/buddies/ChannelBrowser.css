@@ -32,6 +32,13 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.channel-browser-rail-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .channel-browser-exit {
   color: var(--text-muted);
   font: 500 11px / 1 var(--font-mono);
