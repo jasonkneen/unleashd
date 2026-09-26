@@ -32,7 +32,8 @@ const play = (from: number, to: number, rate: number, note: string): Play => ({ 
 const hold = (at: number, seconds: number, note: string): Hold => ({ kind: 'hold', at, seconds, note });
 
 // Source seconds. The ending holds on a few screenshots with one quick scroll between them
-// (owner, 2026-09-26: rough cut 2 "was too much scrolling at the end").
+// (owner, 2026-09-26: rough cut 2 "was too much scrolling at the end"; rough cut 3's final
+// Desktop hold was dropped too: end on the quick scroll and cut to the next section).
 const REQUEST = play(0.8, 5.3, 1.5, 'request appears in the composer, sent, thread opens');
 const CUTS: Cut[] = [
   REQUEST,
@@ -41,8 +42,7 @@ const CUTS: Cut[] = [
   play(425.8, 426.8, 1, 'owner clicks the iPad thread (loading 426.8–430 cut)'),
   hold(431.75, 1.0, 'iPad landscape: the Buddies grid'),
   play(431.75, 435.0, 4, 'quick scroll down the iPad thread'),
-  hold(435.0, 0.9, 'iPad landscape: a channel'),
-  hold(438.75, 1.3, 'Desktop thread: the Buddies grid'),
+  hold(435.0, 0.4, 'the scroll lands on an iPad channel; cut to the next section'),
 ];
 
 const cutFrames = (c: Cut) => Math.round((c.kind === 'play' ? (c.to - c.from) / c.rate : c.seconds) * FPS);
@@ -65,7 +65,6 @@ const POSTS: Shot = { focus: 1, x: 540, w: 1620, top: 800, scale: 1, ...STILL, o
 // Screenshot holds in the pane, framed on each picture (label above it, source rows).
 const IPAD_BUDDIES: Shot = { focus: 1, x: 2156, w: 818, top: 740, scale: 1.2, ...STILL, oy: 0.45 };
 const IPAD_CHANNEL: Shot = { ...IPAD_BUDDIES, top: 330 };
-const DESKTOP_BUDDIES: Shot = { ...IPAD_BUDDIES, top: 150, oy: 0.35 };
 const push = (s: Shot, zoom: number): Shot => ({ ...s, zoom });
 
 // Output seconds. Two keys at the same instant are a hard cut.
@@ -85,9 +84,7 @@ const CAMERA: Key[] = [
   { t: at(4), shot: IPAD_BUDDIES },
   { t: at(5), shot: push(IPAD_BUDDIES, 1.05) },
   { t: at(6), shot: IPAD_CHANNEL },
-  { t: at(7), shot: push(IPAD_CHANNEL, 1.05) },
-  { t: at(7), shot: DESKTOP_BUDDIES },
-  { t: DURATION / FPS, shot: push(DESKTOP_BUDDIES, 1.06) },
+  { t: DURATION / FPS, shot: push(IPAD_CHANNEL, 1.03) },
 ];
 
 const ease = Easing.inOut(Easing.cubic);
