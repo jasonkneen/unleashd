@@ -20,4 +20,5 @@ done <<'CLIPS'
 03_design-review                  out/design-review.mp4      6.5
 04_native-multimedia              out/native-multimedia.mp4  8.2
 09_beat9-harness-and-close        ../beat9/beat9.mp4         3.0
+09b_multi-harness-picker          out/multi-harness.mp4      4.8
 CLIPS

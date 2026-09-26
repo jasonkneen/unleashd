@@ -10,6 +10,7 @@ pnpm run render:overload                 # -> out/overload.mp4 (beats 1–5, 18 
 pnpm run render:design-iteration         # -> out/design-iteration.mp4 (1920×1080, 60 fps)
 pnpm run render:design-review            # -> out/design-review.mp4 (13 s, silent)
 pnpm run render:native-multimedia        # -> out/native-multimedia.mp4 (9.4 s, EDM build + drop)
+pnpm run render:multi-harness            # -> out/multi-harness.mp4 (9.05 s, silent)
 ./bank.sh                                # copy finished renders into ../clips/ (the clips bank)
 ```
 
@@ -129,3 +130,22 @@ headless Chrome over CDP and poses every frame. It sets the thread's scroll and 
 `currentTime`, then takes one screenshot, so it's a true 60 fps at 2974×1882 on any machine. A live CDP
 screencast managed 5 fps at that size, and its frames ignore `deviceScaleFactor`. Re-shoot
 with the command in `../footage/FOOTAGE.md`.
+
+## MultiHarness — beat 9, the proof after the "Multi harness" slide
+
+Source: `src/MultiHarness.tsx` (footage H). This is the same card camera as DesignReview; both
+now render through `src/card.tsx` (`CardEdit`: CUTS + CAMERA in, clip out). Rough cut 1,
+2026-09-26: 9.05 s, silent.
+
+| Out (s) | Source | Speed | Shot |
+|---|---|---|---|
+| 0.0–1.07 | 1.0–2.6 s: the mention menu, pick Buddies Release Engineer | 1.5× | full frame → composer card |
+| 1.07–2.6 | 2.6–11.8 s: "Can we push a release to github and npm" is typed | 6× | card drifts toward the composer line |
+| 2.6–5.6 | 11.8–14.8 s: the reply picker opens; hover Claude → Codex → Cursor → Muse, pick Muse | 1× | pushes in 1.4× on the harness row |
+| 5.6–7.0 | 14.8–17.6 s: thinking level medium, Done | 2× | eases to the thinking row and Done |
+| 7.0–8.45 | 17.6–20.5 s: send, the post lands, the thread opens | 2× | card moves to the posted message |
+| 8.45–9.05 | hold on 20.5 s: "Buddies Release Engineer is replying…" | still | slow push |
+
+The composer chip changes from "Claude Opus 5.5" to "Muse Spark 1.3 Contributor" when Muse is
+picked (visible from ~5.6 s). The Model row lists the harness's own models, which is the proof
+that picking a harness is more than a label.
