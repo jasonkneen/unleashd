@@ -7,7 +7,7 @@ Run:  uv run --with numpy python product/releases/launch-2.0/sound/edm.py
   bar 1   0.000  BUILD  Bm  half-time filtered kick, chords at 400 Hz lowpass, vocal chop "oh-ah"
   bar 2   1.875         G   four-on-the-floor, snare roll in 8ths
   bar 3   3.750         D   vocal chop "ay-oh", snare 16ths, noise/pitch riser starts
-  bar 4   5.625         A   snare 32nds, filter fully open; GAP 7.266-7.500 (dry silence, tails only)
+  bar 4   5.625         A   snare 32nds, filter fully open; GAP 7.266-7.500 (tails + reversed crash)
   bar 5   7.500  DROP   Bm  impact + crash + big kick, pumped supersaws, bass, clap, vocal chop
   bar 6   9.375         G
   bar 7  11.250         D   vocal chop
@@ -436,13 +436,16 @@ def soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
 
 # ---- Arrangement
 
-# Dry mask: everything dry stops at GAP (5 ms fade) and resumes on the drop; reverb/echo tails ring.
-DRY = np.where(TIME < GAP, 1.0, 0.0) + np.where(TIME >= DROP, 1.0, 0.0)
-DRY[(TIME >= GAP) & (TIME < GAP + 0.005)] = 1 - (TIME[(TIME >= GAP) & (TIME < GAP + 0.005)] - GAP) / 0.005
+# Dry mask: everything dry fades out over 40 ms at GAP and resumes on the drop.
+# Owner, rough cut 1 (2026-09-26): the transition into the drop was "a bit rough". Then the
+# fade was 5 ms and every tail died within 80 ms, so the whole mix fell off a cliff into dead
+# air. Now the dry cut is a short fade, the rooms ring out (180 ms), and a reversed crash
+# swells through the gap into the downbeat, so the silence reads as a breath, not a dropout.
+GAP_FADE = 0.04
+DRY = np.where(TIME >= DROP, 1.0, np.clip(1 - (TIME - GAP) / GAP_FADE, 0, 1))
 
-# Tails inside the gap decay over 80 ms: a 32nd-note roll's room at full size smears the silence.
 IN_GAP = (TIME >= GAP) & (TIME < DROP)
-TAIL = np.where(IN_GAP, np.exp(-(TIME - GAP) / 0.08), 1.0)
+TAIL = np.where(IN_GAP, np.exp(-(TIME - GAP) / 0.18), 1.0)
 
 BUILD_KICKS = [at(1, 0), at(1, 2)] + [at(b, k) for b in (2, 3, 4) for k in range(4)]
 # Build swell: the build rises from -10 dB to -3 dB at the gap, so the drop is the peak.
@@ -503,6 +506,11 @@ place(drums, crash(r), at(7), 0.22)
 place(drums, panned(impact(rng_for("impact")), 0), DROP, 0.85)
 
 drums *= DRY
+# Reversed crash: swells from nothing to its peak exactly on the drop (added after the dry mask so
+# it plays through the gap).
+swell = crash(rng_for("reverse-crash"), seconds=0.6)[:, ::-1]
+swell = fft_filter(swell, lp(9000)) * np.linspace(0, 1, swell.shape[1]) ** 2
+place(drums, swell, DROP - swell.shape[1] / SR, 0.3)
 drums += reverb(roll * DRY, 1.4, "drum-room", 0.01) * 0.28 * TAIL
 drums = soft_clip(drums, 1.3)
 

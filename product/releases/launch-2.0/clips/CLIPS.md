@@ -15,13 +15,13 @@ The number prefix is the clip's place in the launch script
 | `01_overload-open` | 18.0 s | 1–5 | Chat windows pile up, hard cut to "AI Overload!", then the calm "Introducing… 2.0", with sound | motion graphic, `edit/src/Overload.tsx` | Draft 2 + sound, marimba locked |
 | `02_design-iteration` | 15.35 s | 6 | Workspace-home redesign, then emblems, then the owner types "Great work!" | footage A + B, `edit/src/DesignIteration.tsx` | Rough cut 1, silent |
 | `03_design-review` | 13.0 s | 6–7 | The owner asks for screenshots of every view; ~6 min later the Lead posts Mobile, iPad and Desktop threads; three screenshots held (iPad Buddies, iPad channel, Desktop Buddies) | footage D, `edit/src/DesignReview.tsx` | Rough cut 3 (holds instead of long scroll), silent |
+| `04_native-multimedia` | 9.375 s | 6–7 | "Native multimedia" over the owner typing "@Marketing Designer Can you share with me the latest video", cut on the beat to the reply playing the launch video inline, drop on "Code + / Design + / Marketing!" | footage 1 + 2, `edit/src/NativeMultimedia.tsx`, `sound/edm.py` | Rough cut 2, EDM build + drop |
 | `09_beat9-harness-and-close` | 7.0 s | 9 | "Multi harness", logos, "Bring your own subscriptions" slides | `beat9/beat9.html` | Motion v2 |
 
 ## Being cut elsewhere
 
 | Clip | Beat | Where |
 |---|---|---|
-| Native multimedia ("Code + Design + Marketing!"), with the EDM bed | 6–7 | `edit/src/NativeMultimedia.tsx` + `sound/edm.py`, in the #unleashd-2 thread about the 3:41 AM recording |
 | Multi harness, picking harnesses in the composer (4:26:44 PM upload) | 9 | not started |
 
 ## Raw takes, 2026-09-26 (owner's Desktop unless noted)

@@ -105,22 +105,24 @@ The real wait is ~6.5 minutes; the chip says so rather than implying the reply w
 
 ## NativeMultimedia — opens the features section
 
-Source: `src/NativeMultimedia.tsx` (`CUTS`, `CAMERA`, `CARDS`). Rough cut 1, 2026-09-26: 9.375 s
+Source: `src/NativeMultimedia.tsx` (`CUTS`, `CAMERA`, `CARDS`). Rough cut 2, 2026-09-26: 9.375 s
 = 5 bars of the EDM cue at 128 BPM. Every cut and card sits on a beat (`BEAT`, `DROP`).
 
 | Out (s) | Source | Shot |
 |---|---|---|
+| 0.47–3.28 | card | **Native multimedia**, titling the segment from its first beat (owner, rough cut 2) |
 | 0–3.28 | footage 1, 0.9–9.4 s at 2.6× | owner types "@Marketing Designer Can you share with me the latest video". Eases from full frame into the composer strip. The pauses after "video," are cut |
 | 3.28 | send blip | hard cut on beat 8 to the thread |
 | 3.28–9.375 | footage 2, from 1.0 s at 1× | the reply with the launch video playing inline. Pushes into the player (4.7–6.1 s) |
-| 5.16 | card | **Native multimedia** |
 | 7.5 | the drop | **Code +** / **Design +** / **Marketing!**, one per beat, with a 6% punch on the window |
 
 Music: `../sound/edm-build.wav` from `../sound/edm.py`. It's synthesized, so we own it (128 BPM, D major / B minor
 next to the marimba; 4-bar build, gap, drop at exactly 7.500 s, 4 bars of groove to 15 s). The
 "echoing voice" is formant-synthesized vowels ("oh-ah", "ay-oh") with a ping-pong echo, not
 words. There are stems (`edm-stem-{drums,music,vox}.wav`) for rebalancing. The cut uses bars 1–5; bars 6–8 are
-for the flash cards that follow.
+for the flash cards that follow. The cut fades the music out over its last beat.
+
+The gap before the drop is a breath, not a dropout. Owner, rough cut 1: "the hard transition in music is a bit rough". The dry mix now fades over 40 ms, the rooms ring for about 180 ms, and a reversed crash swells into the downbeat. The gap sits around -25 dB, where it used to be dead air.
 
 Footage 2 is our capture, not a screen recording: `../capture/record-thread.mjs` drives
 headless Chrome over CDP and poses every frame. It sets the thread's scroll and the video's
