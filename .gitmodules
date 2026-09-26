@@ -1,4 +1,4 @@
 [submodule "vendor/agent-cli-tool"]
 	path = vendor/agent-cli-tool
-	url = git@github.com:nbardy/agent-cli.git
+	url = https://github.com/nbardy/agent-cli.git
 	branch = main
