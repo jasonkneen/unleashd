@@ -153,7 +153,9 @@ const Cards: React.FC = () => {
   );
 };
 
-export const NativeMultimedia: React.FC = () => (
+// Picture plus the send blip. The assembly plays this under its one continuous music cue
+// (edm-full.wav); the standalone clip adds the 15 s cue below.
+export const NativeMultimediaPicture: React.FC = () => (
   <AbsoluteFill>
     <Series>
       {CUTS.reduce<{ cut: Cut; start: number }[]>((acc, cut) => {
@@ -166,10 +168,16 @@ export const NativeMultimedia: React.FC = () => (
       ))}
     </Series>
     <Cards />
-    {/* Out over the last beat: a 0.25 s fade clipped the groove mid-bar. */}
-    <Audio src={edm} volume={(f) => Math.min(1, (DURATION - f) / (BEAT * FPS))} />
     <Sequence from={SEND - 2} layout="none">
       <Audio src={SFX.send} volume={0.5} />
     </Sequence>
+  </AbsoluteFill>
+);
+
+export const NativeMultimedia: React.FC = () => (
+  <AbsoluteFill>
+    <NativeMultimediaPicture />
+    {/* Out over the last beat: a 0.25 s fade clipped the groove mid-bar. */}
+    <Audio src={edm} volume={(f) => Math.min(1, (DURATION - f) / (BEAT * FPS))} />
   </AbsoluteFill>
 );
