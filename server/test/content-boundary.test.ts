@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MessagePageSchema, classifyServerFrame, legacyBody } from '@unleashd/shared';
+import { reviewTranscript } from '../src/buddies/memory-review';
 import { nativeBody } from '../src/ingest/content';
 import { sessionMessages } from '../src/ingest/history';
-import { reviewTranscript } from '../src/buddies/memory-review';
 
 const id = '00000000-0000-4000-8000-000000000001';
 

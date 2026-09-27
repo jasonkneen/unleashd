@@ -12,8 +12,8 @@
 import {
   type BuddyMemberExecution,
   type ConversationConfig,
-  type MessageBody,
   ConversationConfigSchema,
+  type MessageBody,
   legacyBody,
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';

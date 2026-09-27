@@ -1,8 +1,8 @@
 import {
   type ConversationDetail,
   type Message,
-  type ServerMessage,
   PROTOCOL_VERSION,
+  type ServerMessage,
   encodeRows,
 } from '@unleashd/shared';
 import type { Atom, createStore } from 'jotai';

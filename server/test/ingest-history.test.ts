@@ -14,8 +14,8 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import {
   ConversationDetailSchema,
-  MessagePageSchema,
   type Message,
+  MessagePageSchema,
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';

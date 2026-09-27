@@ -1,3 +1,4 @@
+import type { ContentPart, MessageBody } from '@unleashd/shared';
 import {
   Fragment,
   type ReactNode,
@@ -17,7 +18,6 @@ import { ChatActivity } from '../../ui/ChatActivity';
 import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
 import { defineMarkdownFlavor, renderMarkdownCached } from '../../utils/markdown-pipeline';
 import { remarkBreaks } from '../../utils/remark-breaks';
-import type { ContentPart, MessageBody } from '@unleashd/shared';
 import { formatToolUse } from '../../utils/tool-presentation';
 import { AskUserQuestionWidget } from '../AskUserQuestion';
 import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';

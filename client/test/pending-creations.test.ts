@@ -3,8 +3,8 @@ import test from 'node:test';
 import {
   type ClientMessage,
   type ConversationConfig,
-  type ServerMessage,
   PROTOCOL_VERSION,
+  type ServerMessage,
   classifyServerFrame,
   encodeRows,
 } from '@unleashd/shared';

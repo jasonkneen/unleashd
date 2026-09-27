@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import { harnessMcpCapability } from '@nbardy/agent-cli';
 import type {
   BuddyContext,
-  ContentPart,
   BuddyKind,
   BuddyVisibility,
+  ContentPart,
   Message,
   Provider as ProviderName,
   ResolvedExecutionConfig,

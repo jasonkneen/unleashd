@@ -9,8 +9,8 @@
  * matching the native Claude Code terminal UI.
  */
 
-import { useState } from 'react';
 import type { AskUserQuestion } from '@unleashd/shared';
+import { useState } from 'react';
 import './AskUserQuestion.css';
 
 type Question = AskUserQuestion['questions'][number];

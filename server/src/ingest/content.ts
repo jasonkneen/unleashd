@@ -2,9 +2,9 @@ import {
   AskUserQuestionSchema,
   type ContentPart,
   type MessageBody,
+  legacyBody,
   parseBuddyBuilderToolResult,
   parseBuddyWorkerToolResult,
-  legacyBody,
   toolContentPart,
 } from '@unleashd/shared';
 
