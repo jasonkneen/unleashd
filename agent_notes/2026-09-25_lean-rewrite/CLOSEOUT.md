@@ -52,9 +52,50 @@ and archived-memory bytes as well as the new databases.
 
 ## Release completion evidence
 
-Pending final combined gate, real-data screenshots, branch publication and live
-switch. Do not interpret committed/pushed code as a deployed database migration.
-This section is updated with exact commits and results at completion.
+The combined application passed typecheck/package build, 211 server tests (one
+skipped), 191 client tests, 15 development-runtime tests, five tooling tests,
+286 agent-cli tests, 16 API tests, 94 Rust tests and all nine client invariants.
+The first run exposed three stale effort-default expectations; these were updated
+to the newer source branch's intentional medium default and affected suites rerun.
+No application behavior was changed to silence those tests.
+
+Copied-real-data visual review inspected 31 initial captures and 10 reshoots.
+Settings icon, worker heading, swarm review cycle labels and the screenshot
+helper were corrected in 188c5c4. Client build/typecheck and affected tests were
+rerun. See [CLOSEOUT-QA.md](CLOSEOUT-QA.md) for evidence and limits, including a
+minor preexisting desktop swarm settings/header overlap. Archived-channel
+mutations have Rust/HTTP/MCP test coverage; no real archived row was available
+for a screenshot. Private screenshots stay in the local cache.
+
+All source branches are included in integration history. Legacy source branches
+were joined only after their behavior ports were checked; importer/Cursor lane
+commits were exact patch equivalents. Agent-cli main is 7983ed4, pushed and pinned
+before the outer release. The release subtree matches source 086c097 byte-for-byte.
+
+The live switch is separate from publication. This closeout session is a child
+of the old backend, so stopping synchronously would kill the operator mid-cutover.
+A detached controller waits for foreground conversations and all process-local
+queues to become empty, then performs the already-authorized runbook. Its status
+is authoritative at:
+`/Users/nicholasbardy/unleashd-t15-backup-20260927T153100/cutover-status.json`.
+A missing or waiting status does not mean migration is complete. It preserves
+queued background work, verifies imported data and exported bytes, and starts the
+prepared legacy checkout on a failure after shutdown. It creates no synthetic
+Buddy work and explicitly records whether a natural memory write was observed.
+The prepared rollback checkout is
+`/Users/nicholasbardy/git/.codex-worktrees/unleashd-rollback-086c097`.
+
+## Size accounting
+
+The closeout adds about 1.75k tracked application-source lines relative to earlier
+main 1d6c9fb. Most is preservation of already-written upstream/settings, archive,
+workers and picker features from the old branch, not another refactor pass.
+Using the same server/client/shared/Rust-runtime paths, the merged application is
+about 77.3k lines versus 106.1k on legacy 086c097 (about 27% smaller). This excludes
+tests, docs, launch assets and the old vendored Buddies package, and is not a claim
+of the original 3–4x target. No new domain table or parallel Buddy authority was
+introduced during closeout; archive is a field on the canonical channel and
+worker inspection uses the existing row/detail/resource authorities.
 
 ## Deliberately deferred
 
