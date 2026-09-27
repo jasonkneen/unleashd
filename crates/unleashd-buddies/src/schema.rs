@@ -63,7 +63,7 @@ CREATE TABLE channel (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspace(id),
   kind TEXT NOT NULL CHECK(kind IN ('public','direct','task')),
   name TEXT COLLATE NOCASE, purpose TEXT, member_key TEXT UNIQUE, task_id TEXT UNIQUE REFERENCES task(id),
-  created_by TEXT REFERENCES buddy(id), created_at TEXT NOT NULL,
+  created_by TEXT REFERENCES buddy(id), created_at TEXT NOT NULL, archived_at TEXT,
   CHECK((kind = 'public') = (name IS NOT NULL AND purpose IS NOT NULL)),
   CHECK((kind = 'direct') = (member_key IS NOT NULL)),
   CHECK((kind = 'task') = (task_id IS NOT NULL)),
@@ -191,6 +191,15 @@ fn require_ordered_ids(conn: &Connection, path: &str) -> Result<()> {
     }
 }
 
+/// Additive compatibility for lean databases created before channel archive shipped.
+fn ensure_channel_archive(conn: &Connection) -> Result<()> {
+    let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('channel') WHERE name = 'archived_at')", [], |r| r.get(0))?;
+    if !present {
+        conn.execute_batch("ALTER TABLE channel ADD COLUMN archived_at TEXT;")?;
+    }
+    Ok(())
+}
+
 fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
@@ -215,6 +224,7 @@ pub fn open(path: &str) -> Result<Connection> {
     match (app_id == APPLICATION_ID, tables) {
         (true, _) => {
             require_ordered_ids(&conn, path)?;
+            ensure_channel_archive(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }
@@ -224,5 +234,20 @@ pub fn open(path: &str) -> Result<Connection> {
             Ok(conn)
         }
         (false, n) => Err(CoreError::WrongDatabase(format!("{path}: {n} tables, application_id {app_id}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_archive_upgrades_existing_lean_database_without_losing_channels() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE channel(id TEXT PRIMARY KEY); INSERT INTO channel VALUES ('kept');").unwrap();
+        ensure_channel_archive(&conn).unwrap();
+        ensure_channel_archive(&conn).unwrap();
+        let row: (String, Option<String>) = conn.query_row("SELECT id, archived_at FROM channel", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(row, ("kept".into(), None));
     }
 }
