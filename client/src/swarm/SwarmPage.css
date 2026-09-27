@@ -63,6 +63,10 @@
   font-size: var(--fs-7);
 }
 
+.swarm-page[data-layout="narrow"] .swarm-page-actions {
+  flex-basis: 100%;
+}
+
 /* Shared by all three screens. */
 .swarm-empty {
   padding: var(--sp-10) var(--sp-7);

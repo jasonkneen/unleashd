@@ -124,16 +124,28 @@ export function ChannelComposer({
   // The model picker and the @ menu share the space above the composer.
   const showPicker = open && matches.length > 0 && !choosing;
 
-  // Grow with the text up to a cap, then scroll.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: text is the re-measure trigger
+  // Re-measure placeholders and width changes too: a long reply target can wrap.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: text and placeholder trigger re-measurement
   useLayoutEffect(() => {
     const node = textareaRef.current;
     if (!node) return;
-    node.style.height = 'auto';
-    node.style.height = `${Math.min(node.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
-    const mirror = highlightRef.current;
-    if (mirror) mirror.scrollTop = node.scrollTop;
-  }, [text]);
+    const fit = () => {
+      node.style.height = 'auto';
+      node.style.height = `${Math.min(node.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+      if (!node.value) node.scrollTop = 0;
+      const mirror = highlightRef.current;
+      if (mirror) mirror.scrollTop = node.scrollTop;
+    };
+    fit();
+    let width = node.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (node.clientWidth === width) return;
+      width = node.clientWidth;
+      fit();
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [text, placeholder]);
 
   const edit = (next: string, nextCaret: number, nextPicked: ChannelReference[] = picked) => {
     setText(next);

@@ -170,6 +170,8 @@
 /* ── card: the Gallery tile. Accent color arrives as an inline border-top. ── */
 .conversation-row--card {
   position: relative;
+  min-width: 0;
+  overflow: hidden;
   padding: var(--sp-8);
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -282,6 +284,7 @@
 }
 
 .conversation-row__preview {
+  overflow-wrap: anywhere;
   color: var(--text-secondary);
   font-size: var(--fs-3);
   line-height: 1.4;
