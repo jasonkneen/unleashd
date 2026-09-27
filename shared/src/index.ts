@@ -514,18 +514,18 @@ export type DeviceUiPrefs = z.infer<typeof DeviceUiPrefsSchema>;
 export const SeenMessageIndexSchema = z.record(z.string(), z.number());
 
 // =============================================================================
-// Server → Client Messages (protocol v3, T09 2026-09-25)
+// Server → Client Messages (protocol v4; T09 introduced the v3 row/patch layout)
 //
 // Skew rule: the client reads `hello.protocol.version` before anything else. A
 // v2 backend (still running while Vite already serves this client) sends
-// `init`, which this client recognises by type and answers with a typed
-// "backend reloading" state + reconnect — it never replaces the list with an
-// empty one. A v2 client talking to a v3 backend rejects `hello` as an
-// unknown type and keeps the list it had. Fields ADDED within v3 still need
-// `.default(...)` (CLAUDE.md). Guard: client/test/protocol-skew.test.ts.
+// `init`, which this client recognises as a typed "backend reloading" skew.
+// A v3 backend is rejected at the socket upgrade until it reloads. The v4
+// message frame carries `body` instead of `content`; an old v3 client must
+// reload before receiving one. New fields within v4 still need `.default(...)`.
+// Guard: client/test/protocol-skew.test.ts.
 // =============================================================================
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
 // A tab left open across a protocol swap kept its list and silently stopped
@@ -689,7 +689,7 @@ export function safeParseClientMessage(data: unknown) {
 }
 
 /**
- * What one server frame means to this client (protocol v3). A v2 backend —
+ * What one server frame means to this client (protocol v4). A v2 backend —
  * still running while Vite already serves this client during a dev reload —
  * greets with `init`; that is a typed version skew, never a parse failure that
  * the caller might answer by clearing state. Guard: client/test/protocol-skew.test.ts.

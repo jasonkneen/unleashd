@@ -2,6 +2,7 @@ import {
   type ConversationDetail,
   type Message,
   type ServerMessage,
+  PROTOCOL_VERSION,
   encodeRows,
 } from '@unleashd/shared';
 import type { Atom, createStore } from 'jotai';
@@ -69,7 +70,7 @@ export function runEventBench(target: BenchTarget): void {
   const rows = syntheticConversations(COUNT);
   deliver({
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/',
     loading: false,
     archivedBuddyIds: [],

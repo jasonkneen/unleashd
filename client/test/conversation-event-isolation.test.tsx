@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
-import { type ServerMessage, encodeRows } from '@unleashd/shared';
+import { PROTOCOL_VERSION, type ServerMessage, encodeRows } from '@unleashd/shared';
 import { type Atom, Provider } from 'jotai';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
@@ -77,7 +77,7 @@ function seed(): void {
   ];
   handleMessage({
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/',
     loading: false,
     archivedBuddyIds: [],
