@@ -1511,30 +1511,34 @@ async function runScriptedTurn(provider: Provider, events: ScriptedEvent[]) {
   return { conversation, broadcasts };
 }
 
+/** Real provider records enter through the same parser as executeTurn. */
+function codexCollab(
+  tool: string,
+  phase: 'started' | 'completed',
+  extra: Record<string, unknown>
+): UnifiedAgentEvent[] {
+  return createParser('codex')({
+    type: `item.${phase}`,
+    item: { type: 'collab_tool_call', tool, sender_thread_id: 'parent', ...extra },
+  });
+}
+
 test('codex collab threads become native sub-agents that parent completion leaves alone', async () => {
-  // Guards T08 S3: codex collab handling moved out of the turn fold into the
-  // harness table (turns/subagents.ts). Shapes mirror agent-cli's codex parser
-  // (collabToolInput). A regression either drops the native rows, infers a
-  // still-pending child as "Done" when the parent turn ends, or double-counts.
-  const collab = (tool: string, phase: 'started' | 'completed', extra: Record<string, unknown>) =>
-    ({
-      type: 'tool.use',
-      name: tool,
-      input: { _phase: phase, sender_thread_id: 'parent', ...extra },
-    }) as const;
+  // Exercise the parser, not a second hand-written tool.use contract: the runtime
+  // must consume canonical child states and publish exactly one patch per observation.
   const { conversation, broadcasts } = await runScriptedTurn('codex', [
     { type: 'turn.started' },
-    collab('spawn_agent', 'started', { prompt: 'Write file_1.md' }),
-    collab('spawn_agent', 'completed', {
+    ...codexCollab('spawn_agent', 'started', { prompt: 'Write file_1.md' }),
+    ...codexCollab('spawn_agent', 'completed', {
       prompt: 'Write file_1.md',
       receiver_thread_ids: ['child-1'],
       agents_states: { 'child-1': { status: 'pending_init', message: null } },
     }),
-    collab('wait', 'completed', {
+    ...codexCollab('wait', 'completed', {
       receiver_thread_ids: ['child-1'],
       agents_states: { 'child-1': { status: 'completed', message: 'test-confirmed' } },
     }),
-    collab('spawn_agent', 'completed', {
+    ...codexCollab('spawn_agent', 'completed', {
       prompt: 'Second child',
       receiver_thread_ids: ['child-2'],
       agents_states: { 'child-2': { status: 'pending_init', message: null } },
@@ -1554,6 +1558,12 @@ test('codex collab threads become native sub-agents that parent completion leave
   assert.equal(byId.get('child-1')?.toolUses, 1);
   assert.equal(byId.get('child-1')?.currentAction, 'Done');
   assert.equal(byId.get('child-2')?.status, 'pending', 'parent completion must not settle it');
+  assert.equal(byId.get('child-2')?.completedAt, undefined);
+  assert.ok(byId.get('child-1')?.completedAt instanceof Date);
+  const patches = broadcasts.filter(
+    (message) => (message as { patch?: { t: string } }).patch?.t === 'subagent'
+  );
+  assert.equal(patches.length, 3, 'one patch per normalized child observation');
   const completed = new Set(
     broadcasts.flatMap((message) => {
       const patch = message as {
@@ -1570,6 +1580,56 @@ test('codex collab threads become native sub-agents that parent completion leave
   assert.deepEqual([...completed], ['child-1']);
   const assistant = conversation.messages.find((message) => message.role === 'assistant');
   assert.match(assistant?.content ?? '', /SUBAGENTS_OK/);
+  assert.equal((assistant?.content.match(/spawn_agent/g) ?? []).length, 1);
+  assert.doesNotMatch(assistant?.content ?? '', /\bwait\b/);
+});
+
+test('native sub-agent operations are applied once and follow-ups can reopen a child', async () => {
+  const observation = (id: string, tool: string, status: string) =>
+    codexCollab(tool, 'completed', {
+      id,
+      prompt: 'Child work',
+      receiver_thread_ids: ['child', 'other'],
+      agents_states: { child: { status }, other: { status: 'failed' } },
+    });
+  const spawn = observation('spawn', 'spawn_agent', 'in_progress');
+  const done = observation('done', 'wait', 'completed');
+  const reopen = observation('follow-up', 'send_input', 'in_progress');
+  const { conversation, broadcasts } = await runScriptedTurn('codex', [
+    ...spawn,
+    // A parent's command is not a child interaction, even when a child is running.
+    ...createParser('codex')({
+      type: 'item.started',
+      item: { type: 'command_execution', command: 'pwd' },
+    }),
+    ...done,
+    ...spawn,
+    ...done,
+    ...reopen,
+    ...reopen,
+    { type: 'turn.complete', reason: 'success' },
+  ]);
+  const [agent] = conversation.subAgents;
+  assert.equal(conversation.subAgents.length, 2);
+  assert.equal(agent.description, '[Codex Agent] Child work');
+  assert.equal(
+    agent.status,
+    'running',
+    'parent completion leaves the reopened native child running'
+  );
+  assert.equal(agent.currentAction, 'Sending follow-up');
+  assert.equal(agent.completedAt, undefined, 'a running child has no terminal timestamp');
+  assert.equal(agent.toolUses, 2, 'one wait and one follow-up, no replay or parent tools');
+  const other = conversation.subAgents[1];
+  assert.equal(other.toolUses, 2, 'the same operation observes each child independently');
+  assert.equal(other.status, 'error');
+  assert.equal(other.currentAction, 'Error');
+  assert.ok(other.completedAt instanceof Date);
+  assert.equal(
+    broadcasts.filter((message) => (message as { patch?: { t: string } }).patch?.t === 'subagent')
+      .length,
+    6
+  );
 });
 
 test('a Task tool starts a generic sub-agent that parent completion settles', async () => {

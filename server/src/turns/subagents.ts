@@ -1,14 +1,6 @@
 import type { UnifiedAgentEvent } from '@nbardy/agent-cli';
 import type { Provider, SubAgent } from '@unleashd/shared';
-import {
-  extractCodexCollabToolInput,
-  getCodexSubagentCurrentAction,
-  getSubagentDescription,
-  isCodexCollabToolName,
-  isSubagentSpawnTool,
-  isTerminalSubagentStatus,
-  normalizeCodexSubagentStatus,
-} from '../subagent-tools';
+import { getSubagentDescription, isSubagentSpawnTool } from '../subagent-tools';
 
 /**
  * Sub-agent tracking for one turn's tool stream. Harnesses differ only here,
@@ -19,6 +11,7 @@ import {
  */
 
 type ToolUseEvent = Extract<UnifiedAgentEvent, { type: 'tool.use' }>;
+type NativeStateEvent = Extract<UnifiedAgentEvent, { type: 'subagent.state' }>;
 type TaskStartedEvent = Extract<UnifiedAgentEvent, { type: 'task.started' }>;
 type TaskFinishedEvent = Extract<UnifiedAgentEvent, { type: 'task.finished' }>;
 
@@ -34,7 +27,7 @@ export interface SubAgentHost {
 /** Whether the tool still renders as a transcript line after the sub-agent fold saw it. */
 export type ToolLine = 'show' | 'hide';
 
-export interface SubAgentFold {
+interface ToolFold {
   toolUse(host: SubAgentHost, event: ToolUseEvent): ToolLine;
   /** The harness started a task: bind it to the sub-agent its tool call spawned. */
   taskStarted(host: SubAgentHost, event: TaskStartedEvent): void;
@@ -42,6 +35,10 @@ export interface SubAgentFold {
   taskFinished(host: SubAgentHost, event: TaskFinishedEvent): void;
   /** The parent turn completed: settle the agents this harness only infers. */
   parentCompleted(host: SubAgentHost, completedAt: Date): void;
+}
+
+export interface SubAgentFold extends ToolFold {
+  state(host: SubAgentHost, event: NativeStateEvent): void;
 }
 
 /**
@@ -54,7 +51,7 @@ export interface SubAgentFold {
  * Guard: conversation-runtime.test.ts "a recorded background agent stays running until its task
  * finishes".
  */
-function genericFold(provider: Provider): SubAgentFold {
+function genericFold(provider: Provider): ToolFold {
   // This turn's spawns still waiting for their task.started, keyed by launch description.
   const launches: { description: unknown; agent: SubAgent }[] = [];
   return {
@@ -148,135 +145,58 @@ export function failRunningSubAgents(agents: SubAgent[], completedAt: Date): voi
   }
 }
 
-// --- Codex native collab threads --------------------------------------------
+// Pattern: parse-dont-validate (docs/patterns.md#parse-dont-validate)
+/** agent-cli owns raw status, child IDs and display text; this handler owns the live row. */
+function applyNativeState(host: SubAgentHost, event: NativeStateEvent): void {
+  let agent = host.agents.find((a) => a.id === event.id || a.providerThreadId === event.id);
+  if (!agent) {
+    agent = {
+      id: event.id,
+      description: event.description,
+      status: event.status,
+      toolUses: 0,
+      tokens: 0,
+      startedAt: new Date(),
+    };
+    host.agents.push(agent);
+  }
+  if (event.operation === 'spawn') {
+    agent.description = event.description;
+  }
+  const wasTerminal = agent.status === 'completed' || agent.status === 'error';
+  agent.providerThreadId = event.id;
+  agent.status = event.status;
+  agent.rawStatus = event.rawStatus;
+  agent.statusSource = 'native';
+  if (event.operation !== 'spawn') agent.toolUses += 1;
+  const terminal = event.status === 'completed' || event.status === 'error';
+  if (terminal) {
+    agent.completedAt ??= new Date();
+    agent.currentAction = event.status === 'error' ? 'Error' : 'Done';
+  } else {
+    agent.completedAt = undefined;
+    agent.currentAction = event.message ?? (wasTerminal ? undefined : agent.currentAction);
+  }
+  host.changed(agent);
+}
 
-function codexFold(): SubAgentFold {
-  const codexGeneric = genericFold('codex');
+function nativeFold(): ToolFold {
   return {
-    ...codexGeneric,
-    toolUse(host, event) {
-      if (!isCodexCollabToolName(event.name)) return codexGeneric.toolUse(host, event);
-      const { phase, receiverThreadIds, prompt, agentStates } = extractCodexCollabToolInput(
-        event.input
-      );
-      // The started phase renders as an ordinary tool line; the completed phase
-      // carries the per-child states and replaces the line with agent rows.
-      if (phase !== 'completed') return 'show';
-      const childIds = new Set<string>([...receiverThreadIds, ...Object.keys(agentStates)]);
-      for (const childId of childIds) {
-        const agentState = agentStates[childId];
-        applyCodexChildState(
-          host,
-          childId,
-          event.name,
-          prompt,
-          agentState?.status,
-          agentState?.message
-        );
-      }
-      return 'hide';
-    },
-    // Native threads report their own terminal state; only inferred agents settle here.
+    // Parent tool calls do not identify work by a particular native child.
+    toolUse: () => 'show',
+    taskStarted() {},
+    taskFinished() {},
     parentCompleted(host, completedAt) {
       completeRunning(host, completedAt, (agent) => !agent.providerThreadId);
     },
   };
 }
 
-function applyCodexChildState(
-  host: SubAgentHost,
-  childId: string,
-  toolName: string,
-  prompt: string | undefined,
-  rawStatus: string | undefined,
-  statusMessage: string | null | undefined
-): void {
-  const { agent, isNew, wasTerminal } = upsertCodexAgent(
-    host,
-    childId,
-    toolName,
-    prompt,
-    rawStatus,
-    statusMessage
-  );
-  if (toolName !== 'spawn_agent') agent.toolUses += 1;
-  if (isNew) {
-    console.log(
-      `[${host.conversationId}] Codex sub-agent started: ${agent.id.substring(0, 8)} - "${agent.description.substring(0, 50)}"`
-    );
-    host.changed(agent);
-  } else {
-    broadcastAgentUpdate(host, agent);
-  }
-  if (statusMessage !== undefined && statusMessage !== null) broadcastAgentUpdate(host, agent);
-  const status = agent.status;
-  if (status !== 'completed' && status !== 'error') return;
-  agent.completedAt ??= new Date();
-  if (status === 'error') agent.currentAction = 'Error';
-  else if (!agent.currentAction) agent.currentAction = 'Done';
-  broadcastAgentUpdate(host, agent);
-  if (!wasTerminal) {
-    agent.currentAction = status === 'error' ? 'Error' : 'Done';
-    host.changed(agent);
-  }
-}
-
-function upsertCodexAgent(
-  host: SubAgentHost,
-  childThreadId: string,
-  toolName: string,
-  prompt: string | undefined,
-  rawStatus: string | undefined,
-  statusMessage: string | null | undefined
-): { agent: SubAgent; isNew: boolean; wasTerminal: boolean } {
-  const description = getSubagentDescription('codex', toolName, prompt ? { prompt } : {});
-  const status = normalizeCodexSubagentStatus(
-    rawStatus,
-    toolName === 'spawn_agent' ? 'pending' : 'running'
-  );
-  const currentAction = getCodexSubagentCurrentAction(toolName, rawStatus, statusMessage);
-  const existing = host.agents.find(
-    (agent) => agent.id === childThreadId || agent.providerThreadId === childThreadId
-  );
-  if (!existing) {
-    const agent: SubAgent = {
-      id: childThreadId,
-      description,
-      status,
-      toolUses: 0,
-      tokens: 0,
-      currentAction,
-      startedAt: new Date(),
-      providerThreadId: childThreadId,
-      rawStatus,
-      statusSource: 'native',
-    };
-    host.agents.push(agent);
-    return { agent, isNew: true, wasTerminal: false };
-  }
-  const wasTerminal = isTerminalSubagentStatus(existing.status);
-  existing.providerThreadId = childThreadId;
-  if (!existing.description || existing.description.startsWith('Running ')) {
-    existing.description = description;
-  }
-  existing.status = status;
-  existing.rawStatus = rawStatus;
-  existing.statusSource = 'native';
-  if (currentAction) existing.currentAction = currentAction;
-  else if (isTerminalSubagentStatus(status)) existing.currentAction = undefined;
-  if (isTerminalSubagentStatus(status)) existing.completedAt ??= new Date();
-  return { agent: existing, isNew: false, wasTerminal };
-}
-
-function broadcastAgentUpdate(host: SubAgentHost, agent: SubAgent): void {
-  host.changed(agent);
-}
-
 // Pattern: table-driven (docs/patterns.md#table-driven)
 /** Harness capability table: which sub-agent protocol each harness speaks. One fold per turn. */
-const SUB_AGENT_FOLDS: Record<Provider, () => SubAgentFold> = {
+const SUB_AGENT_FOLDS: Record<Provider, () => ToolFold> = {
   claude: () => genericFold('claude'),
-  codex: codexFold,
+  codex: nativeFold,
   gemini: () => genericFold('gemini'),
   opencode: () => genericFold('opencode'),
   cursor: () => genericFold('cursor'),
@@ -285,5 +205,16 @@ const SUB_AGENT_FOLDS: Record<Provider, () => SubAgentFold> = {
 
 /** A fresh fold for one turn of `provider`. */
 export function subAgentFoldFor(provider: Provider): SubAgentFold {
-  return SUB_AGENT_FOLDS[provider]();
+  const applied = new Set<string>();
+  return {
+    ...SUB_AGENT_FOLDS[provider](),
+    state(host, event) {
+      // A replay must not double-count or reopen a child. IDs are only unique within this turn.
+      // Guard: conversation-runtime.test.ts "native sub-agent operations are applied once".
+      const key = event.operationId && JSON.stringify([event.id, event.operationId]);
+      if (key && applied.has(key)) return;
+      if (key) applied.add(key);
+      applyNativeState(host, event);
+    },
+  };
 }

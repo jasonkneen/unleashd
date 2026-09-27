@@ -277,7 +277,12 @@ async function runAttempt(
   const cancel = () => rung.abort();
   signal.addEventListener('abort', cancel, { once: true });
   const result = await runDetached(execute, harness.request(launch), rung.signal, (event, stop) => {
-    if (event.type === 'tool.use' && !harness.authorizes(event.name)) {
+    // Native child states are tool activity too, even without a preceding tool.use.
+    // Guard: buddies-v2.test.ts "native child events cannot bypass restricted Buddy runs".
+    if (event.type === 'subagent.state') {
+      failure = `Memory reviewer attempted a sub-agent operation: ${event.operation}`;
+      stop();
+    } else if (event.type === 'tool.use' && !harness.authorizes(event.name)) {
       failure = `Memory reviewer attempted a tool outside its read-only set: ${event.name}`;
       stop();
     } else if (event.type === 'error') failure = event.message;

@@ -499,6 +499,11 @@ export class TurnRunner {
     this.ports.broadcast({ type: 'chunk', conversationId: this.host.id, text: chunkText });
   }
 
+  applySubagentState(event: Extract<UnifiedAgentEvent, { type: 'subagent.state' }>): void {
+    this.ensureAssistantMessage();
+    this.subAgentFold.state(this.subAgentHost, event);
+  }
+
   applyTaskStarted(event: Extract<UnifiedAgentEvent, { type: 'task.started' }>): void {
     this.backgroundWait.taskStarted(event);
     this.subAgentFold.taskStarted(this.subAgentHost, event);
@@ -883,8 +888,9 @@ class EventFold {
       case 'usage':
         runner.noteUsage(event.usage);
         return;
-      // Codex collab is folded from tool.use (turns/subagents.ts); this duplicate is unused.
       case 'subagent.state':
+        runner.sawOutput();
+        runner.applySubagentState(event);
         return;
       case 'task.started':
         runner.applyTaskStarted(event);

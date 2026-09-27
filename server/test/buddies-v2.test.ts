@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { McpServerSpec } from '@nbardy/agent-cli';
+import { type McpServerSpec, createParser } from '@nbardy/agent-cli';
 import {
   BuddiesCore,
   type Buddy,
@@ -1102,6 +1102,73 @@ test('a reply gate with no answer, or out of tokens, fails with the provider mes
   const verdict = await gate({ config: createDefaultConversationConfig('claude'), prompt: 'p' });
   assert.equal(verdict.kind, 'failed');
   assert.match(verdict.kind === 'failed' ? verdict.reason : '', /out_of_tokens.*session limit/);
+});
+
+test('native child events cannot bypass restricted Buddy runs', async () => {
+  const w = await world();
+  let stops = 0;
+  let launches = 0;
+  const execute = (() => {
+    launches += 1;
+    return {
+      events: (async function* () {
+        // No item.started: the canonical state alone must trigger the guard.
+        yield* createParser('codex')({
+          type: 'item.completed',
+          item: {
+            type: 'collab_tool_call',
+            tool: 'spawn_agent',
+            id: 'spawn',
+            receiver_thread_ids: ['child'],
+            agents_states: { child: { status: 'pending_init' } },
+          },
+        });
+        yield { type: 'text.delta', text: '<yes>' };
+      })(),
+      completed: Promise.resolve({ reason: 'success', exitCode: 0, signal: null, sessionId: 's' }),
+      stop: () => {
+        stops += 1;
+      },
+    };
+  }) as never;
+  const reviewer = createMemoryReviewer({
+    core: w.core,
+    grants: w.grants,
+    spec: w.endpoint.spec,
+    execute,
+    logger: { warn: () => undefined },
+  });
+  try {
+    const gate = createCliReplyGate({
+      resolveExecution: async () => ({ provider: 'codex', modelId: 'gpt-6-luna' }),
+      execute,
+    });
+    const verdict = await gate({ config: createDefaultConversationConfig('codex'), prompt: 'p' });
+    assert.equal(verdict.kind, 'unparseable', 'a yes after tool activity is not admitted');
+    reviewer.start();
+    reviewer.enqueue({
+      attemptId: 'native-child-violation',
+      conversationId: 'chat',
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      completedAt: new Date().toISOString(),
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    const receipt = await until(
+      async () =>
+        (await w.core.listEvents(w.lead.id, Number.MAX_SAFE_INTEGER, 20)).find(
+          (event) => event.op === 'memory_review'
+        ),
+      'failed review receipt'
+    );
+    const body = JSON.parse(receipt.payload);
+    assert.equal(body.status, 'failed');
+    assert.match(body.error, /sub-agent operation/);
+    assert.equal(launches, 2, 'one gate and one review; violations do not climb the ladder');
+    assert.equal(stops, 2);
+  } finally {
+    reviewer.stop();
+    await w.close();
+  }
 });
 
 test('follow-ups stop after three Buddy posts in a row, and a failed gate on an owner post is shown', async () => {
