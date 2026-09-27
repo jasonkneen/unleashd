@@ -41,7 +41,7 @@ fn rule(op: Op) -> Rule {
         Op::Admin => Rule::OwnerOnly,
         Op::CreateChannel | Op::SearchPosts => Rule::AnyBuddy,
         Op::Post | Op::ReadChannel => Rule::ChannelAccess,
-        Op::ArchiveChannel => Rule::WorkspaceChannel,
+        Op::ArchiveChannel | Op::RenameChannel => Rule::WorkspaceChannel,
         Op::ReadDoc | Op::WriteDoc | Op::WriteTask | Op::EnqueueRun | Op::CancelRun | Op::WriteSchedule => Rule::SelfOrManager,
     }
 }

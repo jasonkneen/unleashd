@@ -468,6 +468,30 @@ impl Store {
         })
     }
 
+    pub fn rename_channel(&mut self, actor: &Actor, channel_id: &str, name: &str, key: &str) -> Result<Channel> {
+        self.write(|tx| {
+            let channel = get_channel(tx, channel_id)?;
+            require(tx, actor, Op::RenameChannel, &Subject::Channel { id: channel.id.clone() })?;
+            if !matches!(channel.kind, ChannelKind::Public { .. }) {
+                return Err(CoreError::Invalid("only public channels may be renamed".into()));
+            }
+            let m = Mutation {
+                actor,
+                workspace_id: &channel.workspace_id,
+                buddy_id: actor.buddy_id(),
+                task_id: None,
+                op: "channel.rename",
+                payload: json!({"channel": channel_id, "name": name}),
+                key: Some(key),
+            };
+            let id = idempotent(tx, &m, |tx| {
+                tx.execute("UPDATE channel SET name = ?2 WHERE id = ?1", params![channel_id, name])?;
+                Ok(channel_id.to_string())
+            })?;
+            get_channel(tx, &id)
+        })
+    }
+
     pub fn create_channel(&mut self, actor: &Actor, input: ChannelInput) -> Result<Channel> {
         self.write(|tx| {
             require(tx, actor, Op::CreateChannel, &Subject::Owner)?;

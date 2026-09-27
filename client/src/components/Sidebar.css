@@ -158,19 +158,19 @@
   overflow-y: overlay; /* Float over content, no reserved gutter */
   padding: var(--sp-2) var(--sp-3) var(--sp-6);
 
-  /* Floating scrollbar: hidden until hover/scroll, no track background */
+  /* Keep the scrollbar out of the way until the list is actively scrolling. */
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
   scrollbar-gutter: auto; /* No reserved space — scrollbar overlaps content */
 }
 
-.conversations-list:hover {
-  scrollbar-color: color-mix(in srgb, var(--text-emphasis) 30%, transparent) transparent;
+.conversations-list--scrolling {
+  scrollbar-color: color-mix(in srgb, var(--text-emphasis) 32%, transparent) transparent;
 }
 
 /* WebKit (Chrome/Safari) — overlay scrollbar with no track */
 .conversations-list::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 
 .conversations-list::-webkit-scrollbar-track {
@@ -179,15 +179,16 @@
 
 .conversations-list::-webkit-scrollbar-thumb {
   background: transparent;
-  border-radius: var(--ui-radius);
+  border-radius: 999px;
+  transition: background-color 0.18s ease-out;
 }
 
-.conversations-list:hover::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-emphasis) 30%, transparent);
+.conversations-list--scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-emphasis) 32%, transparent);
 }
 
 .conversations-list::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--text-emphasis) 50%, transparent);
+  background: color-mix(in srgb, var(--text-emphasis) 45%, transparent);
 }
 
 .pending-creation,
@@ -472,6 +473,10 @@ a.sidebar-buddy-wake-done {
 
 .sidebar-section {
   margin-bottom: 0;
+}
+
+.sidebar-section + .sidebar-section {
+  margin-top: var(--sp-5);
 }
 
 .sidebar-section-header {

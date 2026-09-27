@@ -9,8 +9,9 @@ import { requireCanonicalPostMedia } from './channel-media';
 import {
   type BuddiesCore,
   BuddyChangesSchema,
-  ChannelArchiveSchema,
   BuddyCreateFieldsSchema,
+  ChannelArchiveSchema,
+  ChannelRenameSchema,
   OWNER,
   ScheduleFieldsSchema,
   TaskChangesSchema,
@@ -264,6 +265,14 @@ const BUDDY_TOOLS = {
     schema: ChannelArchiveSchema.extend({ channelId: z.string().min(1) }),
     handler: (deps, grant, input) =>
       deps.core.setChannelArchived(grant.author, input.channelId, input.archived, input.key),
+  }),
+  channel_rename: buddyTool({
+    description:
+      'Rename a public channel in your workspace. The channel keeps its history and id; use a stable key so retries replay the same result.',
+    writes: true,
+    schema: ChannelRenameSchema.extend({ channelId: z.string().min(1) }),
+    handler: (deps, grant, input) =>
+      deps.core.renameChannel(grant.author, input.channelId, input.name, input.key),
   }),
   channel_read: buddyTool({
     description:

@@ -112,6 +112,11 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn rename_channel(&self, actor: Actor, channel_id: String, name: String, key: String) -> napi::Result<Channel> {
+        call(&self.store, move |s| s.rename_channel(&actor, &channel_id, &name, &key)).await
+    }
+
+    #[napi]
     pub async fn create_channel(&self, actor: Actor, input: ChannelInput) -> napi::Result<Channel> {
         call(&self.store, move |s| s.create_channel(&actor, input)).await
     }

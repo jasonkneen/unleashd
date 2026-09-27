@@ -31,8 +31,9 @@ import { type Channels, mentionedBuddyIds } from './channels';
 import {
   type BuddiesCore,
   BuddyChangesSchema,
-  ChannelArchiveSchema,
   BuddyCreateFieldsSchema,
+  ChannelArchiveSchema,
+  ChannelRenameSchema,
   CoreError,
   OWNER,
   ScheduleFieldsSchema,
@@ -393,6 +394,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       const { archived, key } = ChannelArchiveSchema.parse(req.body);
       const channelId = p(req, 'channelId');
       const channel = await write(core.setChannelArchived(OWNER, channelId, archived, key));
+      deps.channelChanged(channelId);
+      return channel;
+    },
+    'POST 200 /api/buddies/channels/:channelId/rename': async (req) => {
+      const { name, key } = ChannelRenameSchema.parse(req.body);
+      const channelId = p(req, 'channelId');
+      const channel = await write(core.renameChannel(OWNER, channelId, name, key));
       deps.channelChanged(channelId);
       return channel;
     },

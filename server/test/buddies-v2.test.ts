@@ -1513,3 +1513,45 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
     await w.close();
   }
 });
+
+test('Buddy MCP renames a public channel without changing its identity or history', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const post = await w.core.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      { kind: 'inform', body: 'Keep this rename evidence', evidence: [], key: 'rename-history' }
+    );
+    const grant = w.grants.issueBuddy({
+      role: 'worker',
+      buddyId: w.lead.id,
+      workspaceId: w.ws,
+      conversationId: 'rename-test',
+      runId: null,
+    });
+    const renamed = await call(w.endpoint.spec(grant), 'channel_rename', {
+      channelId: w.general.id,
+      name: 'features',
+      key: 'rename',
+    });
+    assert.equal(renamed.isError, false, renamed.text);
+    assert.equal(renamed.value.id, w.general.id);
+    assert.equal(renamed.value.kind.name, 'features');
+    assert.equal(
+      (
+        (await http('GET', `/api/buddies/channels/${w.general.id}`)).body as unknown as {
+          kind: { name: string };
+        }
+      ).kind.name,
+      'features'
+    );
+    const history = await call(w.endpoint.spec(grant), 'channel_read', {
+      read: { channelId: w.general.id },
+    });
+    assert.equal(history.value.posts[0].id, post.id);
+  } finally {
+    server.close();
+    await w.close();
+  }
+});

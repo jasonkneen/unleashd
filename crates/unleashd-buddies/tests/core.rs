@@ -758,3 +758,33 @@ fn channel_archive_preserves_history_and_restores_posting() {
     let direct = s.open_channel(&Actor::Owner, dm("mid", "ic")).unwrap();
     assert!(s.set_channel_archived(&Actor::Owner, &direct.id, true, "no-dm").is_err());
 }
+
+#[test]
+fn channel_rename_preserves_identity_and_history() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let channel = s
+        .create_channel(
+            &buddy("ic"),
+            ChannelInput { workspace_id: WS.into(), name: "old-name".into(), purpose: "history".into(), key: "rename-channel".into() },
+        )
+        .unwrap();
+    let post = s
+        .post(
+            &buddy("ic"),
+            ChannelRef::Id { id: channel.id.clone() },
+            PostInput { kind: PostKind::Inform, ..request("remember", "remember") },
+        )
+        .unwrap();
+
+    let renamed = s.rename_channel(&buddy("peer"), &channel.id, "features", "rename").unwrap();
+    assert_eq!(renamed.id, channel.id);
+    assert!(matches!(renamed.kind, ChannelKind::Public { ref name, ref purpose } if name == "features" && purpose == "history"));
+    assert_eq!(s.rename_channel(&buddy("peer"), &channel.id, "features", "rename").unwrap().id, channel.id);
+    assert_eq!(s.open_channel(&Actor::Owner, ChannelRef::Id { id: channel.id.clone() }).unwrap().kind, renamed.kind);
+    assert_eq!(s.get_post(&Actor::Owner, &post.id).unwrap().id, post.id);
+
+    assert!(matches!(s.rename_channel(&buddy("peer"), &channel.id, "other", "rename"), Err(CoreError::IdempotencyConflict(_))));
+    let direct = s.open_channel(&Actor::Owner, dm("mid", "ic")).unwrap();
+    assert!(s.rename_channel(&Actor::Owner, &direct.id, "not-a-dm", "direct").is_err());
+}

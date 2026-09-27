@@ -1,7 +1,7 @@
 import type { ConversationConfig } from '@unleashd/shared';
 import { createDefaultConversationConfig } from '@unleashd/shared';
 import { useAtom, useAtomValue } from 'jotai';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { readConversation, readConversationDetail, setConversationDone } from '../atoms/actions';
 import {
@@ -103,8 +103,23 @@ export function Sidebar() {
   const runningCountByFolder = useAtomValue(listField('runningByFolder'));
   const [expandedBuddies, setExpandedBuddies] = useState<Set<string>>(() => new Set());
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set());
+  const [isScrollingList, setIsScrollingList] = useState(false);
+  const listScrollTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(
+    () => () => {
+      if (listScrollTimeout.current) clearTimeout(listScrollTimeout.current);
+    },
+    []
+  );
+
+  const handleConversationsScroll = useCallback(() => {
+    setIsScrollingList(true);
+    if (listScrollTimeout.current) clearTimeout(listScrollTimeout.current);
+    listScrollTimeout.current = setTimeout(() => setIsScrollingList(false), 700);
+  }, []);
 
   const handleNewConversation = useCallback(() => setPicker(DEFAULT_START), []);
 
@@ -278,7 +293,10 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="conversations-list">
+      <div
+        className={`conversations-list${isScrollingList ? ' conversations-list--scrolling' : ''}`}
+        onScroll={handleConversationsScroll}
+      >
         {pendingCreations
           .filter((creation) => creation.args.kind.t !== 'buddy')
           .map((creation) => (

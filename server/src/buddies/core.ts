@@ -31,6 +31,9 @@ export const key = z
   .max(200)
   .describe('Idempotency key: the same key replays the first result');
 export const ChannelArchiveSchema = z.object({ archived: z.boolean(), key }).strict();
+export const ChannelRenameSchema = z
+  .object({ name: z.string().trim().min(1).max(80), key })
+  .strict();
 
 export const evidence = z.array(z.string().min(1).max(4000)).max(32).default([]);
 
