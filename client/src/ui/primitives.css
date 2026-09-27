@@ -161,3 +161,36 @@
   font-size: var(--fs-5);
   cursor: pointer;
 }
+
+/* A side list whose scrollbar is a thin rounded translucent pill, shown only while it
+ * scrolls (useScrollActivity sets data-scrolling). Owner, 2026-09-27: the channel rail
+ * still had the global 8px square bar, always on and over the unread badges. Chrome 121+
+ * IGNORES ::-webkit-scrollbar once scrollbar-width/-color is set, so those are Firefox-only. */
+.ui-scroll-quiet {
+  overflow: hidden auto;
+}
+
+.ui-scroll-quiet::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ui-scroll-quiet::-webkit-scrollbar-track,
+.ui-scroll-quiet::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.ui-scroll-quiet[data-scrolling]::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-emphasis) 32%, transparent);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .ui-scroll-quiet {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .ui-scroll-quiet[data-scrolling] {
+    scrollbar-color: color-mix(in srgb, var(--text-emphasis) 32%, transparent) transparent;
+  }
+}

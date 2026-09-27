@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
+import { useScrollActivity } from '../../hooks/useScrollActivity';
 import { rowBuddy } from '../../utils/conversation-row';
 import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
@@ -940,6 +941,7 @@ export function ChannelBrowser({
   useWarmChannelPosts(rail.channels);
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
+  const railScroll = useScrollActivity();
   const listed = [
     ...rail.channels,
     ...rail.direct,
@@ -995,7 +997,7 @@ export function ChannelBrowser({
           </div>
           <WorkspaceSwitcher workspaceId={workspaceId} workspaceName={directory.workspaceName} />
         </header>
-        <div className="channel-browser-rail-scroll">
+        <div className="channel-browser-rail-scroll ui-scroll-quiet" {...railScroll}>
           <div className="channel-browser-rail-section-row ui-row">
             <h3 className="channel-browser-rail-section ui-muted">Channels</h3>
             <button

@@ -131,7 +131,6 @@
 .channel-browser-rail-scroll {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   padding: var(--sp-7) var(--sp-5) var(--sp-9);
 }
 
@@ -616,6 +615,10 @@ a.channel-browser-buddy-done {
 .channel-browser-rail-section-row {
   justify-content: space-between;
   margin-bottom: var(--sp-3);
+}
+
+.channel-browser-rail-section-row:not(:first-child) {
+  margin-top: var(--sp-8);
 }
 
 .channel-browser-rail-add {
