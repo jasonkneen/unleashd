@@ -77,3 +77,33 @@ persistent indicator on desktop; touch layouts retain their 44px targets.
 - The five implementation/test files were copied into the isolated checked
   snapshot for comparison with the follow-up commit. The earlier full-suite
   baseline failures documented above are unchanged by this presentation update.
+
+## Owner correction: keep the worker page in the Buddy/DM UI
+
+The original screenshot exposed a real navigation mismatch: the badge lived in
+the Channels Buddy list, but its destination mounted the legacy conversations
+sidebar. The badge now links to the workspace's Channels route with
+`?workers=<buddyId>`. Desktop keeps the channel/Buddy rail, highlights the selected
+Buddy and displays its workers alongside it. Phone opens a workers screen in the
+same Channels route. The existing worker list and status authority are reused;
+no second worker model or API was added.
+
+The page is fixed to the selected workspace. Opening it preserves the previous
+DM/channel query, and its Back link restores that context. Direct links and
+reloads work on both shells. The original standalone Buddy tab remains available
+for existing bookmarks.
+
+- Live click-through from the persistent green badge, reload and Back verified
+  with real running workers at desktop, phone and landscape-tablet sizes.
+  All worker destinations retained the Channels path and had no legacy sidebar.
+  Desktop/tablet retained the Buddy rail; no horizontal overflow. All three
+  resulting worker-page screenshots were inspected.
+- Reproduction, screenshots and DOM evidence:
+  `output/background-worker-shell/review.mjs`, `evidence.json`,
+  `buddy-list-*.png`, `buddy-workers-*.png` (gitignored).
+- Eleven focused tests pass, including a route integration that follows the
+  rendered badge href into both real route components, checks workspace isolation,
+  preserves the previous DM in Back, and verifies the desktop Buddy rail.
+- Client `tsc -b` and all six client invariant gates pass. The isolated feature
+  snapshot includes only this correction in the mobile route file, preserving
+  another session's uncommitted channel-archive edits in the shared checkout.

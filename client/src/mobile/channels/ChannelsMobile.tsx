@@ -16,6 +16,7 @@ import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLin
 import '../../components/buddies/BuddyBackgroundLink.css';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
+import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { ChannelMarkdown, TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { ConversationEye } from '../../components/buddies/ConversationEye';
@@ -116,6 +117,15 @@ type ScreenContext = {
 
 function renderScreen(screen: MobileChannelScreen, context: ScreenContext) {
   switch (screen.kind) {
+    case 'workers':
+      return (
+        <ChannelWorkers
+          buddyId={screen.buddyId}
+          buddyName={context.directory.buddyNames[screen.buddyId] ?? 'Buddy'}
+          workspaceId={context.workspaceId}
+          tasks={context.directory.tasks}
+        />
+      );
     case 'home':
       return <ChannelsHome context={context} />;
     case 'channel':
@@ -151,6 +161,7 @@ function useChannelsOpenDm(workspaceId: string): OpenDm {
     params.delete('thread');
     params.delete('post');
     params.delete('task');
+    params.delete('workers');
     params.set('dm', conversationId);
     navigate(`/buddies/workspaces/${encodeURIComponent(workspaceId)}/channels?${params}`);
   };

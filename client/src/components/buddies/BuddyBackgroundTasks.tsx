@@ -29,10 +29,13 @@ export function BuddyBackgroundTasks({
   buddyId,
   workspaces,
   projects = NO_PROJECTS,
+  fixedWorkspaceId,
 }: {
   buddyId: string;
   workspaces: Workspace[];
-  projects?: readonly BuddyProject[];
+  projects?: readonly Pick<BuddyProject, 'id' | 'title'>[];
+  /** A workspace's Buddy UI keeps workers scoped to that workspace. */
+  fixedWorkspaceId?: string;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
@@ -43,7 +46,7 @@ export function BuddyBackgroundTasks({
   // counts show work — background threads look hidden everywhere, since the
   // Conversations tab hides background placement by design.
   const workspaceParam = searchParams.get('workspace');
-  const workspaceId = workspaceParam ? workspaceParam : null;
+  const workspaceId = fixedWorkspaceId ?? (workspaceParam || null);
   const workers = useAtomValue(buddyBackgroundWorkersAtomFamily({ buddyId, workspaceId }));
   const unfiltered = useAtomValue(buddyBackgroundWorkersAtomFamily({ buddyId, workspaceId: null }));
   const loaded = useAtomValue(conversationLoadCompleteAtom);
@@ -61,25 +64,27 @@ export function BuddyBackgroundTasks({
               : 'Loading workers…'}
           </p>
         </div>
-        <label>
-          Workspace
-          <select
-            value={workspaceId ?? ''}
-            onChange={(event) => {
-              const next = new URLSearchParams(searchParams);
-              if (event.target.value) next.set('workspace', event.target.value);
-              else next.delete('workspace');
-              setSearchParams(next);
-            }}
-          >
-            <option value="">All workspaces</option>
-            {workspaces.map((workspace) => (
-              <option key={workspace.id} value={workspace.id}>
-                {workspace.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {fixedWorkspaceId === undefined && (
+          <label>
+            Workspace
+            <select
+              value={workspaceId ?? ''}
+              onChange={(event) => {
+                const next = new URLSearchParams(searchParams);
+                if (event.target.value) next.set('workspace', event.target.value);
+                else next.delete('workspace');
+                setSearchParams(next);
+              }}
+            >
+              <option value="">All workspaces</option>
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <p className="buddy-background-tasks-explainer">
         Background conversations and session workers. Open a conversation to inspect its work. No
@@ -88,7 +93,7 @@ export function BuddyBackgroundTasks({
       {workers.length === 0 ? (
         <div className="buddy-background-tasks-empty">
           <p>{loaded ? 'No background workers yet.' : 'Loading background workers…'}</p>
-          {loaded && workspaceId && unfiltered.length > 0 && (
+          {loaded && fixedWorkspaceId === undefined && workspaceId && unfiltered.length > 0 && (
             <button
               type="button"
               onClick={() => {

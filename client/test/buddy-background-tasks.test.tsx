@@ -188,7 +188,7 @@ test('DM worker count and page include native workers, deduplicate transcripts a
   const render = () =>
     renderToStaticMarkup(
       <Provider store={store}>
-        <MemoryRouter initialEntries={['/buddies/lead/background?workspace=wave']}>
+        <MemoryRouter initialEntries={['/buddies/workspaces/wave/channels?dm=dm']}>
           <BuddyBackgroundLink buddyId="lead" workspaceId="wave" name="Lead" />
           <BuddyBackgroundTasks
             buddyId="lead"
@@ -200,7 +200,7 @@ test('DM worker count and page include native workers, deduplicate transcripts a
   const html = render();
   assert.match(html, /Lead: 2 active background workers/);
   assert.match(html, /class="buddy-background-link" data-running="true"/);
-  assert.match(html, /href="\/buddies\/lead\/background\?workspace=wave"/);
+  assert.match(html, /href="\/buddies\/workspaces\/wave\/channels\?workers=lead&amp;dm=dm"/);
   assert.match(html, /1 running · 1 queued · 3 total/);
   assert.match(html, /Review the build/);
   assert.match(html, /Reading test results/);

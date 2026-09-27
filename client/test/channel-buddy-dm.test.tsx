@@ -33,5 +33,5 @@ test('desktop slack rail: buddy name is a DM button, never a buddy-page link', (
   assert.ok(html.includes('aria-label="Message Lead"'), 'name must offer the DM action');
   assert.match(html, /<button[^>]*aria-label="Message Lead"/);
   assert.ok(!html.includes('href="/buddies/b1"'), 'rail name must not link to a buddy page');
-  assert.match(html, /href="\/buddies\/b1\/background\?workspace=ws"/);
+  assert.match(html, /href="\/buddies\/workspaces\/ws\/channels\?workers=b1"/);
 });

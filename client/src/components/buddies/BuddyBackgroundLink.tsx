@@ -1,11 +1,11 @@
 import { useAtomValue } from 'jotai';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   buddyActiveWorkerCountAtomFamily,
   buddyHasRunningWorkersAtomFamily,
 } from '../../atoms/buddy-background';
 import { conversationLoadCompleteAtom } from '../../atoms/conversations';
-import { buddyTabPath } from './buddy-tabs';
+import { channelLinkPath } from './channel-link';
 
 /** A separate link beside Message/Wake, so inspecting workers never starts a turn. */
 export function BuddyBackgroundLink({
@@ -16,12 +16,16 @@ export function BuddyBackgroundLink({
   const count = useAtomValue(buddyActiveWorkerCountAtomFamily({ buddyId, workspaceId }));
   const running = useAtomValue(buddyHasRunningWorkersAtomFamily({ buddyId, workspaceId }));
   const loaded = useAtomValue(conversationLoadCompleteAtom);
+  const [searchParams] = useSearchParams();
+  const returnParams = new URLSearchParams(searchParams);
+  returnParams.delete('workers');
+  const path = channelLinkPath(workspaceId, { kind: 'workers', buddyId });
   const label = `${name}: ${loaded ? `${count} active background workers` : 'loading background workers'}`;
   return (
     <Link
       className="buddy-background-link"
       data-running={loaded && running ? 'true' : undefined}
-      to={`${buddyTabPath(buddyId, 'background')}?workspace=${encodeURIComponent(workspaceId)}`}
+      to={returnParams.size ? `${path}&${returnParams}` : path}
       aria-label={label}
       title={`${label}. View workers and recent activity`}
     >
