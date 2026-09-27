@@ -450,7 +450,7 @@ test('a data dir with unimported JSON records refuses to boot', async () => {
     });
     const location = recordsLocation(root);
     assert.equal(location.t, 'unimported');
-    await assert.rejects(openRecords(location), /records-tool -- import[\s\S]*ok=true/);
+    await assert.rejects(openRecords(location), /one-time records import[\s\S]*03fc931/);
     await assert.rejects(access(location.file), { code: 'ENOENT' });
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 //! Conversation records (T23a): compare-and-set under a real two-writer race, the query-plan
-//! guard, and the two behaviours config-store.ts carried incident comments for. The importer's
-//! tests live with it in crates/unleashd-records-tool.
+//! guard, and the two behaviours config-store.ts carried incident comments for. The one-time importer
+//! and its tests were deleted after the 2026-09-27 swap (last at 03fc931).
 
 use rusqlite::Connection;
 use std::sync::{Arc, Barrier};

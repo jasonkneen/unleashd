@@ -219,7 +219,7 @@ impl ConversationKind {
 }
 
 /// One durable conversation record. `version` is not a field: every stored record is version 2
-/// (T09's `kind`); import refuses a v1 file (run record-migration.ts on the copy first).
+/// (T09's `kind`); v1 files were migrated by the one-time import, deleted after the 2026-09-27 swap (last at 03fc931).
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -380,29 +380,3 @@ pub enum BranchLaunchOutcome {
     Full,
 }
 
-/// Fields a legacy file omitted and the schema defaulted (`status`, `done`, `recordRevision`).
-/// Kept as data so the verifier can rebuild the file exactly; cleared by the first write, which
-/// makes them explicit (as the TS store's full-record save did).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Defaulted {
-    Status,
-    Done,
-    RecordRevision,
-}
-
-impl Defaulted {
-    pub const ALL: [Defaulted; 3] = [Defaulted::Status, Defaulted::Done, Defaulted::RecordRevision];
-
-    /// The JSON key, and the value the Zod schema filled in.
-    pub fn key_and_default(self) -> (&'static str, serde_json::Value) {
-        match self {
-            Defaulted::Status => ("status", serde_json::Value::from("active")),
-            Defaulted::Done => ("done", serde_json::Value::from(false)),
-            Defaulted::RecordRevision => ("recordRevision", serde_json::Value::from(0)),
-        }
-    }
-
-    pub fn parse(key: &str) -> Option<Defaulted> {
-        Defaulted::ALL.into_iter().find(|d| d.key_and_default().0 == key)
-    }
-}
