@@ -502,7 +502,7 @@ test('a Codex turn that fails before creating a thread retries without resume', 
   type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
   const requests: Request[] = [];
   const { conversation } = runtimeFixture({
-    executeTurn: ((request) => {
+    executeTurn: fakeExecuteTurn((request) => {
       requests.push(request);
       const first = requests.length === 1;
       return {
@@ -520,11 +520,12 @@ test('a Codex turn that fails before creating a thread retries without resume', 
         completed: Promise.resolve({
           exitCode: first ? 1 : 0,
           signal: null,
+          sessionId: first ? '' : 'real-codex-thread',
           reason: first ? ('error' as const) : ('success' as const),
         }),
         stop: () => undefined,
       };
-    }) as NonNullable<ConversationRuntimeDependencies['executeTurn']>,
+    }),
   });
 
   conversation.sendMessage('First request');
@@ -542,7 +543,7 @@ test('a missing Codex rollout clears a legacy phantom session binding', async ()
   type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
   const requests: Request[] = [];
   const fixture = runtimeFixture({
-    executeTurn: ((request) => {
+    executeTurn: fakeExecuteTurn((request) => {
       requests.push(request);
       const missing = requests.length === 1;
       return {
@@ -563,11 +564,12 @@ test('a missing Codex rollout clears a legacy phantom session binding', async ()
         completed: Promise.resolve({
           exitCode: missing ? 1 : 0,
           signal: null,
+          sessionId: missing ? '' : 'new-codex-thread',
           reason: missing ? ('error' as const) : ('success' as const),
         }),
         stop: () => undefined,
       };
-    }) as NonNullable<ConversationRuntimeDependencies['executeTurn']>,
+    }),
   });
   const conversation = new fixture.Conversation({
     id: 'legacy-codex-conversation',
