@@ -1,0 +1,60 @@
+/* The channel header reveals secondary actions on hover and keyboard focus. */
+.channel-header-controls {
+  display: flex;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+.channel-header-info,
+.channel-header-settings {
+  position: relative;
+}
+.channel-header-info button,
+.channel-header-settings summary {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-6);
+  cursor: pointer;
+  list-style: none;
+}
+.channel-header-settings summary::-webkit-details-marker {
+  display: none;
+}
+.channel-header-info__text,
+.channel-header-settings__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  padding: var(--sp-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+}
+.channel-header-info__text {
+  display: none;
+  max-width: min(320px, 80vw);
+}
+.channel-header-info:hover .channel-header-info__text,
+.channel-header-info__text[data-open] {
+  display: block;
+}
+.channel-header-controls > *,
+.channel-header-copy {
+  opacity: 0;
+}
+[data-channel-header]:hover .channel-header-controls > *,
+[data-channel-header]:focus-within .channel-header-controls > *,
+[data-channel-header]:hover .channel-header-copy,
+[data-channel-header]:focus-within .channel-header-copy,
+[data-device="mobile"] .channel-header-controls > *,
+[data-device="mobile"] .channel-header-copy {
+  opacity: 1;
+}

@@ -253,27 +253,12 @@ a.mobile-channels-wake-done {
   white-space: nowrap;
 }
 
-.mobile-channel-header__heading p {
-  margin: 1px 0 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--fs-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .mobile-channel__scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--sp-2) 0 var(--sp-6);
-}
-
-/* The Task filter picker under a channel's header (TaskFilter.tsx). */
-.mobile-channel__task-filter {
-  flex: none;
-  margin: var(--sp-4) var(--sp-6) 0;
 }
 
 .mobile-channel__error {

@@ -1,5 +1,5 @@
 import { useAtomValue } from 'jotai';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { listField, rowFamily } from '../../atoms/conversations';
@@ -8,7 +8,7 @@ import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLin
 import { BuddySigil } from '../../components/buddies/BuddySigil';
 import {
   ArchivedChannels,
-  ChannelArchiveButton,
+  ChannelHeaderControls,
   useArchivedChannels,
 } from '../../components/buddies/ChannelArchive';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
@@ -648,25 +648,30 @@ function ScreenHeader({
   subtitle,
   link,
   channel,
+  settings,
 }: {
   backTo: string;
   title: string;
   subtitle: string;
   link: { path: string; label: string };
   channel?: Channel;
+  settings?: ReactNode;
 }) {
   return (
-    <header className="mobile-channel-header ui-row">
+    <header className="mobile-channel-header ui-row" data-channel-header>
       <Link className="mobile-channel-header__back" to={backTo} aria-label="Back">
         ‹
       </Link>
       <div className="mobile-channel-header__heading">
         <h1>{title}</h1>
-        <p>{subtitle}</p>
       </div>
-      {channel && <ChannelArchiveButton channel={channel} />}
+      {channel && (
+        <ChannelHeaderControls channel={channel} description={subtitle}>
+          {settings}
+        </ChannelHeaderControls>
+      )}
       <CopyLinkButton
-        className="mobile-channel-header__link ui-muted"
+        className="mobile-channel-header__link channel-header-copy ui-muted"
         path={link.path}
         label={link.label}
       />
@@ -707,20 +712,22 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
         title={title}
         channel={entry?.channel}
         subtitle={heading.about}
+        settings={
+          <TaskFilter
+            className="mobile-channel__task-filter"
+            posts={feed.posts}
+            taskFilter={null}
+            tasks={directory.taskById}
+            onTaskFilter={(taskId) =>
+              taskId !== null &&
+              navigate(channelsHref(workspaceId, { kind: 'task', channelId, taskId }))
+            }
+          />
+        }
         link={{
           path: channelLinkPath(workspaceId, { kind: 'channel', channelId }),
           label: 'Copy link to channel',
         }}
-      />
-      <TaskFilter
-        className="mobile-channel__task-filter"
-        posts={feed.posts}
-        taskFilter={null}
-        tasks={directory.taskById}
-        onTaskFilter={(taskId) =>
-          taskId !== null &&
-          navigate(channelsHref(workspaceId, { kind: 'task', channelId, taskId }))
-        }
       />
       <div className="mobile-channel__scroll" ref={follow.scrollRef} onScroll={follow.onScroll}>
         {(feed.latest.kind === 'failed' || feed.latest.kind === 'stale') && (

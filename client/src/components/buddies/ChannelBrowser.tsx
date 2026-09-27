@@ -8,7 +8,7 @@ import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
 import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
 import { BuddySigil } from './BuddySigil';
-import { ArchivedChannels, ChannelArchiveButton, useArchivedChannels } from './ChannelArchive';
+import { ArchivedChannels, ChannelHeaderControls, useArchivedChannels } from './ChannelArchive';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
 import { ChannelDm } from './ChannelDm';
@@ -584,26 +584,24 @@ function ChannelPane({
         className="channel-browser-pane ui-stack"
         aria-label={`${heading.mark}${heading.name}`}
       >
-        <header className="channel-browser-pane-header ui-row">
+        <header className="channel-browser-pane-header ui-row" data-channel-header>
           <div className="channel-browser-pane-title">
             <h2>
               <span aria-hidden="true">{heading.mark}</span>
               {heading.name}
             </h2>
-            <p title={heading.about}>
-              {taskFilter === null ? heading.about : 'One Task, across every channel'}
-            </p>
           </div>
-          <ChannelArchiveButton channel={entry.channel} />
-          <TaskFilter
-            className="channel-browser-task-filter"
-            posts={feed.posts}
-            taskFilter={taskFilter}
-            tasks={directory.taskById}
-            onTaskFilter={onTaskFilter}
-          />
+          <ChannelHeaderControls channel={entry.channel} description={heading.about}>
+            <TaskFilter
+              className="channel-browser-task-filter"
+              posts={feed.posts}
+              taskFilter={taskFilter}
+              tasks={directory.taskById}
+              onTaskFilter={onTaskFilter}
+            />
+          </ChannelHeaderControls>
           <CopyLinkButton
-            className="channel-browser-header-action"
+            className="channel-browser-header-action channel-header-copy"
             path={channelLinkPath(workspaceId, { kind: 'channel', channelId })}
             label="Copy link to channel"
           />

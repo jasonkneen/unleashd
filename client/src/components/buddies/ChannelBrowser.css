@@ -279,16 +279,6 @@
   font-weight: 500;
 }
 
-.channel-browser-pane-title p {
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--fs-4);
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .channel-browser-scroll {
   flex: 1;
   min-height: 0;
@@ -642,14 +632,11 @@ a.channel-browser-buddy-done {
   background: color-mix(in srgb, var(--theme-user) 32%, transparent);
   color: var(--text-bright);
 }
-
 .channel-browser-new-channel-actions button:disabled {
   opacity: 0.5;
   cursor: default;
 }
-
 /* ── Channel + thread panes ───────────────────────────────────────────── */
-
 .channel-browser-dm,
 .channel-browser-panes {
   display: flex;
@@ -657,11 +644,9 @@ a.channel-browser-buddy-done {
   min-width: 0;
   min-height: 0;
 }
-
 .channel-browser-message {
   position: relative;
 }
-
 /* Slack's hover toolbar: a bordered group of icon buttons pinned to the
    message's top-right corner, straddling its top edge so it sits over the
    gap between messages instead of over the text. */
@@ -679,12 +664,10 @@ a.channel-browser-buddy-done {
   box-shadow: 0 1px 3px color-mix(in srgb, black 25%, transparent);
   visibility: hidden;
 }
-
 .channel-browser-message:hover .channel-browser-message-actions,
 .channel-browser-message-actions:focus-within {
   visibility: visible;
 }
-
 .channel-browser-message-action,
 .channel-browser-header-action {
   display: grid;
@@ -700,49 +683,40 @@ a.channel-browser-buddy-done {
   font-size: var(--fs-4);
   cursor: pointer;
 }
-
 .channel-browser-message-action:hover,
 .channel-browser-header-action:hover,
 .channel-thread-header button:hover {
   background: color-mix(in srgb, var(--text-emphasis) 7%, transparent);
   color: var(--text-bright);
 }
-
 .channel-browser-message-action[data-copy-state="copied"],
 .channel-browser-header-action[data-copy-state="copied"] {
   color: var(--theme-success);
 }
-
 .channel-browser-header-action {
   flex: none;
 }
-
 .channel-thread-header-actions {
   display: flex;
   gap: var(--sp-1);
 }
-
 /* The message a permalink opened (`?post=`), highlighted as Slack does. */
 .channel-browser-message[data-linked="true"] {
   background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
   box-shadow: inset 3px 0 0 var(--theme-warning);
 }
-
 .channel-browser-purpose[data-purpose="reply_failed"] {
   background: color-mix(in srgb, var(--theme-warning) 16%, transparent);
   color: var(--theme-warning);
 }
-
 .channel-browser-message[data-purpose="reply_failed"] .channel-markdown {
   color: var(--text-muted);
 }
-
 .channel-browser-thread-summary {
   flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-6);
   margin-top: 4px;
 }
-
 .channel-browser-thread-summary button {
   display: inline-flex;
   align-items: baseline;
@@ -757,21 +731,17 @@ a.channel-browser-buddy-done {
   font-size: var(--fs-4);
   cursor: pointer;
 }
-
 .channel-browser-thread-summary button strong {
   color: var(--theme-user);
   font-weight: 600;
 }
-
 .channel-browser-thread-summary button:hover {
   border-color: var(--border-subtle);
   background: var(--bg-base);
 }
-
 .channel-browser-thread-summary button[data-unread] strong {
   font-weight: 800;
 }
-
 .channel-browser-thread-unread {
   align-self: center;
   width: 7px;
@@ -779,29 +749,17 @@ a.channel-browser-buddy-done {
   border-radius: 50%;
   background: var(--theme-user);
 }
-
-.channel-browser-task-filter {
-  max-width: 220px;
-  height: 28px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-content);
-  color: var(--text-primary);
-  font-size: var(--fs-3);
-}
-
 .channel-browser-replying {
   gap: var(--sp-4);
   font-size: var(--fs-4);
   font-style: italic;
 }
-
 .channel-thread {
   flex: none;
   width: min(420px, 42vw);
   min-height: 0;
   border-left: 1px solid var(--border-subtle);
 }
-
 .channel-thread-header {
   flex: none;
   justify-content: space-between;
@@ -809,20 +767,17 @@ a.channel-browser-buddy-done {
   padding: 0 var(--sp-7) 0 var(--sp-8);
   border-bottom: 1px solid var(--border-subtle);
 }
-
 .channel-thread-header h2 {
   margin: 0;
   color: var(--text-bright);
   font-size: var(--fs-post);
   font-weight: 700;
 }
-
 .channel-thread-header p {
   margin: 1px 0 0;
   color: var(--text-muted);
   font-size: var(--fs-3);
 }
-
 .channel-thread-header button {
   padding: 0; /* the global button padding would crush this icon square */
   width: 28px;
@@ -833,30 +788,25 @@ a.channel-browser-buddy-done {
   color: var(--text-muted);
   cursor: pointer;
 }
-
 .channel-thread .channel-browser-message {
   padding-right: var(--sp-7);
   padding-left: var(--sp-7);
 }
-
 .channel-thread-divider {
   gap: var(--sp-5);
   margin: 8px 16px 0;
   font-size: var(--fs-3);
 }
-
 .channel-thread-divider::after {
   flex: 1;
   height: 1px;
   background: var(--border-subtle);
   content: "";
 }
-
 .channel-thread-replying {
   /* 64px: an alignment offset to the post text column, kept exact rather than snapped. */
   padding: var(--sp-4) var(--sp-7) 0 calc(var(--sp-10) * 2);
 }
-
 /* Composer placement (the composer's own look is ChannelComposer.css). */
 .channel-browser-pane > .channel-composer {
   margin: 0 24px 18px;
