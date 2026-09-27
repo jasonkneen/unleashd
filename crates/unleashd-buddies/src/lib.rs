@@ -1,5 +1,5 @@
 //! Lean Buddies core (DESIGN.md Part B, D1): the SQLite file, the schema, `authorize` and the
-//! Buddy functions. The one-time v33 importer and its verifier are crates/unleashd-buddies-import.
+//! Buddy functions. The one-time v33 importer was deleted after the 2026-09-27 swap (last at 03fc931).
 
 pub mod docs;
 pub mod error;

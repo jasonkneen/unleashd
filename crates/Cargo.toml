@@ -2,7 +2,7 @@
 resolver = "2"
 # The two napi addons, plus the one-time import CLIs as their own crates (S12): an importer edit
 # must not touch an addon crate's build inputs (tools/ensure-addons.mjs).
-members = ["unleashd-buddies", "unleashd-ingest", "unleashd-buddies-import", "unleashd-records-tool"]
+members = ["unleashd-buddies", "unleashd-ingest"]
 
 [profile.release]
 lto = true

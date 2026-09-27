@@ -34,25 +34,18 @@ export function DmChannelsNotice({
   const latest = generations.at(-1) ?? conversationId;
   return (
     <div className={className} role="note">
-      <span>
-        {latest === conversationId
-          ? 'This DM lives in Channels, with its earlier chats above it.'
-          : 'An earlier chat in this DM. The latest is in Channels.'}
-      </span>
       <Link className="channel-inline-action" to={dmPath(latest)}>
-        Open in Channels
+        Open DM
       </Link>
       <HarnessPicker
-        label="New chat"
-        note="A new chat with this Buddy, with no handoff. It opens in Channels, below this one."
-        confirm="Start"
+        label="Refresh context"
+        note="Start a fresh chat to save token cost. Saved Buddy memories carry forward; this chat remains above it in Channels."
+        confirm="Refresh context"
         seed={seed}
         excluded={null}
         buddy
         onConfirm={(config) =>
-          startNewDirectChat(buddy.buddyId, generations, { config }).then((next) =>
-            navigate(dmPath(next))
-          )
+          startNewDirectChat(buddy.buddyId, { config }).then((next) => navigate(dmPath(next)))
         }
       />
     </div>

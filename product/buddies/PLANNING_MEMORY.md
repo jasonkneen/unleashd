@@ -10,7 +10,7 @@
 > **2026-09-26: notes are no longer a store.** A Buddy's detailed notes are
 > `agent_notes/<date>_<topic>.md` files it writes and searches with its own file tools, like
 > every other agent. The `note` doc kind, the note/recall tools and the reviewer's note writes
-> are gone; the importer skips v33 note rows and `buddies-import export-notes` writes them to
+> are gone; the importer skips v33 note rows and the one-time `buddies-import export-notes` (run in the 2026-09-27 swap, since deleted) wrote them to
 > `<workspace>/agent_notes/buddy-notes/<buddy>/<date>.md`. Memory is soul, working and
 > long-term docs only. Mentions of notes below are history.
 

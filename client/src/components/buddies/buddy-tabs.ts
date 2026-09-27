@@ -19,6 +19,9 @@ export const EMPLOYEE_TABS = [
   'mailbox',
   'background',
   'memory',
+  'working-memory',
+  'long-term-memory',
+  'recent-tasks',
   'schedules',
   'settings',
 ] as const satisfies readonly EmployeeTab[];
@@ -30,6 +33,9 @@ export const EMPLOYEE_TAB_LABELS: Record<EmployeeTab, string> = {
   conversations: 'Conversations',
   background: 'Background workers',
   memory: 'Memory',
+  'working-memory': 'Working memory',
+  'long-term-memory': 'Long-term memory',
+  'recent-tasks': 'Recent tasks',
   schedules: 'Schedules',
 };
 
@@ -41,6 +47,9 @@ export const EMPLOYEE_TAB_LABELS_SHORT: Record<EmployeeTab, string> = {
   conversations: 'Chats',
   background: 'Workers',
   memory: 'Memory',
+  'working-memory': 'Working',
+  'long-term-memory': 'Long-term',
+  'recent-tasks': 'Tasks',
   schedules: 'Schedules',
 };
 

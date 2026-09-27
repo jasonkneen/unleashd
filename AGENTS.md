@@ -26,8 +26,6 @@ server/src/buddies/*               → Buddy server over the crate: grants, mcp 
 crates/unleashd-buddies/           → Buddies core (Rust, napi-rs addon): schema,
                                      authorize, posts/docs/tasks/runs
 crates/unleashd-ingest/            → transcript ingest + conversation records (Rust addon)
-crates/unleashd-{buddies-import,records-tool}/ → one-time import CLIs (own crates:
-                                     editing them never rebuilds an addon)
 vendor/agent-cli-tool/             → GIT SUBMODULE: canonical request → argv →
                                      process → unified event stream. Thin wrapper;
                                      harness differences live at its edges only.
@@ -303,8 +301,8 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   a miss; `pnpm --dir crates/<c> run build` forces a build. Restart the backend
   after a Rust change. Deploy sequence: crate README "Deploy".
 - Build cache: a lane that changes no Rust never runs rustc. The key is the
-  crate's own inputs only (docs/patterns.md#build-cache), so the one-time import
-  CLIs live in their own crates (`unleashd-buddies-import`, `unleashd-records-tool`);
+  crate's own inputs only (docs/patterns.md#build-cache), so one-time tools
+  live in their own crates (the v33/records import CLIs did, until deleted after the 2026-09-27 swap);
   build them with `cargo build --release -p <crate>` and never move tool code
   back into an addon crate. Worktree setup is `pnpm run bootstrap`, never
   `pnpm setup`: that is a pnpm BUILTIN which edits `~/.zshrc` (it did, 2026-09-26).
@@ -394,7 +392,7 @@ magenta). Run 1 and 3 back-to-back: live data drifts (sidebar badges,
   Changes go out as typed `patch` messages — never re-send a conversation. A
   conversation's kind is ONE stored value (`record.kind`: chat | buddy | builder
   | worker); never derive identity from transcript text. Guards:
-  `server/test/wire-v3.test.ts`, `server/test/record-migration.test.ts`.
+  `server/test/wire-v3.test.ts`.
 - The wire is compressed: WS permessage-deflate (the 2.4 MB `init` goes out
   as ~180 KB) and `compression` middleware after the auth gate for HTTP.
   A new streaming route (SSE, chunked `res.write`) must `res.flush()` after

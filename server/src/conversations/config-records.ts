@@ -95,15 +95,11 @@ export function openRecords(location: RecordsLocation): Promise<Addon.Conversati
 
 function unimportedMessage(location: Extract<RecordsLocation, { t: 'unimported' }>): string {
   const root = location.appDataRoot;
-  const copy = path.join(root, 'records-import');
-  const tool = 'cargo run --release --manifest-path crates/Cargo.toml -p unleashd-records-tool --';
   return [
     `Conversation records ${location.file} do not exist, but ${root}/conversation-config does.`,
-    'Import them once, with the backend stopped (from the repo root):',
-    `  mkdir ${copy} && cp -R ${root}/conversation-config ${copy}/ && ln -s ${root}/session-cache-v1 ${copy}/session-cache-v1`,
-    `  pnpm --dir server exec tsx src/conversations/record-migration.ts ${copy}`,
-    `  ${tool} import ${copy}/conversation-config/v1 ${location.file}`,
-    `  ${tool} verify ${copy}/conversation-config/v1 ${location.file}   # must print ok=true`,
+    'They need the one-time records import, whose tools (unleashd-records-tool, record-migration.ts)',
+    'were deleted after the 2026-09-27 swap: check out commit 03fc931 and follow',
+    'agent_notes/2026-09-25_lean-rewrite/T15-RUNBOOK.md with the backend stopped.',
     'Keep conversation-config/ until the owner approves deleting it.',
   ].join('\n');
 }

@@ -55,6 +55,9 @@ export type EmployeeTab =
   | 'mailbox'
   | 'background'
   | 'memory'
+  | 'working-memory'
+  | 'long-term-memory'
+  | 'recent-tasks'
   | 'schedules'
   | 'settings';
 

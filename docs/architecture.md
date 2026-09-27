@@ -192,8 +192,7 @@ This used to break Chat "Fork": the transcript loader resolved kind from the
 writes, so every restart demoted forks to `general` ("N conversations on the
 Buddies page, N-1 in the sidebar"). The create command in
 `conversation-websocket.ts` now resolves a fork's kind from its source and
-stores it in `record.kind`, which is what survives. Guards: `server/test/wire-v3.test.ts`,
-`server/test/record-migration.test.ts`.
+stores it in `record.kind`, which is what survives. Guard: `server/test/wire-v3.test.ts`.
 
 ## 3) Conversation lifecycle and state authority
 

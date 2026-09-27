@@ -19,7 +19,7 @@ register(
 const { ChannelBrowser } = await import('../src/components/buddies/ChannelBrowser');
 const { ChannelsMobile } = await import('../src/mobile/channels/ChannelsMobile');
 const { ReplyRetry } = await import('../src/components/buddies/HarnessPicker');
-const { directChainUrl } = await import('../src/components/buddies/ChannelDm');
+const { directChainUrl, startNewDirectChat } = await import('../src/components/buddies/ChannelDm');
 const { workspaceDirectory } = await import('../src/components/buddies/channel-data');
 const { mobileChannelScreen, channelsHref } = await import('../src/mobile/channels/channel-route');
 const { Provider } = await import('jotai');
@@ -98,7 +98,7 @@ function desktop(dm: string) {
   );
 }
 
-test('a desktop DM is a thread: every chat generation, a divider, New chat and the composer', async () => {
+test('a desktop DM keeps generations in order and puts Refresh context in the header', async () => {
   await seed();
   const html = desktop(NEW);
   assert.match(html, /aria-label="Direct message with Lead"/);
@@ -110,7 +110,10 @@ test('a desktop DM is a thread: every chat generation, a divider, New chat and t
     `generations in order around the divider: ${order}`
   );
   assert.match(html, /class="channel-browser-author">Lead</);
-  assert.match(html, /class="channel-inline-action">New chat</);
+  assert.match(html, /class="channel-inline-action">Refresh context</);
+  assert.ok(html.indexOf('Refresh context') < html.indexOf('Old question'));
+  assert.match(html, /Default model:/);
+  assert.match(html, /aria-label="About Lead"/);
   assert.match(html, /placeholder="Message Lead"/);
   assert.doesNotMatch(html, /class="chat-container/, 'not the conversation page');
 
@@ -119,6 +122,24 @@ test('a desktop DM is a thread: every chat generation, a divider, New chat and t
   assert.match(old, /Old answer/);
   assert.doesNotMatch(old, /Fresh answer/);
   assert.match(old, />Latest chat</);
+});
+
+test('starting a new DM leaves the visible conversation available while its replacement loads', async () => {
+  await seed();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ conversationId: 'next' }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  try {
+    const result = await startNewDirectChat('lead', {
+      config: syntheticDetail(NEW).config.config,
+    });
+    assert.equal(result, 'next');
+    assert.equal(jotaiStore.get(rowsAtom).get(NEW)?.done, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('a phone DM stays in Channels with Back to where it was opened', async () => {
@@ -211,15 +232,13 @@ test('the conversation page sends a Buddy DM chat to Channels; other Buddy chats
     );
   const latest = `href="/buddies/workspaces/${WS}/channels\\?dm=${NEW}"`;
   const current = page(NEW);
-  assert.match(current, /This DM lives in Channels/);
-  assert.match(current, new RegExp(`${latest}[^>]*>Open in Channels<`));
-  assert.match(current, /class="channel-inline-action">New chat</);
+  assert.match(current, new RegExp(`${latest}[^>]*>Open DM<`));
+  assert.match(current, /class="channel-inline-action">Refresh context</);
   // An earlier generation says so and opens the latest, as the snapshot's redirect did.
   const earlier = page(OLD);
-  assert.match(earlier, /An earlier chat in this DM/);
-  assert.match(earlier, new RegExp(`${latest}[^>]*>Open in Channels<`));
+  assert.match(earlier, new RegExp(`${latest}[^>]*>Open DM<`));
   // A seat or Wake chat is a Buddy conversation but not a DM generation.
   const other = page(SEAT);
   assert.match(other, /class="chat-view /, 'the page rendered the conversation');
-  assert.doesNotMatch(other, /Open in Channels/);
+  assert.doesNotMatch(other, />Open DM</);
 });
