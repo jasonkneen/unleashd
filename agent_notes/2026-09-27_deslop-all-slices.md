@@ -2,18 +2,26 @@
 
 Owner authorized all findings from `2026-09-27_deslop-systems-review.md`, using
 GPT-6 Sol agents. Base app `325801b`; base agent-cli `7983ed4`. Work stays in
-isolated branches; main and the live runtime are not deployment targets here.
+isolated branches. The owner subsequently authorized completing, merging and
+pushing both repositories after verification. The live runtime is not a
+deployment target; concurrent uncommitted work in the main checkout is preserved.
 
 ## Ownership and replacement
 
 - Native sub-agent contract: committed app `c840815`, published agent-cli
   `ff17213`. One normalized child event replaces duplicate Codex decoding.
+  Review found a duplicate line for a known childless Codex completion; agent-cli
+  `0a1d0cb` adds its explicit phase, and app `8b12230` suppresses that completion's
+  presentation after policy guards consume it. Agent-cli `19cbd3f` includes the
+  concurrent Claude catalog-label update and passes 286 tests plus typecheck.
 - Typed content + retired team-config output: Sol `typed_content`. Ordered
   content parts replace text/marker round trips across live/history/consumers.
 - Diagnostics: Sol `diagnostics`. One typed indexed attempt store replaces
   the journal/replay/map/polling stack while retaining history and recovery.
 - Records: Sol `records`. Native record types constrain the TS boundary;
   remove redundant bridging and unused APIs without dropping provenance.
+  Integrated as `493bf27`: 154 net source lines removed across TypeScript and
+  Rust, with historical Buddy metadata and branch-launch round-trip coverage.
 - Parent owns integration, historical sub-agent audit, importer-retirement
   evidence, and combined verification. Agent design notes contain deletion
   lists and preserved behavior. Desktop/mobile interactions stay separate.
