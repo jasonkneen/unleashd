@@ -264,6 +264,25 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Search sits centred in the channel header (the DM header has no data-channel-header). */
+.channel-browser-pane-header[data-channel-header] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.channel-browser-pane-actions {
+  justify-self: end;
+  gap: var(--sp-7);
+}
+
+.channel-search-trigger {
+  width: clamp(140px, 28vw, 320px);
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5);
+  background: var(--bg-tertiary);
+  font-size: var(--fs-3);
+}
+
 .channel-browser-pane-title h2 {
   display: flex;
   gap: var(--sp-2);
