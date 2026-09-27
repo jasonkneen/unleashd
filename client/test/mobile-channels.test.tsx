@@ -372,3 +372,37 @@ test('the mobile Task filter opens from a channel and links each post into its o
     )
   );
 });
+
+test('archived channel links retain history and hide channel/thread composers on mobile', async () => {
+  await seed();
+  const channel = { ...publicChannel('ch_a', 'general', WS), archivedAt: '2026-09-27T00:00:00Z' };
+  await loadResource({
+    key: `/api/buddies/workspaces/${WS}/inbox`,
+    load: async () => inboxFixture([]),
+  });
+  await loadResource({
+    key: `/api/buddies/workspaces/${WS}/channels/archived`,
+    load: async () => [channel],
+  });
+  const render = (search: string) =>
+    renderToStaticMarkup(
+      <Provider store={jotaiStore}>
+        <MemoryRouter initialEntries={[`${CHANNELS}${search}`]}>
+          <Routes>
+            <Route path="/buddies/workspaces/:workspaceId/channels" element={<ChannelsMobile />} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    );
+  assert.match(render(''), /Archived channels \(1\)/);
+  const page = render('?channel=ch_a');
+  assert.match(page, /general/);
+  assert.match(page, /Restore/);
+  assert.doesNotMatch(page, /<textarea/);
+  assert.doesNotMatch(render('?channel=ch_a&thread=post_root'), /<textarea/);
+  assert.deepEqual(mobileChannelScreen('?channel=ch_a&workers=lead'), {
+    kind: 'workers',
+    buddyId: 'lead',
+  });
+  assert.equal(isImmersiveChannelRoute(CHANNELS, '?workers=lead'), true);
+});

@@ -18,7 +18,7 @@ import { useAtomValue } from 'jotai';
 import { type UIEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type OutboxEntry, channelOutboxAtom, outboxDrop } from '../../atoms/channel-outbox';
 import { warmResources } from '../../atoms/prefetch';
-import { seedResource } from '../../atoms/resources';
+import { invalidateBuddyResources, seedResource } from '../../atoms/resources';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { type PolledState, resource, usePolledFetch } from '../../hooks/usePolledFetch';
 import { buddyApi, buddyWrite } from './api';
@@ -864,4 +864,12 @@ export function useOwnerUnreadTitle(): void {
       total.requests > 0 ? `(${total.requests}) ` : total.unreadChannels > 0 ? '• ' : '';
     document.title = `${prefix}${baseTitle.current}`;
   }, [total.requests, total.unreadChannels]);
+}
+
+/** Archive changes navigation and unread counts on both shells through the shared keyed cache. */
+export async function setChannelArchived(channelId: string, archived: boolean): Promise<void> {
+  await buddyWrite(`/api/buddies/channels/${encodeURIComponent(channelId)}/archive`, 'POST', {
+    archived,
+  });
+  invalidateBuddyResources();
 }

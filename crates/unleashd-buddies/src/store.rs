@@ -33,6 +33,7 @@ enum Rule {
     AnyBuddy,
     /// Public and task channels: any active buddy. Direct channels: members only.
     ChannelAccess,
+    WorkspaceChannel,
 }
 
 fn rule(op: Op) -> Rule {
@@ -40,6 +41,7 @@ fn rule(op: Op) -> Rule {
         Op::Admin => Rule::OwnerOnly,
         Op::CreateChannel | Op::SearchPosts => Rule::AnyBuddy,
         Op::Post | Op::ReadChannel => Rule::ChannelAccess,
+        Op::ArchiveChannel => Rule::WorkspaceChannel,
         Op::ReadDoc | Op::WriteDoc | Op::WriteTask | Op::EnqueueRun | Op::CancelRun | Op::WriteSchedule => Rule::SelfOrManager,
     }
 }
@@ -149,6 +151,15 @@ fn buddy_decision(conn: &Connection, actor: &str, rule: Rule, subject: &Subject)
         (BuddyStatus::Archived, _, _) => denied(format!("{actor} is archived")),
         (_, Rule::OwnerOnly, _) => denied("owner only".into()),
         (_, Rule::AnyBuddy, _) => Ok(Decision::Allowed),
+        (_, Rule::WorkspaceChannel, Subject::Channel { id }) => {
+            let channel = get_channel(conn, id)?;
+            if channel.workspace_id == get_buddy(conn, actor)?.workspace_id {
+                Ok(Decision::Allowed)
+            } else {
+                denied(format!("{id} is outside {actor}'s workspace"))
+            }
+        }
+        (_, Rule::WorkspaceChannel, _) => denied("archive needs a channel".into()),
         (_, Rule::ChannelAccess, Subject::Channel { id }) => channel_access(conn, actor, id),
         (_, Rule::ChannelAccess, Subject::Owner | Subject::Buddy { .. }) => denied("posts live in channels".into()),
         (_, Rule::SelfOrManager, Subject::Owner) => denied("the owner's resources are owner only".into()),

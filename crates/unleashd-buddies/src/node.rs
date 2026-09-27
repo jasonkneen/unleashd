@@ -102,6 +102,16 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn archived_channels(&self, actor: Actor, workspace_id: String) -> napi::Result<Vec<Channel>> {
+        call(&self.store, move |s| s.archived_channels(&actor, &workspace_id)).await
+    }
+
+    #[napi]
+    pub async fn set_channel_archived(&self, actor: Actor, channel_id: String, archived: bool, key: String) -> napi::Result<Channel> {
+        call(&self.store, move |s| s.set_channel_archived(&actor, &channel_id, archived, &key)).await
+    }
+
+    #[napi]
     pub async fn create_channel(&self, actor: Actor, input: ChannelInput) -> napi::Result<Channel> {
         call(&self.store, move |s| s.create_channel(&actor, input)).await
     }

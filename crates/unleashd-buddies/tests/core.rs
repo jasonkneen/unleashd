@@ -728,3 +728,33 @@ fn task_counts_are_unfinished_top_level_tasks_per_buddy() {
     );
     assert!(s.task_counts("ws_other").unwrap().is_empty());
 }
+
+#[test]
+fn channel_archive_preserves_history_and_restores_posting() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let channel = s.create_channel(&buddy("ic"), ChannelInput { workspace_id: WS.into(), name: "archive".into(), purpose: "history".into(), key: "archive-channel".into() }).unwrap();
+    let channel_ref = || ChannelRef::Id { id: channel.id.clone() };
+    let post = s.post(&buddy("ic"), channel_ref(), PostInput { kind: PostKind::Inform, ..request("remember", "remember") }).unwrap();
+    assert!(s.inbox(&Actor::Owner, WS).unwrap().channels.iter().any(|c| c.channel.id == channel.id && c.unread == 1));
+    let archived = s.set_channel_archived(&buddy("peer"), &channel.id, true, "archive").unwrap();
+    assert!(archived.archived_at.is_some());
+    assert_eq!(s.set_channel_archived(&buddy("peer"), &channel.id, true, "archive").unwrap().archived_at, archived.archived_at);
+    assert!(s.set_channel_archived(&buddy("peer"), &channel.id, false, "archive").is_err());
+    assert!(s.set_channel_archived(&buddy("gone"), &channel.id, false, "gone").is_err());
+    let conn = rusqlite::Connection::open(&f.path).unwrap();
+    conn.execute("INSERT INTO workspace(id, name, root_path, created_at) VALUES ('elsewhere', 'Elsewhere', '/tmp/elsewhere', 'now')", []).unwrap();
+    let elsewhere = s.create_channel(&Actor::Owner, ChannelInput { workspace_id: "elsewhere".into(), name: "foreign".into(), purpose: "p".into(), key: "foreign".into() }).unwrap();
+    assert!(matches!(s.set_channel_archived(&buddy("peer"), &elsewhere.id, true, "foreign-denied"), Err(CoreError::Denied(_))));
+
+    assert!(!s.inbox(&Actor::Owner, WS).unwrap().channels.iter().any(|c| c.channel.id == channel.id));
+    assert_eq!(s.archived_channels(&Actor::Owner, WS).unwrap()[0].id, channel.id);
+    assert_eq!(s.open_channel(&Actor::Owner, channel_ref()).unwrap().archived_at, archived.archived_at);
+    assert_eq!(s.search_posts(&Actor::Owner, WS, "remember", 10).unwrap()[0].id, post.id);
+    assert!(s.post(&Actor::Owner, channel_ref(), PostInput { kind: PostKind::Inform, reply_to_id: Some(post.id.clone()), ..request("no", "no") }).is_err());
+    s.set_channel_archived(&Actor::Owner, &channel.id, false, "restore").unwrap();
+    assert!(s.archived_channels(&Actor::Owner, WS).unwrap().is_empty());
+    s.post(&Actor::Owner, channel_ref(), PostInput { kind: PostKind::Inform, ..request("yes", "yes") }).unwrap();
+    let direct = s.open_channel(&Actor::Owner, dm("mid", "ic")).unwrap();
+    assert!(s.set_channel_archived(&Actor::Owner, &direct.id, true, "no-dm").is_err());
+}

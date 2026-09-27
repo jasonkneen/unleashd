@@ -16,6 +16,8 @@ export declare class BuddiesCore {
   searchPosts(actor: Actor, workspaceId: string, query: string, limit: number): Promise<Array<Post>>
   inbox(actor: Actor, workspaceId: string): Promise<Inbox>
   markRead(actor: Actor, channelId: string, postId: string): Promise<void>
+  archivedChannels(actor: Actor, workspaceId: string): Promise<Array<Channel>>
+  setChannelArchived(actor: Actor, channelId: string, archived: boolean, key: string): Promise<Channel>
   createChannel(actor: Actor, input: ChannelInput): Promise<Channel>
   readDoc(actor: Actor, doc: DocRef): Promise<Doc | null>
   writeDoc(actor: Actor, input: DocWrite): Promise<Doc>
@@ -115,6 +117,7 @@ export interface BuddyUpdate {
 }
 
 export interface Channel {
+  archivedAt?: string
   id: string
   workspaceId: string
   kind: ChannelKind
@@ -273,7 +276,7 @@ export type ManagerRef =
   | { kind: 'nobody' }
   | { kind: 'buddy'; id: string }
 
-export type Op = 'read_doc' | 'write_doc' | 'post' | 'read_channel' | 'search_posts' | 'create_channel' | 'write_task' | 'enqueue_run' | 'cancel_run' | 'write_schedule' | 'admin'
+export type Op = 'read_doc' | 'write_doc' | 'post' | 'read_channel' | 'search_posts' | 'create_channel' | 'archive_channel' | 'write_task' | 'enqueue_run' | 'cancel_run' | 'write_schedule' | 'admin'
 
 /** How a run ended, reported by the runner. */
 export type Outcome =

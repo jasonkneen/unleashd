@@ -9,6 +9,7 @@ import { requireCanonicalPostMedia } from './channel-media';
 import {
   type BuddiesCore,
   BuddyChangesSchema,
+  ChannelArchiveSchema,
   BuddyCreateFieldsSchema,
   OWNER,
   ScheduleFieldsSchema,
@@ -255,6 +256,14 @@ const BUDDY_TOOLS = {
     writes: false,
     schema: z.object({}),
     handler: (deps, grant) => deps.core.inbox(grant.author, grant.workspaceId),
+  }),
+  channel_archive: buddyTool({
+    description:
+      'Archive or restore a public channel in your workspace. Archived channels leave navigation and unread counts; history stays readable, and posting resumes after restore.',
+    writes: true,
+    schema: ChannelArchiveSchema.extend({ channelId: z.string().min(1) }),
+    handler: (deps, grant, input) =>
+      deps.core.setChannelArchived(grant.author, input.channelId, input.archived, input.key),
   }),
   channel_read: buddyTool({
     description:

@@ -1,4 +1,5 @@
 import { setConversationDone } from '../../atoms/actions';
+import { BuddyBackgroundLink } from './BuddyBackgroundLink';
 import { BuddySigil } from './BuddySigil';
 import type { OpenDm } from './ChannelAuthor';
 import { WakeIcon, WakeIndicator } from './WakeIndicator';
@@ -14,16 +15,19 @@ export function BuddyRailRow({
   member,
   openDm,
   current,
+  workspaceId,
 }: {
   member: Pick<Buddy, 'id' | 'name' | 'role'>;
   openDm: OpenDm;
   current: boolean;
+  workspaceId: string;
 }) {
   const direct = useBuddyDirectActions(member.id);
   const { action } = direct;
   return (
     <li
       className="channel-browser-buddy ui-row"
+      data-worker-row="desktop"
       data-failed={action.kind === 'failed' || undefined}
     >
       <button
@@ -38,6 +42,7 @@ export function BuddyRailRow({
         <BuddySigil className="channel-browser-buddy-sigil" name={member.name} />
         <span className="channel-browser-channel-name ui-truncate">{member.name}</span>
       </button>
+      <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
       {direct.woken && (
         <WakeIndicator
           key={direct.woken.attempt}

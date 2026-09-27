@@ -3,9 +3,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { listField, rowFamily } from '../../atoms/conversations';
+import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
+import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
+import {
+  ArchivedChannels,
+  ChannelArchiveButton,
+  useArchivedChannels,
+} from '../../components/buddies/ChannelArchive';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { ChannelMarkdown, TypingDots } from '../../components/buddies/ChannelMarkdown';
@@ -46,7 +53,7 @@ import {
   useWorkspaceInbox,
 } from '../../components/buddies/channel-data';
 import { channelLinkPath, postLink } from '../../components/buddies/channel-link';
-import type { Buddy, ChannelUnread, Inbox, Post } from '../../components/buddies/types';
+import type { Buddy, Channel, ChannelUnread, Inbox, Post } from '../../components/buddies/types';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { rowBuddy } from '../../utils/conversation-row';
@@ -76,13 +83,19 @@ export function ChannelsMobile() {
   const screen = mobileChannelScreen(location.search);
   const directory = useWorkspaceDirectory(workspaceId);
   const inbox = useWorkspaceInbox(workspaceId);
+  const archived = useArchivedChannels(workspaceId);
   const rail = useMemo(() => railChannels(inbox.data), [inbox.data]);
   useWarmChannelPosts(rail.channels);
   return renderScreen(screen, {
     workspaceId,
     directory,
     inbox: inbox.data,
-    listed: [...rail.channels, ...rail.direct],
+    listed: [
+      ...rail.channels,
+      ...rail.direct,
+      ...(archived.data ?? []).map((channel) => ({ channel, unread: 0 })),
+    ],
+    archived: archived.data ?? [],
     refetchInbox: inbox.refetch,
   });
 }
@@ -91,6 +104,7 @@ type ScreenContext = {
   workspaceId: string;
   directory: WorkspaceDirectory;
   inbox: Inbox | null;
+  archived: readonly Channel[];
   /** Public channels, then DMs: what Home lists and a channel screen can open. */
   listed: readonly ChannelUnread[];
   refetchInbox(): Promise<void>;
@@ -98,6 +112,14 @@ type ScreenContext = {
 
 function renderScreen(screen: MobileChannelScreen, context: ScreenContext) {
   switch (screen.kind) {
+    case 'workers':
+      return (
+        <ChannelWorkers
+          buddyId={screen.buddyId}
+          buddyName={context.directory.buddyNames[screen.buddyId] ?? 'Buddy'}
+          workspaceId={context.workspaceId}
+        />
+      );
     case 'home':
       return <ChannelsHome context={context} />;
     case 'channel':
@@ -299,6 +321,7 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
         </ul>
         {inbox === null && <MobileEmptyPanel>Loading channels…</MobileEmptyPanel>}
       </MobileSection>
+      <ArchivedChannels workspaceId={workspaceId} channels={context.archived} />
       {rail.direct.length > 0 && (
         <MobileSection title="Direct messages">
           <ul className="mobile-channels-list">{rail.direct.map(row)}</ul>
@@ -375,6 +398,7 @@ function BuddyRow({ member }: { member: Buddy }) {
   return (
     <li
       className="mobile-channels-buddy ui-row"
+      data-worker-row="mobile"
       data-failed={action.kind === 'failed' || undefined}
     >
       <button
@@ -391,6 +415,11 @@ function BuddyRow({ member }: { member: Buddy }) {
           </span>
         </span>
       </button>
+      <BuddyBackgroundLink
+        buddyId={member.id}
+        workspaceId={member.workspaceId}
+        name={member.name}
+      />
       {direct.woken && (
         <WakeIndicator
           key={direct.woken.attempt}
@@ -623,11 +652,13 @@ function ScreenHeader({
   title,
   subtitle,
   link,
+  channel,
 }: {
   backTo: string;
   title: string;
   subtitle: string;
   link: { path: string; label: string };
+  channel?: Channel;
 }) {
   return (
     <header className="mobile-channel-header ui-row">
@@ -638,6 +669,7 @@ function ScreenHeader({
         <h1>{title}</h1>
         <p>{subtitle}</p>
       </div>
+      {channel && <ChannelArchiveButton channel={channel} />}
       <CopyLinkButton
         className="mobile-channel-header__link ui-muted"
         path={link.path}
@@ -678,6 +710,7 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
       <ScreenHeader
         backTo={channelsHref(workspaceId, { kind: 'home' })}
         title={title}
+        channel={entry?.channel}
         subtitle={heading.about}
         link={{
           path: channelLinkPath(workspaceId, { kind: 'channel', channelId }),
@@ -722,18 +755,20 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
           ),
         })}
       </div>
-      <ChannelComposerMobile
-        title={title}
-        channelId={channelId}
-        rootId={null}
-        placeholder={`Message ${heading.mark}${heading.name}`}
-        references={directory.references}
-        submit="button"
-        onPosted={() => {
-          follow.pin();
-          void feed.latest.refetch();
-        }}
-      />
+      {!entry?.channel.archivedAt && (
+        <ChannelComposerMobile
+          title={title}
+          channelId={channelId}
+          rootId={null}
+          placeholder={`Message ${heading.mark}${heading.name}`}
+          references={directory.references}
+          submit="button"
+          onPosted={() => {
+            follow.pin();
+            void feed.latest.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -883,19 +918,21 @@ function ThreadScreen({
           </p>
         )}
       </div>
-      <ChannelComposerMobile
-        title={`Thread in ${heading.mark} ${heading.name}`}
-        channelId={channelId}
-        rootId={rootId}
-        placeholder="Reply…"
-        references={directory.references}
-        seats={thread.latest.data?.seats}
-        submit="button"
-        onPosted={() => {
-          follow.pin();
-          void thread.latest.refetch();
-        }}
-      />
+      {!entry?.channel.archivedAt && (
+        <ChannelComposerMobile
+          title={`Thread in ${heading.mark} ${heading.name}`}
+          channelId={channelId}
+          rootId={rootId}
+          placeholder="Reply…"
+          references={directory.references}
+          seats={thread.latest.data?.seats}
+          submit="button"
+          onPosted={() => {
+            follow.pin();
+            void thread.latest.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

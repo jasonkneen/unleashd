@@ -54,7 +54,7 @@ pub(crate) fn get_post(conn: &Connection, id: &str) -> Result<Post> {
         .ok_or_else(|| CoreError::not_found("post", id))
 }
 
-const CHANNEL_COLS: &str = "c.id, c.workspace_id, c.kind, c.name, c.purpose, c.member_key, c.task_id, c.created_by, c.created_at";
+const CHANNEL_COLS: &str = "c.id, c.workspace_id, c.kind, c.name, c.purpose, c.member_key, c.task_id, c.created_by, c.created_at, c.archived_at";
 
 fn channel_row(r: &Row) -> rusqlite::Result<Channel> {
     let kind = match (r.get::<_, String>(2)?.as_str(), r.get(3)?, r.get(4)?, r.get::<_, Option<String>>(5)?, r.get(6)?) {
@@ -63,7 +63,7 @@ fn channel_row(r: &Row) -> rusqlite::Result<Channel> {
         ("task", None, None, None, Some(task_id)) => ChannelKind::Task { task_id },
         (kind, ..) => return Err(corrupt(CoreError::Corrupt(format!("channel kind {kind:?} with the columns of another kind")))),
     };
-    Ok(Channel { id: r.get(0)?, workspace_id: r.get(1)?, kind, created_by: Actor::from_nullable(r.get(7)?), created_at: r.get(8)? })
+    Ok(Channel { id: r.get(0)?, workspace_id: r.get(1)?, kind, created_by: Actor::from_nullable(r.get(7)?), created_at: r.get(8)?, archived_at: r.get(9)? })
 }
 
 pub(crate) fn get_channel(conn: &Connection, id: &str) -> Result<Channel> {
@@ -389,12 +389,12 @@ impl Store {
                     "SELECT {CHANNEL_COLS}, (SELECT count(*) FROM post p WHERE p.channel_id = c.id AND p.author_id IS NOT ?3
                         AND p.ord > coalesce(r.last_ord, '')), r.last_ord
                      FROM channel c LEFT JOIN post_read r ON r.reader = ?1 AND r.channel_id = c.id
-                     WHERE c.workspace_id = ?2 AND (c.kind = 'public' OR r.reader IS NOT NULL
+                     WHERE c.workspace_id = ?2 AND c.archived_at IS NULL AND (c.kind = 'public' OR r.reader IS NOT NULL
                        OR EXISTS (SELECT 1 FROM channel_member m WHERE m.member = ?1 AND m.channel_id = c.id))
                      ORDER BY c.kind, c.name, c.created_at"
                 ))?
                 .query_map(params![me, workspace_id, my_buddy], |r| {
-                    Ok(ChannelUnread { channel: channel_row(r)?, unread: r.get(9)?, last_read_ord: r.get(10)? })
+                    Ok(ChannelUnread { channel: channel_row(r)?, unread: r.get(10)?, last_read_ord: r.get(11)? })
                 })?,
         )?;
         Ok(Inbox { requests, waiting_on, channels })
@@ -439,6 +439,35 @@ impl Store {
         })
     }
 
+    /// Archived public channels remain explicitly readable, outside the inbox/unread totals.
+    pub fn archived_channels(&self, actor: &Actor, workspace_id: &str) -> Result<Vec<Channel>> {
+        require(&self.conn, actor, Op::SearchPosts, &Subject::Owner)?;
+        if let Some(id) = actor.buddy_id() {
+            if get_buddy(&self.conn, id)?.workspace_id != workspace_id {
+                return Err(CoreError::Denied("channels outside workspace".into()));
+            }
+        }
+        collect(self.conn.prepare_cached(&format!("SELECT {CHANNEL_COLS} FROM channel c WHERE c.workspace_id = ?1 AND c.kind = 'public' AND c.archived_at IS NOT NULL ORDER BY c.name"))?.query_map([workspace_id], channel_row)?)
+    }
+
+    pub fn set_channel_archived(&mut self, actor: &Actor, channel_id: &str, archived: bool, key: &str) -> Result<Channel> {
+        self.write(|tx| {
+            let channel = get_channel(tx, channel_id)?;
+            require(tx, actor, Op::ArchiveChannel, &Subject::Channel { id: channel.id.clone() })?;
+            if !matches!(channel.kind, ChannelKind::Public { .. }) {
+                return Err(CoreError::Invalid("only public channels may be archived".into()));
+            }
+            let m = Mutation { actor, workspace_id: &channel.workspace_id, buddy_id: actor.buddy_id(), task_id: None,
+                op: "channel.archive", payload: json!({"channel": channel_id, "archived": archived}), key: Some(key) };
+            let id = idempotent(tx, &m, |tx| {
+                let timestamp = if archived { channel.archived_at.clone().or_else(|| Some(now_iso())) } else { None };
+                tx.execute("UPDATE channel SET archived_at = ?2 WHERE id = ?1", params![channel_id, timestamp])?;
+                Ok(channel_id.to_string())
+            })?;
+            get_channel(tx, &id)
+        })
+    }
+
     pub fn create_channel(&mut self, actor: &Actor, input: ChannelInput) -> Result<Channel> {
         self.write(|tx| {
             require(tx, actor, Op::CreateChannel, &Subject::Owner)?;
@@ -465,6 +494,9 @@ impl Store {
 }
 
 fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostInput) -> Result<String> {
+    if channel.archived_at.is_some() {
+        return Err(CoreError::Invalid("channel is archived; restore it before posting".into()));
+    }
     let ask = ask(input.kind, channel, actor)?;
     let root_id = input.reply_to_id.as_deref().map(|parent| thread_root(tx, parent, &channel.id)).transpose()?;
     let ord = crate::ids::next().to_string();

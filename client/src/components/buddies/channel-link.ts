@@ -20,7 +20,8 @@ export type ChannelLink =
   | { kind: 'channel'; channelId: string }
   | { kind: 'thread'; channelId: string; rootId: string }
   | { kind: 'reply'; channelId: string; rootId: string; postId: string }
-  | { kind: 'dm'; conversationId: string };
+  | { kind: 'dm'; conversationId: string }
+  | { kind: 'workers'; buddyId: string };
 
 export function postLink(post: Post): ChannelLink {
   return post.rootId === undefined
@@ -36,6 +37,8 @@ function linkParams(link: ChannelLink): Record<string, string> {
       return { channel: link.channelId, thread: link.rootId };
     case 'reply':
       return { channel: link.channelId, thread: link.rootId, post: link.postId };
+    case 'workers':
+      return { workers: link.buddyId };
     case 'dm':
       return { dm: link.conversationId };
   }

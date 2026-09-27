@@ -24,9 +24,14 @@ test('desktop slack rail: buddy name is a DM button, never a buddy-page link', (
         member={{ id: 'b1', name: 'Lead', role: 'Own the work' }}
         openDm={() => {}}
         current={false}
+        workspaceId="workspace"
       />
     </MemoryRouter>
   );
   assert.ok(html.includes('aria-label="Message Lead"'), 'name must offer the DM action');
-  assert.ok(!html.includes('href="/buddies/'), 'rail name must not link to a buddy page');
+  assert.ok(!html.includes('href="/buddies/b1'), 'rail name must not link to a buddy page');
+  assert.ok(
+    html.includes('/buddies/workspaces/workspace/channels?workers=b1'),
+    'workers stay inside the Buddy workspace'
+  );
 });
