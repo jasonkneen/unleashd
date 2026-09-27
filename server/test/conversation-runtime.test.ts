@@ -908,9 +908,9 @@ test('every harness receives its resolved effort in one request shape', () => {
   // effort silently (the provider would run at its own default).
   type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
   const expected: Record<Provider, string | undefined> = {
-    claude: 'high',
-    codex: 'ultra',
-    muse: 'high',
+    claude: 'medium',
+    codex: 'medium',
+    muse: 'medium',
     gemini: undefined,
     opencode: undefined,
     cursor: undefined,
