@@ -3,6 +3,15 @@
 Moved out of AGENTS.md (startup-context size limit). File-level roles live in
 the AGENTS.md code tree map; this doc is the why behind the layout.
 
+## Product direction: channels and thread inspection
+
+Channels and Buddy DMs are the primary working UI. The classic `/chat/:id` view
+is deprecated for new product development but remains supported for inspecting
+underlying transcripts, tools and worker activity. Keep its inspection links and
+fix regressions; do not launch another pane/composer rewrite or remove it as part
+of the lean-refactor closeout. Removing it is a separate product decision after
+Channels covers the required inspection workflow.
+
 ## 1) Provider abstraction is the integration seam
 
 Provider-specific CLI details are expressed through a shared contract, split
@@ -361,4 +370,3 @@ read_file). Production runs from the repo root, so it only reproduced in dev.
 `resolveDefaultWorkingDirectory` (server/src/http/path-utils.ts) resolves:
 `UNLEASHD_DEFAULT_CWD` → the enclosing pnpm workspace root (at most 4 levels up) →
 `process.cwd()`. It is only a default: a Buddy with a workspace uses its `root_path`.
-
