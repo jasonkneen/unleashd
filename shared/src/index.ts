@@ -719,3 +719,5 @@ export * from './harness-retry.js';
 export * from './buddy-team-configuration.js';
 
 export * from './buddy-team-configuration-result.js';
+
+export * from './upstream.js';

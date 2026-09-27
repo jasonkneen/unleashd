@@ -10,6 +10,7 @@ pnpm run render:overload                 # -> out/overload.mp4 (beats 1–5, 18 
 pnpm run render:design-iteration         # -> out/design-iteration.mp4 (1920×1080, 60 fps)
 pnpm run render:design-review            # -> out/design-review.mp4 (13 s, silent)
 pnpm run render:native-multimedia        # -> out/native-multimedia.mp4 (9.4 s, EDM build + drop)
+pnpm run render:multi-harness            # -> out/multi-harness.mp4 (9.05 s, silent)
 ./bank.sh                                # copy finished renders into ../clips/ (the clips bank)
 ```
 
@@ -84,7 +85,7 @@ privacy note in `../footage/FOOTAGE.md`.
 Source: `src/DesignReview.tsx` (footage D). Same card-over-blur camera as DesignIteration, but
 a shot can frame any source region (`x`, `w`, `top`, `scale`), not only the thread pane.
 Each hold also drifts in (`zoom` 1.04–1.10, anchored at `ox`/`oy` in the card) toward where the
-action is, so no shot sits dead still. Rough cut 3, 2026-09-26: 13.0 s, silent.
+action is, so no shot sits dead still. Rough cut 4, 2026-09-26: 11.2 s, silent.
 
 | Out (s) | Source | Speed | Shot |
 |---|---|---|---|
@@ -94,36 +95,57 @@ action is, so no shot sits dead still. Rough cut 3, 2026-09-26: 13.0 s, silent.
 | 8.0–9.0 | 425.8–426.8 s: click the iPad thread | 1× | main-column card |
 | 9.0–10.0 | hold on 431.75 s: iPad landscape Buddies grid | still | hard cut to pane card (1.2×) |
 | 10.0–10.8 | 431.75–435.0 s: quick scroll down the iPad thread | 4× | pane card eases down |
-| 10.8–11.7 | hold on 435.0 s: iPad landscape channel | still | pane card |
-| 11.7–13.0 | hold on 438.75 s: Desktop Buddies grid | still | hard cut, pane card |
+| 10.8–11.2 | hold on 435.0 s: the scroll lands on an iPad channel | still | pane card, then cut to the next section |
 
 Rough cut 3: the owner found the scrolling ending too long ("just show a few screenshots and a
 quick scroll to the other"), so the end holds three screenshots (`hold` cuts, a frozen frame)
-with a single fast scroll between the first two.
+with a single fast scroll between the first two. Rough cut 4: the Desktop hold is gone; the clip
+ends 0.4 s after the scroll lands (owner: "do the quick scroll and then cut it there").
 
 The real wait is ~6.5 minutes; the chip says so rather than implying the reply was instant.
 
 ## NativeMultimedia — opens the features section
 
-Source: `src/NativeMultimedia.tsx` (`CUTS`, `CAMERA`, `CARDS`). Rough cut 1, 2026-09-26: 9.375 s
+Source: `src/NativeMultimedia.tsx` (`CUTS`, `CAMERA`, `CARDS`). Rough cut 2, 2026-09-26: 9.375 s
 = 5 bars of the EDM cue at 128 BPM. Every cut and card sits on a beat (`BEAT`, `DROP`).
 
 | Out (s) | Source | Shot |
 |---|---|---|
+| 0.47–3.28 | card | **Native multimedia**, titling the segment from its first beat (owner, rough cut 2) |
 | 0–3.28 | footage 1, 0.9–9.4 s at 2.6× | owner types "@Marketing Designer Can you share with me the latest video". Eases from full frame into the composer strip. The pauses after "video," are cut |
 | 3.28 | send blip | hard cut on beat 8 to the thread |
 | 3.28–9.375 | footage 2, from 1.0 s at 1× | the reply with the launch video playing inline. Pushes into the player (4.7–6.1 s) |
-| 5.16 | card | **Native multimedia** |
 | 7.5 | the drop | **Code +** / **Design +** / **Marketing!**, one per beat, with a 6% punch on the window |
 
 Music: `../sound/edm-build.wav` from `../sound/edm.py`. It's synthesized, so we own it (128 BPM, D major / B minor
 next to the marimba; 4-bar build, gap, drop at exactly 7.500 s, 4 bars of groove to 15 s). The
 "echoing voice" is formant-synthesized vowels ("oh-ah", "ay-oh") with a ping-pong echo, not
 words. There are stems (`edm-stem-{drums,music,vox}.wav`) for rebalancing. The cut uses bars 1–5; bars 6–8 are
-for the flash cards that follow.
+for the flash cards that follow. The cut fades the music out over its last beat.
+
+The gap before the drop is a breath, not a dropout. Owner, rough cut 1: "the hard transition in music is a bit rough". The dry mix now fades over 40 ms, the rooms ring for about 180 ms, and a reversed crash swells into the downbeat. The gap sits around -25 dB, where it used to be dead air.
 
 Footage 2 is our capture, not a screen recording: `../capture/record-thread.mjs` drives
 headless Chrome over CDP and poses every frame. It sets the thread's scroll and the video's
 `currentTime`, then takes one screenshot, so it's a true 60 fps at 2974×1882 on any machine. A live CDP
 screencast managed 5 fps at that size, and its frames ignore `deviceScaleFactor`. Re-shoot
 with the command in `../footage/FOOTAGE.md`.
+
+## MultiHarness — beat 9, the proof after the "Multi harness" slide
+
+Source: `src/MultiHarness.tsx` (footage H). This is the same card camera as DesignReview; both
+now render through `src/card.tsx` (`CardEdit`: CUTS + CAMERA in, clip out). Rough cut 1,
+2026-09-26: 9.05 s, silent.
+
+| Out (s) | Source | Speed | Shot |
+|---|---|---|---|
+| 0.0–1.07 | 1.0–2.6 s: the mention menu, pick Buddies Release Engineer | 1.5× | full frame → composer card |
+| 1.07–2.6 | 2.6–11.8 s: "Can we push a release to github and npm" is typed | 6× | card drifts toward the composer line |
+| 2.6–5.6 | 11.8–14.8 s: the reply picker opens; hover Claude → Codex → Cursor → Muse, pick Muse | 1× | pushes in 1.4× on the harness row |
+| 5.6–7.0 | 14.8–17.6 s: thinking level medium, Done | 2× | eases to the thinking row and Done |
+| 7.0–8.45 | 17.6–20.5 s: send, the post lands, the thread opens | 2× | card moves to the posted message |
+| 8.45–9.05 | hold on 20.5 s: "Buddies Release Engineer is replying…" | still | slow push |
+
+The composer chip changes from "Claude Opus 5.5" to "Muse Spark 1.3 Contributor" when Muse is
+picked (visible from ~5.6 s). The Model row lists the harness's own models, which is the proof
+that picking a harness is more than a label.

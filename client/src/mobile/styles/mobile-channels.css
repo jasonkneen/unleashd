@@ -5,6 +5,10 @@
 
 /* ── Home: channel and Buddy rows ─────────────────────────────────────── */
 
+.mobile-channels-header-aside {
+  gap: var(--sp-4);
+}
+
 .mobile-channels-list {
   display: grid;
   /* minmax(0, …): a grid item's min-width is its content by default, so a
