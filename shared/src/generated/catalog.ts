@@ -90,9 +90,9 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProviderEntry[] = [
     supportsDynamicModels: false,
     models: [
       { id: "fable", displayName: "Claude Fable 5.1", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
-      { id: "claude-opus-5-5", displayName: "Claude Opus 5.5", isDefault: true, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
-      { id: "sonnet", displayName: "Claude Sonnet", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
-      { id: "haiku", displayName: "Claude Haiku", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
+      { id: "claude-opus-5-5", displayName: "Opus 5.5", isDefault: true, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
+      { id: "sonnet", displayName: "Sonnet", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
+      { id: "haiku", displayName: "Haiku", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
     ],
   },
   {

@@ -408,8 +408,8 @@ function configLabel(config: ConversationConfig, catalog: ProviderCatalog | null
   const modelId =
     config.model.mode === 'explicit' ? config.model.modelId : provider?.defaultModelId;
   const model = provider?.models.find((candidate) => candidate.id === modelId);
-  // Model names already carry their family ("Claude Opus 5.5"); the picker
-  // shows the harness.
+  // The catalog supplies the user-facing model name; the provider is already
+  // represented by the Buddy's model choice and does not need repeating here.
   return model?.displayName ?? modelId ?? `${config.provider} default`;
 }
 
