@@ -10,16 +10,17 @@ import * as Close from './Close';
 import * as DesignIterationShort from './DesignIterationShort';
 import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
-import * as MultiHarness from './MultiHarness';
 import * as NativeMultimedia from './NativeMultimedia';
 import * as Overload from './Overload';
+import * as PickerRefresh from './PickerRefresh';
+import * as PostIntroBenefits from './PostIntroBenefits';
 
 export const FPS = 60;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
 
 const BAR = (4 * 60) / 128; // 1.875 s
-const MUSIC_IN = Overload.DURATION; // the build starts as the title card ends (18 s)
+const MUSIC_IN = Overload.DURATION + PostIntroBenefits.DURATION;
 // Frame where bar b (1-based) of the cue starts. Bars are 112.5 frames, so round per bar, never accumulate.
 const bar = (b: number) => MUSIC_IN + Math.round((b - 1) * BAR * FPS);
 
@@ -40,20 +41,21 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
   offset,
 });
 
-// Bars 20–27: the harness slide, the picker proof, the subscriptions slide. The picker clip
-// (9.05 s) starts 1.05 s in, on the mention menu, so the three fill exactly 8 bars.
+// Bars 20–27: harness slide, refreshed picker proof, subscriptions slide.
+// The picker starts on Claude and ends on the new thinking slider.
 const PICKER_FROM = bar(20) + SLIDE_SPLIT;
 const PICKER_TO = bar(28) - (SLIDES_END - SLIDE_SPLIT);
 
 export const SECTIONS: Section[] = [
-  section('overload', 0, MUSIC_IN, Overload.Overload, Overload.DURATION),
+  section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
+  section('post-intro-benefits', Overload.DURATION, MUSIC_IN, PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
   section('native-multimedia', bar(1), bar(6), NativeMultimedia.NativeMultimediaPicture, NativeMultimedia.DURATION),
   section('design-review', bar(6), bar(12), DesignReview.DesignReview, DesignReview.DURATION),
   section('design-iteration', bar(12), bar(15), DesignIterationShort.DesignIterationShort, DesignIterationShort.DURATION),
   section('features', bar(15), bar(18), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
   section('values', bar(18), bar(20), Close.Values, Close.VALUES_FRAMES),
   section('harness-slide', bar(20), PICKER_FROM, Slides, SLIDE_SPLIT),
-  section('picker', PICKER_FROM, PICKER_TO, MultiHarness.MultiHarness, MultiHarness.DURATION, MultiHarness.DURATION - (PICKER_TO - PICKER_FROM)),
+  section('picker', PICKER_FROM, PICKER_TO, PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
   section('subscriptions-slide', PICKER_TO, bar(28), Slides, SLIDES_END, SLIDE_SPLIT),
   section('fork', bar(28), bar(29), Close.Fork, Close.FORK_FRAMES),
   section('run', bar(29), bar(30), Close.Run, Close.RUN_FRAMES),
@@ -87,6 +89,9 @@ export const Assembly: React.FC = () => (
     {SECTIONS.map((s) => (
       <Place key={s.id} s={s} />
     ))}
+    <Sequence from={Overload.DURATION} layout="none">
+      <PostIntroBenefits.BenefitsSound />
+    </Sequence>
     <Sequence from={MUSIC_IN} layout="none">
       <Audio src={edmFull} />
     </Sequence>
