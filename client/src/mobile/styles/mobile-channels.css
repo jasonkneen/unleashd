@@ -147,7 +147,9 @@
   color: var(--text-bright);
 }
 
-.mobile-channels-wake-status {
+/* The Task filter now sits in the header's settings slot (578e160): no margin, just no shrink. */
+.mobile-channels-wake-status,
+.mobile-channel__task-filter {
   flex: none;
 }
 
