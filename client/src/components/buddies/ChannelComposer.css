@@ -480,19 +480,21 @@
   cursor: default;
 }
 
-/* A retry or New chat button: the harness popover opens above it (493c1c7). */
 .channel-harness-picker {
   position: relative;
   margin-top: var(--sp-3);
 }
 
-/* A Buddy DM on the conversation page: Open in Channels + New chat (DmChannelsNotice). */
 .dm-channels-notice {
-  flex-wrap: wrap;
   gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-4);
 }
-
 .dm-channels-notice > .channel-harness-picker {
   margin-top: 0;
+}
+.channel-dm-about {
+  position: relative;
+}
+.channel-dm-model {
+  color: var(--text-bright);
+  border-color: var(--accent-primary);
 }

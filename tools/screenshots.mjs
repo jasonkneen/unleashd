@@ -263,6 +263,10 @@ async function discover(api, args, token) {
   const overview = await api('/api/buddies/overview');
   const channel = await discoverChannel(api, overview, args.workspace);
   const conversation = await discoverConversation(args.url, token);
+  const buddy = firstBuddy(overview, channel.workspaceId);
+  const direct = buddy.buddyId
+    ? await api(`/api/buddies/${encodeURIComponent(buddy.buddyId)}/direct/chain`)
+    : null;
   return {
     ...channel,
     // A pinned channel/thread replaces the richest one discovery picked.
@@ -271,7 +275,8 @@ async function discover(api, args, token) {
     conversationId: conversation?.conversationId ?? null,
     conversationMessages: conversation?.messageCount ?? null,
     // The first active Buddy of the discovered workspace (its detail tabs are screens).
-    ...firstBuddy(overview, channel.workspaceId),
+    ...buddy,
+    directConversationId: direct?.generations?.at(-1) ?? null,
     swarmProject: await discoverSwarm(api),
   };
 }
@@ -423,6 +428,7 @@ function buildScreens(found, focus) {
   const noBuddy = found.buddyId ? null : 'no Buddy';
   const buddy = found.buddyId && `/buddies/${enc(found.buddyId)}`;
   const channels = `/buddies/workspaces/${enc(found.workspaceId)}/channels`;
+  const dm = found.directConversationId && `${channels}?dm=${enc(found.directConversationId)}`;
   const channel = found.channelId && `channel=${enc(found.channelId)}`;
   const noChannel = channel ? null : 'no channel with posts in this workspace';
   const thread = found.threadRootId && `${channels}?${channel}&thread=${enc(found.threadRootId)}`;
@@ -529,6 +535,7 @@ function buildScreens(found, focus) {
     },
     // ── Channels ──
     { name: 'channels', missing: null, views: onBoth(channels) },
+    { name: 'dm', missing: dm ? null : 'no Buddy DM', views: onBoth(dm) },
     { name: 'channel', missing: noChannel, views: onBoth(`${channels}?${channel}`) },
     { name: 'thread', missing: noThread, views: onBoth(thread) },
     // The Task filter is desktop-only (the mobile channel screen has no picker).

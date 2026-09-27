@@ -94,9 +94,13 @@ export function BuddyPage({
                 <span>{buddy.status}</span>
               </div>
               <details className="buddy-detail-about">
-                <summary>About this Buddy</summary>
-                <p className="buddy-page__role">{buddy.role}</p>
-                <BuddyRelations buddy={buddy} overview={overview.data} />
+                <summary aria-label={`About ${buddy.name}`} title={`About ${buddy.name}`}>
+                  ⓘ
+                </summary>
+                <div className="buddy-detail-nav__menu ui-card" style={{ left: 0, right: 'auto' }}>
+                  <p className="buddy-page__role">{buddy.role}</p>
+                  <BuddyRelations buddy={buddy} overview={overview.data} />
+                </div>
               </details>
               <RefreshNotice read={detail} />
             </div>

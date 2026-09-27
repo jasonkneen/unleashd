@@ -385,3 +385,24 @@ export function BuddyMemory({ buddyId, workspaceId }: { buddyId: string; workspa
     </section>
   );
 }
+
+/** A focused memory tab keeps the editor and its revision history on one page. */
+export function BuddyMemoryDoc({
+  buddyId,
+  kind,
+}: { buddyId: string; kind: 'working' | 'long_term' }) {
+  const working = kind === 'working';
+  const label = working ? 'Working memory' : 'Long-term memory';
+  return (
+    <section className="buddy-panel" aria-label={label}>
+      <BuddyDocEditor
+        key={`${buddyId}:${kind}`}
+        buddyId={buddyId}
+        kind={kind}
+        address={PORTABLE}
+        label={label}
+        hint={working ? 'What the Buddy is in the middle of.' : 'What the Buddy keeps across work.'}
+      />
+    </section>
+  );
+}
