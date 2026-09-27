@@ -1,5 +1,5 @@
-// The TS boundary for conversation records: the built addon round-trips a record in the exact
-// PersistedConversationConfigRecord shape (nullish null vs absent included), resolves concurrent
+// The TS boundary for conversation records: the built addon round-trips the native record shape
+// (historical fields and nullish null vs absent included), resolves concurrent
 // set_config calls from JS to one winner, and returns typed outcomes. Run `pnpm run build` first.
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
@@ -20,13 +20,24 @@ const config = (modelId) => ({
 test('records round-trip through the addon and set_config is compare-and-set', async () => {
   const db = join(mkdtempSync(join(tmpdir(), 'unleashd-records-')), 'records.sqlite');
   const records = await ConversationRecords.open(db);
-  const creation = { commandId: 'cmd-1' };
+  const creation = {
+    commandId: 'cmd-1',
+    branch: {
+      sourceConversationId: 'parent',
+      throughMessageId: 'message',
+      audience: { kind: 'workspace', workspaceId: 'w1' },
+      handoff: 'context',
+      launches: { digest: 'historical handoff' },
+    },
+  };
   const kind = {
     t: 'buddy',
     context: {
       buddyId: 'b1',
       workspaceId: 'w1',
       buddyProjectId: null,
+      legacyWorkItemId: 'older-task',
+      knowledgeScope: { kind: 'workspace', workspaceId: 'w1' },
       allowedBuddyOperations: ['buddy.post'],
     },
     visibility: 'foreground',
@@ -102,7 +113,7 @@ test('records round-trip through the addon and set_config is compare-and-set', a
   assert.equal(summary.status, 'deleted');
   assert.deepEqual(summary.sessions, [{ provider: 'codex', sessionId: 's1' }]);
 
-  // A record the Zod schema would refuse is refused with a typed code, not stored.
+  // Invalid input is refused at the SQLite write boundary with a typed code.
   await assert.rejects(
     records.create(
       {
@@ -118,7 +129,7 @@ test('records round-trip through the addon and set_config is compare-and-set', a
   );
   assert.equal(await records.get('c2'), null);
 
-  // Worker ids are `.nullable()` in the Zod schema: null must cross as null, never as absent.
+  // Worker ids are nullable: null must cross as null, never as absent.
   const worker = { t: 'worker', swarmId: 'sw', workerId: null, role: null };
   const w = await records.create(
     {

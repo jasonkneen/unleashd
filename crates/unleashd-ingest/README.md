@@ -103,8 +103,10 @@ await records.setConfig({ conversationId, expectedConfigRevision, config, lastRe
 // {t:'committed'} | {t:'revision_conflict', current} | {t:'tombstoned', current} | {t:'missing'}
 ```
 
-`ConversationRecord` has the `PersistedConversationConfigRecord` shape minus `version`
-(always 2: T09's stored `kind`). The server (`server/src/conversations/config-records.ts`)
+`ConversationRecord` is the Rust-owned stored contract, generated into `index.d.ts`.
+The old JSON file's `version` was not a stored field. Shared Zod schemas still validate
+active input and wire values; Rust validates semantic constraints at the SQLite write.
+The server (`server/src/conversations/config-records.ts`)
 opens its own file, `<app data>/conversation-records.sqlite`, never the ingest cache file:
 records are authoritative, and deleting the cache must never delete them. Every mutation is read-modify-write in one `BEGIN IMMEDIATE` transaction and
 goes through `store::put`, which validates the Zod refinements and rebuilds the

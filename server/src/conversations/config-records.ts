@@ -6,7 +6,6 @@ import type {
   ConversationConfig,
   ConversationCreationMetadata,
   ConversationKind,
-  PersistedConversationConfigRecord,
   Provider,
   ProviderTurnUsage,
   ResolvedExecutionConfig,
@@ -36,8 +35,9 @@ const { ConversationRecords } = createRequire(__filename)(
 export const INITIAL_MESSAGE_DISPATCH_LEASE_MS = 15_000;
 export const RECORDS_FILE = 'conversation-records.sqlite';
 
-/** A stored record. `version` belonged to the JSON file format only. */
-export type ConversationRecord = Omit<PersistedConversationConfigRecord, 'version'>;
+/** The generated native contract is the stored record; shared schemas describe active inputs. */
+// Pattern: one-type-source (docs/patterns.md#one-type-source)
+export type ConversationRecord = Addon.ConversationRecord;
 export type SessionBinding = ConversationRecord['sessionBindings'][number];
 export type ConfigProvenance = ConversationRecord['provenance'];
 
@@ -104,19 +104,10 @@ function unimportedMessage(location: Extract<RecordsLocation, { t: 'unimported' 
   ].join('\n');
 }
 
-// Rust validated every record against the same schema before storing it, so a
-// returned record is canonical; this is the one place the napi type is named
-// as the shared one.
-const record = (r: Addon.ConversationRecord): ConversationRecord =>
-  r as unknown as ConversationRecord;
 const maybe = (r: Addon.ConversationRecord | null): ConversationRecord | undefined =>
-  r === null ? undefined : record(r);
-const binding = (b: SessionBinding) => b as Addon.SessionBinding;
+  r ?? undefined;
 
-export type SetConfigResult =
-  | { t: 'committed'; record: ConversationRecord }
-  | { t: 'revision_conflict' | 'tombstoned'; current: ConversationRecord }
-  | { t: 'missing' };
+export type SetConfigResult = Addon.SetConfigOutcome;
 
 /** Pattern: deep-modules (docs/patterns.md#deep-modules) — one call per store operation. */
 export class ConversationRecordStore {
@@ -146,7 +137,7 @@ export class ConversationRecordStore {
     provider: Provider,
     sessionId: string
   ): Promise<ConversationRecord | undefined> {
-    return maybe(await (await this.ready).findBySession(provider as Addon.Provider, sessionId));
+    return maybe(await (await this.ready).findBySession(provider, sessionId));
   }
 
   listSummaries(): Promise<Addon.RecordSummary[]> {
@@ -168,20 +159,20 @@ export class ConversationRecordStore {
     const outcome = await (await this.ready).create(
       {
         conversationId: input.conversationId,
-        kind: input.kind as Addon.ConversationKind,
-        sessionBindings: (input.sessionBindings ?? []).map(binding),
-        currentSession: input.currentSession && binding(input.currentSession),
+        kind: input.kind,
+        sessionBindings: [...(input.sessionBindings ?? [])],
+        currentSession: input.currentSession,
         workingDirectory: input.workingDirectory,
-        creation: input.creation as Addon.ConversationCreation | undefined,
-        config: input.config as Addon.ConversationConfig,
-        lastResolvedConfig: input.lastResolvedConfig as Addon.ResolvedExecutionConfig | undefined,
-        provenance: input.provenance as Addon.Provenance,
+        creation: input.creation,
+        config: input.config,
+        lastResolvedConfig: input.lastResolvedConfig,
+        provenance: input.provenance,
       },
       this.at()
     );
     switch (outcome.t) {
       case 'created':
-        return record(outcome.record);
+        return outcome.record;
       case 'exists':
         throw new ConfigRevisionConflictError(-1, outcome.current.configRevision);
     }
@@ -198,12 +189,12 @@ export class ConversationRecordStore {
       {
         conversationId: input.conversationId,
         expectedConfigRevision: input.expectedConfigRevision,
-        config: input.config as Addon.ConversationConfig,
-        lastResolvedConfig: input.lastResolvedConfig as Addon.ResolvedExecutionConfig,
+        config: input.config,
+        lastResolvedConfig: input.lastResolvedConfig,
       },
       this.at()
     );
-    return outcome as unknown as SetConfigResult;
+    return outcome;
   }
 
   /** Tombstone; the session index stays so transcripts remain recognisable. */
@@ -216,7 +207,6 @@ export class ConversationRecordStore {
     return (await this.ready).purge(conversationId);
   }
 
-  /** Replace a legacy (session-id) conversation id, keeping its bindings. */
   /** Undefined when no record exists for this id. */
   async setDone(conversationId: string, done: boolean): Promise<ConversationRecord | undefined> {
     return maybe(await (await this.ready).setDone(conversationId, done, this.at()));
@@ -227,7 +217,7 @@ export class ConversationRecordStore {
     currentSession: SessionBinding
   ): Promise<ConversationRecord | undefined> {
     return maybe(
-      await (await this.ready).setCurrentSession(conversationId, binding(currentSession), this.at())
+      await (await this.ready).setCurrentSession(conversationId, currentSession, this.at())
     );
   }
 
@@ -241,7 +231,7 @@ export class ConversationRecordStore {
       await (await this.ready).setCurrentSessionUsage(
         conversationId,
         sessionId,
-        latestUsage as Addon.ProviderTurnUsage,
+        latestUsage,
         this.at()
       )
     );
@@ -252,7 +242,7 @@ export class ConversationRecordStore {
     sessionBinding: SessionBinding
   ): Promise<ConversationRecord | undefined> {
     return maybe(
-      await (await this.ready).addSessionBinding(conversationId, binding(sessionBinding), this.at())
+      await (await this.ready).addSessionBinding(conversationId, sessionBinding, this.at())
     );
   }
 

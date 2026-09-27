@@ -16,11 +16,9 @@ export declare class ConversationRecords {
   markDeleted(conversationId: string, at: number): Promise<boolean>
   /** Remove the row (rollback of an unexposed creation). false = missing. */
   purge(conversationId: string): Promise<boolean>
-  rekey(from: string, to: string): Promise<RekeyOutcome>
   setCurrentSession(conversationId: string, binding: SessionBinding, at: number): Promise<ConversationRecord | null>
   setCurrentSessionUsage(conversationId: string, sessionId: string, usage: ProviderTurnUsage, at: number): Promise<ConversationRecord | null>
   addSessionBinding(conversationId: string, binding: SessionBinding, at: number): Promise<ConversationRecord | null>
-  appendBranchLaunch(conversationId: string, digest: string, handoff: string): Promise<BranchLaunchOutcome>
   /** Lease the first-message delivery to `token` (the caller's random UUID). null = not claimed. */
   claimInitialMessageDispatch(conversationId: string, token: string, at: number): Promise<ConversationRecord | null>
   /** null = `token` does not hold the lease, or the message was already delivered. */
@@ -57,12 +55,6 @@ export declare class Ingest {
   /** Stop watching and release `onChange` (so Node can exit). Idempotent. */
   stop(): Promise<void>
 }
-
-export type BranchLaunchOutcome =
-  | { t: 'recorded'; record: ConversationRecord }
-  | { t: 'missing' }
-  | { t: 'unavailable' }
-  | { t: 'full' }
 
 export interface BuddyContext {
   knowledgeScope?: KnowledgeScope
@@ -289,11 +281,6 @@ export interface RecordSummary {
   createdAt: string
   updatedAt: string
 }
-
-export type RekeyOutcome =
-  | { t: 'rekeyed'; record: ConversationRecord }
-  | { t: 'missing' }
-  | { t: 'exists'; current: ConversationRecord }
 
 export interface RemovedSession {
   sessionId: string

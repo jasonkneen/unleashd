@@ -1,10 +1,8 @@
 //! Pattern: parse-dont-validate (docs/patterns.md#parse-dont-validate)
 //!
-//! The Zod refinements serde's shape cannot express (`min(1)`, `nonnegative`, `.datetime()`,
-//! `max(64000)`, a non-empty operations list). Run once per record at the only write path
-//! (`store::put`), so the importer and every API write refuse exactly what
-//! `PersistedConversationConfigRecordSchema.safeParse` refuses — a stored row is always one the
-//! TS schema accepts.
+//! Semantic constraints serde's shape cannot express (`min(1)`, `nonnegative`, `.datetime()`,
+//! `max(64000)`, a non-empty operations list). Run once per record at the only SQLite write path
+//! (`store::put`), including historical fields whose bytes must survive unchanged.
 
 use super::types::*;
 use regex::Regex;
