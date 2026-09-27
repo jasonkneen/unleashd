@@ -932,7 +932,7 @@ test('a missing Buddies database with the v33 file present names the import comm
     const file = join(scratch, 'buddies-v3.sqlite');
     await assert.rejects(
       openBuddiesCore(buddiesLocation(file, legacy)),
-      /one-time v33 import[\s\S]*03fc931/
+      /one-time v33\/v34 import[\s\S]*archive\/t15-importer-93367be/
     );
     assert.equal(existsSync(file), false, 'no empty database is created over an unimported one');
   } finally {
