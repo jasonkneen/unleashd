@@ -37,3 +37,10 @@ export const MessageBodySchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('parts'), parts: z.array(ContentPartSchema).min(1) }),
 ]);
 export type MessageBody = z.infer<typeof MessageBodySchema>;
+
+/** Visible prose in order; structured tool and receipt parts have no prose projection. */
+export function bodyText(body: MessageBody): string {
+  return body.t === 'text'
+    ? body.text
+    : body.parts.map((part) => (part.t === 'text' ? part.text : '')).join('');
+}

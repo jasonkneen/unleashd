@@ -10,7 +10,7 @@ import type {
   ServerMessageInput,
   SubAgent,
 } from '@unleashd/shared';
-import { AskUserQuestionSchema, toolContentPart } from '@unleashd/shared';
+import { AskUserQuestionSchema, bodyText, toolContentPart } from '@unleashd/shared';
 import {
   TURN_BRIDGE_TIMEOUT_MS,
   TURN_MAX_RUNTIME_MS,
@@ -143,6 +143,8 @@ export class TurnRunner {
   // Usage changed this turn and is unpersisted (one CAS write per turn, not per event).
   private providerUsageDirty = false;
   private activeAttemptId: string | null = null;
+  // Fix-guard: tool events now occupy separate records; completion must collect this turn's prose.
+  private turnMessageStart = 0;
   private nextAttempt: string | null = null;
   // Chosen once per turn from the harness capability table (turns/subagents.ts).
   private subAgentFold: SubAgentFold = subAgentFoldFor('claude');
@@ -266,6 +268,7 @@ export class TurnRunner {
     console.log(`[${host.id}] Message: "${turn.content.substring(0, 50)}"`);
 
     this.stderrBuffer = '';
+    this.turnMessageStart = host.messages.length;
     this.sawMeaningfulOutput = false;
     this.completedCleanly = false;
     this.sealed = false;
@@ -637,12 +640,13 @@ export class TurnRunner {
         host.policy.reviewCompleted(host.messages);
       }
       this.finishAttempt('succeeded', 'provider_complete');
-      const completedAssistant = [...host.messages]
-        .reverse()
-        .find((message) => message.role === 'assistant');
       host.emit(
         'buddy-turn-complete',
-        completedAssistant?.body.t === 'text' ? completedAssistant.body.text : ''
+        host.messages
+          .slice(this.turnMessageStart)
+          .filter((message) => message.role === 'assistant')
+          .map((message) => bodyText(message.body))
+          .join('')
       );
     }
     host.processQueue();

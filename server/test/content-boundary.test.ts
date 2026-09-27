@@ -65,6 +65,25 @@ test('native ordered blocks keep tools, questions and prose typed', () => {
   });
 });
 
+test('plain native text parts normalize to the same body as a live user turn', async () => {
+  const plain = {
+    seq: 0,
+    role: 'user',
+    content: 'First\nsecond',
+    partsJson: JSON.stringify([
+      { t: 'text', text: 'First\n' },
+      { t: 'text', text: 'second' },
+    ]),
+    at: 1,
+  };
+  const [message] = await sessionMessages(
+    { messages: async () => [plain] } as never,
+    { sessionId: 's', createdAt: 1 },
+    1
+  );
+  assert.deepEqual(message.body, { t: 'text', text: 'First\nsecond' });
+});
+
 test('an unchanged pre-upgrade stored tool row equals a full rebuilt native part', async () => {
   const input = { command: 'oompa run runs.json' };
   const old = {

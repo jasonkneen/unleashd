@@ -5,7 +5,13 @@
  * rows — a day rule, a lead (avatar + name + time) or a continuation — so a DM reads like the
  * channel around it. Pure, so mobile may import it.
  */
-import type { ContentPart, Message, MessageBody, QueuedMessage } from '@unleashd/shared';
+import {
+  type ContentPart,
+  type Message,
+  type MessageBody,
+  type QueuedMessage,
+  bodyText,
+} from '@unleashd/shared';
 import type { MessageGroup } from '../../utils/chat-message-groups';
 
 // The window channelRows uses: a later message from the same author within five minutes
@@ -85,8 +91,7 @@ export function dmRows(groups: readonly MessageGroup[], queued: readonly QueuedM
 export function lastOwnerText(messages: readonly Message[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.role === 'user' && message.body.t === 'text' && message.body.text.trim())
-      return message.body.text;
+    if (message.role === 'user' && bodyText(message.body).trim()) return bodyText(message.body);
   }
   return null;
 }

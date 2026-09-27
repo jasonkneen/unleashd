@@ -37,3 +37,22 @@ test('the label is bounded', () => {
   assert.ok(label.length <= 80);
   assert.ok(label.endsWith('…'));
 });
+
+test('mixed native user parts still contribute visible label prose', () => {
+  assert.equal(
+    conversationLabel(undefined, [
+      {
+        role: 'user',
+        body: {
+          t: 'parts',
+          parts: [
+            { t: 'text', text: 'Explain this' },
+            { t: 'tool', name: 'attached_file', input: { path: '/a' } },
+          ],
+        },
+        timestamp: new Date('2026-09-22T00:00:00.000Z'),
+      },
+    ]),
+    'Explain this'
+  );
+});

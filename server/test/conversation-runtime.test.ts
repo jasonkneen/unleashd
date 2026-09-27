@@ -363,6 +363,40 @@ test('an early turn.complete does not drop the prompt answer that follows it', a
   assert.match(output, /The real answer/);
 });
 
+test('buddy completion preserves current-turn prose when a tool is last', async () => {
+  let turn = 0;
+  const fixture = runtimeFixture({
+    executeTurn: fakeExecuteTurn(() => {
+      turn += 1;
+      const current = turn;
+      async function* events() {
+        yield { type: 'turn.started' as const };
+        yield { type: 'text.delta' as const, text: current === 1 ? 'Old turn' : 'Current answer' };
+        yield { type: 'tool.use' as const, name: 'Read', input: { file_path: '/a' } };
+        yield { type: 'turn.complete' as const, reason: 'success' as const };
+      }
+      return {
+        child: { exitCode: 0 },
+        events: events(),
+        completed: Promise.resolve({
+          exitCode: 0,
+          signal: null,
+          sessionId: 'provider-session',
+          reason: 'success' as const,
+        }),
+        stop: () => undefined,
+      };
+    }),
+  });
+  const outputs: string[] = [];
+  fixture.conversation.on('buddy-turn-complete', (text: string) => outputs.push(text));
+  fixture.conversation.sendMessage('First');
+  await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
+  fixture.conversation.sendMessage('Second');
+  await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
+  assert.deepEqual(outputs, ['Old turn', 'Current answer']);
+});
+
 // The terminal failure names the provider's own message, unwrapped from its JSON
 // envelope, instead of the generic "Provider reported an error" (493c1c7).
 test('a provider error fails the turn with its own message, not the JSON envelope', async () => {
@@ -1625,7 +1659,8 @@ test('a childless Codex collab completion keeps one visible attempt and no child
   ]);
   const assistant = conversation.messages.filter((message) => message.role === 'assistant');
   assert.equal(
-    assistant.flatMap((message) => message.body.t === 'parts' ? message.body.parts : [])
+    assistant
+      .flatMap((message) => (message.body.t === 'parts' ? message.body.parts : []))
       .filter((part) => part.t === 'tool' && part.name === 'spawn_agent').length,
     1
   );

@@ -50,5 +50,7 @@ export function nativeBody(partsJson: string | undefined, content: string): Mess
       parts.push(...receiptParts(part.output));
     }
   }
+  if (parts.length && parts.every((part) => part.t === 'text'))
+    return { t: 'text', text: parts.map((part) => (part.t === 'text' ? part.text : '')).join('') };
   return parts.length ? { t: 'parts', parts } : { t: 'text', text: '' };
 }

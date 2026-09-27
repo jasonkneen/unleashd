@@ -17,6 +17,7 @@ import {
   transcriptFamily,
   transcriptStore,
 } from '../src/atoms/conversations';
+import { lastOwnerText } from '../src/components/buddies/channel-dm';
 import { groupChatMessages, regroupChatMessages } from '../src/utils/chat-message-groups';
 import { buildForkDraft, messageTranscriptContent } from '../src/utils/conversation-transcript';
 import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-conversations';
@@ -734,4 +735,33 @@ test('regrouping after records change matches a full pass for every transcript p
       groupChatMessages(replaced, null)
     );
   }
+});
+
+test('mixed user parts retain retry prose and strip the hidden first-turn prefix', () => {
+  const user: Message = {
+    ...message('user', ''),
+    body: {
+      t: 'parts',
+      parts: [
+        { t: 'text', text: 'hidden\n\nVisible request' },
+        { t: 'tool', name: 'attachment', input: { path: '/a' } },
+      ],
+    },
+  };
+  assert.equal(lastOwnerText([user]), 'hidden\n\nVisible request');
+  const grouped = groupChatMessages([user], 'hidden');
+  assert.deepEqual(grouped[0].messages[0].body, {
+    t: 'parts',
+    parts: [
+      { t: 'text', text: 'Visible request' },
+      { t: 'tool', name: 'attachment', input: { path: '/a' } },
+    ],
+  });
+  const draft = buildForkDraft({
+    row: syntheticConversation(1, { id: 'mixed-prefix', cwd: '/tmp/project' }),
+    detail: { ...syntheticDetail('mixed-prefix'), swarmDebugPrefix: 'hidden' },
+    messages: [user],
+  });
+  assert.match(draft, /User: Visible request/);
+  assert.doesNotMatch(draft, /hidden/);
 });

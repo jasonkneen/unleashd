@@ -41,6 +41,29 @@ export function messageTranscriptContent(message: Message): string {
     .join('\n');
 }
 
+/** Remove the machine preamble from the first user record, including mixed native blocks. */
+export function stripFirstMessagePrefix(message: Message, prefix: string): Message {
+  if (message.body.t === 'text')
+    return message.body.text.startsWith(prefix)
+      ? {
+          ...message,
+          body: { t: 'text', text: message.body.text.slice(prefix.length).replace(/^\n\n/, '') },
+        }
+      : message;
+  const first = message.body.parts[0];
+  if (first?.t !== 'text' || !first.text.startsWith(prefix)) return message;
+  return {
+    ...message,
+    body: {
+      t: 'parts',
+      parts: [
+        { t: 'text', text: first.text.slice(prefix.length).replace(/^\n\n/, '') },
+        ...message.body.parts.slice(1),
+      ],
+    },
+  };
+}
+
 export function buildThreadTranscript({ row, detail, messages }: OpenConversation): string {
   // The server's resolution is the model; the client never re-derives it (T09).
   const resolution = detail.config.resolution;
@@ -62,14 +85,9 @@ export function buildThreadTranscript({ row, detail, messages }: OpenConversatio
   const prefix = detail.swarmDebugPrefix;
   const body = messages
     .map((msg, index) => {
-      const content =
-        index === 0 &&
-        msg.role === 'user' &&
-        prefix &&
-        msg.body.t === 'text' &&
-        msg.body.text.startsWith(prefix)
-          ? msg.body.text.slice(prefix.length).replace(/^\n\n/, '')
-          : messageTranscriptContent(msg);
+      const content = messageTranscriptContent(
+        index === 0 && msg.role === 'user' && prefix ? stripFirstMessagePrefix(msg, prefix) : msg
+      );
       return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${content}`;
     })
     .join('\n\n');

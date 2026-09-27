@@ -5,7 +5,7 @@ import type {
   ConversationConfig,
   Provider,
 } from '@unleashd/shared';
-import { buddyKind, normalizeModelId } from '@unleashd/shared';
+import { bodyText, buddyKind, normalizeModelId } from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
 import { configFromProviderPreferences } from './config-mapping';
 import { INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
@@ -140,10 +140,7 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
     if (!initialMessage || !claimToken) return;
     try {
       const alreadyVisible = conversation.messages.some(
-        (message) =>
-          message.role === 'user' &&
-          message.body.t === 'text' &&
-          message.body.text === initialMessage
+        (message) => message.role === 'user' && bodyText(message.body) === initialMessage
       );
       if (!alreadyVisible) {
         const currentOptions = dispatchOptions.get(conversation.id);

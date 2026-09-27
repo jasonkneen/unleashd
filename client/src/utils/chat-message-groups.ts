@@ -1,5 +1,5 @@
 import type { BuddyWorkerThread, ContentPart, Message } from '@unleashd/shared';
-import { messageTranscriptContent } from './conversation-transcript';
+import { messageTranscriptContent, stripFirstMessagePrefix } from './conversation-transcript';
 
 export type AssistantResponsePart =
   | { type: 'content'; key: string; message: Message }
@@ -67,18 +67,8 @@ function groupMessageRange(
   for (const [localIndex, message] of messages.entries()) {
     const index = firstIndex + localIndex;
     const msg =
-      index === 0 &&
-      message.role === 'user' &&
-      prefix &&
-      message.body.t === 'text' &&
-      message.body.text.startsWith(prefix)
-        ? {
-            ...message,
-            body: {
-              t: 'text' as const,
-              text: message.body.text.slice(prefix.length).replace(/^\n\n/, ''),
-            },
-          }
+      index === 0 && message.role === 'user' && prefix
+        ? stripFirstMessagePrefix(message, prefix)
         : message;
     if (msg.role !== 'assistant') {
       if (response)

@@ -32,6 +32,7 @@ import {
 
 export * from './conversation-config.js';
 export * from './conversation.js';
+export { bodyText } from './content-schema.js';
 export * from './turn-attempt.js';
 export * from './legacy-content.js';
 export * from './tool-content.js';

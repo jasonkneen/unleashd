@@ -23,6 +23,7 @@ import type {
   SubAgent,
 } from '@unleashd/shared';
 import {
+  bodyText,
   encodeRows,
   kindBuddyContext,
   matchConversationKind,
@@ -940,7 +941,7 @@ export function conversationLabel(title: string | undefined, messages: readonly 
   if (title?.trim()) return title.trim();
   const source = messages.find((message) => message.role === 'user') ?? messages[0];
   if (!source) return 'New conversation';
-  const visible = (source.body.t === 'text' ? source.body.text : '')
+  const visible = bodyText(source.body)
     .replace(HIDDEN_ENVELOPE_RE, '')
     .trim()
     .replace(OOMPA_TAG_RE, '');
