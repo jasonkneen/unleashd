@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { type Message, type ServerMessage, encodeRows } from '@unleashd/shared';
-import { handleMessage, refreshTranscript } from '../src/atoms/actions';
+import { handleMessage, loadConversationDetails, refreshTranscript } from '../src/atoms/actions';
 import { messagesOf, rowFamily, transcriptFamily } from '../src/atoms/conversations';
 import { jotaiStore } from '../src/atoms/store';
 import { bodiesStep } from '../src/hooks/useConversationBodies';
 import { setLoaded, setRows } from './fixtures/client-store';
-import { syntheticConversation } from './fixtures/synthetic-conversations';
+import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-conversations';
 
 /**
  * The disk poller broadcasts rows only (2026-09-25: full histories of growing
@@ -51,6 +51,63 @@ test('a moved message count pages in the open chat tail and keeps its history on
       ['one', 'two']
     );
     assert.equal(bodiesStep(transcript, 2), 'none', 'a current chat is not refetched');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('a terminal attempt patch during detail loading survives a slower history response', async () => {
+  const raceId = '31111111-1111-4111-8111-111111111111';
+  const realFetch = globalThis.fetch;
+  let releaseHistory: ((response: Response) => void) | undefined;
+  let detailParsed: (() => void) | undefined;
+  const history = new Promise<Response>((resolve) => {
+    releaseHistory = resolve;
+  });
+  const detailComplete = new Promise<void>((resolve) => {
+    detailParsed = resolve;
+  });
+  const attempt = {
+    attemptId: 'attempt-restarted',
+    conversationId: raceId,
+    originServerBootId: 'old-boot',
+    state: 'interrupted' as const,
+    terminalCause: 'server_restart' as const,
+    stateTimestamps: {
+      queued: '2026-09-25T00:00:00.000Z',
+      interrupted: '2026-09-25T00:00:01.000Z',
+    },
+    createdAt: '2026-09-25T00:00:00.000Z',
+    updatedAt: '2026-09-25T00:00:01.000Z',
+    terminalAt: '2026-09-25T00:00:01.000Z',
+  };
+  globalThis.fetch = ((url: string) =>
+    url.endsWith('/messages?afterSeq=-1&limit=500')
+      ? history
+      : Promise.resolve({
+          ok: true,
+          json: async () => {
+            const staleDetail = syntheticDetail(raceId, { latestAttempt: null });
+            detailParsed?.();
+            return staleDetail;
+          },
+        } as Response)) as typeof fetch;
+  try {
+    setRows([syntheticConversation(1, { id: raceId, messageCount: 0 })]);
+    const loading = loadConversationDetails(raceId);
+    await detailComplete;
+    await new Promise<void>((resolve) => setImmediate(resolve)); // detail GET settled; history remains held.
+    handleMessage({ type: 'patch', id: raceId, patch: { t: 'attempt', latestAttempt: attempt } });
+    assert.equal(jotaiStore.get(transcriptFamily(raceId)).tag, 'loading');
+    releaseHistory?.(
+      new Response(JSON.stringify({ epoch: 0, total: 0, afterSeq: -1, messages: [] }))
+    );
+    await loading;
+    const transcript = jotaiStore.get(transcriptFamily(raceId));
+    assert.equal(
+      transcript.tag === 'loaded' ? transcript.detail.latestAttempt?.terminalCause : null,
+      'server_restart'
+    );
   } finally {
     globalThis.fetch = realFetch;
   }

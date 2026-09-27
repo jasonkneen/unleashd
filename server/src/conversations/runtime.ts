@@ -883,6 +883,7 @@ export class Conversation extends EventEmitter {
       queue: this.queue,
       subAgents: this.subAgents,
       latestTurn: { observedModel: this.observedModel, usage: this.providerUsage },
+      latestAttempt: null,
       swarmDebugPrefix: this.swarmDebugPrefix,
     };
   }

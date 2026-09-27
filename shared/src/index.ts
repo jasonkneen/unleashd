@@ -26,6 +26,7 @@ import {
 
 export * from './conversation-config.js';
 export * from './conversation.js';
+export * from './turn-attempt.js';
 export * from './buddy.js';
 export * from './provider-catalog.js';
 

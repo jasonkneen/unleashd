@@ -7,6 +7,7 @@ import type {
   Provider,
   ProviderTurnUsage,
 } from '@unleashd/shared';
+import type { TurnAttemptSnapshot } from '@unleashd/shared';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import { BUDDY_BUILDER_BRIEFING } from '../buddies/builder';
 import { toolManifest } from '../buddies/mcp';
@@ -110,6 +111,7 @@ export interface ContextBreakdownDeps {
   ) => Promise<ConversationBranch | null | undefined> | ConversationBranch | null | undefined;
   /** The ingest store's session usage and latest context (server/src/ingest/instance.ts). */
   ingest: IngestAccessor;
+  latestAttempt?: (conversationId: string) => Promise<TurnAttemptSnapshot | null>;
 }
 
 interface ProviderReadings {
@@ -409,7 +411,10 @@ export function registerConversationRoutes(
         response.status(404).json({ error: 'Conversation not found' });
         return;
       }
-      response.json(conversation.toDetail());
+      response.json({
+        ...conversation.toDetail(),
+        latestAttempt: (await deps.latestAttempt?.(conversation.id)) ?? null,
+      });
     })
   );
 

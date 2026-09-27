@@ -92,6 +92,7 @@ export function syntheticDetail(
     queue: [],
     subAgents: [],
     latestTurn: { observedModel: null, usage: null },
+    latestAttempt: null,
     swarmDebugPrefix: null,
     ...overrides,
   };

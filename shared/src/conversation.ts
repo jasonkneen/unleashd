@@ -11,6 +11,7 @@ import {
   matchConversationKind,
 } from './conversation-config.js';
 import { ProviderSchema } from './provider-catalog.js';
+import { TurnAttemptSnapshotSchema } from './turn-attempt.js';
 
 // =============================================================================
 // Conversation read models (protocol v3, T09 2026-09-25)
@@ -161,6 +162,7 @@ export const ConversationDetailSchema = z.object({
   queue: z.array(QueuedMessageSchema),
   subAgents: z.array(SubAgentSchema),
   latestTurn: TurnObservationSchema,
+  latestAttempt: TurnAttemptSnapshotSchema.nullable().default(null),
   /** Swarm debug prefix hidden from the first message (chat kind only). */
   swarmDebugPrefix: z.string().nullable(),
 });
@@ -201,6 +203,7 @@ export const RowPatchSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('session'), sessionId: z.string() }),
   z.object({ t: z.literal('subagent'), subAgent: SubAgentSchema }),
   z.object({ t: z.literal('turn'), latestTurn: TurnObservationSchema }),
+  z.object({ t: z.literal('attempt'), latestAttempt: TurnAttemptSnapshotSchema.nullable() }),
   // History was REPLACED, not appended (a transcript rewritten on disk, or the live overlay
   // absorbed into the provider's own rows): a loaded transcript refetches even when its length
   // did not change. Guard: server/test/ingest-history.test.ts.
@@ -343,6 +346,7 @@ export function applyRowPatch(row: ConversationRow, patch: RowPatch): Conversati
     case 'session':
     case 'subagent':
     case 'turn':
+    case 'attempt':
     case 'rewritten':
       return row;
   }
@@ -367,6 +371,8 @@ export function applyDetailPatch(detail: ConversationDetail, patch: RowPatch): C
     }
     case 'turn':
       return { ...detail, latestTurn: patch.latestTurn };
+    case 'attempt':
+      return { ...detail, latestAttempt: patch.latestAttempt };
     case 'run':
     case 'done':
     case 'label':

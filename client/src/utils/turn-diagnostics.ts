@@ -1,3 +1,5 @@
+import type { TurnAttemptSnapshot } from '@unleashd/shared';
+
 export type TurnStatusKind =
   | 'idle'
   | 'queued'
@@ -54,56 +56,17 @@ export interface TurnDiagnosticsViewModel {
   title: string;
 }
 
-export interface TurnAttemptSnapshotLike {
-  state:
-    | 'queued'
-    | 'starting'
-    | 'running'
-    | 'stopping'
-    | 'succeeded'
-    | 'failed'
-    | 'cancelled'
-    | 'interrupted';
-  terminalCause?:
-    | 'provider_complete'
-    | 'provider_error'
-    | 'out_of_tokens'
-    | 'user_stop'
-    | 'process_killed'
-    | 'process_exit'
-    | 'spawn_failed'
-    | 'idle_timeout'
-    | 'bridge_timeout'
-    | 'provider_idle_timeout'
-    | 'max_runtime_timeout'
-    | 'timeout'
-    | 'server_restart'
-    | 'unknown';
-  createdAt: Date | string | number;
-  updatedAt: Date | string | number;
-  lastActivityAt?: Date | string | number;
-  lastActivity?: {
-    source:
-      | 'runtime'
-      | 'provider_event'
-      | 'provider_native_activity'
-      | 'native_session'
-      | 'agent_cli_heartbeat'
-      | 'legacy_unknown';
-    providerEventType: string;
-    providerEventSource?: string;
-    heartbeat?: {
-      unifiedEventSilentSeconds?: number;
-      rawStdoutSilentSeconds?: number;
-      nativeSessionAvailable?: boolean;
-      nativeSessionAdvanced?: boolean;
-      nativeSessionSilentSeconds?: number;
-      phase?: 'startup' | 'running';
-    };
-  };
-  startedAt?: Date | string | number;
-  terminalAt?: Date | string | number;
-}
+export type TurnAttemptSnapshotLike = Pick<
+  TurnAttemptSnapshot,
+  | 'state'
+  | 'terminalCause'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'lastActivityAt'
+  | 'lastActivity'
+  | 'startedAt'
+  | 'terminalAt'
+>;
 
 export function turnDiagnosticsFromAttempt(attempt: TurnAttemptSnapshotLike): TurnDiagnosticsInput {
   const terminalCause = attempt.terminalCause;
@@ -223,7 +186,6 @@ function projectAttemptActivity(
   if (!activity) return null;
   const heartbeat = activity.heartbeat;
   const nativeProgress =
-    activity.source === 'provider_native_activity' ||
     activity.source === 'native_session' ||
     heartbeat?.nativeSessionAdvanced === true ||
     activity.providerEventSource === 'codex.native_session';
@@ -309,28 +271,14 @@ export function isNonterminalAttemptState(state: TurnAttemptSnapshotLike['state'
 }
 
 /**
- * Runtime state is newer than a previously fetched terminal snapshot. Hide
- * that stale terminal result until the diagnostics endpoint exposes the
- * current nonterminal attempt.
+ * Runtime state may arrive before the durable attempt patch. Hide a prior
+ * terminal result until the current nonterminal attempt arrives.
  */
 export function shouldPresentTurnAttempt(
   attempt: TurnAttemptSnapshotLike,
   runtimeActive: boolean
 ): boolean {
   return !runtimeActive || isNonterminalAttemptState(attempt.state);
-}
-
-export function turnDiagnosticsPollDelay(
-  runtimeActive: boolean,
-  attemptState: TurnAttemptSnapshotLike['state'] | null,
-  consecutiveNotFound: number
-): number {
-  if (consecutiveNotFound > 0) {
-    return Math.min(30_000, 1_000 * 2 ** Math.min(consecutiveNotFound - 1, 5));
-  }
-  return runtimeActive || (attemptState !== null && isNonterminalAttemptState(attemptState))
-    ? 2_000
-    : 30_000;
 }
 
 function viewModel(

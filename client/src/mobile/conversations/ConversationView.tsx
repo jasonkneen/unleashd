@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { setConversationConfig } from '../../atoms/commands';
 import {
   childRowsFamily,
   commandFor,
@@ -44,14 +45,13 @@ import {
   shouldShowTypingIndicator,
   turnDiagnosticsFromAttempt,
 } from '../../utils/turn-diagnostics';
+import { ConfigOverlay } from '../../views/config/ConfigOverlay';
+import { modelSummary } from '../../views/config/config-options';
 import { QueuedMessages } from '../../views/conversation/QueuedMessages';
 import { ResumeSource } from '../../views/conversation/ResumeSource';
 import { SubAgentPanel } from '../../views/conversation/SubAgentPanel';
 import { TranscriptGroup } from '../../views/transcript/TranscriptGroup';
 import { ComposerMobile } from '../components/ComposerMobile';
-import { setConversationConfig } from '../../atoms/commands';
-import { ConfigOverlay } from '../../views/config/ConfigOverlay';
-import { modelSummary } from '../../views/config/config-options';
 
 /**
  * The one mobile conversation pane (plain chats and Buddy threads). It fills its PARENT (height:
@@ -231,14 +231,11 @@ export function ConversationView({
 
   // Turn diagnostics — same hook desktop Chat.tsx uses (hooks/useTurnDiagnostics)
   // + same derived view model (utils/turn-diagnostics). Reuses existing atoms
-  // and polling, not new state. Must stay before early returns.
+  // and detail patches, not new state. Must stay before early returns.
   const runtimeIsRunning = conversation?.run === 'running' || conversation?.run === 'streaming';
   const runtimeIsStreaming = conversation?.run === 'streaming';
   const runtimeTurnActive = runtimeIsRunning || runtimeIsStreaming;
-  const { attempt: latestTurnAttempt } = useTurnDiagnostics(
-    conversationId || undefined,
-    runtimeTurnActive
-  );
+  const { attempt: latestTurnAttempt } = useTurnDiagnostics(conversationId || undefined);
   const turnDiagnostics =
     latestTurnAttempt && shouldPresentTurnAttempt(latestTurnAttempt, runtimeTurnActive)
       ? turnDiagnosticsFromAttempt(latestTurnAttempt)

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { endConversation, interruptAndSend, queueMessage } from '../../atoms/actions';
 import { streamFamily } from '../../atoms/conversations';
 import { useComposerSubmission } from '../../hooks/useComposerSubmission';
+import { useConversationBodies } from '../../hooks/useConversationBodies';
 import { useConversationDraft } from '../../hooks/useConversationDraft';
 import { usePendingAttachments } from '../../hooks/usePendingAttachments';
 import { useRestartRecovery } from '../../hooks/useRestartRecovery';
@@ -119,16 +120,11 @@ export function ComposerMobile({
     if (content) savePrompt(content);
   }, [draft, savePrompt]);
 
-  // Turn diagnostics — same hook as ConversationView (and desktop Chat.tsx).
-  // Composer owns its own subscription so typing/turn status remains visible
-  // even when the conversation pane is not mounted (e.g. embedded use).
-  // Reuses derived view model, not new state.
+  // The embedded composer loads detail even without the conversation pane.
+  useConversationBodies(conversationId || null);
   const streamingText = useAtomValue(streamFamily(conversationId));
   const runtimeTurnActive = isRunning || isStreaming;
-  const { attempt: composerTurnAttempt } = useTurnDiagnostics(
-    conversationId || undefined,
-    runtimeTurnActive
-  );
+  const { attempt: composerTurnAttempt } = useTurnDiagnostics(conversationId || undefined);
   const restartRecovery = useRestartRecovery(
     conversationId,
     composerTurnAttempt,

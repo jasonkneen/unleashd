@@ -56,6 +56,17 @@ export declare class Ingest {
   stop(): Promise<void>
 }
 
+export declare class TurnAttempts {
+  static open(dbPath: string): Promise<TurnAttempts>
+  append(snapshot: string | undefined | null, event: string): Promise<boolean>
+  get(id: string): Promise<string | null>
+  query(conversation: string | undefined | null, queue: string | undefined | null, session: string | undefined | null, state: string | undefined | null, cause: string | undefined | null, limit: number): Promise<Array<string>>
+  events(attempt: string | undefined | null, conversation: string | undefined | null, since: string | undefined | null, limit: number): Promise<Array<string>>
+  recoverable(boot: string): Promise<Array<string>>
+  importLegacy(rowsJson: string): Promise<boolean>
+  legacyImported(): Promise<boolean>
+}
+
 export interface BuddyContext {
   knowledgeScope?: KnowledgeScope
   coordinationRunId?: string | undefined | null

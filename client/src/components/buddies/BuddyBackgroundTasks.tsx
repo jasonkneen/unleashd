@@ -2,7 +2,7 @@ import { useAtomValue } from 'jotai';
 import { Link, useLocation } from 'react-router-dom';
 import type { BuddyBackgroundWorker, BuddyWorkerStatus } from '../../atoms/buddy-background';
 import { connectionAtom, listField, loadCompleteOf, streamFamily } from '../../atoms/conversations';
-import { useBuddyWorkerDiagnostics, useBuddyWorkers } from '../../hooks/useBuddyData';
+import { useBuddyWorkers } from '../../hooks/useBuddyData';
 import { useTimeTick } from '../../hooks/useTimeTick';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { isRowRunning } from '../../utils/conversation-row';
@@ -103,9 +103,8 @@ function WorkerRow({
   const streaming = useAtomValue(streamFamily(row.id));
   const location = useLocation();
   const running = isRowRunning(row);
-  const diagnostics = useBuddyWorkerDiagnostics(row.id, running);
   useTimeTick();
-  const attempt = diagnostics.data?.latestAttempt;
+  const attempt = worker.latestAttempt;
   const activity =
     running && attempt && shouldPresentTurnAttempt(attempt, true)
       ? buildTurnDiagnosticsViewModel(turnDiagnosticsFromAttempt(attempt))
@@ -146,14 +145,6 @@ function WorkerRow({
       {activity && (
         <p className="ui-muted">
           {parent?.id === row.id ? 'Parent turn' : 'Turn'} · {activity.title}
-        </p>
-      )}
-      {running && (diagnostics.kind === 'failed' || diagnostics.kind === 'stale') && (
-        <p>
-          Activity report unavailable.{' '}
-          <button type="button" onClick={() => void diagnostics.refetch()}>
-            Retry
-          </button>
         </p>
       )}
       {status === 'unknown' && (

@@ -208,11 +208,18 @@ export function loadConversationDetails(conversationId: string): Promise<void> {
         body = await readCurrentHistory(conversationId);
       }
       if (requestEpoch !== connectionEpoch || !readConversation(conversationId)) return;
+      // Fix guard: a terminal attempt patch can arrive after detail GET but before
+      // history resolves; retaining it in `loading` prevents stale recovery/status.
+      const loading = readTranscript(conversationId);
+      const currentDetail =
+        loading.tag === 'loading' && loading.latestAttempt !== undefined
+          ? { ...detail, latestAttempt: loading.latestAttempt }
+          : detail;
       putTranscript(conversationId, {
         tag: 'loaded',
         epoch: body.epoch,
         messages: body.messages,
-        detail,
+        detail: currentDetail,
       });
     } catch (cause) {
       if (requestEpoch !== connectionEpoch) return;
@@ -443,6 +450,11 @@ function handlePatch(data: Extract<ServerMessage, { type: 'patch' }>): void {
   if (loaded) {
     const detail = applyDetailPatch(loaded.detail, data.patch);
     if (detail !== loaded.detail) putTranscript(data.id, { ...loaded, detail });
+  } else if (data.patch.t === 'attempt') {
+    const transcript = readTranscript(data.id);
+    if (transcript.tag === 'loading') {
+      putTranscript(data.id, { ...transcript, latestAttempt: data.patch.latestAttempt });
+    }
   }
   patchEffects(data.id, data.patch);
 }
@@ -468,6 +480,7 @@ function patchEffects(id: string, patch: RowPatch): void {
     case 'session':
     case 'subagent':
     case 'turn':
+    case 'attempt':
       return;
   }
 }
