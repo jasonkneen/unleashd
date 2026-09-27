@@ -1,8 +1,8 @@
 import type { ConversationConfig } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
-import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { queueMessage, setConversationDone } from '../../atoms/actions';
+import { queueMessage, readConversation, setConversationDone } from '../../atoms/actions';
 import { setConversationConfig } from '../../atoms/commands';
 import {
   commandFor,
@@ -91,13 +91,11 @@ export const directChainUrl = (buddyId: string) =>
   `/api/buddies/${encodeURIComponent(buddyId)}/direct/chain`;
 
 /**
- * "New chat" (or the out-of-tokens retry): the DM's next generation. The earlier ones are marked
- * done, so the sidebar lists only the current chat, as the snapshot's chain filter did; they stay
- * live, so the DM still draws them above the divider and `/chat/:id` still opens them.
+ * Start the DM's next generation. Earlier rows remain visible until the new row arrives;
+ * ChannelDm then marks them done so the sidebar lists only the current chat.
  */
 export async function startNewDirectChat(
   buddyId: string,
-  earlier: readonly string[],
   input: { config: ConversationConfig; message?: string }
 ): Promise<string> {
   const { conversationId } = await buddyWrite<{ conversationId: string }>(
@@ -105,7 +103,9 @@ export async function startNewDirectChat(
     'POST',
     input
   );
-  for (const id of earlier) setConversationDone(id, true);
+  // Fix guard: marking the visible DM done before its replacement arrives collapses the
+  // channel while creation is pending (channel-dm.test.tsx).
+  // Keep earlier generations available; the chain view already groups them as one DM.
   return conversationId;
 }
 
@@ -153,10 +153,18 @@ export function ChannelDm({
   const follow = useFollowBottom(messages.length + queue.length, groups, null);
   const generations = chain.data?.generations ?? [conversationId];
   const latest = generations.at(-1) ?? conversationId;
+  useEffect(() => {
+    // Fix guard: wait for the new row before hiding older sidebar generations.
+    // Marking them during the POST collapsed the DM while the new row was still pending.
+    if (row === null || latest !== conversationId || chain.data === null) return;
+    for (const id of chain.data.generations.slice(0, -1)) {
+      if (readConversation(id)?.done === false) setConversationDone(id, true);
+    }
+  }, [row, latest, conversationId, chain.data]);
   // An earlier generation shows alone, with a way to the latest; the latest shows every one.
   const shown = latest === conversationId ? generations : [conversationId];
   const newChat = async (input: { config: ConversationConfig; message?: string }) => {
-    const next = await startNewDirectChat(buddyId, generations, input);
+    const next = await startNewDirectChat(buddyId, input);
     await chain.refetch();
     onConversation(next);
   };
@@ -169,30 +177,56 @@ export function ChannelDm({
     !running && diagnostics.attempt?.terminalCause === 'out_of_tokens' && retryText !== null;
   return (
     <section className={f.pane} aria-label={`Direct message with ${buddyName}`}>
-      <header className={f.header}>
+      <header className={f.header} style={frame === 'mobile' ? { flexWrap: 'wrap' } : undefined}>
         {backTo !== null && (
           <Link className="mobile-channel-header__back" to={backTo} aria-label="Back">
             ‹
           </Link>
         )}
-        <div className={f.heading}>
+        <div className={f.heading} style={frame === 'mobile' ? { flex: 1 } : undefined}>
           {frame === 'desktop' ? <h2>{buddyName}</h2> : <h1>{buddyName}</h1>}
-          <p>{buddyRole}</p>
         </div>
+        <details className="channel-dm-about buddy-detail-about">
+          <summary aria-label={`About ${buddyName}`} title={`About ${buddyName}`}>
+            ⓘ
+          </summary>
+          <div className="buddy-detail-nav__menu" role="note" style={{ left: 0, right: 'auto' }}>
+            {buddyRole}
+          </div>
+        </details>
+        {frame === 'mobile' && (
+          <CopyLinkButton className={f.link} path={linkPath} label="Copy link to DM" />
+        )}
+        {frame === 'mobile' && <span aria-hidden="true" style={{ flexBasis: '100%', height: 0 }} />}
+        {latest === conversationId && messages.length + queue.length > 0 && (
+          <HarnessPicker
+            style={frame === 'mobile' ? { order: 3, marginTop: 0 } : undefined}
+            label="Refresh context"
+            note={`Start a fresh chat with ${buddyName} to save token cost. Saved Buddy memories carry forward; this chat remains above it.`}
+            confirm="Refresh context"
+            seed={config}
+            excluded={null}
+            buddy
+            onConfirm={(nextConfig) => newChat({ config: nextConfig })}
+          />
+        )}
         <button
           type="button"
           className="channel-dm-model channel-inline-action ui-truncate"
-          title="Change this DM's model"
-          aria-label={`Change model for ${buddyName}: ${config ? modelSummary(config, catalog) : 'loading'}`}
+          style={frame === 'mobile' ? { order: 4, flex: '1 1 0', minWidth: 0 } : undefined}
+          title="Set the model for future turns in this DM"
+          aria-label={`DM default model for ${buddyName}: ${config ? modelSummary(config, catalog) : 'loading'}`}
           aria-haspopup="dialog"
           aria-expanded={modelOpen}
           disabled={config === null}
           onClick={() => setModelOpen(true)}
         >
-          {config ? modelSummary(config, catalog) : 'Model'}
+          Default model: {config ? modelSummary(config, catalog) : 'Loading'}
           {configSaving ? ' …' : ''} ▾
         </button>
-        <CopyLinkButton className={f.link} path={linkPath} label="Copy link to DM" />
+        {frame === 'desktop' && (
+          <CopyLinkButton className={f.link} path={linkPath} label="Copy link to DM" />
+        )}
       </header>
       {modelOpen && (
         <ConfigOverlay
@@ -209,7 +243,7 @@ export function ChannelDm({
           }}
           picker={{ disabled: configSaving, providerDisabled: true, defaults: 'inline' }}
           notes={[
-            { tone: 'info', text: 'This choice applies to the next turn in this DM.' },
+            { tone: 'info', text: 'This model is used for future turns in this DM.' },
             ...(configSaving ? [{ tone: 'info' as const, text: 'Saving…' }] : []),
             ...(configError ? [{ tone: 'error' as const, text: configError }] : []),
           ]}
@@ -252,7 +286,7 @@ export function ChannelDm({
             onConfirm={(config) => newChat({ config, message: retryText })}
           />
         )}
-        {latest !== conversationId ? (
+        {latest !== conversationId && (
           <button
             type="button"
             className="channel-inline-action"
@@ -260,18 +294,6 @@ export function ChannelDm({
           >
             Latest chat
           </button>
-        ) : (
-          messages.length + queue.length > 0 && (
-            <HarnessPicker
-              label="New chat"
-              note={`A new chat with ${buddyName}, with no handoff. This one stays above it.`}
-              confirm="Start"
-              seed={detailOf(transcript)?.config.config ?? null}
-              excluded={null}
-              buddy
-              onConfirm={(config) => newChat({ config })}
-            />
-          )
         )}
       </div>
       {composeShell(

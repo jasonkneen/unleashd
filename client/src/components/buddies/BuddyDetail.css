@@ -34,7 +34,7 @@
   right: 0;
   top: 100%;
   z-index: 10;
-  width: 190px;
+  width: min(360px, 80vw);
   padding: var(--sp-3);
   background: var(--bg-raised-1);
   box-shadow: 0 8px 24px #0003;
@@ -122,6 +122,9 @@
   color: var(--text-secondary);
   font-size: var(--fs-2);
   cursor: pointer;
+}
+.buddy-detail-about {
+  position: relative;
 }
 
 .buddy-work-disclosure {

@@ -4,7 +4,7 @@ import {
   isOutOfTokensFailure,
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
-import { useState } from 'react';
+import { type CSSProperties, useState } from 'react';
 import { rowFamily } from '../../atoms/conversations';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { ConversationConfigPicker } from '../../views/config/ConversationConfigPicker';
@@ -24,6 +24,7 @@ export function HarnessPicker({
   excluded,
   buddy,
   onConfirm,
+  style,
 }: {
   label: string;
   note: string;
@@ -33,6 +34,7 @@ export function HarnessPicker({
   excluded: string | null;
   buddy: boolean;
   onConfirm(config: ConversationConfig): Promise<unknown>;
+  style?: CSSProperties;
 }) {
   const { catalog } = useProviderCatalog();
   const [draft, setDraft] = useState<ConversationConfig | null>(null);
@@ -53,7 +55,7 @@ export function HarnessPicker({
       : null);
   const close = () => setOpen(false);
   return (
-    <div className="channel-harness-picker">
+    <div className="channel-harness-picker" style={style}>
       <button
         type="button"
         className="channel-inline-action"

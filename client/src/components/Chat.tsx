@@ -53,10 +53,10 @@ import { QueuedMessages } from '../views/conversation/QueuedMessages';
 import { ResumeSource } from '../views/conversation/ResumeSource';
 import { SubAgentPanel } from '../views/conversation/SubAgentPanel';
 import { TurnStatus } from '../views/conversation/TurnStatus';
+import { COPY_GLYPH } from '../views/transcript/markdown-components';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
 import { ContextBreakdownMeter } from './ContextBreakdownMeter';
 import { VirtualizedMessageList } from './VirtualizedMessageList';
-import { COPY_GLYPH } from '../views/transcript/markdown-components';
 import { DmChannelsNotice } from './buddies/DmChannelsNotice';
 import { HarnessPicker } from './buddies/HarnessPicker';
 import { lastOwnerText } from './buddies/channel-dm';
@@ -529,6 +529,13 @@ export function Chat({ id }: { id: string }) {
           )}
         </div>
         <div className="header-status ui-row">
+          {dmBuddy !== null && (
+            <DmChannelsNotice
+              conversationId={conversation.id}
+              buddy={dmBuddy}
+              className="dm-channels-notice ui-row ui-muted"
+            />
+          )}
           <button
             type="button"
             className="fork-thread-btn"
@@ -686,14 +693,6 @@ export function Chat({ id }: { id: string }) {
         )}
 
         <QueuedMessages presentation="list" conversationId={conversation.id} queue={queue} />
-
-        {dmBuddy !== null && (
-          <DmChannelsNotice
-            conversationId={conversation.id}
-            buddy={dmBuddy}
-            className="dm-channels-notice chat-reading-column ui-row ui-muted"
-          />
-        )}
 
         {uploadError && <UploadErrorNotice error={uploadError} onDismiss={dismissUploadError} />}
 
