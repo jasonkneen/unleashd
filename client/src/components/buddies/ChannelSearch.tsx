@@ -27,15 +27,16 @@ export function ChannelSearchButton({ onOpen }: { onOpen: () => void }) {
   return (
     <button
       type="button"
-      className="channel-search-trigger ui-row ui-card ui-muted"
+      className="channel-search-trigger ui-row ui-muted"
       aria-label="Search all channel messages"
+      title="Search all messages (⌘F)"
       onClick={onOpen}
     >
-      <span aria-hidden="true">⌕</span>
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
+        <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
       <span>Search</span>
-      <kbd className="search-view__esc ui-card ui-muted" style={{ marginLeft: 'auto' }}>
-        ⌘F
-      </kbd>
     </button>
   );
 }

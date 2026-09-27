@@ -275,12 +275,17 @@
   gap: var(--sp-7);
 }
 
+/* A tiny pill until clicked; the icon carries the accent so it reads at a glance. */
 .channel-search-trigger {
-  width: clamp(140px, 28vw, 320px);
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-5);
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
   background: var(--bg-tertiary);
-  font-size: var(--fs-3);
+  font-size: var(--fs-2);
+}
+.channel-search-trigger svg {
+  color: var(--accent);
 }
 
 .channel-browser-pane-title h2 {
