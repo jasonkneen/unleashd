@@ -4,7 +4,7 @@ import test from 'node:test';
 import type { ConversationRow } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import { syntheticConversation } from './fixtures/synthetic-conversations';
+import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-conversations';
 register(
   `data:text/javascript,${encodeURIComponent(`
     export async function load(url, context, nextLoad) {
@@ -61,13 +61,90 @@ test('background destination shows running work first, keeps history and drops d
       </Provider>
     );
   assert.deepEqual(hrefs(render()), ['/chat/active', '/chat/past']);
-  assert.match(render(), /1 running · 2 conversations/);
+  assert.match(render(), /1 running · 0 queued · 2 total/);
 
   // Live snapshots change the count; deletion removes its target immediately.
   store.set(rowsAtom, new Map(conversations).set('active', make('active')));
-  assert.match(render(), /0 running · 2 conversations/);
+  assert.match(render(), /0 running · 0 queued · 2 total/);
   const remaining = new Map(conversations);
   remaining.delete('active');
   store.set(rowsAtom, remaining);
   assert.deepEqual(hrefs(render()), ['/chat/past']);
+});
+
+test('native workers are deduplicated against descendants, and unconfirmed completion stays honest', async () => {
+  const { projectBuddyWorkers } = await import('../src/atoms/buddy-background');
+  const parent = make('owner', {
+    kind: { t: 'buddy', buddyId: 'lead', workspaceId: 'wave', visibility: 'foreground' },
+    run: 'running',
+  });
+  const child = make('child', { kind: { t: 'chat' }, parent: parent.id, run: 'running' });
+  const agent = {
+    id: 'agent',
+    providerThreadId: 'native-child',
+    description: 'Implement archive',
+    status: 'running' as const,
+    toolUses: 4,
+    tokens: 0,
+    startedAt: new Date(T0),
+    statusSource: 'native' as const,
+  };
+  const details = [
+    syntheticDetail(parent.id, { subAgents: [agent] }),
+    syntheticDetail(child.id, { sessionId: 'native-child' }),
+  ];
+  const active = projectBuddyWorkers([parent, child], details);
+  assert.equal(active.length, 1);
+  assert.equal(active[0].row.id, child.id);
+  assert.equal(active[0].status, 'running');
+  const unknown = projectBuddyWorkers(
+    [{ ...parent, run: 'idle' }],
+    [
+      syntheticDetail(parent.id, {
+        subAgents: [{ ...agent, status: 'completed', statusSource: 'inferred_parent_completion' }],
+      }),
+    ]
+  );
+  assert.equal(unknown[0].status, 'unknown');
+  assert.equal(unknown[0].row.id, parent.id);
+});
+
+test('cold worker discovery reads bounded detail only, reuses quiet sessions and retries partial failures', async () => {
+  const { workerDetailsResource } = await import('../src/atoms/buddy-background');
+  const { clearResourceCache } = await import('../src/atoms/resources');
+  clearResourceCache();
+  const original = globalThis.fetch;
+  const paths: string[] = [];
+  let failing = true;
+  globalThis.fetch = async (input) => {
+    const path = String(input);
+    paths.push(path);
+    if (path.endsWith('/temporarily-unavailable') && failing)
+      return new Response('', { status: 503 });
+    const id = path.split('/').at(-1)!;
+    return Response.json(syntheticDetail(id));
+  };
+  try {
+    const rows = [make('quiet'), make('temporarily-unavailable')];
+    const source = workerDetailsResource(rows);
+    const first = await source.load(new AbortController().signal);
+    assert.deepEqual(
+      first.details.map((detail) => detail.id),
+      ['quiet']
+    );
+    assert.deepEqual(first.unavailableIds, ['temporarily-unavailable']);
+    failing = false;
+    const second = await source.load(new AbortController().signal);
+    assert.equal(second.details.length, 2);
+    assert.deepEqual(second.unavailableIds, []);
+    assert.equal(paths.filter((path) => path.endsWith('/quiet')).length, 1);
+    assert.equal(paths.filter((path) => path.endsWith('/temporarily-unavailable')).length, 2);
+    assert.ok(
+      paths.every((path) => !path.includes('/messages')),
+      'worker inspection never hydrates transcript bodies'
+    );
+  } finally {
+    globalThis.fetch = original;
+    clearResourceCache();
+  }
 });

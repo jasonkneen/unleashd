@@ -16,7 +16,8 @@ export type MobileChannelScreen =
   | { kind: 'channel'; channelId: string }
   | { kind: 'thread'; channelId: string; rootId: string; linkedPostId: string | null }
   | { kind: 'task'; channelId: string; taskId: string }
-  | { kind: 'dm'; conversationId: string };
+  | { kind: 'dm'; conversationId: string }
+  | { kind: 'workers'; buddyId: string };
 
 const CHANNELS_PATH = /^\/buddies\/workspaces\/[^/]+\/channels\/?$/;
 
@@ -25,6 +26,8 @@ export function mobileChannelScreen(search: string): MobileChannelScreen {
   const channelId = params.get('channel');
   const rootId = params.get('thread');
   const taskId = params.get('task');
+  const workers = params.get('workers');
+  if (workers) return { kind: 'workers', buddyId: workers };
   const dm = params.get('dm');
   if (dm) return { kind: 'dm', conversationId: dm };
   if (channelId && rootId)
@@ -58,6 +61,8 @@ export function channelsHref(workspaceId: string, screen: MobileChannelScreen): 
     }
     case 'task':
       return `${base}?channel=${encodeURIComponent(screen.channelId)}&task=${encodeURIComponent(screen.taskId)}`;
+    case 'workers':
+      return `${base}?workers=${encodeURIComponent(screen.buddyId)}`;
     case 'dm':
       return `${base}?dm=${encodeURIComponent(screen.conversationId)}`;
   }

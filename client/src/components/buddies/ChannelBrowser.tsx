@@ -9,6 +9,8 @@ import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
 import { BuddySigil } from './BuddySigil';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
+import { ArchivedChannels, ChannelArchiveButton, useArchivedChannels } from './ChannelArchive';
+import { ChannelWorkers } from './ChannelWorkers';
 import { ChannelDm } from './ChannelDm';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { ChannelMarkdown, TypingDots } from './ChannelMarkdown';
@@ -450,19 +452,21 @@ function ThreadPane({
           </div>
         )}
       </div>
-      <ChannelComposer
-        key={rootId}
-        channelId={channelId}
-        rootId={rootId}
-        placeholder={root ? `Reply to ${plainChannelText(root.body).slice(0, 40)}…` : 'Reply…'}
-        references={context.directory.references}
-        submit="enter"
-        seats={thread.latest.data?.seats}
-        onPosted={() => {
-          follow.pin();
-          void thread.latest.refetch();
-        }}
-      />
+      {!entry.channel.archivedAt && (
+        <ChannelComposer
+          key={rootId}
+          channelId={channelId}
+          rootId={rootId}
+          placeholder={root ? `Reply to ${plainChannelText(root.body).slice(0, 40)}…` : 'Reply…'}
+          references={context.directory.references}
+          submit="enter"
+          seats={thread.latest.data?.seats}
+          onPosted={() => {
+            follow.pin();
+            void thread.latest.refetch();
+          }}
+        />
+      )}
     </aside>
   );
 }
@@ -589,6 +593,7 @@ function ChannelPane({
               {taskFilter === null ? heading.about : 'One Task, across every channel'}
             </p>
           </div>
+          <ChannelArchiveButton channel={entry.channel} />
           <TaskFilter
             className="channel-browser-task-filter"
             posts={feed.posts}
@@ -642,20 +647,22 @@ function ChannelPane({
         ) : (
           <TaskTranscript key={taskFilter} taskId={taskFilter} context={taskContext} />
         )}
-        <ChannelComposer
-          channelId={channelId}
-          rootId={null}
-          placeholder={`Message ${heading.mark}${heading.name}`}
-          references={directory.references}
-          submit="enter"
-          onPosted={(result) => {
-            follow.pin();
-            void feed.latest.refetch();
-            // Mentioning a Buddy opens the thread its reply will land in.
-            if (result.mentions.some((mention) => mention.status === 'started'))
-              openThread(result.post.id);
-          }}
-        />
+        {!entry.channel.archivedAt && (
+          <ChannelComposer
+            channelId={channelId}
+            rootId={null}
+            placeholder={`Message ${heading.mark}${heading.name}`}
+            references={directory.references}
+            submit="enter"
+            onPosted={(result) => {
+              follow.pin();
+              void feed.latest.refetch();
+              // Mentioning a Buddy opens the thread its reply will land in.
+              if (result.mentions.some((mention) => mention.status === 'started'))
+                openThread(result.post.id);
+            }}
+          />
+        )}
       </section>
       {threadId && (
         <ThreadPane
@@ -921,11 +928,16 @@ export function ChannelBrowser({
   availableConversationIds: ReadonlySet<string>;
 }) {
   const inbox = useWorkspaceInbox(workspaceId);
+  const archived = useArchivedChannels(workspaceId);
   const rail = useMemo(() => railChannels(inbox.data), [inbox.data]);
   useWarmChannelPosts(rail.channels);
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
-  const listed = [...rail.channels, ...rail.direct];
+  const listed = [
+    ...rail.channels,
+    ...rail.direct,
+    ...(archived.data ?? []).map((channel) => ({ channel, unread: 0 })),
+  ];
   const selected =
     listed.find((entry) => entry.channel.id === params.get('channel')) ?? rail.channels[0] ?? null;
   const select = (next: { channel: string; thread: string | null; task?: string | null }) =>
@@ -946,6 +958,7 @@ export function ChannelBrowser({
     [inbox.data, directory.buddyNames]
   );
   // An open DM replaces the channel in the main pane; picking a channel closes it.
+  const workers = params.get('workers');
   const dm = params.get('dm');
   const openDm: OpenDm = (conversationId) => setParams({ dm: conversationId });
   const dmConversation = useAtomValue(rowFamily(dm ?? ''));
@@ -959,7 +972,7 @@ export function ChannelBrowser({
       entry={entry}
       heading={channelHeading(entry.channel.kind, directory.buddyNames)}
       requests={channelRequestCount(inbox.data, entry.channel.id)}
-      current={!dm && selected?.channel.id === entry.channel.id}
+      current={!workers && !dm && selected?.channel.id === entry.channel.id}
       onSelect={() => select({ channel: entry.channel.id, thread: null })}
     />
   );
@@ -1004,6 +1017,7 @@ export function ChannelBrowser({
           ) : (
             <ul className="channel-browser-channels">{rail.channels.map(railRow)}</ul>
           )}
+          <ArchivedChannels workspaceId={workspaceId} channels={archived.data ?? []} />
           {rail.direct.length > 0 && (
             <>
               <h3 className="channel-browser-rail-section ui-muted">Direct messages</h3>
@@ -1043,8 +1057,9 @@ export function ChannelBrowser({
                 <BuddyRailRow
                   key={member.id}
                   member={member}
+                  workspaceId={workspaceId}
                   openDm={openDm}
-                  current={member.id === dmBuddyId}
+                  current={member.id === (workers ?? dmBuddyId)}
                 />
               ))}
             </ul>
@@ -1052,7 +1067,13 @@ export function ChannelBrowser({
         </div>
       </nav>
       <main className="channel-browser-main">
-        {dm ? (
+        {workers ? (
+          <ChannelWorkers
+            buddyId={workers}
+            buddyName={directory.buddyNames[workers] ?? 'Buddy'}
+            workspaceId={workspaceId}
+          />
+        ) : dm ? (
           <DmPane
             key={dm}
             conversationId={dm}

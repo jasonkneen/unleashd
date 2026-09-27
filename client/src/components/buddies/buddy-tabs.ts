@@ -28,7 +28,7 @@ export const EMPLOYEE_TAB_LABELS: Record<EmployeeTab, string> = {
   work: 'Work',
   mailbox: 'Messages',
   conversations: 'Conversations',
-  background: 'Background tasks',
+  background: 'Background workers',
   memory: 'Memory',
   schedules: 'Schedules',
 };
@@ -39,7 +39,7 @@ export const EMPLOYEE_TAB_LABELS_SHORT: Record<EmployeeTab, string> = {
   work: 'Work',
   mailbox: 'DMs',
   conversations: 'Chats',
-  background: 'Tasks',
+  background: 'Workers',
   memory: 'Memory',
   schedules: 'Schedules',
 };

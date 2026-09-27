@@ -1,3 +1,11 @@
+import { useAtomValue } from 'jotai';
+import {
+  buddyBackgroundWorkersAtomFamily,
+  buddyWorkerRowsFamily,
+  workerDetailsResource,
+} from '../atoms/buddy-background';
+import { isRowRunning } from '../utils/conversation-row';
+import type { TurnAttemptSnapshotLike } from '../utils/turn-diagnostics';
 import { useCallback, useRef } from 'react';
 import { createConversation } from '../atoms/commands';
 import { findWorkspace } from '../components/buddies/roster';
@@ -68,4 +76,29 @@ export function useBuddyPage(
   }, [buddy, workspace]);
 
   return { detail, overview, buddy, workspace, talk };
+}
+
+/** Shared by rail badges and the workers screen; cold navigation discovers native session workers. */
+export function useBuddyWorkerRead(buddyId: string, workspaceId: string | null = null) {
+  const scope = { buddyId, workspaceId };
+  const rows = useAtomValue(buddyWorkerRowsFamily(scope));
+  return usePolledFetch(
+    workerDetailsResource(rows),
+    rows.some(isRowRunning) ? 5_000 : 30_000,
+    rows.length > 0
+  );
+}
+
+export function useBuddyWorkers(buddyId: string, workspaceId: string | null = null) {
+  const read = useBuddyWorkerRead(buddyId, workspaceId);
+  const workers = useAtomValue(buddyBackgroundWorkersAtomFamily({ buddyId, workspaceId }));
+  return { workers, read };
+}
+
+export function useBuddyWorkerDiagnostics(conversationId: string, running: boolean) {
+  return usePolledFetch<{ latestAttempt: TurnAttemptSnapshotLike | null }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/diagnostics?limit=1`,
+    5_000,
+    running
+  );
 }

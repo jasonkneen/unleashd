@@ -30,6 +30,7 @@ import { type Channels, mentionedBuddyIds } from './channels';
 import {
   type BuddiesCore,
   BuddyChangesSchema,
+  ChannelArchiveSchema,
   BuddyCreateFieldsSchema,
   CoreError,
   OWNER,
@@ -365,6 +366,15 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
         z.string().trim().min(1).parse(q(req, 'q')),
         50
       ),
+    'GET 200 /api/buddies/workspaces/:workspaceId/channels/archived': (req) =>
+      core.archivedChannels(OWNER, p(req, 'workspaceId')),
+    'POST 200 /api/buddies/channels/:channelId/archive': async (req) => {
+      const { archived, key } = ChannelArchiveSchema.parse(req.body);
+      const channelId = p(req, 'channelId');
+      const channel = await write(core.setChannelArchived(OWNER, channelId, archived, key));
+      deps.channelChanged(channelId);
+      return channel;
+    },
     'POST 201 /api/buddies/workspaces/:workspaceId/channels': (req) =>
       write(
         core.createChannel(OWNER, {

@@ -30,6 +30,8 @@ export const key = z
   .min(1)
   .max(200)
   .describe('Idempotency key: the same key replays the first result');
+export const ChannelArchiveSchema = z.object({ archived: z.boolean(), key }).strict();
+
 export const evidence = z.array(z.string().min(1).max(4000)).max(32).default([]);
 
 export const TaskChangesSchema = z.object({

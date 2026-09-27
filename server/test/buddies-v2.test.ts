@@ -1445,3 +1445,71 @@ test('New workspace from a folder: the name defaults to the folder, any spelling
     await w.close();
   }
 });
+
+test('owner HTTP and Buddy MCP archive a channel while retaining readable history', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const post = await w.core.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      { kind: 'inform', body: 'Keep this archive evidence', evidence: [], key: 'archive-history' }
+    );
+    const grant = w.grants.issueBuddy({
+      role: 'worker',
+      buddyId: w.lead.id,
+      workspaceId: w.ws,
+      conversationId: 'archive-test',
+      runId: null,
+    });
+    const archived = await call(w.endpoint.spec(grant), 'channel_archive', {
+      channelId: w.general.id,
+      archived: true,
+      key: 'archive',
+    });
+    assert.equal(archived.isError, false, archived.text);
+    assert.ok(archived.value.archivedAt);
+    const listed = await http('GET', `/api/buddies/workspaces/${w.ws}/channels/archived`);
+    assert.equal(listed.status, 200);
+    assert.equal((listed.body as unknown as { id: string }[])[0].id, w.general.id);
+    const inbox = await w.core.inbox(OWNER, w.ws);
+    assert.equal(
+      inbox.channels.some((entry) => entry.channel.id === w.general.id),
+      false
+    );
+    const history = await call(w.endpoint.spec(grant), 'channel_read', {
+      read: { channelId: w.general.id },
+    });
+    assert.equal(history.value.posts[0].id, post.id);
+    assert.equal(
+      (
+        await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+          body: 'blocked',
+          key: 'blocked',
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await http('POST', `/api/buddies/channels/${w.general.id}/archive`, {
+          archived: false,
+          key: 'restore',
+        })
+      ).status,
+      200
+    );
+    assert.equal(
+      (
+        await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+          body: 'restored',
+          key: 'restored',
+        })
+      ).status,
+      201
+    );
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
