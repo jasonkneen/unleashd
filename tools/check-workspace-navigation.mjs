@@ -50,7 +50,7 @@ try {
       `);
       assert.ok(rows.length > 0, 'Buddy rows must render');
       assert.ok(
-        rows.every((row) => row.height <= 30),
+        rows.every((row) => row.height <= 26),
         `Buddy rows stretched: ${JSON.stringify(rows)}`
       );
       assert.ok(
@@ -62,7 +62,7 @@ try {
       );
       assert.ok(Number.parseFloat(gap) <= 4, `Channel hash spacing grew: ${gap}`);
       console.log(
-        `Desktop: ${rows.length} Buddy rows fit the rail at 30px or less; hash gap ${gap}`
+        `Desktop: ${rows.length} Buddy rows fit the rail at 26px or less; hash gap ${gap}`
       );
     }
     console.log(`${width}px: no workspace bullets or duplicate Direct messages section`);

@@ -19,7 +19,10 @@ Task: `task_01a0e213-a688-7579-be7a-67bf4a5ac21c`.
   the link was transparent. Grid min-content sizing also made rows 259.625px wide
   inside a 243px list. Set the worker link to the small type token, line-height 1
   and 4px padding; allow the Buddy grid item to shrink. All seven current desktop
-  rows now measure 30px and fit their parent. Mobile retains its touch-sized rows.
+  rows initially returned to 30px and fit their parent. The owner's follow-up
+  screenshot also asked for tighter vertical spacing in the channel list, so both
+  desktop channel and Buddy rows now use 26px (28px between successive row tops).
+  Mobile retains its touch-sized rows.
 - Removed obsolete section-heading margin overrides. Both headings already live
   in section-row wrappers; changing the old `:not(:first-child)` heading rule in
   `fff12ab` had no effect on those wrappers. The existing section-row gap remains.
