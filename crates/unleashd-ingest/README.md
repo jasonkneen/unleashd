@@ -111,19 +111,8 @@ goes through `store::put`, which validates the Zod refinements and rebuilds the
 `conversation_session` index rows. Errors reject as `[sqlite|corrupt|invalid|schema] …`;
 conflicts are return values.
 
-One-time import from a COPY of the data dir. The server refuses to boot, printing this
-sequence, while `conversation-config/` exists without the records file. The importer reads
-record v2 only and stops on a v1 file, so T09's v1 → v2 rewrite runs on the copy first:
-
-```bash
-mkdir <copy> && cp -R ~/.agent-viewer/conversation-config <copy>/ \
-  && ln -s ~/.agent-viewer/session-cache-v1 <copy>/session-cache-v1   # read only
-pnpm --dir server exec tsx src/conversations/record-migration.ts <copy>
-cargo build --release --manifest-path crates/Cargo.toml -p unleashd-records-tool   # its own crate (S12)
-records-tool import <copy>/conversation-config/v1 new.sqlite   # → new.sqlite.import.json
-records-tool verify <copy>/conversation-config/v1 new.sqlite   # sha256 per record; must print ok=true
-records-tool bench new.sqlite 500          # list + CAS latency on a scratch copy
-```
+The one-time import and verify tools ran in the 2026-09-27 live swap and were then deleted (last at 03fc931).
+The procedure, counts and verification are in agent_notes/2026-09-25_lean-rewrite/T15-RUNBOOK.md.
 
 Nothing is dropped: unparseable, future-version, schema-invalid, duplicate, stray and
 quarantined files, and by-session entries the records do not reproduce, are stored with

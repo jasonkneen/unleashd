@@ -1,8 +1,7 @@
 # unleashd-buddies
 
 The lean Buddies core (DESIGN.md Part B, step D1) is an in-process Rust addon built with napi-rs.
-It owns the SQLite file, the schema, `authorize` and the Buddy functions. It also contains the
-one-time v33 importer and its zero-loss verifier.
+It owns the SQLite file, the schema, `authorize` and the Buddy functions.
 
 The server loads it like any other module. Every call is async and runs on a blocking thread
 against the one connection this object owns. SQLite never runs on the JS event loop, and no
@@ -15,10 +14,6 @@ cd crates/unleashd-buddies
 pnpm run build          # release: buddies-core.node + index.d.ts (generated from the Rust types)
 pnpm run build:debug    # debug build, faster to compile
 pnpm test               # cargo tests, then the release build, then the Node boundary test
-
-# importer / verifier CLI: its own crate (../unleashd-buddies-import), so editing it never
-# rebuilds this addon (S12). It depends on this crate without the napi layer.
-cargo build --release --manifest-path ../Cargo.toml -p unleashd-buddies-import
 ```
 
 `buddies-core.node` and `crates/target/` are build output and are not committed.
@@ -84,100 +79,10 @@ Not in this crate yet: full-text post search. A post's `conversation_id` is the 
 written from (provenance); `return_conversation_id` is set only on a request, where its answer goes.
 They arrive with the server rewrite (T11), when a route needs them.
 
-## Import and verify (v33/v34 → this schema)
+## Import (done)
 
-Both legacy versions are supported; unknown versions and inconsistent archive-column shapes
-are refused before a target is created. The legacy v34 migration only added
-`buddy_lists.archived_at` (`@nbardy/buddies` `src/lists.js`, commit b672694). Imports preserve
-that timestamp in `channel.archived_at`; v33 channels import unarchived. Verification compares
-every public channel's identity and archive timestamp, and all six fields of each existing
-`buddy_builder_hires` receipt (preserved as a `buddy.create` event). Running and queued runs
-retain their source state during import; the separate server-start recovery still applies.
-
-```bash
-buddies-import import --from old.sqlite --to new.sqlite --report import.json
-buddies-import verify --from old.sqlite --to new.sqlite --import-report import.json --out verify.json  # exit 1 on mismatch
-```
-
-**Import.** Follows 01 §7.1, with the T06b post model.
-- `buddy_messages` → posts in the direct channel of {sender, recipient} (a NULL recipient is the
-  owner). An inline reply becomes its own post (`reply_<message id>`), written by the recipient at
-  `replied_at`, with `reply_to_id` = the request and the request's `answer_id` pointing at it.
-  The v33 `root_message_id` is the delegation-chain root and is often in another channel, so it is
-  kept in `legacy`; `root_id` is the thread inside the channel.
-- `buddy_list_posts` → public channel posts; `buddy_task_comments` → the task's channel.
-- `buddy_list_reads` and `owner-channel-reads.json` → `post_read`. The JSON is read, never written
-  (`--owner-reads`, default `$UNLEASHD_DATA_DIR` or `~/.agent-viewer`); a missing file is
-  recorded as `absent`. A list the owner never opened gets the file's baseline as its cursor.
-- It opens the v33 file with `mode=ro`, refuses to write an existing target, and never writes a
-  soul file.
-- Every source column with no new home goes into the row's `legacy` JSON.
-- It fails with a typed error before writing anything if a source value falls outside the
-  mapping, for example a `claimed` run or an unknown status.
-- It fails if any per-table count differs after the import.
-- Audit rows that are pure reads (`get_*`, `list_*`, `search_*`, `recall`) are dropped by design.
-- Command receipts keep their key and hash, but not the cached result.
-- The report lists:
-  - the non-home memberships;
-  - the memory-fold winners that are not the legacy head, and the count of folded copies;
-  - the interval schedules that were converted to cron;
-  - the foreign-key violations;
-  - the soul-file hashes, which are the verifier's baseline.
-
-**Verify.** Implements 01 §7.3 checks 1–4, with both databases opened read-only.
-- Per-author and per-channel counts and a content hash for each data class. Both sides use the
-  same SQLite `json_array` serializer.
-- Every v33 inline reply is byte-identical to its answer post, by the recipient, in the request's
-  thread.
-- Thread and reply links: every `reply_to_id` and `root_id` resolves inside its own channel.
-- Read cursors equal `buddy_list_reads` plus the owner JSON, which must be unchanged since import.
-- Revision sets per doc, as (revision, sha256).
-- Stored hashes match the content.
-- Heads equal their last revision.
-- Soul files are unchanged, and the soul-check split holds (match / no header / empty).
-
-### Direct channels are imported read (T11, owner decision)
-
-v33 kept no read state for messages. `import` therefore marks every imported direct channel read
-through its newest post, for the owner and for each member, so the first inbox after the swap is
-not a flood of every historical DM. It is ON by default; `--keep-direct-unread` turns it off. The
-report records `direct_reads: {state: marked, cursors}` and `verify` recomputes the same cursors
-from the imported posts (on the copy: 188 cursors; 271 read cursors in total, all identical).
-
-## Deploy (the live swap, T15: owner-gated)
-
-The server opens `UNLEASHD_BUDDIES_DB` (default `~/.buddies/buddies-v3.sqlite`). It never opens the
-v33 `~/.buddies/buddies.sqlite`, and it never falls back to it: while the new file is missing and
-the v33 one exists, every Buddy call fails with the import command, and ordinary chats keep working.
-A first-time install (neither file) starts with an empty new-schema database.
-
-1. **Stop the server** (no turn may write v33 during the copy), then take a consistent copy:
-   `sqlite3 ~/.buddies/buddies.sqlite "VACUUM INTO '/path/backup-v33.sqlite'"`.
-2. **Import** the copy into the new file (the importer refuses an existing target):
-   `buddies-import import --from /path/backup-v33.sqlite --to ~/.buddies/buddies-v3.sqlite --report ~/.buddies/buddies-v3.import.json`
-   (`--owner-reads` defaults to `$UNLEASHD_DATA_DIR/owner-channel-reads.json`).
-   Then carry the notes across: they are not imported (notes are agent_notes files, not docs).
-   `buddies-import export-notes --from /path/backup-v33.sqlite` prints the plan (154 files for
-   1,082 notes on the 2026-09-26 copy); add `--write` to write
-   `<workspace>/agent_notes/buddy-notes/<buddy>/<date>.md`. It refuses if any file exists.
-   Memory folds to one doc per Buddy and kind: for working/long_term, of the legacy head and every
-   thread/task/workspace copy, the newest becomes `mem_<buddy>_<kind>` with its own chain renumbered 1..n (source id,
-   scope and revision in `legacy`). The same `export-notes` run writes every other copy, oldest
-   first, to `<buddy>/memory-archive.md` (524 copies for 30 Buddies on the 2026-09-26 copy), and
-   verify fails unless each Buddy's folded copies equal its archived sections. The soul is always
-   the v33 head (it must match SOUL.md); scoped soul copies are archived, never imported.
-3. **Verify** (exit 1 on any mismatch; do not switch unless `"ok": true`):
-   `buddies-import verify --from /path/backup-v33.sqlite --to ~/.buddies/buddies-v3.sqlite --import-report ~/.buddies/buddies-v3.import.json --out ~/.buddies/buddies-v3.verify.json`
-4. **Switch**: build the addon (`pnpm --dir crates/unleashd-buddies build`) and deploy the server
-   commit that runs on the crate. `UNLEASHD_BUDDIES_DB` only if the file lives elsewhere.
-5. **Restart** the backend. Startup runs `recoverRuns` once: any run v33 had running ends
-   `interrupted`. Queued runs START once the runner wakes, except those of buddies whose background
-   work is off (they stay queued, "delivered but held"). On the 2026-09-25 copy that is 18 runs for
-   background-enabled buddies (11 failure notices, 4 replies, 3 requests) and 1 held request.
-   Cancel any that should not run before step 5 (`POST /api/buddies/runs/:id/cancel`, or decide
-   in T15). Check `pnpm errors:list` for Buddy errors.
-
-Rollback: stop the server, deploy the previous commit; v33 was never written after step 1.
+The one-time import and verify tools ran in the 2026-09-27 live swap and were then deleted (last at 03fc931).
+The procedure, counts and verification are in agent_notes/2026-09-25_lean-rewrite/T15-RUNBOOK.md.
 
 ## Tests
 
@@ -198,13 +103,6 @@ node --test crates/unleashd-buddies/test/node.test.mjs               # after pnp
   - the request → answer → return loop, read cursors on a direct channel, and the failure notice;
   - epoch cancellation;
   - schedules and event pruning.
-- `../unleashd-buddies-import/tests/import.rs`:
-  - a v33 fixture (the real v33 schema, `tests/fixtures/v33-schema.sql`) is imported and
-    verified;
-  - it has inline replies, a same-channel thread, a cross-channel root, a note to self and an
-    owner read file;
-  - then a message body, an answer body, a thread link, the owner read file, a revision and a
-    soul file are tampered with, and the verifier must report each one.
 - `tests/query_plan.rs` guards query plans:
   - it traces every statement that a workload over every public function runs;
   - it fails on any plain `SCAN <table>` in `EXPLAIN QUERY PLAN`, the regression class behind

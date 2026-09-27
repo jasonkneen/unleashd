@@ -164,14 +164,13 @@ fn load(tx: &Connection, id: &str) -> Result<Option<ConversationRecord>> {
 }
 
 /// The one write. Validates against the Zod refinements, upserts the row, and rebuilds the
-/// record's session index rows. `defaults` is non-empty only for an imported legacy file.
-/// `pub` only for the one-time importer, which is its own crate (unleashd-records-tool, S12).
-pub fn put(tx: &Transaction<'_>, record: &ConversationRecord, defaults: &[Defaulted]) -> Result<()> {
+/// record's session index rows. `import_defaults` held the one-time importer's provenance; the
+/// first write cleared it by design and the importer is gone (2026-09-27), so writes store NULL.
+fn put(tx: &Transaction<'_>, record: &ConversationRecord) -> Result<()> {
     let issues = validate::record(record);
     if !issues.is_empty() {
         return Err(RecordsError::Invalid(record.conversation_id.clone(), issues));
     }
-    let import_defaults = (!defaults.is_empty()).then(|| defaults.iter().map(|d| d.key_and_default().0).collect::<Vec<_>>().join(","));
     tx.prepare_cached(
         "INSERT INTO conversation_record (conversation_id, status, deleted_at, done, kind, provenance, working_directory,
            config, config_revision, record_revision, last_resolved, current_session, session_bindings, creation, created_at,
@@ -202,7 +201,7 @@ pub fn put(tx: &Transaction<'_>, record: &ConversationRecord, defaults: &[Defaul
         record.creation.as_ref().map(json),
         record.created_at,
         record.updated_at,
-        import_defaults,
+        None::<String>,
     ])?;
     tx.prepare_cached("DELETE FROM conversation_session WHERE conversation_id = ?1")?.execute([&record.conversation_id])?;
     let mut index = tx.prepare_cached("INSERT INTO conversation_session (provider, session_id, conversation_id) VALUES (?1, ?2, ?3)")?;
@@ -253,11 +252,6 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection> {
 impl Records {
     pub fn open(path: &Path) -> Result<Records> {
         Ok(Records { conn: open_connection(path)? })
-    }
-
-    /// The raw connection, for the one-time importer crate (unleashd-records-tool, S12) only.
-    pub fn connection(&mut self) -> &mut Connection {
-        &mut self.conn
     }
 
     pub fn get(&self, conversation_id: &str) -> Result<Option<ConversationRecord>> {
@@ -372,7 +366,7 @@ impl Records {
             created_at: now.clone(),
             updated_at: now,
         };
-        put(&tx, &record, &[])?;
+        put(&tx, &record)?;
         tx.commit()?;
         Ok(CreateOutcome::Created { record })
     }
@@ -385,7 +379,7 @@ impl Records {
             Edit::Keep(verdict) => Found::Found(current, verdict),
             Edit::Write(mut next, verdict) => {
                 next.record_revision = current.record_revision + 1;
-                put(&tx, &next, &[])?;
+                put(&tx, &next)?;
                 Found::Found(next, verdict)
             }
         };
@@ -455,7 +449,7 @@ impl Records {
         }
         let record = ConversationRecord { conversation_id: to.to_string(), ..existing };
         tx.prepare_cached("DELETE FROM conversation_record WHERE conversation_id = ?1")?.execute([from])?;
-        put(&tx, &record, &[])?;
+        put(&tx, &record)?;
         tx.commit()?;
         Ok(RekeyOutcome::Rekeyed { record })
     }

@@ -153,7 +153,7 @@ export type ConversationKind =
 
 /**
  * One durable conversation record. `version` is not a field: every stored record is version 2
- * (T09's `kind`); import refuses a v1 file (run record-migration.ts on the copy first).
+ * (T09's `kind`); v1 files were migrated by the one-time import, deleted after the 2026-09-27 swap (last at 03fc931).
  */
 export interface ConversationRecord {
   conversationId: string

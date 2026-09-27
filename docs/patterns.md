@@ -131,9 +131,10 @@ carry none of its code or CSS. Deleting the feature = delete the folder + the ca
 **Smell:** compatibility shims, permanent flags, migration chains (33 schema versions).
 **Pattern:** a one-time export into a clean shape, with zero-loss verification (counts plus content hashes). Then
 delete the old path entirely.
-**Here:** `crates/unleashd-buddies-import` (import + verify; deleted after the live swap); `crates/unleashd-records-tool` (config JSON directory → records table, deleted after T23b);
-`server/src/conversations/record-migration.ts` (config records v1 → v2 with one stored `kind`; since T23b a CLI
-step of the records import, run on the copy; delete with `unleashd-records-tool` after the live swap).
+**Here:** the Buddies v33 → v3 importer/verifier (`crates/unleashd-buddies-import`), the config JSON → records
+store import (`crates/unleashd-records-tool`) and `record-migration.ts` ran once in the 2026-09-27 swap and were
+deleted after it (last at 03fc931; runbook agent_notes/2026-09-25_lean-rewrite/T15-RUNBOOK.md). The server keeps
+only a guard: it refuses to start on an unimported legacy data dir instead of creating an empty store over it.
 
 ## build-cache
 **Smell:** every worktree cold-builds the Rust addons (~30 s each, three cores) though it never touched Rust, and an
@@ -143,8 +144,7 @@ every checkout, and publish into the cache by an atomic rename under a per-key l
 starts the compiler. Code that is not shipped lives in its own build unit, so editing it changes no shipped key.
 **Here:** `tools/ensure-addons.mjs` (key: the crate's `src/**`, `build.rs`, `Cargo.toml`, `package.json`, its
 reachable `Cargo.lock` entries, `rustc -vV`; cache `$UNLEASHD_ADDON_CACHE`); called by `pnpm run bootstrap`, the dev /
-build tasks, `test:server` and the dev watcher on a saved `.rs`. The import CLIs are `crates/unleashd-buddies-import`
-and `crates/unleashd-records-tool`. Guards: `tools/ensure-addons.test.mjs` (a TS or tool-crate edit keeps the key;
+build tasks, `test:server` and the dev watcher on a saved `.rs`. One-time tools get their own crates for the same reason. Guards: `tools/ensure-addons.test.mjs` (a TS or tool-crate edit keeps the key;
 a hit never spawns), `tools/watch-server.test.mjs` (a tool-crate save builds nothing). S12, 2026-09-26.
 
 ## tokens-and-shells

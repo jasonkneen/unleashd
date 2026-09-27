@@ -163,7 +163,7 @@ export type BuddyContext = z.infer<typeof BuddyContextSchema>;
 // `creation.buddyContext`, `purpose`, a transcript text marker) next to
 // `placement` and five nullable worker fields, and hydration picked "the first
 // specific candidate" among them. Records were migrated once
-// (server/src/conversations/record-migration.ts); nothing else derives kind.
+// (the one-time record migration, deleted after the 2026-09-27 swap (last at 03fc931)); nothing else derives kind.
 export const BuddyVisibilitySchema = z.enum(['foreground', 'background']);
 export type BuddyVisibility = z.infer<typeof BuddyVisibilitySchema>;
 
@@ -262,7 +262,7 @@ export type ConversationCreationMetadata = z.infer<typeof ConversationCreationMe
 
 // v2 (T09, 2026-09-25): `kind` is required and is the only identity; v1's
 // creation.buddyContext / purpose / placement are gone. The one-time v1 → v2
-// rewrite is server/src/conversations/record-migration.ts.
+// rewrite was the one-time record migration, deleted after the 2026-09-27 swap (last at 03fc931).
 export const CONVERSATION_RECORD_VERSION = 2;
 export const PersistedConversationConfigRecordSchema = z.object({
   version: z.literal(CONVERSATION_RECORD_VERSION),

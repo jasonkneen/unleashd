@@ -209,7 +209,9 @@ export async function openBuddiesCore(location: BuddiesLocation): Promise<Buddie
     case 'unimported': {
       const { file, legacy } = location;
       throw new Error(
-        `Buddies database ${file} does not exist, but ${legacy} does. Import it first:\n  buddies-import import --from ${legacy} --to ${file} --report ${file}.import.json\n  buddies-import verify --from ${legacy} --to ${file} --import-report ${file}.import.json --out ${file}.verify.json\n(or set UNLEASHD_BUDDIES_DB). See crates/unleashd-buddies/README.md "Deploy".`
+        `Buddies database ${file} does not exist, but ${legacy} does. It needs the one-time v33 import, whose tools
+(crates/unleashd-buddies-import) were deleted after the 2026-09-27 swap: check out commit 03fc931 and follow
+agent_notes/2026-09-25_lean-rewrite/T15-RUNBOOK.md (or set UNLEASHD_BUDDIES_DB).`
       );
     }
   }
