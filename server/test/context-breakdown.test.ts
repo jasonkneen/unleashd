@@ -30,6 +30,10 @@ function sourceOf(subjects: RoutedConversation[]): MessageSource {
 
 const WINDOW_200K: ContextWindow = { source: 'model', tokens: 200_000, modelId: 'haiku' };
 
+function textMessage(role: Message['role'], text: string): Message {
+  return { role, body: { t: 'text', text }, timestamp: new Date() };
+}
+
 function conversation(overrides: Record<string, unknown> = {}): RoutedConversation {
   return {
     id: 'convo-1',
@@ -110,8 +114,8 @@ test('an unrecognised model is reported as unknown, never silently defaulted', (
 test('buildContextBreakdown sums history and pairs provider cumulative delta', () => {
   const convo = conversation({
     messages: [
-      { role: 'user', content: 'hello', timestamp: new Date() },
-      { role: 'assistant', content: 'world!', timestamp: new Date() },
+      textMessage('user', 'hello'),
+      textMessage('assistant', 'world!'),
     ],
   });
   const usage = {
@@ -170,7 +174,7 @@ test('context-breakdown route 404s identically to the conversation route', async
 test('context-breakdown route returns the meter payload for a known conversation', async () => {
   const convo = conversation({
     kind: { t: 'builder' },
-    messages: [{ role: 'user', content: 'build a team', timestamp: new Date() }],
+    messages: [textMessage('user', 'build a team')],
   });
   const app = express();
   registerConversationRoutes(
@@ -220,7 +224,7 @@ test('context-breakdown route returns the meter payload for a known conversation
 
 test('measured context becomes the headline and the unmodelled harness overhead becomes a band', () => {
   const convo = conversation({
-    messages: [{ role: 'user', content: 'x'.repeat(4_000), timestamp: new Date() }],
+    messages: [textMessage('user', 'x'.repeat(4_000))],
     // Our five sections model ~1,000 tokens of that message. The provider
     // counted 40,500 because its own system prompt and tool schemas -- which we
     // never see -- ride along on every request.
@@ -252,7 +256,7 @@ test('a provider-side compaction drops the meter instead of pushing it past 100%
   // Modelled on the real fixture: conversation 411783af compacted three times,
   // ~966k -> ~52k, while our append-only store kept every message.
   const convo = conversation({
-    messages: [{ role: 'user', content: 'y'.repeat(3_864_000), timestamp: new Date() }],
+    messages: [textMessage('user', 'y'.repeat(3_864_000))],
     providerUsage: {
       contextTokens: 52_704,
       outputTokens: 80,
@@ -289,7 +293,7 @@ test('a provider-side compaction drops the meter instead of pushing it past 100%
 /** ~40k chars of history => ~10k estimated tokens, enough to scale against. */
 function bigConversation() {
   return conversation({
-    messages: [{ role: 'user', content: 'x'.repeat(40_000) }],
+    messages: [textMessage('user', 'x'.repeat(40_000))],
   });
 }
 
@@ -315,7 +319,7 @@ test('session-file context is used when the live usage event has not run', () =>
 
 test('the live usage event outranks the session file when both are present', () => {
   const convo = conversation({
-    messages: [{ role: 'user', content: 'x'.repeat(40_000) }],
+    messages: [textMessage('user', 'x'.repeat(40_000))],
     providerUsage: { contextTokens: 99_000 },
   });
   const result = buildContextBreakdown(convo, historyOf(convo), null, null, null, WINDOW_200K, {
