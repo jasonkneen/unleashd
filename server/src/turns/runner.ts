@@ -67,7 +67,8 @@ export interface TurnRunnerHost {
   providerUsage: ProviderTurnUsage | null;
   readonly policy: TurnPolicy;
   readonly turnQueue: TurnQueue;
-  markSessionStarted(): void;
+  readonly provider: ResolvedExecutionConfig['provider'];
+  markSessionStarted(started?: boolean): void;
   /** A provider-generated title; the conversation owns custom-over-ai precedence. */
   observeTitle(title: string, source: 'ai' | 'custom'): void;
   persistSession(sessionId: string, audienceKey: string | undefined): Promise<void>;
@@ -328,7 +329,6 @@ export class TurnRunner {
     host.isRunning = true;
     if (this.activeAttemptId) this.ports.turnAttempts.running(this.activeAttemptId, host.sessionId);
     host.emit('buddy-turn-started');
-    host.markSessionStarted();
     this.startWatchdogs();
     this.broadcastStatus();
 
@@ -378,6 +378,8 @@ export class TurnRunner {
   /** The provider named its session: alias it, persist it, bind the attempt to it. */
   private async adoptSession(sessionId: string, audienceKey: string | undefined): Promise<void> {
     const host = this.host;
+    // Spawning a CLI is not proof of a resumable session. Guard: Codex startup retry.
+    host.markSessionStarted();
     const oldSessionId = host.sessionId;
     host.sessionId = sessionId;
     if (oldSessionId !== sessionId) {
@@ -435,6 +437,10 @@ export class TurnRunner {
   }
 
   noteFailure(cause: 'out_of_tokens' | 'provider_error', message: string): void {
+    if (this.host.provider === 'codex' && message.includes('no rollout found for thread id')) {
+      // Repair old phantom bindings so the next explicit retry starts a real thread.
+      this.host.markSessionStarted(false);
+    }
     this.terminalCauseHint = cause;
     this.providerFailureMessage = normalizeProviderErrorMessage(message);
     this.surfaceError(this.providerFailureMessage);

@@ -498,6 +498,97 @@ test('synchronous provider startup failure notifies automation listeners', () =>
   assert.equal(conversation.hasActiveProcess(), false);
 });
 
+test('a Codex turn that fails before creating a thread retries without resume', async () => {
+  type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
+  const requests: Request[] = [];
+  const { conversation } = runtimeFixture({
+    executeTurn: ((request) => {
+      requests.push(request);
+      const first = requests.length === 1;
+      return {
+        child: { exitCode: first ? 1 : 0 },
+        events: (async function* () {
+          yield { type: 'turn.started' as const };
+          if (first) {
+            yield { type: 'error' as const, message: 'required MCP server failed to initialize' };
+          } else {
+            yield { type: 'session.started' as const, sessionId: 'real-codex-thread' };
+            yield { type: 'text.delta' as const, text: 'Ready' };
+            yield { type: 'turn.complete' as const, reason: 'success' as const };
+          }
+        })(),
+        completed: Promise.resolve({
+          exitCode: first ? 1 : 0,
+          signal: null,
+          reason: first ? ('error' as const) : ('success' as const),
+        }),
+        stop: () => undefined,
+      };
+    }) as NonNullable<ConversationRuntimeDependencies['executeTurn']>,
+  });
+
+  conversation.sendMessage('First request');
+  await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+  conversation.sendMessage('Retry');
+  await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].resumeSessionId, undefined);
+  assert.equal(requests[1].resumeSessionId, undefined);
+  assert.equal(conversation.sessionId, 'real-codex-thread');
+});
+
+test('a missing Codex rollout clears a legacy phantom session binding', async () => {
+  type Request = Parameters<NonNullable<ConversationRuntimeDependencies['executeTurn']>>[0];
+  const requests: Request[] = [];
+  const fixture = runtimeFixture({
+    executeTurn: ((request) => {
+      requests.push(request);
+      const missing = requests.length === 1;
+      return {
+        child: { exitCode: missing ? 1 : 0 },
+        events: (async function* () {
+          yield { type: 'turn.started' as const };
+          if (missing) {
+            yield {
+              type: 'error' as const,
+              message: 'thread/resume failed: no rollout found for thread id phantom-thread',
+            };
+          } else {
+            yield { type: 'session.started' as const, sessionId: 'new-codex-thread' };
+            yield { type: 'text.delta' as const, text: 'Ready' };
+            yield { type: 'turn.complete' as const, reason: 'success' as const };
+          }
+        })(),
+        completed: Promise.resolve({
+          exitCode: missing ? 1 : 0,
+          signal: null,
+          reason: missing ? ('error' as const) : ('success' as const),
+        }),
+        stop: () => undefined,
+      };
+    }) as NonNullable<ConversationRuntimeDependencies['executeTurn']>,
+  });
+  const conversation = new fixture.Conversation({
+    id: 'legacy-codex-conversation',
+    done: false,
+    kind: { t: 'chat' },
+    workingDirectory: '/tmp',
+    configState: fixture.configState,
+    existingSessionId: 'phantom-thread',
+  });
+
+  conversation.sendMessage('Resume');
+  await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+  conversation.sendMessage('Retry');
+  await eventually(() => assert.equal(conversation.hasActiveProcess(), false));
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].resumeSessionId, 'phantom-thread');
+  assert.equal(requests[1].resumeSessionId, undefined);
+  assert.equal(conversation.sessionId, 'new-codex-thread');
+});
+
 test('unsupported Buddy provider leaves a queued message retryable', () => {
   const fixture = runtimeFixture({ provider: 'gemini' });
   const conversation = new fixture.Conversation({
