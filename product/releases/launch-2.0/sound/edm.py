@@ -3,26 +3,44 @@
 Run:  uv run --with numpy python product/releases/launch-2.0/sound/edm.py
 
 128 BPM in B minor / D major, next to the D-major marimba intro. beat = 0.46875 s, bar = 1.875 s.
+Two cues come from one set of elements. Each is a table of sections (BUILD_CUE, FULL_CUE, below);
+retime a cue by editing the table's bars.
 
+edm-build.wav, 15 s. A locked cut uses it, so it must stay sample-identical:
   bar 1   0.000  BUILD  Bm  half-time filtered kick, chords at 400 Hz lowpass, vocal chop "oh-ah"
   bar 2   1.875         G   four-on-the-floor, snare roll in 8ths
   bar 3   3.750         D   vocal chop "ay-oh", snare 16ths, noise/pitch riser starts
-  bar 4   5.625         A   snare 32nds, filter fully open; GAP 7.266-7.500 (dry silence, tails only)
+  bar 4   5.625         A   snare 32nds, filter fully open; GAP 7.266-7.500 (tails + reversed crash)
   bar 5   7.500  DROP   Bm  impact + crash + big kick, pumped supersaws, bass, clap, vocal chop
-  bar 6   9.375         G
-  bar 7  11.250         D   vocal chop
+  bar 6   9.375  GROOVE G
+  bar 7  11.250         D   crash (quiet), vocal chop
   bar 8  13.125         A   cue ends at 15.000
 
-The drop lands at exactly 7.500 s (sample 360000). Writes stereo 48 kHz 16-bit WAVs next to this file:
-edm-build.wav (the mix, peak -1 dBFS) and edm-stem-{drums,music,vox}.wav. The stems sum to the mix
+edm-full.wav, 61.375 s. Runs under the whole features section and the close:
+  bars  1-4    0.000  BUILD      as above
+  bar   5      7.500  DROP       as above
+  bars  6-17   9.375  GROOVE     crashes 9, 13, 17 (15.0, 22.5, 30.0); chops 7, 11, 15
+  bar  18     31.875  HIT        impact + full crash ("Free! Private! Open Source!"), groove goes on
+  bars 19-29  33.750  GROOVE     crashes 21, 25, 29 (37.5, 45.0, 52.5); chops 19, 23, 27
+  bars 30-31  54.375  BREAKDOWN  G, A: no drums or bass, chords lowpassed at 1.2 kHz and softly
+                                 pumped, sparse arp, one chop drenched in ping-pong echo; riser +
+                                 snare roll over the last 2 beats (57.188)
+  bar  32     58.125  END        impact + crash + one D-major chord, rings out and fades to 61.375
+
+The drop lands at exactly 7.500 s (sample 360000) in both. Writes stereo 48 kHz 16-bit WAVs next
+to this file: edm-build.wav / edm-full.wav (the mix, peak -1 dBFS) and
+edm-stem-{drums,music,vox}.wav / edm-full-stem-{drums,music,vox}.wav. The stems sum to the mix
 (to 16-bit rounding): the master limiter is a gain envelope computed from the mix and applied
 identically to every stem, so the edit can rebalance them. Drums stem also carries the riser, crash
-and impact. Deterministic: every element draws noise from its own fixed seed.
+and impact. Deterministic: every element draws noise from its own fixed seed, and each seeded
+generator is shared across sections in bar order, so the full cue's bars 1-5 match the build.
 
 Filters are applied in the frequency domain (whole-buffer FFT, or STFT frames for time-varying
 cutoffs) instead of synth.py's per-sample loop, which would take minutes on 15 s of stereo.
 """
 
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 import wave
 import zlib
@@ -36,9 +54,6 @@ BEAT = 60 / BPM  # 0.46875 s
 BAR = 4 * BEAT  # 1.875 s
 DROP = 4 * BAR  # 7.5 s
 GAP = DROP - BEAT / 2  # 7.265625 s: the last 1/8 of bar 4 is dry silence
-LENGTH = 8 * BAR  # 15.0 s
-N = round(LENGTH * SR)
-TIME = np.arange(N) / SR
 PEAK = 10 ** (-1 / 20)  # -1 dBFS
 
 
@@ -140,10 +155,6 @@ def smoothstep(u: np.ndarray) -> np.ndarray:
     return u * u * (3 - 2 * u)
 
 
-def track() -> np.ndarray:
-    return np.zeros((2, N))
-
-
 # ---- Oscillators
 
 
@@ -183,24 +194,45 @@ PROGRESSION = [  # (voicing, bass)
 ]
 
 
+CHORDS = dict(zip(("Bm", "G", "D", "A"), PROGRESSION))
+END_VOICING = ["D3", "A3", "D4", "F#4", "A4", "D5"]  # the final hit: D major, root on top
+
+
 def harmony(bar: int):
     return PROGRESSION[(bar - 1) % 4]
+
+
+def chord(voicing: list[str], r: np.random.Generator, octave_layer: float, seconds: float, env):
+    body = sum(supersaw(hz(n), seconds, r) for n in voicing)
+    top = supersaw(hz(voicing[-1]) * 2, seconds, r) * octave_layer
+    return (body + top) * env
 
 
 def chord_bar(voicing: list[str], r: np.random.Generator, octave_layer: float) -> np.ndarray:
     """One bar of sustained supersaw chord, slightly overlapping the next bar's attack."""
     seconds = BAR + 0.015
-    body = sum(supersaw(hz(n), seconds, r) for n in voicing)
-    top = supersaw(hz(voicing[-1]) * 2, seconds, r) * octave_layer
-    return (body + top) * gate(seconds, 0.006, 0.03)
+    return chord(voicing, r, octave_layer, seconds, gate(seconds, 0.006, 0.03))
 
 
-def pump(depth: float, kicks: list[float], release: float = 0.75 * BEAT) -> np.ndarray:
-    """Sidechain gain: duck by `depth` at each kick, curve back to unity over `release`."""
-    g = np.ones(N)
+def ring_chord(voicing: list[str], r: np.random.Generator, seconds: float) -> np.ndarray:
+    """The end hit: struck once, decaying over `seconds` instead of holding for a bar."""
+    t = t_axis(seconds)
+    return chord(voicing, r, 0.45, seconds, np.minimum(1, t / 0.006) * np.exp(-t / 1.1))
+
+
+def bass_note(root: float, seconds: float, env: np.ndarray) -> np.ndarray:
+    """Sine plus a dark saw an octave up, saturated."""
+    t = t_axis(seconds)
+    body = np.sin(2 * np.pi * root * t) + 0.35 * fft_filter(saw(root * 2, len(t), 0.0), lp(900))
+    return panned(np.tanh(1.6 * body) * env, 0)
+
+
+def pump(n: int, depth: float, kicks: list[float], release: float = 0.75 * BEAT) -> np.ndarray:
+    """Sidechain gain over n samples: duck by `depth` at each kick, back to unity over `release`."""
+    g = np.ones(n)
     for k in kicks:
         s = round(k * SR)
-        e = min(N, s + round(release * SR))
+        e = min(n, s + round(release * SR))
         tt = np.arange(e - s) / SR
         duck = depth * (1 - tt / release) ** 2 * np.minimum(1, tt / 0.003)
         g[s:e] = np.minimum(g[s:e], 1 - duck)
@@ -388,11 +420,12 @@ def voice(phrase: list[tuple[float, str, str]], seconds: float, seed: str, cents
     return (voiced * onset + breath * breath_env) * release * np.minimum(1, t / 0.004)
 
 
-VOCAL_CHOPS = [  # (start, phrase, seconds, gain, octave-down weight)
-    (at(1), [(0.0, "B4", "o"), (0.38, "D5", "a")], 1.0, 0.5, 0.0),
-    (at(3), [(0.0, "A4", "e"), (0.16, "A4", "i"), (0.42, "F#4", "o"), (0.8, "F#4", "u")], 1.05, 0.6, 0.0),
-    (at(5), [(0.0, "D5", "o"), (0.22, "F#5", "a"), (0.62, "D5", "e"), (0.76, "D5", "i")], 1.0, 1.0, 0.15),
-    (at(7), [(0.0, "F#5", "e"), (0.14, "F#5", "i"), (0.4, "D5", "o"), (0.8, "D5", "u")], 1.1, 0.75, 0.15),
+CHOP_PHRASES = [  # (phrase, seconds, octave-down weight); index i sings from seeds "vox-{i}*"
+    ([(0.0, "B4", "o"), (0.38, "D5", "a")], 1.0, 0.0),  # "oh-ah"
+    # "ay-oh"
+    ([(0.0, "A4", "e"), (0.16, "A4", "i"), (0.42, "F#4", "o"), (0.8, "F#4", "u")], 1.05, 0.0),
+    ([(0.0, "D5", "o"), (0.22, "F#5", "a"), (0.62, "D5", "e"), (0.76, "D5", "i")], 1.0, 0.15),
+    ([(0.0, "F#5", "e"), (0.14, "F#5", "i"), (0.4, "D5", "o"), (0.8, "D5", "u")], 1.1, 0.15),
 ]
 
 
@@ -400,19 +433,30 @@ def lower_octave(phrase):
     return [(tk, n[:-1] + str(int(n[-1]) - 1), v) for tk, n, v in phrase]
 
 
+@cache
+def chop(i: int) -> np.ndarray:
+    """A chop is a sample: lead + detuned double + octave-down, rendered once, placed many times."""
+    phrase, seconds, low = CHOP_PHRASES[i]
+    lead = voice(phrase, seconds, f"vox-{i}", 0.0)
+    double = voice(phrase, seconds, f"vox-{i}-double", 9.0)
+    octave = voice(lower_octave(phrase), seconds, f"vox-{i}-low", -4.0)
+    return panned(lead, 0) + 0.45 * panned(double, 0.35) + low * panned(octave, -0.25)
+
+
 # ---- Effects
 
 
 def ping_pong(x: np.ndarray, delay: float, feedback: float, taps: int = 10) -> np.ndarray:
     """Mono in, stereo out: echoes alternate L, R, L... each one darker and thinner than the last."""
-    nfft = 1 << int(np.ceil(np.log2(N + taps * delay * SR + SR)))
+    n = x.shape[-1]
+    nfft = 1 << int(np.ceil(np.log2(n + taps * delay * SR + SR)))
     f = np.fft.rfftfreq(nfft, 1 / SR)
     X = np.fft.rfft(x, nfft)
     colour = lp(5000)(f) * hp(300)(f)
     echo = [feedback**n * colour**n * np.exp(-2j * np.pi * f * n * delay) for n in range(1, taps + 1)]
     left = sum(echo[0::2])
     right = sum(echo[1::2])
-    return np.stack([np.fft.irfft(X * left, nfft)[:N], np.fft.irfft(X * right, nfft)[:N]])
+    return np.stack([np.fft.irfft(X * left, nfft)[:n], np.fft.irfft(X * right, nfft)[:n]])
 
 
 def reverb(x: np.ndarray, rt60: float, seed: str, predelay: float = 0.02) -> np.ndarray:
@@ -425,148 +469,383 @@ def reverb(x: np.ndarray, rt60: float, seed: str, predelay: float = 0.02) -> np.
     ir *= np.minimum(1, t / 0.008)
     ir /= np.sqrt(np.sum(ir**2, axis=1, keepdims=True))
     ir = np.pad(ir, ((0, 0), (round(predelay * SR), 0)))
-    nfft = 1 << int(np.ceil(np.log2(N + ir.shape[1])))
+    n = x.shape[-1]
+    nfft = 1 << int(np.ceil(np.log2(n + ir.shape[1])))
     mono = np.fft.rfft(x.sum(axis=0) / 2, nfft)
-    return np.fft.irfft(mono[None, :] * np.fft.rfft(ir, nfft), nfft)[:, :N]
+    return np.fft.irfft(mono[None, :] * np.fft.rfft(ir, nfft), nfft)[:, :n]
 
 
 def soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
     return np.tanh(drive * x) / drive
 
 
-# ---- Arrangement
+# ---- Arrangement: a cue is a table of sections, 1-based bars, contiguous. One dataclass per kind.
 
-# Dry mask: everything dry stops at GAP (5 ms fade) and resumes on the drop; reverb/echo tails ring.
-DRY = np.where(TIME < GAP, 1.0, 0.0) + np.where(TIME >= DROP, 1.0, 0.0)
-DRY[(TIME >= GAP) & (TIME < GAP + 0.005)] = 1 - (TIME[(TIME >= GAP) & (TIME < GAP + 0.005)] - GAP) / 0.005
 
-# Tails inside the gap decay over 80 ms: a 32nd-note roll's room at full size smears the silence.
-IN_GAP = (TIME >= GAP) & (TIME < DROP)
-TAIL = np.where(IN_GAP, np.exp(-(TIME - GAP) / 0.08), 1.0)
+@dataclass(frozen=True)
+class Build:  # the 4-bar build and gap; fixed at bars 1-4 (DROP, GAP and the locked cut rely on it)
+    first: int
+    last: int
+
+
+@dataclass(frozen=True)
+class Drop:  # impact + crash + big kick + chop, then a groove bar
+    bar: int
+
+    first = last = property(lambda self: self.bar)
+
+
+@dataclass(frozen=True)
+class Groove:  # the drop groove, progression cycling by bar number
+    first: int
+    last: int
+    crashes: tuple[int, ...]  # bars with a quiet crash on the downbeat
+    chops: tuple[tuple[int, int, float], ...]  # (bar, CHOP_PHRASES index, gain)
+
+
+@dataclass(frozen=True)
+class Hit:  # impact + full crash on the downbeat, then a groove bar
+    bar: int
+
+    first = last = property(lambda self: self.bar)
+
+
+@dataclass(frozen=True)
+class Breakdown:  # no drums or bass; riser + snare roll over the last 2 beats into what follows
+    first: int
+    last: int
+    chords: tuple[str, ...]  # one CHORDS name per bar
+    chop: int  # CHOP_PHRASES index, drenched in echo on the first bar
+
+
+@dataclass(frozen=True)
+class End:  # impact + crash + one ringing D-major chord; the file ends `ring` s after the downbeat
+    bar: int
+    ring: float
+    fade: float  # master fade over the last `fade` s, on a squared curve
+
+    first = last = property(lambda self: self.bar)
+
+
+Section = Build | Drop | Groove | Hit | Breakdown | End
+
+BUILD_CUE = [
+    Build(1, 4),
+    Drop(5),
+    Groove(6, 8, crashes=(7,), chops=((7, 3, 0.75),)),
+]
+
+FULL_CUE = [
+    Build(1, 4),
+    Drop(5),
+    Groove(6, 17, crashes=(9, 13, 17), chops=((7, 3, 0.75), (11, 2, 0.55), (15, 3, 0.55))),
+    Hit(18),  # "Free! Private! Open Source!"
+    Groove(19, 29, crashes=(21, 25, 29), chops=((19, 2, 0.55), (23, 3, 0.55), (27, 2, 0.55))),
+    Breakdown(30, 31, chords=("G", "A"), chop=0),  # "Inspired by Vim" lands on the end hit
+    End(32, ring=3.25, fade=2.75),  # the end card
+]
+
+CUT_FADE = 0.015  # a cue that ends mid-groove is cut with a 15 ms linear fade
+ENDINGS = {  # last section -> (cue length, master fade seconds, fade curve exponent)
+    Groove: lambda s: (at(s.last + 1), CUT_FADE, 1),
+    # Squared: a linear fade left the reverb/echo tail at -56 dBFS in the last 0.1 s.
+    End: lambda s: (at(s.bar) + s.ring, s.fade, 2),
+}
+
+
+def checked(cue: list[Section]) -> list[Section]:
+    assert cue[0] == Build(1, 4), "the build is bars 1-4: the drop must land at 7.5 s"
+    for a, b in zip(cue, cue[1:]):
+        assert b.first == a.last + 1, f"{b} does not follow {a}"
+    assert type(cue[-1]) in ENDINGS, f"a cue ends on {' or '.join(k.__name__ for k in ENDINGS)}"
+    for s in cue:
+        assert type(s) is not Breakdown or len(s.chords) == s.last - s.first + 1, s
+    return cue
+
+
+# ---- Mix: one bus per element. Buses are summed in a fixed order at mixdown, so the float
+# summation order (hence every output sample) is the same however sections interleave. That is
+# what keeps edm-build.wav sample-identical to the pre-table script, which summed element by
+# element.
+
+BUSES = ("kick", "roll", "open-hat", "closed-hat", "clap", "riser", "crash", "impact", "swell",
+         "arp", "bass", "vox", "vox-drench")  # fmt: skip
+
+CHORD_TREATMENTS = {  # bus -> (filter, sidechain depth)
+    # Build filter: 24 dB/oct resonant lowpass opening from 400 Hz to 18 kHz across bars 1-4.
+    "build": (lambda x: fft_filter(tv_filter(x, build_sweep), hp(170)), 0.3),
+    "groove": (lambda x: fft_filter(x, lambda f: lp(11000)(f) * hp(170)(f)), 0.72),
+    "breakdown": (lambda x: fft_filter(x, lambda f: lp(1200)(f) * hp(170)(f)), 0.35),
+    "end": (lambda x: fft_filter(x, lambda f: lp(11000)(f) * hp(170)(f)), 0.0),
+}
+
+
+def build_sweep(f, tt):
+    cutoff = 400 * (18000 / 400) ** (np.clip(tt / GAP, 0, 1) ** 1.4)
+    return lp(cutoff, 1.3)(f) ** 2
+
+
+@dataclass(frozen=True)
+class Kit:
+    """One-shots rendered once per cue, drawn from each element's seed in a fixed order."""
+
+    k_build: np.ndarray
+    k_bar1: np.ndarray
+    k_drop: np.ndarray
+    k_first: np.ndarray
+    open_hat: np.ndarray
+    closed_hat: np.ndarray
+    clap: np.ndarray
+    impact: np.ndarray
+
+
+def make_kit() -> Kit:
+    r = rng_for("kick")
+    k_build = kick(r)
+    k_bar1 = fft_filter(k_build, lp(260, 0.9))  # bar 1: half-time and muffled, as if behind a wall
+    k_drop = kick(r, seconds=0.36, decay=0.15)  # shorter tail: the off-beat bass needs the room
+    k_first = kick(r, seconds=0.9, f_top=190, f_bottom=42, decay=0.38, click=0.5)
+    r = rng_for("hats")
+    open_hat, closed_hat = hat(r, 0.07), hat(r, 0.018)
+    return Kit(
+        *(panned(k, 0) for k in (k_build, k_bar1, k_drop, k_first)),
+        panned(open_hat, 0.2),
+        panned(closed_hat, -0.3),
+        clap(rng_for("clap")),
+        panned(impact(rng_for("impact")), 0),
+    )
+
+
+class Seeds(dict):
+    """element -> its generator, shared across sections, so e.g. the chords draw bar 1, 2, 3... in
+    order. That is why the full cue's bars 1-5 are the build's bars 1-5."""
+
+    def __missing__(self, element: str) -> np.random.Generator:
+        self[element] = rng_for(element)
+        return self[element]
+
+
+class Mix:
+    def __init__(self, length: float):
+        self.length = length
+        self.n = round(length * SR)
+        self.time = np.arange(self.n) / SR
+        self.bus = {name: np.zeros((2, self.n)) for name in BUSES}
+        self.chords = {name: np.zeros((2, self.n)) for name in CHORD_TREATMENTS}
+        self.pulses = {name: [] for name in CHORD_TREATMENTS}  # sidechain triggers per chord bus
+        self.kit = make_kit()
+        self.rng = Seeds()
+
+    def add(self, bus: str, x: np.ndarray, t0: float, gain: float = 1.0) -> None:
+        place(self.bus[bus], x, t0, gain)
+
+    def add_chord(self, treatment: str, x: np.ndarray, t0: float, pulses: list[float]) -> None:
+        place(self.chords[treatment], x, t0)
+        self.pulses[treatment] += pulses
+
+
+# ---- Section builders: one per kind, each writing its events into the mix.
 
 BUILD_KICKS = [at(1, 0), at(1, 2)] + [at(b, k) for b in (2, 3, 4) for k in range(4)]
-# Build swell: the build rises from -10 dB to -3 dB at the gap, so the drop is the peak.
-SWELL = 10 ** ((-10 + 7 * np.clip(TIME / GAP, 0, 1) ** 1.2) / 20)
-DROP_KICKS = [at(b, k) for b in (5, 6, 7, 8) for k in range(4)]
 
-# ---------------- DRUMS (+ FX) ----------------
-r = rng_for("kick")
-drums = track()
-k_build = kick(r)
-k_bar1 = fft_filter(k_build, lp(260, 0.9))  # bar 1: half-time and muffled, as if behind a wall
-k_drop = kick(r, seconds=0.36, decay=0.15)  # shorter tail: the off-beat bass needs the room
-k_first = kick(r, seconds=0.9, f_top=190, f_bottom=42, decay=0.38, click=0.5)
-place(drums, panned(k_bar1, 0), at(1, 0), 0.5)
-place(drums, panned(k_bar1, 0), at(1, 2), 0.5)
-for tk in BUILD_KICKS[2:]:
-    place(drums, panned(k_build, 0), tk, 0.55 + 0.15 * tk / GAP)
-place(drums, panned(k_first, 0), DROP, 1.0)
-for tk in DROP_KICKS[1:]:
-    place(drums, panned(k_drop, 0), tk, 1.0)
 
-# Snare roll: quarters (bar 1) -> 8ths -> 16ths -> 32nds (bar 4), rising in pitch, band and level.
-r = rng_for("snare")
-roll = track()
-for bar, per_beat in ((1, 1), (2, 2), (3, 4), (4, 8)):
-    for i in range(4 * per_beat):
-        tk = at(bar, i / per_beat)
-        u = tk / GAP
-        hit = snare(r, tone=180 + 170 * u**1.5, band=1800 + 2800 * u, decay=0.09 - 0.05 * u)
-        place(roll, panned(hit, 0.15 * (-1) ** i * u), tk, 0.18 + 0.55 * u**1.6)
-roll = fft_filter(roll, lp(10000))  # bright but not fizzy
-drums += roll * DRY
+def snare_hit(mix: Mix, tk: float, u: float, i: int) -> None:
+    """One roll hit; u in [0, 1] is how far into the roll: rising pitch, band, level and spread."""
+    r = mix.rng["snare"]
+    hit = snare(r, tone=180 + 170 * u**1.5, band=1800 + 2800 * u, decay=0.09 - 0.05 * u)
+    mix.add("roll", panned(hit, 0.15 * (-1) ** i * u), tk, 0.18 + 0.55 * u**1.6)
 
-r = rng_for("hats")
-open_hat, closed_hat = hat(r, 0.07), hat(r, 0.018)
-for bar in range(1, 9):
-    hat_level = 0.1 + 0.12 * (bar - 1) / 3 if bar <= 4 else 0.26
+
+def arp_bar(mix: Mix, voicing: list[str], bar: int, start: str, gain: float, every: int = 1):
+    """16ths climbing through chord tones; every=3 keeps a sparse dotted-8th pattern."""
+    for s, f in list(enumerate(arp_notes(voicing, start)))[::every]:
+        mix.add("arp", panned(pluck(f), 0.35 * (-1) ** s), at(bar, s / 4), gain)
+
+
+def groove_bar(mix: Mix, bar: int, downbeat_kick: np.ndarray) -> None:
+    kit = mix.kit
+    kicks = [at(bar, k) for k in range(4)]
+    for tk, k in zip(kicks, (downbeat_kick, kit.k_drop, kit.k_drop, kit.k_drop)):
+        mix.add("kick", k, tk)
     for k in range(4):
-        place(drums, panned(open_hat, 0.2), at(bar, k + 0.5), hat_level)
-for bar in range(5, 9):
+        mix.add("open-hat", kit.open_hat, at(bar, k + 0.5), 0.26)
     for s in range(16):
         accent = 1.0 if s % 2 else 0.6
-        place(drums, panned(closed_hat, -0.3), at(bar, s / 4), 0.09 * accent * (s % 4 != 2))
-
-r = rng_for("clap")
-the_clap = clap(r)
-for bar in range(5, 9):
+        mix.add("closed-hat", kit.closed_hat, at(bar, s / 4), 0.09 * accent * (s % 4 != 2))
     for k in (1, 3):
-        place(drums, the_clap, at(bar, k), 0.5)
-
-r = rng_for("riser")
-rise = riser(r, GAP - at(3))
-place(drums, fft_filter(rise, lp(9000)), at(3), 0.3)
-
-r = rng_for("crash")
-place(drums, crash(r), DROP, 0.42)
-place(drums, crash(r), at(7), 0.22)
-place(drums, panned(impact(rng_for("impact")), 0), DROP, 0.85)
-
-drums *= DRY
-drums += reverb(roll * DRY, 1.4, "drum-room", 0.01) * 0.28 * TAIL
-drums = soft_clip(drums, 1.3)
-
-# ---------------- MUSIC: chords, arp, bass ----------------
-r = rng_for("chords")
-build_chords, drop_chords = track(), track()
-for bar in range(1, 5):
-    place(build_chords, chord_bar(harmony(bar)[0], r, 0.0), at(bar))
-for bar in range(5, 9):
-    place(drop_chords, chord_bar(harmony(bar)[0], r, 0.45), at(bar))
-
-# Build filter: 24 dB/oct resonant lowpass opening from 400 Hz to 18 kHz across bars 1-4.
-cutoff = lambda tt: 400 * (18000 / 400) ** (np.clip(tt / GAP, 0, 1) ** 1.4)  # noqa: E731
-build_chords = tv_filter(build_chords, lambda f, tt: lp(cutoff(tt), 1.3)(f) ** 2)
-drop_chords = fft_filter(drop_chords, lambda f: lp(11000)(f) * hp(170)(f))
-build_chords = fft_filter(build_chords, hp(170))
-level = 1 / np.sqrt(np.mean(drop_chords[:, round(DROP * SR) :] ** 2))
-chords = (build_chords * pump(0.3, BUILD_KICKS) + drop_chords * pump(0.72, DROP_KICKS)) * level
-
-arp = track()
-starts = {1: "B3", 2: "D4", 3: "A4", 4: "E5", 5: "D5", 6: "D5", 7: "D5", 8: "D5"}
-for bar in range(1, 9):
-    for s, f in enumerate(arp_notes(harmony(bar)[0], starts[bar])):
-        gain = 0.3 + 0.35 * (bar - 1) / 3 if bar <= 4 else 0.3
-        place(arp, panned(pluck(f), 0.35 * (-1) ** s), at(bar, s / 4), gain)
-arp *= DRY
-
-bass = track()
-for bar in range(5, 9):
-    root = hz(harmony(bar)[1])
+        mix.add("clap", kit.clap, at(bar, k), 0.5)
+    voicing, root = harmony(bar)
+    mix.add_chord("groove", chord_bar(voicing, mix.rng["chords"], 0.45), at(bar), kicks)
     for k in range(4):
-        t = t_axis(BEAT / 2)
-        body = np.sin(2 * np.pi * root * t) + 0.35 * fft_filter(saw(root * 2, len(t), 0.0), lp(900))
-        note = np.tanh(1.6 * body) * gate(BEAT / 2, 0.004, 0.03)
-        place(bass, panned(note, 0), at(bar, k + 0.5), 0.55)
+        note = bass_note(hz(root), BEAT / 2, gate(BEAT / 2, 0.004, 0.03))
+        mix.add("bass", note, at(bar, k + 0.5), 0.55)
+    arp_bar(mix, voicing, bar, "D5", 0.3)
 
-music_dry = (chords * 0.16 + arp * 0.32) * SWELL * DRY + bass
-music = music_dry + reverb(music_dry, 1.8, "music-hall") * 0.18 * TAIL
-music += ping_pong(arp.sum(axis=0) / 2 * 0.32, 0.75 * BEAT, 0.35) * 0.35 * TAIL
-music = soft_clip(music, 1.1)
 
-# ---------------- VOX: formant chops, ping-pong dotted-1/8 delay, reverb ----------------
-vox_dry = track()
-for i, (start, phrase, seconds, gain, low) in enumerate(VOCAL_CHOPS):
-    lead = voice(phrase, seconds, f"vox-{i}", 0.0)
-    double = voice(phrase, seconds, f"vox-{i}-double", 9.0)
-    octave = voice(lower_octave(phrase), seconds, f"vox-{i}-low", -4.0)
-    stereo = panned(lead, 0) + 0.45 * panned(double, 0.35) + low * panned(octave, -0.25)
-    place(vox_dry, stereo, start, gain)
-vox_dry = fft_filter(vox_dry, lambda f: hp(220)(f) * lp(12000)(f))
-vox = vox_dry * 0.68
-vox += ping_pong(vox_dry.sum(axis=0) / 2, 0.75 * BEAT, 0.45) * 0.62
-vox += reverb(vox_dry, 2.4, "vox-plate", 0.03) * 0.34
+def build_section(s: Build, mix: Mix) -> None:
+    kit = mix.kit
+    mix.add("kick", kit.k_bar1, at(1, 0), 0.5)
+    mix.add("kick", kit.k_bar1, at(1, 2), 0.5)
+    for tk in BUILD_KICKS[2:]:
+        mix.add("kick", kit.k_build, tk, 0.55 + 0.15 * tk / GAP)
+    # Snare roll: quarters (bar 1) -> 8ths -> 16ths -> 32nds (bar 4).
+    for bar, per_beat in ((1, 1), (2, 2), (3, 4), (4, 8)):
+        for i in range(4 * per_beat):
+            tk = at(bar, i / per_beat)
+            snare_hit(mix, tk, tk / GAP, i)
+    for bar in range(1, 5):
+        for k in range(4):
+            mix.add("open-hat", kit.open_hat, at(bar, k + 0.5), 0.1 + 0.12 * (bar - 1) / 3)
+    mix.add("riser", fft_filter(riser(mix.rng["riser"], GAP - at(3)), lp(9000)), at(3), 0.3)
+    for bar, start in zip(range(1, 5), ("B3", "D4", "A4", "E5")):
+        voicing = harmony(bar)[0]
+        mix.add_chord("build", chord_bar(voicing, mix.rng["chords"], 0.0), at(bar), [])
+        arp_bar(mix, voicing, bar, start, 0.3 + 0.35 * (bar - 1) / 3)
+    mix.pulses["build"] += BUILD_KICKS
+    mix.add("vox", chop(0), at(1), 0.5)
+    mix.add("vox", chop(1), at(3), 0.6)
+    # Reversed crash: swells from nothing to its peak exactly on the drop. Its own bus is added
+    # after the dry mask, so it plays through the gap.
+    swell = crash(rng_for("reverse-crash"), seconds=0.6)[:, ::-1]
+    swell = fft_filter(swell, lp(9000)) * np.linspace(0, 1, swell.shape[1]) ** 2
+    mix.add("swell", swell, DROP - swell.shape[1] / SR, 0.3)
 
-# ---------------- MASTER ----------------
-stems = {"drums": drums, "music": music, "vox": vox}
+
+def drop_section(s: Drop, mix: Mix) -> None:
+    groove_bar(mix, s.bar, mix.kit.k_first)
+    mix.add("crash", crash(mix.rng["crash"]), at(s.bar), 0.42)
+    mix.add("impact", mix.kit.impact, at(s.bar), 0.85)
+    mix.add("vox", chop(2), at(s.bar), 1.0)
+
+
+def groove_section(s: Groove, mix: Mix) -> None:
+    for bar in range(s.first, s.last + 1):
+        groove_bar(mix, bar, mix.kit.k_drop)
+    for bar in s.crashes:
+        mix.add("crash", crash(mix.rng["crash"]), at(bar), 0.22)
+    for bar, phrase, gain in s.chops:
+        mix.add("vox", chop(phrase), at(bar), gain)
+
+
+def hit_section(s: Hit, mix: Mix) -> None:
+    groove_bar(mix, s.bar, mix.kit.k_drop)
+    mix.add("crash", crash(mix.rng["crash"]), at(s.bar), 0.42)
+    mix.add("impact", mix.kit.impact, at(s.bar), 0.85)
+
+
+def breakdown_section(s: Breakdown, mix: Mix) -> None:
+    for bar, name in zip(range(s.first, s.last + 1), s.chords):
+        voicing = CHORDS[name][0]
+        # Ghost sidechain on the quarters: no kick, but the chords still breathe.
+        quarters = [at(bar, k) for k in range(4)]
+        mix.add_chord("breakdown", chord_bar(voicing, mix.rng["chords"], 0.0), at(bar), quarters)
+        arp_bar(mix, voicing, bar, "D5", 0.22, every=3)
+    mix.add("vox-drench", chop(s.chop), at(s.first), 0.7)
+    # Lead-in over the last 2 beats: riser, and a snare roll in 16ths then 32nds.
+    t0 = at(s.last, 2)
+    mix.add("riser", fft_filter(riser(mix.rng["riser"], 2 * BEAT), lp(9000)), t0, 0.3)
+    beats = [2 + i / 4 for i in range(4)] + [3 + i / 8 for i in range(8)]
+    for i, b in enumerate(beats):
+        tk = at(s.last, b)
+        snare_hit(mix, tk, 0.6 + 0.4 * (tk - t0) / (2 * BEAT), i)
+
+
+def end_section(s: End, mix: Mix) -> None:
+    t0 = at(s.bar)
+    mix.add("crash", crash(mix.rng["crash"]), t0, 0.42)
+    mix.add("impact", mix.kit.impact, t0, 0.85)
+    mix.add_chord("end", ring_chord(END_VOICING, mix.rng["chords"], s.ring), t0, [])
+    t = t_axis(s.ring)
+    low_d = bass_note(hz("D2"), s.ring, np.minimum(1, t / 0.004) * np.exp(-t / 0.9))
+    mix.add("bass", low_d, t0, 0.6)
+    for i, note in enumerate(("D5", "F#5", "A5", "D6")):  # a quick strummed pluck on top
+        mix.add("arp", panned(pluck(hz(note), 0.6), 0.35 * (-1) ** i), t0 + 0.025 * i, 0.35)
+
+
+BUILDERS = {
+    Build: build_section,
+    Drop: drop_section,
+    Groove: groove_section,
+    Hit: hit_section,
+    Breakdown: breakdown_section,
+    End: end_section,
+}
+
+
+# ---- Mixdown
+
+# Dry mask: everything dry fades out over 40 ms at GAP and resumes on the drop.
+# Owner, rough cut 1 (2026-09-26): the transition into the drop was "a bit rough". Then the
+# fade was 5 ms and every tail died within 80 ms, so the whole mix fell off a cliff into dead
+# air. Now the dry cut is a short fade, the rooms ring out (180 ms), and a reversed crash
+# swells through the gap into the downbeat, so the silence reads as a breath, not a dropout.
+GAP_FADE = 0.04
+
+
+def dry_mask(time: np.ndarray) -> np.ndarray:
+    return np.where(time >= DROP, 1.0, np.clip(1 - (time - GAP) / GAP_FADE, 0, 1))
+
+
+def gap_tail(time: np.ndarray) -> np.ndarray:
+    in_gap = (time >= GAP) & (time < DROP)
+    return np.where(in_gap, np.exp(-(time - GAP) / 0.18), 1.0)
+
+
+def build_swell(time: np.ndarray) -> np.ndarray:
+    """The build rises from -10 dB to -3 dB at the gap, so the drop is the peak."""
+    return 10 ** ((-10 + 7 * np.clip(time / GAP, 0, 1) ** 1.2) / 20)
+
+
+def mixdown(mix: Mix) -> dict[str, np.ndarray]:
+    b, dry, tail = mix.bus, dry_mask(mix.time), gap_tail(mix.time)
+
+    # DRUMS (+ FX)
+    roll = fft_filter(b["roll"], lp(10000))  # bright but not fizzy
+    drums = b["kick"] + roll * dry
+    for name in ("open-hat", "closed-hat", "clap", "riser", "crash", "impact"):
+        drums += b[name]
+    drums *= dry
+    drums += b["swell"]
+    drums += reverb(roll * dry, 1.4, "drum-room", 0.01) * 0.28 * tail
+    drums = soft_clip(drums, 1.3)
+
+    # MUSIC: chords, arp, bass
+    chords = {name: f(mix.chords[name]) for name, (f, _) in CHORD_TREATMENTS.items()}
+    ref = chords["groove"][:, round(DROP * SR) : round((DROP + 4 * BAR) * SR)]  # the drop phrase
+    level = 1 / np.sqrt(np.mean(ref**2))
+    pumped = sum(
+        chords[name] * pump(mix.n, depth, mix.pulses[name])
+        for name, (_, depth) in CHORD_TREATMENTS.items()
+    )
+    arp = b["arp"] * dry
+    music_dry = (pumped * level * 0.16 + arp * 0.32) * build_swell(mix.time) * dry + b["bass"]
+    music = music_dry + reverb(music_dry, 1.8, "music-hall") * 0.18 * tail
+    music += ping_pong(arp.sum(axis=0) / 2 * 0.32, 0.75 * BEAT, 0.35) * 0.35 * tail
+    music = soft_clip(music, 1.1)
+
+    # VOX: formant chops, ping-pong dotted-1/8 delay, reverb; the drenched bus is mostly echo.
+    band = lambda f: hp(220)(f) * lp(12000)(f)  # noqa: E731
+    vox_dry = fft_filter(b["vox"], band)
+    vox = vox_dry * 0.68
+    vox += ping_pong(vox_dry.sum(axis=0) / 2, 0.75 * BEAT, 0.45) * 0.62
+    vox += reverb(vox_dry, 2.4, "vox-plate", 0.03) * 0.34
+    drench = fft_filter(b["vox-drench"], band)
+    vox += drench * 0.3
+    vox += ping_pong(drench.sum(axis=0) / 2, 0.75 * BEAT, 0.62, taps=16) * 0.9
+    vox += reverb(drench, 2.4, "vox-plate", 0.03) * 0.5
+    return {"drums": drums, "music": music, "vox": vox}
+
+
+# ---- Master
 
 
 def limiter_gain(mix: np.ndarray, drive: float, block: int = 32, release: float = 0.09) -> np.ndarray:
     """Look-ahead peak limiter as a gain envelope (instant attack one block early, smooth
     release). Returned as a gain curve so the same curve can be applied to every stem."""
+    n = mix.shape[1]
     peak = np.abs(mix * drive).max(axis=0)
-    nb = -(-N // block)
-    blocks = np.pad(peak, (0, nb * block - N)).reshape(nb, block).max(axis=1)
+    nb = -(-n // block)
+    blocks = np.pad(peak, (0, nb * block - n)).reshape(nb, block).max(axis=1)
     ahead = np.maximum.reduce([np.roll(blocks, -s) for s in (-1, 0, 1, 2)])
     target = np.minimum(1.0, 1.0 / ahead)
     a = np.exp(-block / (release * SR))
@@ -576,17 +855,24 @@ def limiter_gain(mix: np.ndarray, drive: float, block: int = 32, release: float 
         acc = min(v, v + a * (acc - v))
         g[i] = acc
     centres = (np.arange(nb) + 0.5) * block
-    return drive * np.interp(np.arange(N), centres, g)
+    return drive * np.interp(np.arange(n), centres, g)
 
 
-mix = sum(stems.values())
-mix /= np.max(np.abs(mix))
-gain = limiter_gain(mix, drive=10 ** (7 / 20)) / np.max(np.abs(sum(stems.values())))
-tail = np.clip((LENGTH - TIME) / 0.015, 0, 1)
-for name in stems:
-    stems[name] = stems[name] * gain * tail
-mix = sum(stems.values())
-scale = PEAK / np.max(np.abs(mix))
+def render(cue: list[Section]) -> dict[str, np.ndarray]:
+    """Mastered, peak -1 dBFS: {"mix": ..., "drums": ..., "music": ..., "vox": ...}."""
+    length, fade, curve = ENDINGS[type(cue[-1])](cue[-1])
+    mix = Mix(length)
+    for section in checked(cue):
+        BUILDERS[type(section)](section, mix)
+    stems = mixdown(mix)
+    peak_mix = sum(stems.values())
+    top = np.max(np.abs(peak_mix))
+    gain = limiter_gain(peak_mix / top, drive=10 ** (7 / 20)) / top
+    tail = np.clip((length - mix.time) / fade, 0, 1) ** curve
+    stems = {name: x * gain * tail for name, x in stems.items()}
+    out = sum(stems.values())
+    scale = PEAK / np.max(np.abs(out))
+    return {"mix": out * scale} | {name: x * scale for name, x in stems.items()}
 
 
 def write(name: str, x: np.ndarray) -> None:
@@ -600,6 +886,14 @@ def write(name: str, x: np.ndarray) -> None:
     print(f"{name}.wav  {x.shape[1] / SR:.3f}s  peak {peak_db:+.2f} dBFS")
 
 
-write("edm-build", mix * scale)
-for name, x in stems.items():
-    write(f"edm-stem-{name}", x * scale)
+def write_cue(cue: list[Section], name: str, stem_prefix: str) -> None:
+    for s in cue:
+        print(f"  {type(s).__name__:9s} bars {s.first:2d}-{s.last:2d}  {at(s.first):7.3f} s")
+    out = render(cue)
+    write(name, out.pop("mix"))
+    for stem, x in out.items():
+        write(f"{stem_prefix}-{stem}", x)
+
+
+write_cue(BUILD_CUE, "edm-build", "edm-stem")
+write_cue(FULL_CUE, "edm-full", "edm-full-stem")

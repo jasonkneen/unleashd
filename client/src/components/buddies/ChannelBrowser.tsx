@@ -5,6 +5,7 @@ import { listField, rowFamily } from '../../atoms/conversations';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { rowBuddy } from '../../utils/conversation-row';
 import { Chat } from '../Chat';
+import { AppSettingsDropdown } from './AppSettingsDropdown';
 import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
 import { BuddySigil } from './BuddySigil';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
@@ -980,9 +981,12 @@ export function ChannelBrowser({
     <div className="channel-browser" aria-label="Channels">
       <nav className="channel-browser-rail ui-stack">
         <header className="channel-browser-rail-header ui-stack">
-          <Link className="channel-browser-exit ui-muted" to="/" title="Back to workspaces">
-            ← Workspaces
-          </Link>
+          <div className="channel-browser-rail-header-row ui-row">
+            <Link className="channel-browser-exit ui-muted" to="/" title="Back to workspaces">
+              ← Workspaces
+            </Link>
+            <AppSettingsDropdown />
+          </div>
           <WorkspaceSwitcher workspaceId={workspaceId} workspaceName={directory.workspaceName} />
         </header>
         <div className="channel-browser-rail-scroll">

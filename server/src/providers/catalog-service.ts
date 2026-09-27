@@ -27,7 +27,8 @@ function buildProviderEntry(provider: Provider): ProviderCatalogEntry {
     id: provider,
     displayName: metadata.label,
     shortName: metadata.shortLabel,
-    defaultModelId: entry.defaultModelId,
+    // App defaults preserved from the refreshed picker; explicit choices stay verbatim.
+    defaultModelId: provider === 'codex' ? 'gpt-6-sol' : entry.defaultModelId,
     supportsDynamicModels: entry.supportsDynamicModels,
     supportsRequiredMcp: harnessMcpCapability(provider) === 'required',
     models: entry.models.map((model) => ({
@@ -38,9 +39,11 @@ function buildProviderEntry(provider: Provider): ProviderCatalogEntry {
         : {
             reasoning: {
               levels: [...model.reasoning.levels],
-              ...(model.reasoning.defaultEffort === undefined
-                ? {}
-                : { defaultEffort: model.reasoning.defaultEffort }),
+              ...(model.reasoning.levels.includes('medium')
+                ? { defaultEffort: 'medium' }
+                : model.reasoning.defaultEffort === undefined
+                  ? {}
+                  : { defaultEffort: model.reasoning.defaultEffort }),
             },
           }),
     })),

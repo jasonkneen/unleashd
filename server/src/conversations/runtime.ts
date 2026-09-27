@@ -397,8 +397,8 @@ export class Conversation extends EventEmitter {
     return this._policy;
   }
 
-  markSessionStarted(): void {
-    this._hasStartedSession = true;
+  markSessionStarted(started = true): void {
+    this._hasStartedSession = started;
   }
 
   persistSession(sessionId: string, audienceKey: string | undefined): Promise<void> {

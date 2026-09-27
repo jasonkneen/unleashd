@@ -439,7 +439,10 @@ function buildScreens(found, focus) {
       missing: null,
       views: {
         // Desktop search is a palette over any page; mobile has a search page.
-        desktop: { path: '/chats', prepare: clickThen('.sidebar-search-field', '.search-palette') },
+        desktop: {
+          path: '/chats',
+          prepare: clickThen('.sidebar-search-field', '.search-view--palette'),
+        },
         mobile: { path: '/search', prepare: null },
       },
     },
@@ -452,16 +455,16 @@ function buildScreens(found, focus) {
           prepare: prep(`
   document.querySelector('.sidebar-search-field')?.click();
   await tick();
-  const input = document.querySelector('.search-palette-input');
+  const input = document.querySelector('.search-view__input');
   if (!input) return 'SKIP';
   typeInto(input, ${JSON.stringify(NO_MATCH)});
   await tick(1200);
-  return has('.search-palette-empty');`),
+  return has('.search-view__status');`),
         },
         mobile: {
           path: '/search',
           prepare: prep(`
-  const input = document.querySelector('.mobile-search__input');
+  const input = document.querySelector('.search-view__input');
   if (!input) return 'SKIP';
   typeInto(input, ${JSON.stringify(NO_MATCH)});
   await tick(1200);
@@ -474,7 +477,7 @@ function buildScreens(found, focus) {
       missing: null,
       views: {
         desktop: { path: '/chats', prepare: clickThen('.sidebar-new-btn', '.new-conv-modal') },
-        mobile: { path: '/chats', prepare: clickThen('.mobile-ui-header-action', '.mobile-sheet') },
+        mobile: { path: '/chats', prepare: clickThen('.mobile-ui-header-action', '.ui-sheet') },
       },
     },
     {
@@ -504,8 +507,11 @@ function buildScreens(found, focus) {
       missing: noChat,
       settleMs: 1500,
       views: {
-        desktop: { path: chat, prepare: clickThen('.chat-config-summary', '.chat-config-modal') },
-        mobile: { path: chat, prepare: clickThen('.mobile-chat__model', '.mobile-sheet') },
+        desktop: {
+          path: chat,
+          prepare: clickThen('.chat-config-summary', '.config-overlay--popover'),
+        },
+        mobile: { path: chat, prepare: clickThen('.mobile-chat__model', '.ui-sheet') },
       },
     },
     // ── Buddies ──

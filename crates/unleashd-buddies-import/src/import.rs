@@ -1,4 +1,4 @@
-//! One-time import of a v33 `@nbardy/buddies` database into the new schema (01 §7.1).
+//! One-time import of a v33/v34 `@nbardy/buddies` database into the new schema (01 §7.1).
 //!
 //! The source is opened read-only (`mode=ro`) and the target must be a NEW file. Every source
 //! column without a home in the new schema is kept in the row's `legacy` JSON. Soul files are
@@ -20,11 +20,10 @@ use unleashd_buddies::runs::next_run;
 use unleashd_buddies::schema;
 use unleashd_buddies::store::{now_iso, sha256_hex};
 
-pub const SOURCE_VERSION: i64 = 33;
-
 #[derive(Debug, Serialize)]
 pub struct ImportReport {
     pub source: String,
+    pub source_version: i64,
     pub target: String,
     pub imported_at: String,
     /// (mapping, source rows, target rows); the import fails unless every pair is equal.
@@ -254,11 +253,32 @@ pub(crate) fn uri(path: &Path) -> String {
 
 pub fn open_source(path: &Path) -> Result<Connection> {
     let conn = Connection::open_with_flags(uri(path), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)?;
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    match version {
-        SOURCE_VERSION => Ok(conn),
-        v => Err(CoreError::WrongDatabase(format!("{}: user_version {v}, expected {SOURCE_VERSION}", path.display()))),
+    source_version(&conn, "")?;
+    Ok(conn)
+}
+
+// Pattern: fix-guards (docs/patterns.md#fix-guards)
+// v34 added only buddy_lists.archived_at (legacy lists.js migrateLists, b672694); accepting it
+// without mapping that column resurrects archived channels. Guard: v34_archive_and_builder_receipts_survive_import.
+pub(crate) fn source_version(conn: &Connection, prefix: &str) -> Result<i64> {
+    let version: i64 = conn.query_row(&format!("PRAGMA {prefix}user_version"), [], |r| r.get(0))?;
+    if !matches!(version, 33 | 34) {
+        return Err(CoreError::WrongDatabase(format!("source user_version {version}, expected 33 or 34")));
     }
+    let columns = unleashd_buddies::store::collect(
+        conn.prepare(&format!("PRAGMA {prefix}table_info(buddy_lists)"))?
+            .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?,
+    )?;
+    let archive = columns.iter().find(|(name, _, _)| name == "archived_at");
+    let expected = match version {
+        33 => archive.is_none(),
+        34 => archive.is_some_and(|(_, ty, required)| ty.eq_ignore_ascii_case("TEXT") && *required == 0),
+        _ => unreachable!(),
+    };
+    if !expected {
+        return Err(CoreError::WrongDatabase(format!("source v{version} has an unexpected buddy_lists.archived_at shape")));
+    }
+    Ok(version)
 }
 
 /// Every v33 copy of a Buddy's soul/working/long_term memory: the legacy head and each
@@ -407,7 +427,7 @@ const IS_READ: &str =
     "(substr(operation, instr(operation, '.') + 1) GLOB 'get_*' OR substr(operation, instr(operation, '.') + 1) GLOB 'list_*'
     OR substr(operation, instr(operation, '.') + 1) GLOB 'search_*' OR substr(operation, instr(operation, '.') + 1) = 'recall')";
 
-fn mapping_sql() -> Vec<String> {
+fn mapping_sql(source_version: i64) -> Vec<String> {
     vec![
         "INSERT INTO workspace SELECT id, name, root_path, created_at, json_object('slug', slug, 'updated_at', updated_at) FROM old.projects".into(),
         "INSERT INTO buddy (id, workspace_id, slug, name, role, status, manager_id, provider, model, reasoning_effort, soul_path,
@@ -446,8 +466,9 @@ fn mapping_sql() -> Vec<String> {
          FROM old.buddy_todos t JOIN old.owned_projects p ON p.id = t.buddy_project_id".into(),
         // Channels: lists are public; each {sender, recipient} set of messages is one direct channel
         // (the owner is the member 'owner'); each task with comments gets its task channel.
-        "INSERT INTO channel (id, workspace_id, kind, name, purpose, created_by, created_at)
-         SELECT id, workspace_id, 'public', name, purpose, created_by_buddy_id, created_at FROM old.buddy_lists".into(),
+        format!("INSERT INTO channel (id, workspace_id, kind, name, purpose, created_by, created_at, archived_at)
+         SELECT id, workspace_id, 'public', name, purpose, created_by_buddy_id, created_at, {} FROM old.buddy_lists",
+         if source_version == 34 { "archived_at" } else { "NULL" }),
         "INSERT INTO channel (id, workspace_id, kind, member_key, created_by, created_at)
          SELECT 'dm_' || substr(sha256(member_key), 1, 32), workspace_id, 'direct', member_key, from_buddy_id, created_at
          FROM (SELECT *, row_number() OVER (PARTITION BY member_key ORDER BY created_at, id) AS n FROM msg) WHERE n = 1".into(),
@@ -548,7 +569,7 @@ fn mapping_sql() -> Vec<String> {
                UNION ALL
                SELECT created_at, 'owner', workspace_id, buddy_id, NULL, 'buddy.create',
                  json_object('request_fingerprint', request_fingerprint), 'builder:' || conversation_id || ':' || creation_key, NULL,
-                 buddy_id, json_object('source', 'buddy_builder_hires')
+                 buddy_id, json_object('source', 'buddy_builder_hires', 'conversation_id', conversation_id, 'creation_key', creation_key)
                FROM old.buddy_builder_hires)
              ORDER BY 1"
         ),
@@ -697,6 +718,7 @@ pub fn import(source: &Path, target: &Path, owner_reads: &Path, options: ImportO
         return Err(CoreError::Invalid(format!("target {} already exists; the import only writes a new file", target.display())));
     }
     let src = open_source(source)?;
+    let source_version = source_version(&src, "")?;
     let soul_baseline = soul_files(&src, V33_SOUL_PATHS)?;
     let lists: Vec<String> = unleashd_buddies::store::collect(src.prepare("SELECT id FROM buddy_lists")?.query_map([], |r| r.get(0))?)?;
     drop(src);
@@ -706,9 +728,9 @@ pub fn import(source: &Path, target: &Path, owner_reads: &Path, options: ImportO
     conn.execute_batch("PRAGMA foreign_keys = OFF")?;
     register_sha256(&conn)?;
     conn.execute("ATTACH DATABASE ?1 AS old", [uri(source)])?;
-    let old_version: i64 = conn.query_row("PRAGMA old.user_version", [], |r| r.get(0))?;
-    if old_version != SOURCE_VERSION {
-        return Err(CoreError::WrongDatabase(format!("attached source has user_version {old_version}")));
+    let old_version = self::source_version(&conn, "old.")?;
+    if old_version != source_version {
+        return Err(CoreError::WrongDatabase(format!("source version changed during import: {source_version} to {old_version}")));
     }
     for sql in setup_sql() {
         conn.execute(&sql, [])?;
@@ -730,7 +752,7 @@ pub fn import(source: &Path, target: &Path, owner_reads: &Path, options: ImportO
 
     let now = now_iso();
     conn.execute_batch("BEGIN")?;
-    for sql in mapping_sql() {
+    for sql in mapping_sql(source_version) {
         conn.execute(&sql, [])?;
     }
     assign_post_ords(&conn)?;
@@ -811,6 +833,7 @@ pub fn import(source: &Path, target: &Path, owner_reads: &Path, options: ImportO
     })?)?;
     Ok(ImportReport {
         source: source.display().to_string(),
+        source_version,
         target: target.display().to_string(),
         imported_at: now,
         counts,

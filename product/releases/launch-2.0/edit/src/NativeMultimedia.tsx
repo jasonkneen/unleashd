@@ -129,11 +129,12 @@ const Frame: React.FC<{ cut: Cut; startFrame: number }> = ({ cut, startFrame }) 
   );
 };
 
-// Cards, one per beat. "Native multimedia" names the moment the video starts playing in the
-// thread; the drop brings the three words one per beat.
+// Cards, one per beat. "Native multimedia" titles the segment from its first beat, over the
+// typing (owner, rough cut 1: "put native multimedia at the start"); the drop brings the three
+// words one per beat.
 type Card = { text: string; at: number; out: number; size: 'md' | 'xl'; fill: string; ink: string; rot: number; x: number; y: number };
 const CARDS: Card[] = [
-  { text: 'Native multimedia', at: 11 * BEAT, out: DROP - 0.05, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -3, x: 110, y: 60 },
+  { text: 'Native multimedia', at: BEAT, out: SEND / FPS, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -3, x: 110, y: 90 },
   { text: 'Code +', at: DROP, out: 99, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -4, x: 150, y: 140 },
   { text: 'Design +', at: DROP + BEAT, out: 99, size: 'xl', fill: INK.yellow, ink: INK.plate, rot: 2, x: 520, y: 430 },
   { text: 'Marketing!', at: DROP + 2 * BEAT, out: 99, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: -3, x: 900, y: 730 },
@@ -152,7 +153,9 @@ const Cards: React.FC = () => {
   );
 };
 
-export const NativeMultimedia: React.FC = () => (
+// Picture plus the send blip. The assembly plays this under its one continuous music cue
+// (edm-full.wav); the standalone clip adds the 15 s cue below.
+export const NativeMultimediaPicture: React.FC = () => (
   <AbsoluteFill>
     <Series>
       {CUTS.reduce<{ cut: Cut; start: number }[]>((acc, cut) => {
@@ -165,9 +168,16 @@ export const NativeMultimedia: React.FC = () => (
       ))}
     </Series>
     <Cards />
-    <Audio src={edm} volume={(f) => Math.min(1, (DURATION - f) / (0.25 * FPS))} />
     <Sequence from={SEND - 2} layout="none">
       <Audio src={SFX.send} volume={0.5} />
     </Sequence>
+  </AbsoluteFill>
+);
+
+export const NativeMultimedia: React.FC = () => (
+  <AbsoluteFill>
+    <NativeMultimediaPicture />
+    {/* Out over the last beat: a 0.25 s fade clipped the groove mid-bar. */}
+    <Audio src={edm} volume={(f) => Math.min(1, (DURATION - f) / (BEAT * FPS))} />
   </AbsoluteFill>
 );

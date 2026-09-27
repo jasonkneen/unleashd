@@ -92,3 +92,27 @@ Two sources, both 2974×1882 @ 60 fps. They're gitignored like the other recordi
 
 Privacy: for about 0.7 s the cut opens on the full frame, with the sidebar and the mention menu (Task titles) unblurred
 while the blur eases in.
+
+## H — `2026-09-26_multi-harness_H_pick-harness-in-composer.mov` (20.6 s)
+
+Role: the **multi harness** proof for beat 9. The owner uploaded it to #unleashd-2 (post_2cef572b…);
+the Desktop original is `Screen Recording 2026-09-26 at 4.26.44 PM.mov`. Recorded in #releases.
+The layout is the usual 2974×1882 @ 60 fps; the composer spans x 811–2944, y 1690–1862, and the
+picker opens above it (y ~1070–1678).
+
+| Time | Shows |
+|---|---|
+| 0–1 s | Empty composer |
+| 1.0–2.4 s | "@buddies" mention menu (Buddies and Task titles), Buddies Release Engineer picked |
+| 2.6–11.8 s | "Can we push a release to github and npm" typed; the reply chip reads "Claude Opus 5.5" |
+| 11.8–12.2 s | Click the reply chip; the picker opens (Harness / Model / Thinking Level) |
+| 13.0 / 13.4 / 13.8 s | Hover Codex, Cursor, Muse |
+| 14.5 s | Muse picked; Model row switches to Muse Spark models |
+| 15–16.6 s | Thinking level: hover "No reasoning flag", then pick medium |
+| 17.0–17.4 s | Done; the chip reads "Muse Spark 1.3 Contributor" |
+| 18.6 s | Send |
+| 19.0–19.8 s | The post lands in #releases; the thread pane opens and the column reflows |
+| 20.0 s | "Buddies Release Engineer is replying…" |
+
+Cut: `../edit/src/MultiHarness.tsx`. Privacy: the 0.1–0.8 s full-frame ease shows the sidebar
+(channel and Buddy names) and a terminal strip on the far left, and the mention menu shows Task titles.

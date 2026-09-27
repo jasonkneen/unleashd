@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type {
+  Actor,
   BuddyChanges,
   ChannelRef,
   DocKind,
@@ -185,6 +186,39 @@ function mentionConfigsByBuddy(
   return byBuddy;
 }
 
+export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 'mentionConfigs'>;
+
+/**
+ * The one way an owner-side post enters a channel: canonical media, the crate write, the feed
+ * announcement and, for the owner's own post in a public channel, the Buddy turns its @mentions
+ * start. The owner post routes and the upstream update (upstream/routes.ts) both come here.
+ */
+// Pattern: one-write-path (docs/patterns.md#one-write-path)
+export async function publishOwnerPost(
+  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'> & {
+    channels: Pick<Channels, 'respondToOwnerPost'>;
+  },
+  author: Actor,
+  ref: ChannelRef,
+  input: OwnerPostInput,
+  chosen: ReadonlyMap<string, ConversationConfig>
+) {
+  const target = await deps.core.openChannel(OWNER, ref);
+  const body = requireCanonicalPostMedia(input.body, {
+    uploadsRoot: deps.uploadsRoot(),
+    channelId: target.id,
+  });
+  const written = await deps.core.post(author, { kind: 'id', id: target.id }, { ...input, body });
+  deps.events.emit({ kind: 'changed' });
+  const { post, channel } = await announcePost(deps, OWNER, written);
+  // Only the owner's own @mentions start turns, and only in a public channel's thread seats.
+  const mentions =
+    channel.kind.type === 'public' && post.author.kind === 'owner'
+      ? await deps.channels.respondToOwnerPost(channel, post, chosen)
+      : [];
+  return { post, mentions };
+}
+
 const MEDIA = new Set<string>([...CHANNEL_IMAGE_EXTENSIONS, ...CHANNEL_VIDEO_EXTENSIONS]);
 
 type Handler = (req: Request) => Promise<unknown>;
@@ -223,22 +257,9 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
   };
   const ownerPost = async (raw: unknown, ref: ChannelRef) => {
     const { asBuddyId, ...input } = PostBodySchema.parse(raw);
-    const chosen = mentionConfigsByBuddy(input.body, input.mentionConfigs);
     const author = asBuddyId === undefined ? OWNER : buddyActor(asBuddyId);
-    const target = await core.openChannel(OWNER, ref);
-    const body = requireCanonicalPostMedia(input.body, {
-      uploadsRoot: deps.uploadsRoot(),
-      channelId: target.id,
-    });
-    const { post, channel } = await posted(
-      core.post(author, { kind: 'id', id: target.id }, { ...input, body })
-    );
-    // Only the owner's own @mentions start turns, and only in a public channel's thread seats.
-    const mentions =
-      channel.kind.type === 'public' && post.author.kind === 'owner'
-        ? await channels.respondToOwnerPost(channel, post, chosen)
-        : [];
-    return { post, mentions };
+    const chosen = mentionConfigsByBuddy(input.body, input.mentionConfigs);
+    return publishOwnerPost(deps, author, ref, input, chosen);
   };
   const archive = async (buddyId: string, changes: BuddyChanges, changeKey: string) => {
     const buddy = await write(core.updateBuddy(OWNER, { buddyId, changes, key: changeKey }));

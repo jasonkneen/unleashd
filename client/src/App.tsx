@@ -13,6 +13,7 @@ import { handleMessage } from './atoms/actions';
 import { startConversationPrefetch } from './atoms/prefetch';
 import { jotaiStore } from './atoms/store';
 import { UpdateBanner } from './components/UpdateBanner';
+import { UpstreamUpdatePrompt } from './components/buddies/UpstreamUpdatePrompt';
 import { useOwnerUnreadTitle } from './components/buddies/channel-data';
 import { useWebSocket } from './hooks/useWebSocket';
 import { type DeviceKind, useDeviceKind } from './mobile/hooks/useDeviceKind';
@@ -317,6 +318,8 @@ function AppInner() {
     <>
       <UpdateBanner />
       <AppRoutes device={device} />
+      {/* App-wide, outside both shells: it shows on every route of either tree. */}
+      <UpstreamUpdatePrompt device={device} />
     </>
   );
 }

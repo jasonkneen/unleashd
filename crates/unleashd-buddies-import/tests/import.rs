@@ -99,6 +99,7 @@ fn import_then_verify_then_catch_tampering() {
     let owner_reads = dir.path().join("owner-channel-reads.json");
     let report = import(&old, &new, &owner_reads, ImportOptions::default()).unwrap();
 
+    assert_eq!(report.source_version, 33);
     assert_eq!(report.dropped_read_events, 1, "buddy.get_inbox is a read");
     assert_eq!(report.non_home_memberships.len(), 1);
     // k3, Worker's only long_term copy, is workspace-scoped: it wins with no head to compete.
@@ -124,6 +125,7 @@ fn import_then_verify_then_catch_tampering() {
     // The imported rows carry their meaning, not just their bytes.
     let conn = Connection::open(&new).unwrap();
     let row = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
+    assert_eq!(row("SELECT CAST(count(*) AS TEXT) FROM channel WHERE archived_at IS NOT NULL"), "0", "v33 channels stay unarchived");
     assert_eq!(row("SELECT manager_id FROM buddy WHERE id = 'b2'"), "b1");
     assert_eq!(row("SELECT request FROM post WHERE id = 'm2'"), "awaiting");
     assert_eq!(row("SELECT coalesce(request, 'none') FROM post WHERE id = 'm3'"), "none", "expects_reply = 0 owes nothing");
@@ -196,6 +198,80 @@ fn import_then_verify_then_catch_tampering() {
     assert!(!bad.revision_chains.ok && !bad.soul.ok);
     assert!(!bad.ordering.ok, "an ordered id that is not a UUIDv7 is caught");
     assert_eq!(bad.soul.files_changed, ["lead"]);
+}
+
+/// v34 is exactly the legacy migrateLists ALTER (buddies b672694). Archive time and builder
+/// replay identity survive as data; importing must not cancel queued work or settle a running turn.
+#[test]
+fn v34_archive_and_builder_receipts_survive_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = fixture(dir.path());
+    Connection::open(&old)
+        .unwrap()
+        .execute_batch(
+            r#"ALTER TABLE buddy_lists ADD COLUMN archived_at TEXT; PRAGMA user_version=34;
+         UPDATE buddy_lists SET archived_at='2026-09-27T01:02:03.000Z' WHERE id='l1';
+         UPDATE buddy_builder_hires SET conversation_id='conv:builder', creation_key='slot:two';
+         UPDATE buddy_runs SET status='running', claim_token='lease-1', claim_expires_at='2026-09-27T03:00:00.000Z',
+           started_at='2026-09-27T02:00:00.000Z', deadline='2026-09-27T04:00:00.000Z', execution_snapshot='{"context":"keep"}'
+           WHERE id='run1';"#,
+        )
+        .unwrap();
+    let source_before = std::fs::read(&old).unwrap();
+    let new = dir.path().join("new.sqlite");
+    let report = import(&old, &new, &dir.path().join("owner-channel-reads.json"), ImportOptions::default()).unwrap();
+    assert_eq!(report.source_version, 34);
+    let verified = verify(&old, &new, &report.soul_files, &report.owner_reads, &report.direct_reads).unwrap();
+    assert!(verified.ok, "{}", serde_json::to_string_pretty(&verified).unwrap());
+    let conn = Connection::open(&new).unwrap();
+    let row = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
+    assert_eq!(row("SELECT archived_at FROM channel WHERE id='l1'"), "2026-09-27T01:02:03.000Z");
+    assert_eq!(row("SELECT coalesce(archived_at, 'active') FROM channel WHERE id='l2'"), "active");
+    assert_eq!(row("SELECT body FROM post WHERE id='lp2'"), "hi", "archiving preserves replies");
+    assert_eq!(
+        row("SELECT json_array(status, lease_token, lease_expires_at, started_at, deadline, snapshot, ended_at, error_code)
+             FROM run WHERE id='run1'"),
+        r#"["running","lease-1","2026-09-27T03:00:00.000Z","2026-09-27T02:00:00.000Z","2026-09-27T04:00:00.000Z","{\"context\":\"keep\"}",null,null]"#
+    );
+    assert_eq!(row("SELECT status || '/' || input_kind || '/' || input_id FROM run WHERE id='run2'"), "queued/post/m1");
+    assert_eq!(
+        row("SELECT json_array(json_extract(legacy, '$.conversation_id'), json_extract(legacy, '$.creation_key'))
+                   FROM event WHERE json_extract(legacy, '$.source')='buddy_builder_hires'"),
+        r#"["conv:builder","slot:two"]"#
+    );
+    assert_eq!(std::fs::read(&old).unwrap(), source_before, "import and verify never alter the legacy source");
+
+    conn.execute("UPDATE channel SET archived_at=NULL WHERE id='l1'", []).unwrap();
+    let bad = verify(&old, &new, &report.soul_files, &report.owner_reads, &report.direct_reads).unwrap();
+    assert!(!bad.ok && !bad.classes.iter().find(|c| c.class == "public_channels_with_archive_state").unwrap().ok);
+    conn.execute("UPDATE channel SET archived_at='2026-09-27T01:02:03.000Z' WHERE id='l1'", []).unwrap();
+    conn.execute(
+        "UPDATE event SET legacy=json_set(legacy, '$.creation_key', 'lost')
+                  WHERE json_extract(legacy, '$.source')='buddy_builder_hires'",
+        [],
+    )
+    .unwrap();
+    let bad = verify(&old, &new, &report.soul_files, &report.owner_reads, &report.direct_reads).unwrap();
+    assert!(!bad.ok && !bad.classes.iter().find(|c| c.class == "builder_hire_receipts").unwrap().ok);
+}
+
+#[test]
+fn unsupported_or_malformed_source_fails_before_creating_target() {
+    for migration in [
+        "PRAGMA user_version=32",
+        "PRAGMA user_version=35",
+        "PRAGMA user_version=34",
+        "ALTER TABLE buddy_lists ADD COLUMN archived_at INTEGER; PRAGMA user_version=34",
+        "ALTER TABLE buddy_lists ADD COLUMN archived_at TEXT",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let old = fixture(dir.path());
+        Connection::open(&old).unwrap().execute_batch(migration).unwrap();
+        let new = dir.path().join("new.sqlite");
+        let error = import(&old, &new, &dir.path().join("owner-channel-reads.json"), ImportOptions::default()).unwrap_err();
+        assert_eq!(error.code(), "wrong_database", "{migration}: {error}");
+        assert!(!new.exists(), "{migration}: reject before writing the target");
+    }
 }
 
 /// The memory fold (lean memory design, "Migration"): every v33 copy of a Buddy's memory kind
