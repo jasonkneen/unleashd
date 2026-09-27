@@ -28,6 +28,7 @@ import {
 } from '../../components/buddies/buddy-direct-actions';
 import {
   type BuddyMailingListSummary,
+  archivedListsUrl,
   CHANNEL_BACKSTOP_MS,
   type ChannelMember,
   type ChannelRow,
@@ -41,6 +42,7 @@ import {
   createChannel,
   feedPhase,
   listsUrl,
+  setChannelArchived,
   ownerUnreadByList,
   postPurposeLabel,
   postPurposeTag,
@@ -86,7 +88,15 @@ export function ChannelsMobile() {
     listsUrl(workspaceId),
     CHANNEL_BACKSTOP_MS
   );
+  const archivedLists = usePolledFetch<BuddyMailingListSummary[]>(
+    archivedListsUrl(workspaceId),
+    CHANNEL_BACKSTOP_MS
+  );
   useWarmChannelPosts(lists.data);
+  const changeArchive = async (listId: string, archived: boolean) => {
+    await setChannelArchived(listId, archived);
+    await Promise.all([lists.refetch(), archivedLists.refetch()]);
+  };
   const ownerUnread = useOwnerUnread();
   const availableConversationIds = useAtomValue(availableConversationIdSetAtom);
   const unreadByList = useMemo(
@@ -97,7 +107,10 @@ export function ChannelsMobile() {
     workspaceId,
     directory,
     lists: lists.data ?? null,
+    archivedLists: archivedLists.data ?? null,
     refetchLists: lists.refetch,
+    refetchArchivedLists: archivedLists.refetch,
+    changeArchive,
     unreadByList,
     availableConversationIds,
   });
@@ -107,7 +120,10 @@ type ScreenContext = {
   workspaceId: string;
   directory: WorkspaceDirectory;
   lists: readonly BuddyMailingListSummary[] | null;
+  archivedLists: readonly BuddyMailingListSummary[] | null;
   refetchLists(): Promise<void>;
+  refetchArchivedLists(): Promise<void>;
+  changeArchive(listId: string, archived: boolean): Promise<void>;
   unreadByList: ReadonlyMap<string, OwnerListUnread>;
   availableConversationIds: ReadonlySet<string>;
 };
@@ -224,6 +240,8 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
   const workspaces = overviewWorkspaces(overview.data);
   const [switching, setSwitching] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const { workspaceId, directory, lists } = context;
   return (
     <MobilePage
@@ -307,6 +325,41 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
         </ul>
         {lists === null && <MobileEmptyPanel>Loading channels…</MobileEmptyPanel>}
       </MobileSection>
+      {(context.archivedLists?.length ?? 0) > 0 && (
+        <MobileSection title="Archived channels">
+          <button
+            type="button"
+            className="mobile-channels-archived-toggle"
+            onClick={() => setShowArchived(!showArchived)}
+          >
+            {showArchived ? 'Hide' : `Show ${context.archivedLists?.length}`}
+          </button>
+          {archiveError && <p role="alert">{archiveError}</p>}
+          {showArchived && (
+            <ul className="mobile-channels-list">
+              {context.archivedLists?.map((list) => (
+                <li key={list.id} className="mobile-channels-archived-row">
+                  <span>#{list.name}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void context
+                        .changeArchive(list.id, false)
+                        .catch((error) =>
+                          setArchiveError(
+                            error instanceof Error ? error.message : 'Could not restore channel'
+                          )
+                        )
+                    }
+                  >
+                    Restore
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </MobileSection>
+      )}
       <MobileSection title="Buddies" meta="Tap to message · ☀ to wake">
         <BuddySection workspaceId={workspaceId} directory={directory} />
       </MobileSection>
@@ -645,11 +698,13 @@ function ScreenHeader({
   title,
   subtitle,
   link,
+  action,
 }: {
   backTo: string;
   title: string;
   subtitle: string;
   link: { path: string; label: string };
+  action?: { label: string; onClick(): void };
 }) {
   return (
     <header className="mobile-channel-header">
@@ -661,6 +716,11 @@ function ScreenHeader({
         <p>{subtitle}</p>
       </div>
       <CopyLinkButton className="mobile-channel-header__link" path={link.path} label={link.label} />
+      {action && (
+        <button type="button" className="mobile-channel-header__action" onClick={action.onClick}>
+          {action.label}
+        </button>
+      )}
     </header>
   );
 }
@@ -668,8 +728,13 @@ function ScreenHeader({
 // ── Channel ─────────────────────────────────────────────────────────────────
 
 function ChannelScreen({ listId, context }: { listId: string; context: ScreenContext }) {
+  const navigate = useNavigate();
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const { workspaceId, directory, lists } = context;
-  const list = lists?.find((candidate) => candidate.id === listId) ?? null;
+  const list =
+    lists?.find((candidate) => candidate.id === listId) ??
+    context.archivedLists?.find((candidate) => candidate.id === listId) ??
+    null;
   const channel = useChannelFeed(channelPostFeed(listId));
   const feed = channel.feed;
   const responding = useChannelResponding(listId, directory.buddyNames);
@@ -703,7 +768,20 @@ function ChannelScreen({ listId, context }: { listId: string; context: ScreenCon
           path: channelLinkPath(workspaceId, { kind: 'channel', listId }),
           label: 'Copy link to channel',
         }}
+        action={{
+          label: list?.archivedAt ? 'Restore' : 'Archive',
+          onClick: () =>
+            void context
+              .changeArchive(listId, !list?.archivedAt)
+              .then(() => navigate(channelsHref(workspaceId, { kind: 'home' })))
+              .catch((error) =>
+                setArchiveError(
+                  error instanceof Error ? error.message : 'Could not archive channel'
+                )
+              ),
+        }}
       />
+      {archiveError && <p role="alert">{archiveError}</p>}
       <div className="mobile-channel__scroll" ref={follow.scrollRef} onScroll={follow.onScroll}>
         {(feed.kind === 'failed' || feed.kind === 'stale') && (
           <p className="mobile-channel__error" role="alert">
@@ -737,18 +815,20 @@ function ChannelScreen({ listId, context }: { listId: string; context: ScreenCon
           ),
         })}
       </div>
-      <ChannelComposerMobile
-        title={`# ${name}`}
-        listId={listId}
-        threadRootId={null}
-        placeholder={`Message #${name}`}
-        references={directory.references}
-        submit="button"
-        onPosted={(_result: BuddyOwnerPostResult) => {
-          follow.pin();
-          void feed.refetch();
-        }}
-      />
+      {!list?.archivedAt && (
+        <ChannelComposerMobile
+          title={`# ${name}`}
+          listId={listId}
+          threadRootId={null}
+          placeholder={`Message #${name}`}
+          references={directory.references}
+          submit="button"
+          onPosted={(_result: BuddyOwnerPostResult) => {
+            follow.pin();
+            void feed.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -767,7 +847,10 @@ function ThreadScreen({
   context: ScreenContext;
 }) {
   const { workspaceId, directory, lists } = context;
-  const list = lists?.find((candidate) => candidate.id === listId) ?? null;
+  const list =
+    lists?.find((candidate) => candidate.id === listId) ??
+    context.archivedLists?.find((candidate) => candidate.id === listId) ??
+    null;
   const paged = useChannelFeed(threadPostFeed(listId, rootId, linkedPostId));
   const thread = paged.feed;
   const replying = useChannelResponding(listId, directory.buddyNames).get(rootId);
@@ -832,19 +915,21 @@ function ThreadScreen({
           </p>
         )}
       </div>
-      <ChannelComposerMobile
-        title={`Thread in # ${list?.name ?? 'channel'}`}
-        listId={listId}
-        threadRootId={rootId}
-        placeholder="Reply…"
-        references={directory.references}
-        seats={thread.data?.seats}
-        submit="button"
-        onPosted={() => {
-          follow.pin();
-          void thread.refetch();
-        }}
-      />
+      {!list?.archivedAt && (
+        <ChannelComposerMobile
+          title={`Thread in # ${list?.name ?? 'channel'}`}
+          listId={listId}
+          threadRootId={rootId}
+          placeholder="Reply…"
+          references={directory.references}
+          seats={thread.data?.seats}
+          submit="button"
+          onPosted={() => {
+            follow.pin();
+            void thread.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

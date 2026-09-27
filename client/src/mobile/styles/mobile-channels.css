@@ -164,6 +164,30 @@
   line-height: 1;
 }
 
+.mobile-channels-archived-toggle {
+  margin: 0 12px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mobile-channels-archived-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  color: var(--text-secondary);
+}
+
+.mobile-channels-archived-row button {
+  border: 0;
+  background: transparent;
+  color: var(--text-emphasis);
+  font: inherit;
+}
+
 .mobile-channels-archive:active {
   background: color-mix(in srgb, var(--text-emphasis) 10%, transparent);
   color: var(--text-bright);
@@ -728,6 +752,17 @@ a.mobile-channels-wake-done {
 
 .mobile-channel-header__link[data-copy-state="copied"] {
   color: var(--theme-success);
+}
+
+.mobile-channel-header__action {
+  flex: none;
+  padding: 0 6px;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
 }
 
 /* The reply a permalink opened (`?post=`), highlighted as Slack does. */
