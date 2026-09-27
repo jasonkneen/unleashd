@@ -18,7 +18,7 @@
 
 use crate::import::{
     CURSOR_ORD, DIRECT_READ_CURSORS, DM_KEY, DirectReads, OwnerReads, SoulFile, SoulFileState, load_owner_reads, memory_copies,
-    open_source, register_sha256, soul_files, uri, winner_chains,
+    open_source, register_sha256, soul_files, source_version, uri, winner_chains,
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
@@ -40,8 +40,25 @@ const V33_REQUEST: &str = "CASE WHEN status = 'replied' THEN 'answered' WHEN exp
     WHEN status IN ('pending','active') THEN 'awaiting' ELSE status END";
 
 /// (class, v33 query, new query). Each query yields (group key, canonical line).
-fn classes() -> Vec<(&'static str, String, String)> {
+fn classes(source_version: i64) -> Vec<(&'static str, String, String)> {
     vec![
+        (
+            "public_channels_with_archive_state",
+            format!("SELECT workspace_id, json_array(id, name, purpose, created_by_buddy_id, created_at, {}) FROM buddy_lists",
+                if source_version == 34 { "archived_at" } else { "NULL" }),
+            "SELECT workspace_id, json_array(id, name, purpose, created_by, created_at, archived_at) FROM channel WHERE kind = 'public'".into(),
+        ),
+        // Builder hire keys contain two independently meaningful strings; never recover them by
+        // splitting the combined idempotency key. This checks every source field plus its replay identity.
+        (
+            "builder_hire_receipts",
+            "SELECT workspace_id, json_array(conversation_id, creation_key, buddy_id, workspace_id, request_fingerprint,
+               created_at, 'owner', 'buddy.create', 'builder:' || conversation_id || ':' || creation_key, buddy_id)
+             FROM buddy_builder_hires".into(),
+            "SELECT workspace_id, json_array(json_extract(legacy, '$.conversation_id'), json_extract(legacy, '$.creation_key'),
+               buddy_id, workspace_id, json_extract(payload, '$.request_fingerprint'), at, actor, op, idem_key, result_ref)
+             FROM event WHERE json_extract(legacy, '$.source') = 'buddy_builder_hires'".into(),
+        ),
         (
             "messages_by_sender",
             "SELECT from_buddy_id, json_array(id, created_at, body, evidence) FROM buddy_messages".into(),
@@ -509,7 +526,7 @@ pub fn verify(
     let old = open_source(source)?;
     register_sha256(&old)?;
     let new = open_new(target)?;
-    let classes = classes().iter().map(|c| check_class(&old, &new, c)).collect::<Result<Vec<_>>>()?;
+    let classes = classes(source_version(&old, "")?).iter().map(|c| check_class(&old, &new, c)).collect::<Result<Vec<_>>>()?;
     let answers = check_answers(&old, &new)?;
     let links = check_links(&new)?;
     let read_cursors = check_reads(&old, &new, owner_reads, direct_reads)?;

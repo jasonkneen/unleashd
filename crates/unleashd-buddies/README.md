@@ -84,7 +84,15 @@ Not in this crate yet: full-text post search. A post's `conversation_id` is the 
 written from (provenance); `return_conversation_id` is set only on a request, where its answer goes.
 They arrive with the server rewrite (T11), when a route needs them.
 
-## Import and verify (v33 → this schema)
+## Import and verify (v33/v34 → this schema)
+
+Both legacy versions are supported; unknown versions and inconsistent archive-column shapes
+are refused before a target is created. The legacy v34 migration only added
+`buddy_lists.archived_at` (`@nbardy/buddies` `src/lists.js`, commit b672694). Imports preserve
+that timestamp in `channel.archived_at`; v33 channels import unarchived. Verification compares
+every public channel's identity and archive timestamp, and all six fields of each existing
+`buddy_builder_hires` receipt (preserved as a `buddy.create` event). Running and queued runs
+retain their source state during import; the separate server-start recovery still applies.
 
 ```bash
 buddies-import import --from old.sqlite --to new.sqlite --report import.json
