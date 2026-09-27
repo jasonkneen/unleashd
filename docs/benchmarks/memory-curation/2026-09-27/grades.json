@@ -1,0 +1,378 @@
+{
+  "archivedAt": "2026-09-27",
+  "grader": "Codex",
+  "scope": "Limited unblinded rubric inspection; original checks unchanged, no semantic aggregate.",
+  "provenance": {
+    "commit": "6505330a002cf58f2b2d5962c85cec4cbf31c099",
+    "dirty": false,
+    "instructionsSha256": "01b2e3553c44c3963fbcce74075a9a10d18ee3f067ecfda881ed3f02ed7847c1",
+    "casesSha256": "a2f766c9e93d04972426af12dbbce03ae53161eb47466e8ecca3c0f9829eba95",
+    "harnessSha256": "9659a0bd9ce487c2bb63f8afa9dccc177d44ecb84f7f29d8d0f663675fe3a4f1",
+    "ladder": [
+      {
+        "harness": "codex",
+        "model": "gpt-6-luna",
+        "reasoningEffort": "low"
+      },
+      {
+        "harness": "cursor",
+        "model": "grok-4.7-low",
+        "reasoningEffort": "low"
+      },
+      {
+        "harness": "claude",
+        "model": "sonnet",
+        "reasoningEffort": "low"
+      },
+      {
+        "harness": "muse",
+        "model": "muse-spark-1.3-contributor",
+        "reasoningEffort": "low"
+      }
+    ],
+    "rungTimeoutMs": 300000
+  },
+  "originalOutcomeCounts": {
+    "checks-passed": 25,
+    "checks-failed": 2,
+    "infra": 1
+  },
+  "rows": [
+    {
+      "case": "A-duplicate-cleanup",
+      "repeat": 1,
+      "outcome": "infra",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/A-duplicate-cleanup.r1.json",
+      "manual": {
+        "status": "not_applicable",
+        "reason": "Infrastructure failure on the observed connection/reconnected event."
+      }
+    },
+    {
+      "case": "A-duplicate-cleanup",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/A-duplicate-cleanup.r2.json",
+      "manual": {
+        "status": "rubric_mismatch",
+        "reason": "Both memory docs remain unchanged at revision 1; NONE report conflicts with frozen duplicate-cleanup rubric."
+      }
+    },
+    {
+      "case": "B-decision-provenance",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/B-decision-provenance.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "B-decision-provenance",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/B-decision-provenance.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "C-existing-correction",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/C-existing-correction.r1.json",
+      "manual": {
+        "status": "rubric_conflict_unresolved",
+        "reason": "Frozen rubric requests removal of transient pending status; working doc retains the unverified worker return. No semantic pass assigned."
+      }
+    },
+    {
+      "case": "C-existing-correction",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/C-existing-correction.r2.json",
+      "manual": {
+        "status": "rubric_conflict_unresolved",
+        "reason": "Frozen rubric requests removal of transient pending status; working doc retains the unverified worker return. No semantic pass assigned."
+      }
+    },
+    {
+      "case": "D-preview-boundary",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/D-preview-boundary.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "D-preview-boundary",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/D-preview-boundary.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "E-qualified-positive",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/E-qualified-positive.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "E-qualified-positive",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/E-qualified-positive.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "F-old-valid-noop",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/F-old-valid-noop.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "F-old-valid-noop",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/F-old-valid-noop.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "G-failed-attempt-evidence",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/G-failed-attempt-evidence.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "G-failed-attempt-evidence",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/G-failed-attempt-evidence.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "H-truncated-evidence",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/H-truncated-evidence.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "H-truncated-evidence",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/H-truncated-evidence.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "J-quoted-injection-scope",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/J-quoted-injection-scope.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "J-quoted-injection-scope",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/J-quoted-injection-scope.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "K-inflight-to-working",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/K-inflight-to-working.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "K-inflight-to-working",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/K-inflight-to-working.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "L-resolved-leaves-working",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/L-resolved-leaves-working.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "L-resolved-leaves-working",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/L-resolved-leaves-working.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "M-preference-to-long-term",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/M-preference-to-long-term.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "M-preference-to-long-term",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/M-preference-to-long-term.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "N-small-talk-noop",
+      "repeat": 1,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/N-small-talk-noop.r1.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "N-small-talk-noop",
+      "repeat": 2,
+      "outcome": "checks-passed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/N-small-talk-noop.r2.json",
+      "manual": {
+        "status": "not_graded",
+        "reason": "No semantic pass assigned in this limited infrastructure closeout."
+      }
+    },
+    {
+      "case": "O-cross-chat-continuation",
+      "repeat": 1,
+      "outcome": "checks-failed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/O-cross-chat-continuation.r1.json",
+      "manual": {
+        "status": "fixture_conflict",
+        "reason": "Shards 3\u20134 are unconfirmed: no command results and seed log only lists shards 1\u20132. reindex regex counts a command name as a second item."
+      }
+    },
+    {
+      "case": "O-cross-chat-continuation",
+      "repeat": 2,
+      "outcome": "checks-failed",
+      "model": "grok-4.7-low",
+      "fallbackFrom": "gpt-6-luna",
+      "result": "results/O-cross-chat-continuation.r2.json",
+      "manual": {
+        "status": "fixture_conflict",
+        "reason": "Shards 3\u20134 are unconfirmed: no command results and seed log only lists shards 1\u20132. reindex regex counts a command name as a second item."
+      }
+    }
+  ]
+}
