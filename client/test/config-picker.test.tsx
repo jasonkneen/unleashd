@@ -69,12 +69,12 @@ function choice(
   return found;
 }
 
-test('switching to a model without the current effort resets reasoning in the same config', () => {
+test('picking a model resets reasoning in the same config', () => {
   // The mobile sheet and the desktop popover each did this by hand; one missed
   // it and the server rejected the pair as inconsistent.
   assert.deepEqual(choice(opusHigh, 'model', 'explicit:haiku').next.reasoning, { mode: 'default' });
   const keep = { ...opusHigh, model: { mode: 'default' as const } };
-  assert.deepEqual(choice(keep, 'model', 'explicit:opus').next.reasoning, opusHigh.reasoning);
+  assert.deepEqual(choice(keep, 'model', 'explicit:opus').next.reasoning, { mode: 'default' });
 });
 
 test('switching provider resets model and reasoning to defaults', () => {
@@ -119,4 +119,20 @@ test('a saved model the catalog no longer offers renders selected and unpickable
   assert.match(html, /retired-model \(unavailable\)/);
   // A model without reasoning offers no thinking-level group at all.
   assert.doesNotMatch(html, /Thinking Level/);
+});
+
+test('the reasoning slider exposes the selected provider-native value and folded default', () => {
+  const html = renderToStaticMarkup(
+    <ConversationConfigPicker
+      value={{ ...opusHigh, reasoning: { mode: 'default' } }}
+      catalog={catalog}
+      reasoningControl="slider"
+      onChange={() => {}}
+    />
+  );
+  assert.match(html, /type="range"/);
+  assert.match(html, /aria-valuetext="high"/);
+  assert.match(html, /<output[^>]*>high<\/output>/);
+  assert.match(html, />Auto</);
+  assert.doesNotMatch(html, /Provider default/);
 });

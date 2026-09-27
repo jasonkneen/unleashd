@@ -6,6 +6,7 @@ import {
   applyConversationConfigPatch,
   resolveConversationConfig,
 } from '../../shared/src/index';
+import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 
 const catalog = ProviderCatalogSchema.parse({
   revision: 'catalog-1',
@@ -58,6 +59,20 @@ function config(overrides: Partial<ConversationConfig> = {}): ConversationConfig
     ...overrides,
   };
 }
+
+test('application defaults retain the refreshed picker while explicit reasoning passes through', () => {
+  const defaults = resolveConfigAgainstProviderCatalog(config());
+  assert.equal(defaults.status, 'resolved');
+  if (defaults.status === 'resolved') {
+    assert.equal(defaults.value.modelId, 'gpt-6-sol');
+    assert.equal(defaults.value.reasoningEffort, 'medium');
+  }
+  const explicit = resolveConfigAgainstProviderCatalog(
+    config({ reasoning: { mode: 'explicit', effort: 'ultra' } })
+  );
+  assert.equal(explicit.status, 'resolved');
+  if (explicit.status === 'resolved') assert.equal(explicit.value.reasoningEffort, 'ultra');
+});
 
 test('provider catalog enforces relational invariants', () => {
   for (const invalid of [

@@ -516,13 +516,16 @@ function MentionModelPopover({
       >
         <div className="channel-composer-model-head ui-row ui-muted">
           <BuddySigil className="channel-composer-mention-sigil" name={buddy.label} />
-          <strong>{buddy.label}</strong>
-          <span>replies on</span>
+          <div className="channel-composer-model-title">
+            <strong>Reply settings</strong>
+            <span>{buddy.label}</span>
+          </div>
         </div>
         {catalog && value ? (
           <ConversationConfigPicker
             value={value}
             catalog={catalog}
+            reasoningControl="slider"
             // Buddy turns need the Buddy MCP tools.
             providerFilter={(providerId) =>
               catalog.providers.some(
@@ -536,12 +539,17 @@ function MentionModelPopover({
         )}
         <p className="channel-composer-model-note ui-muted">
           {choice.kind === 'seat'
-            ? `Continues on ${buddy.label}’s latest harness, model and reasoning in this thread. A change here sticks for later replies.`
-            : `Applies to ${buddy.label}’s replies in this thread from now on. Without a choice, ${buddy.label} keeps what it already uses here.`}
+            ? 'Updates this thread’s current harness, model, and thinking level.'
+            : 'Applies to future replies in this thread.'}
         </p>
         <div className="channel-composer-model-actions">
-          <button type="button" onClick={onReset} disabled={choice.kind !== 'chosen'}>
-            Use default
+          <button
+            type="button"
+            onClick={onReset}
+            disabled={choice.kind !== 'chosen'}
+            aria-label="Reset to the Buddy's default settings"
+          >
+            Reset
           </button>
           <button type="button" className="channel-composer-model-done" onClick={onClose}>
             Done

@@ -1,3 +1,4 @@
+import { createDefaultConversationConfig } from '@unleashd/shared';
 import type {
   ConversationConfig,
   ModelSelection,
@@ -54,19 +55,13 @@ function resolvedModelOf(provider: ProviderEntry | undefined, model: ModelSelect
   return provider?.models.find((candidate) => candidate.id === id);
 }
 
-/**
- * A model change keeps an explicit effort only when the new model offers it:
- * the server rejects the pair otherwise. Every surface gets this in the same
- * event as the model click, so no effect can race a later click.
- */
+/** Model picks begin at that model's default reasoning on every picker surface. */
 export function withModel(
   value: ConversationConfig,
-  provider: ProviderEntry | undefined,
+  _provider: ProviderEntry | undefined,
   model: ModelSelection
 ): ConversationConfig {
-  const levels = resolvedModelOf(provider, model)?.reasoning?.levels ?? [];
-  const keeps = value.reasoning.mode !== 'explicit' || levels.includes(value.reasoning.effort);
-  return { ...value, model, reasoning: keeps ? value.reasoning : { mode: 'default' } };
+  return { ...value, model, reasoning: { mode: 'default' } };
 }
 
 function providerGroup(
@@ -79,7 +74,7 @@ function providerGroup(
     choices: providers.map((option) => ({
       key: option.id,
       label: option.displayName,
-      meta: null,
+      meta: option.id === createDefaultConversationConfig().provider ? 'default' : null,
       selected: option.id === value.provider,
       availability: 'available',
       // Dependent intent resets with the provider.
@@ -120,6 +115,14 @@ function modelGroup(
     });
   }
   for (const model of provider?.models ?? []) {
+    // Compact Codex choices, without hiding an older saved selection or the default.
+    if (
+      provider?.id === 'codex' &&
+      !model.id.startsWith('gpt-6-') &&
+      model.id !== provider.defaultModelId &&
+      !(value.model.mode === 'explicit' && value.model.modelId === model.id)
+    )
+      continue;
     const folded = defaults === 'inline' && model.id === provider?.defaultModelId;
     choices.push({
       key: `explicit:${model.id}`,
@@ -171,7 +174,7 @@ function reasoningGroup(
       meta: reasoning?.defaultEffort ?? 'no flag',
     });
   }
-  choices.push(choice('disabled', 'No reasoning flag', { mode: 'disabled' }));
+  choices.push(choice('disabled', 'Auto', { mode: 'disabled' }));
   for (const effort of levels) {
     choices.push(choice(`explicit:${effort}`, effort, { mode: 'explicit', effort }));
   }
