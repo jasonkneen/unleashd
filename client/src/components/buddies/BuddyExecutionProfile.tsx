@@ -88,11 +88,15 @@ export function BuddyExecutionProfile({
                 Provider default
                 {providerInfo?.defaultModelId ? ` (${providerInfo.defaultModelId})` : ''}
               </option>
-              {providerInfo?.models.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.displayName}
-                </option>
-              ))}
+              {providerInfo?.models
+                .filter(
+                  (candidate) => providerInfo.id !== 'codex' || candidate.id.startsWith('gpt-6-')
+                )
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.displayName}
+                  </option>
+                ))}
             </select>
           </label>
           <label>

@@ -1,8 +1,4 @@
-import {
-  type ConversationConfig,
-  type ProviderCatalog,
-  getBuddyContext,
-} from '@unleashd/shared';
+import { type ConversationConfig, type ProviderCatalog, getBuddyContext } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -78,10 +74,7 @@ export function ChannelDm({
   const queue = conversation?.queue ?? EMPTY_QUEUE;
   const liveTail =
     streamingText.length > 0 && groups.at(-1)?.type !== 'assistant' ? streamingText : null;
-  const rows = useMemo(
-    () => dmTranscriptRows(groups, queue, liveTail),
-    [groups, queue, liveTail]
-  );
+  const rows = useMemo(() => dmTranscriptRows(groups, queue, liveTail), [groups, queue, liveTail]);
   const follow = useFollowBottom(rows.length + (runtimeTurnActive ? 1 : 0), groups, null);
   const messageCount = conversation?.messages.length ?? 0;
   const confirmed = conversation?.confirmed ?? false;
@@ -308,7 +301,6 @@ function DmHarness({
           value={config}
           catalog={catalog}
           disabled={disabled}
-          inlineDefaults
           providerFilter={(providerId) =>
             providerId === config.provider ||
             catalog.providers.some(

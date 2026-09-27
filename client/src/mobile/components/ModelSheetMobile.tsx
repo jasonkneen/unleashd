@@ -1,4 +1,4 @@
-import type { ConversationConfig } from '@unleashd/shared';
+import { type ConversationConfig, DEFAULT_PROVIDER } from '@unleashd/shared';
 import { useEffect, useRef } from 'react';
 import { setConversationConfig } from '../../atoms/config-actions';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
@@ -108,7 +108,7 @@ export function ModelSheetMobile({
                 <button
                   key={p.id}
                   type="button"
-                  className="ui-choice mobile-sheet__option"
+                  className={`ui-choice mobile-sheet__option ${p.id === DEFAULT_PROVIDER ? 'mobile-sheet__option--default' : ''}`}
                   aria-pressed={p.id === config.provider}
                   onClick={() =>
                     apply({
@@ -118,6 +118,9 @@ export function ModelSheetMobile({
                   }
                 >
                   {p.displayName}
+                  {p.id === DEFAULT_PROVIDER && (
+                    <span className="mobile-sheet__option-meta">default</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -126,55 +129,42 @@ export function ModelSheetMobile({
               <>
                 <div className="mobile-sheet__section-title">Model</div>
                 <div className="mobile-sheet__options">
-                  <button
-                    type="button"
-                    className="ui-choice mobile-sheet__option"
-                    aria-pressed={config.model.mode === 'default'}
-                    onClick={() => apply({ kind: 'set_model', model: { mode: 'default' } })}
-                  >
-                    Provider default
-                    <span className="mobile-sheet__option-meta">
-                      {providerEntry.defaultModelId}
-                    </span>
-                  </button>
-                  {providerEntry.models.map((m) => {
-                    const selected =
-                      config.model.mode === 'explicit' && config.model.modelId === m.id;
-                    const currentEffort =
-                      config.reasoning.mode === 'explicit' ? config.reasoning.effort : null;
-                    const supportsEffort =
-                      !currentEffort || m.reasoning?.levels.includes(currentEffort);
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        className="ui-choice mobile-sheet__option"
-                        aria-pressed={selected}
-                        onClick={() => {
-                          // Switching to a model that lacks the current effort must
-                          // reset reasoning in the SAME patch, or the server rejects
-                          // the pair as inconsistent.
-                          if (!supportsEffort) {
+                  {providerEntry.models
+                    .filter(
+                      (model) => providerEntry.id !== 'codex' || model.id.startsWith('gpt-6-')
+                    )
+                    .map((m) => {
+                      const isDefault = m.id === providerEntry.defaultModelId;
+                      const selected =
+                        (config.model.mode === 'default' && isDefault) ||
+                        (config.model.mode === 'explicit' && config.model.modelId === m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          className={`ui-choice mobile-sheet__option ${isDefault ? 'mobile-sheet__option--default' : ''}`}
+                          aria-pressed={selected}
+                          onClick={() => {
+                            // A model change returns thinking to the catalog default.
+                            // Reset it in the same patch so a disabled/stale effort
+                            // cannot carry over to the new model.
                             apply({
                               kind: 'replace',
                               config: {
                                 ...config,
-                                model: { mode: 'explicit', modelId: m.id },
+                                model: isDefault
+                                  ? { mode: 'default' }
+                                  : { mode: 'explicit', modelId: m.id },
                                 reasoning: { mode: 'default' },
                               },
                             });
-                          } else {
-                            apply({
-                              kind: 'set_model',
-                              model: { mode: 'explicit', modelId: m.id },
-                            });
-                          }
-                        }}
-                      >
-                        {m.displayName}
-                      </button>
-                    );
-                  })}
+                          }}
+                        >
+                          {m.displayName}
+                          {isDefault && <span className="mobile-sheet__option-meta">default</span>}
+                        </button>
+                      );
+                    })}
                 </div>
               </>
             )}
@@ -185,40 +175,50 @@ export function ModelSheetMobile({
                 <div className="mobile-sheet__options">
                   <button
                     type="button"
-                    className="ui-choice mobile-sheet__option"
-                    aria-pressed={config.reasoning.mode === 'default'}
-                    onClick={() => apply({ kind: 'set_reasoning', reasoning: { mode: 'default' } })}
-                  >
-                    Model default
-                    {resolvedModel.reasoning.defaultEffort ? (
-                      <span className="mobile-sheet__option-meta">
-                        {resolvedModel.reasoning.defaultEffort}
-                      </span>
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    className="ui-choice mobile-sheet__option"
-                    aria-pressed={config.reasoning.mode === 'disabled'}
+                    className={`ui-choice mobile-sheet__option ${!resolvedModel.reasoning.defaultEffort ? 'mobile-sheet__option--default' : ''}`}
+                    aria-pressed={
+                      resolvedModel.reasoning.defaultEffort
+                        ? config.reasoning.mode === 'disabled'
+                        : config.reasoning.mode === 'default'
+                    }
                     onClick={() =>
-                      apply({ kind: 'set_reasoning', reasoning: { mode: 'disabled' } })
+                      apply({
+                        kind: 'set_reasoning',
+                        reasoning: resolvedModel.reasoning?.defaultEffort
+                          ? { mode: 'disabled' }
+                          : { mode: 'default' },
+                      })
                     }
                   >
                     No reasoning flag
+                    {!resolvedModel.reasoning?.defaultEffort && (
+                      <span className="mobile-sheet__option-meta">default</span>
+                    )}
                   </button>
                   {resolvedModel.reasoning.levels.map((effort) => (
                     <button
                       key={effort}
                       type="button"
-                      className="ui-choice mobile-sheet__option"
+                      className={`ui-choice mobile-sheet__option ${resolvedModel.reasoning?.defaultEffort === effort ? 'mobile-sheet__option--default' : ''}`}
                       aria-pressed={
-                        config.reasoning.mode === 'explicit' && config.reasoning.effort === effort
+                        (config.reasoning.mode === 'default' &&
+                          resolvedModel.reasoning?.defaultEffort === effort) ||
+                        (config.reasoning.mode === 'explicit' && config.reasoning.effort === effort)
                       }
                       onClick={() =>
-                        apply({ kind: 'set_reasoning', reasoning: { mode: 'explicit', effort } })
+                        apply({
+                          kind: 'set_reasoning',
+                          reasoning:
+                            resolvedModel.reasoning?.defaultEffort === effort
+                              ? { mode: 'default' }
+                              : { mode: 'explicit', effort },
+                        })
                       }
                     >
                       {effort}
+                      {resolvedModel.reasoning?.defaultEffort === effort && (
+                        <span className="mobile-sheet__option-meta">default</span>
+                      )}
                     </button>
                   ))}
                 </div>

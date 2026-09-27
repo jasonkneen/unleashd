@@ -1,4 +1,6 @@
 import { Composition } from 'remotion';
+import * as Assembly from './Assembly';
+import * as Close from './Close';
 import * as DesignIteration from './DesignIteration';
 import * as DesignReview from './DesignReview';
 import * as MultiHarness from './MultiHarness';
@@ -46,6 +48,22 @@ export const Root: React.FC = () => (
       fps={MultiHarness.FPS}
       width={MultiHarness.WIDTH}
       height={MultiHarness.HEIGHT}
+    />
+    <Composition
+      id="Assembly"
+      component={Assembly.Assembly}
+      durationInFrames={Assembly.DURATION}
+      fps={Assembly.FPS}
+      width={Assembly.WIDTH}
+      height={Assembly.HEIGHT}
+    />
+    <Composition
+      id="Close"
+      component={Close.Close}
+      durationInFrames={Close.DURATION}
+      fps={Close.FPS}
+      width={Close.WIDTH}
+      height={Close.HEIGHT}
     />
   </>
 );

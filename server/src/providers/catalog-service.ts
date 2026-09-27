@@ -114,14 +114,15 @@ function buildProviderEntry(provider: Provider): ProviderCatalogEntry {
     models: models.map((model) => {
       const fileReasoning = getFileReasoning(provider, model.id);
       if (fileReasoning) {
+        const defaultEffort = fileReasoning.levels.includes('medium')
+          ? 'medium'
+          : fileReasoning.defaultEffort;
         return {
           id: model.id,
           displayName: model.displayName,
           reasoning: {
             levels: fileReasoning.levels,
-            ...(fileReasoning.defaultEffort === undefined
-              ? {}
-              : { defaultEffort: fileReasoning.defaultEffort }),
+            ...(defaultEffort === undefined ? {} : { defaultEffort }),
           },
         };
       }
@@ -134,7 +135,8 @@ function buildProviderEntry(provider: Provider): ProviderCatalogEntry {
       }
       // Fallback to helpers if catalog file not found (e.g. tests with mocked fs).
       const levels = [...effortLevelsForProvider(provider)];
-      const defaultEffort = defaultReasoningEffortForProvider(provider, model.id);
+      const configuredDefault = defaultReasoningEffortForProvider(provider, model.id);
+      const defaultEffort = levels.includes('medium') ? 'medium' : configuredDefault;
       return {
         id: model.id,
         displayName: model.displayName,

@@ -5,7 +5,9 @@ import type {
   ProviderCatalog,
   ReasoningSelection,
 } from '@unleashd/shared';
+import { DEFAULT_PROVIDER } from '@unleashd/shared';
 import { useId, useMemo } from 'react';
+import './ConversationConfigPicker.css';
 
 export interface ConversationConfigPickerProps {
   value: ConversationConfig;
@@ -13,9 +15,9 @@ export interface ConversationConfigPickerProps {
   catalog: ProviderCatalog;
   disabled?: boolean;
   providerDisabled?: boolean;
-  inlineDefaults?: boolean;
   providerFilter?: (provider: Provider) => boolean;
   showProvider?: boolean;
+  reasoningControl?: 'choices' | 'slider';
 }
 
 function selectionKey(selection: ModelSelection | ReasoningSelection): string {
@@ -33,9 +35,9 @@ export function ConversationConfigPicker({
   catalog,
   disabled = false,
   providerDisabled = false,
-  inlineDefaults = false,
   providerFilter,
   showProvider = true,
+  reasoningControl = 'choices',
 }: ConversationConfigPickerProps) {
   const id = useId().replace(/:/g, '');
   const providerGroup = `${id}-provider`;
@@ -55,24 +57,17 @@ export function ConversationConfigPicker({
   const supportsDynamicModels = provider?.supportsDynamicModels === true;
   const modelKey = selectionKey(value.model);
   const reasoningKey = selectionKey(value.reasoning);
-  const defaultModel = provider?.models.find(
-    (candidate) => candidate.id === provider.defaultModelId
+  const selectableModels = provider?.models.filter(
+    (model) => provider?.id !== 'codex' || model.id.startsWith('gpt-6-')
   );
   const reasoningLevels = resolvedModel?.reasoning?.levels ?? [];
 
   const reasoningOptions = useMemo(
     () => [
       {
-        key: 'default',
-        selection: { mode: 'default' } as const,
-        label: resolvedModel?.reasoning?.defaultEffort
-          ? `Model default (${resolvedModel.reasoning.defaultEffort})`
-          : 'Model default (no flag)',
-      },
-      {
         key: 'disabled',
         selection: { mode: 'disabled' } as const,
-        label: 'No reasoning flag',
+        label: 'Auto',
       },
       ...reasoningLevels.map((effort) => ({
         key: `explicit:${effort}`,
@@ -89,8 +84,18 @@ export function ConversationConfigPicker({
           ]
         : []),
     ],
-    [reasoningLevels, resolvedModel?.reasoning?.defaultEffort, value.reasoning]
+    [reasoningLevels, value.reasoning]
   );
+
+  const defaultEffort = resolvedModel?.reasoning?.defaultEffort;
+  const defaultReasoningKey =
+    defaultEffort === undefined ? 'disabled' : `explicit:${defaultEffort}`;
+  const activeReasoningKey = reasoningKey === 'default' ? defaultReasoningKey : reasoningKey;
+  const reasoningIndex = Math.max(
+    0,
+    reasoningOptions.findIndex((option) => option.key === activeReasoningKey)
+  );
+  const activeReasoning = reasoningOptions[reasoningIndex];
 
   const updateProvider = (nextProvider: Provider) => {
     if (nextProvider === value.provider) return;
@@ -110,10 +115,14 @@ export function ConversationConfigPicker({
           <div className="new-conv-label" id={providerGroup}>
             Harness
           </div>
-          <div className="provider-selector" role="radiogroup" aria-labelledby={providerGroup}>
+          <div
+            className="provider-selector conversation-config-selector conversation-config-provider-selector"
+            role="radiogroup"
+            aria-labelledby={providerGroup}
+          >
             {providers.map((option) => (
               <label
-                className={`ui-choice provider-option ${value.provider === option.id ? 'selected' : ''}`}
+                className={`ui-choice provider-option conversation-config-choice ${option.id === DEFAULT_PROVIDER ? 'conversation-config-choice--default' : ''} ${value.provider === option.id ? 'selected' : ''}`}
                 key={option.id}
               >
                 <input
@@ -125,6 +134,9 @@ export function ConversationConfigPicker({
                   onChange={() => updateProvider(option.id)}
                 />
                 {option.displayName}
+                {option.id === DEFAULT_PROVIDER && (
+                  <span className="conversation-config-default-hint">default</span>
+                )}
               </label>
             ))}
           </div>
@@ -134,34 +146,25 @@ export function ConversationConfigPicker({
       <div className="new-conv-label" id={modelGroup}>
         Model
       </div>
-      <div className="model-selector" role="radiogroup" aria-labelledby={modelGroup}>
-        {!inlineDefaults && (
-          <label className={`ui-choice model-option ${modelKey === 'default' ? 'selected' : ''}`}>
-            <input
-              type="radio"
-              name={modelGroup}
-              checked={modelKey === 'default'}
-              disabled={disabled}
-              onChange={() => onChange({ ...value, model: { mode: 'default' } })}
-            />
-            Provider default{defaultModel ? ` (${defaultModel.displayName})` : ''}
-          </label>
-        )}
+      <div
+        className="model-selector conversation-config-selector conversation-config-model-selector"
+        role="radiogroup"
+        aria-labelledby={modelGroup}
+      >
         {unavailableExplicitModel && (
           <label className="ui-choice model-option selected unavailable">
             <input type="radio" name={modelGroup} checked disabled />
             {unavailableExplicitModel} (unavailable)
           </label>
         )}
-        {provider?.models.map((model) => {
+        {selectableModels?.map((model) => {
           const key = `explicit:${model.id}`;
-          const isDefault = model.id === provider.defaultModelId;
-          const selected =
-            modelKey === key || (inlineDefaults && isDefault && modelKey === 'default');
+          const isDefault = model.id === provider?.defaultModelId;
+          const selected = modelKey === key || (isDefault && modelKey === 'default');
           return (
             <label
               key={model.id}
-              className={`ui-choice model-option ${selected ? 'selected' : ''}`}
+              className={`ui-choice model-option conversation-config-choice ${isDefault ? 'conversation-config-choice--default' : ''} ${selected ? 'selected' : ''}`}
             >
               <input
                 type="radio"
@@ -172,17 +175,15 @@ export function ConversationConfigPicker({
                 onChange={() =>
                   onChange({
                     ...value,
-                    model:
-                      inlineDefaults && isDefault
-                        ? { mode: 'default' }
-                        : { mode: 'explicit', modelId: model.id },
+                    model: isDefault
+                      ? { mode: 'default' }
+                      : { mode: 'explicit', modelId: model.id },
+                    reasoning: { mode: 'default' },
                   })
                 }
               />
               {model.displayName}
-              {inlineDefaults && isDefault && (
-                <span className="chat-config-default-hint">default</span>
-              )}
+              {isDefault && <span className="conversation-config-default-hint">default</span>}
             </label>
           );
         })}
@@ -200,6 +201,7 @@ export function ConversationConfigPicker({
                 onChange({
                   ...value,
                   model: modelId.length > 0 ? { mode: 'explicit', modelId } : { mode: 'default' },
+                  reasoning: { mode: 'default' },
                 });
               }}
             />
@@ -209,26 +211,76 @@ export function ConversationConfigPicker({
 
       {(reasoningLevels.length > 0 ||
         resolvedModel?.reasoning ||
-        value.reasoning.mode === 'explicit') && (
-        <>
-          <div className="new-conv-label" id={reasoningGroup}>
-            Thinking Level
+        value.reasoning.mode === 'explicit') &&
+        (reasoningControl === 'slider' ? (
+          <div className="conversation-config-slider">
+            <div className="conversation-config-slider-heading">
+              <label id={reasoningGroup} htmlFor={`${reasoningGroup}-range`}>
+                Thinking
+              </label>
+              <div className="conversation-config-slider-value">
+                <output htmlFor={`${reasoningGroup}-range`}>{activeReasoning.label}</output>
+                {activeReasoning.key === defaultReasoningKey && (
+                  <span className="conversation-config-default-hint">default</span>
+                )}
+              </div>
+            </div>
+            <input
+              id={`${reasoningGroup}-range`}
+              type="range"
+              min={0}
+              max={reasoningOptions.length - 1}
+              step={1}
+              value={reasoningIndex}
+              disabled={disabled || reasoningOptions.length < 2}
+              aria-labelledby={reasoningGroup}
+              aria-valuetext={activeReasoning.label}
+              onChange={(event) => {
+                const option = reasoningOptions[Number(event.target.value)];
+                onChange({
+                  ...value,
+                  reasoning:
+                    option.key === defaultReasoningKey ? { mode: 'default' } : option.selection,
+                });
+              }}
+            />
+            <div className="conversation-config-slider-stops" aria-hidden="true">
+              {reasoningOptions.map((option) => (
+                <span
+                  key={option.key}
+                  data-selected={option.key === activeReasoningKey || undefined}
+                >
+                  {option.label}
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="model-selector" role="radiogroup" aria-labelledby={reasoningGroup}>
-            {reasoningOptions
-              .filter((option) => !inlineDefaults || option.key !== 'default')
-              .map((option) => {
-                const defaultKey = resolvedModel?.reasoning?.defaultEffort
-                  ? `explicit:${resolvedModel.reasoning.defaultEffort}`
-                  : 'disabled';
-                const isDefault = option.key === defaultKey;
+        ) : (
+          <>
+            <div className="new-conv-label" id={reasoningGroup}>
+              Thinking Level
+            </div>
+            <div
+              className="model-selector conversation-config-selector conversation-config-reasoning-selector"
+              role="radiogroup"
+              aria-labelledby={reasoningGroup}
+            >
+              {reasoningOptions.map((option) => {
+                const defaultEffort = resolvedModel?.reasoning?.defaultEffort;
+                const isDefault =
+                  option.key === `explicit:${defaultEffort}` ||
+                  (defaultEffort === undefined && option.key === 'disabled');
                 const selected =
-                  reasoningKey === option.key ||
-                  (inlineDefaults && isDefault && reasoningKey === 'default');
+                  isDefault && reasoningKey === 'default' ? true : reasoningKey === option.key;
                 return (
                   <label
                     key={option.key}
-                    className={`ui-choice model-option ${selected ? 'selected' : ''}`}
+                    title={
+                      option.key === 'disabled'
+                        ? 'Let the harness choose the thinking level'
+                        : undefined
+                    }
+                    className={`ui-choice model-option conversation-config-choice ${isDefault ? 'conversation-config-choice--default' : ''} ${selected ? 'selected' : ''}`}
                   >
                     <input
                       type="radio"
@@ -239,21 +291,18 @@ export function ConversationConfigPicker({
                       onChange={() =>
                         onChange({
                           ...value,
-                          reasoning:
-                            inlineDefaults && isDefault ? { mode: 'default' } : option.selection,
+                          reasoning: isDefault ? { mode: 'default' } : option.selection,
                         })
                       }
                     />
                     {option.label}
-                    {inlineDefaults && isDefault && (
-                      <span className="chat-config-default-hint">default</span>
-                    )}
+                    {isDefault && <span className="conversation-config-default-hint">default</span>}
                   </label>
                 );
               })}
-          </div>
-        </>
-      )}
+            </div>
+          </>
+        ))}
     </>
   );
 }

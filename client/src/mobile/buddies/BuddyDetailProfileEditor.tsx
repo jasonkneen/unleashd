@@ -110,11 +110,15 @@ export function BuddyProfileEditor({
               Provider default{' '}
               {providerInfo?.defaultModelId ? `(${providerInfo.defaultModelId})` : ''}
             </option>
-            {(providerInfo?.models ?? []).map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.displayName ?? candidate.id}
-              </option>
-            ))}
+            {(providerInfo?.models ?? [])
+              .filter(
+                (candidate) => providerInfo?.id !== 'codex' || candidate.id.startsWith('gpt-6-')
+              )
+              .map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.displayName ?? candidate.id}
+                </option>
+              ))}
           </select>
         </label>
         <label className="mobile-field">

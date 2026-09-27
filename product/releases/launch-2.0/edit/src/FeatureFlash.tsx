@@ -1,0 +1,90 @@
+// Beat 7 flash cards: "Multiagent swarms", "Memory!", "Familiar UI", "Mobile Friendly!", three
+// beats each (3 bars of the EDM groove). Each card sits over a real capture of the running app
+// (../capture/record-page.mjs; ../footage/FOOTAGE.md, "Feature clips"). Desktop captures are
+// lifted out as a card of the main column, so the sidebar's real Buddy names stay blurred.
+import type React from 'react';
+import { AbsoluteFill, Easing, OffthreadVideo, Series, staticFile, useCurrentFrame } from 'remotion';
+import { Block, clamp01, INK, lerp } from './blocks';
+import { CardEdit, type Key, play, push, STILL, type Shot } from './card';
+
+export { FPS, HEIGHT, WIDTH } from './card';
+
+const BEAT = 60 / 128;
+const FLASH_BEATS = 3;
+// Round per boundary so four flashes fill exactly 12 beats (1.40625 s is 84.375 frames).
+const boundary = (i: number) => Math.round(i * FLASH_BEATS * BEAT * 60);
+
+const clip = (name: string) => staticFile(`2026-09-26_feature_${name}.mp4`);
+
+// The main column of a 2974×1882 desktop capture (the sidebar ends at x ≈ 560).
+const column = (top: number, ox: number, oy: number): Shot => ({ focus: 1, x: 560, w: 2414, top, scale: 0.74, ...STILL, ox, oy });
+
+type Desktop = { kind: 'desktop'; name: string; from: number; shot: Shot };
+type Phone = { kind: 'phone'; name: string; from: number };
+type Footage = Desktop | Phone;
+type Flash = { text: string; fill: string; rot: number; footage: Footage };
+
+const FLASHES: Flash[] = [
+  { text: 'Multiagent swarms', fill: INK.cyan, rot: -3, footage: { kind: 'desktop', name: 'swarm', from: 1.0, shot: column(280, 0.5, 0.35) } },
+  { text: 'Memory!', fill: INK.yellow, rot: 2, footage: { kind: 'desktop', name: 'memory', from: 1.0, shot: column(150, 0.4, 0.4) } },
+  { text: 'Familiar UI', fill: INK.wordmarkOrange, rot: -2, footage: { kind: 'desktop', name: 'chat', from: 1.0, shot: column(150, 0.5, 0.5) } },
+  { text: 'Mobile Friendly!', fill: '#859900', rot: 3, footage: { kind: 'phone', name: 'phone', from: 0.5 } },
+];
+
+export const DURATION = boundary(FLASHES.length);
+
+const DesktopShot: React.FC<{ f: Desktop; frames: number }> = ({ f, frames }) => {
+  const seconds = frames / 60;
+  const camera: Key[] = [
+    { t: 0, shot: f.shot },
+    { t: seconds, shot: push(f.shot, 1.08) },
+  ];
+  return <CardEdit src={clip(f.name)} cuts={[play(f.from, f.from + seconds, 1, f.name)]} camera={camera} />;
+};
+
+// A phone capture stands upright in the middle of the plate, pushing in slightly.
+const PhoneShot: React.FC<{ f: Phone; frames: number }> = ({ f, frames }) => {
+  const t = useCurrentFrame();
+  const settle = Easing.out(Easing.cubic)(clamp01(t / frames));
+  return (
+    <AbsoluteFill style={{ background: INK.plate, alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        style={{
+          height: 980,
+          borderRadius: 54,
+          overflow: 'hidden',
+          border: `12px solid ${INK.night}`,
+          boxShadow: '0 40px 100px rgba(0,0,0,.55)',
+          transform: `translateX(260px) scale(${lerp(1, 1.05, settle)})`,
+        }}
+      >
+        <OffthreadVideo src={clip(f.name)} trimBefore={Math.round(f.from * 60)} muted style={{ display: 'block', height: '100%' }} />
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const FootageShot: React.FC<{ f: Footage; frames: number }> = ({ f, frames }) =>
+  f.kind === 'desktop' ? <DesktopShot f={f} frames={frames} /> : <PhoneShot f={f} frames={frames} />;
+
+const Card: React.FC<{ flash: Flash }> = ({ flash }) => {
+  const t = useCurrentFrame() / 60;
+  return (
+    <div style={{ position: 'absolute', left: 110, bottom: 110 }}>
+      <Block text={flash.text} u={t} size="xl" fill={flash.fill} ink={INK.plate} rot={flash.rot} />
+    </div>
+  );
+};
+
+export const FeatureFlash: React.FC = () => (
+  <Series>
+    {FLASHES.map((flash, i) => (
+      <Series.Sequence key={flash.text} durationInFrames={boundary(i + 1) - boundary(i)}>
+        <AbsoluteFill style={{ background: INK.night }}>
+          <FootageShot f={flash.footage} frames={boundary(i + 1) - boundary(i)} />
+          <Card flash={flash} />
+        </AbsoluteFill>
+      </Series.Sequence>
+    ))}
+  </Series>
+);

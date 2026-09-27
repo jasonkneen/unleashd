@@ -592,7 +592,6 @@ export function Chat({ id }: { id: string }) {
                       catalog={catalog}
                       disabled={configIsSaving}
                       providerDisabled={!canChangeHarness}
-                      inlineDefaults
                       providerFilter={(providerId) =>
                         !requiresBuddyMcp ||
                         providerId === conversation.provider ||
@@ -872,7 +871,6 @@ export function Chat({ id }: { id: string }) {
               value={conversationConfig}
               catalog={catalog}
               disabled={configIsSaving}
-              inlineDefaults
               providerFilter={(providerId) =>
                 !requiresBuddyMcp ||
                 providerId === conversation.provider ||

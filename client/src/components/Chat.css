@@ -1705,16 +1705,3 @@
   font-size: 12px;
   color: var(--text-muted);
 }
-
-.chat-config-default-hint {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 400;
-  line-height: 1;
-  letter-spacing: normal;
-}
