@@ -6,6 +6,7 @@ import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { useTimeTick } from '../../hooks/useTimeTick';
 import { shortenHomePath } from '../../utils/directories';
 import { formatTimeAgo } from '../../utils/time';
+import { ConfigDropdown } from '../ConfigDropdown';
 import { PathAutocomplete } from '../PathAutocomplete';
 import { BuddySigil, WorkspaceEmblem } from './BuddySigil';
 import { buddyApi, errorText } from './api';
@@ -51,6 +52,7 @@ export function WorkspaceHome() {
             {destination.label}
           </Link>
         ))}
+        <ConfigDropdown />
       </nav>
       <main className="workspace-home-body ui-stack">
         <header className="workspace-home-header ui-row">

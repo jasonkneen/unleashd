@@ -164,6 +164,28 @@ export function removeSeenIndex(conversationId: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Upstream update prompt ('unleashd-upstream-handled') — the upstream `main`
+// sha this device already answered, by [Later] or [Update]. The prompt
+// (UpstreamUpdatePrompt) returns only when upstream moves to a new sha. Its
+// own key: it is one string, unrelated to the prefs blob. Null means never
+// answered on this device.
+// ---------------------------------------------------------------------------
+
+const upstreamHandledStorage = validatedStorage<string | null>((raw) =>
+  typeof raw === 'string' && raw ? raw : null
+);
+export const upstreamHandledShaAtom = atomWithStorage<string | null>(
+  'unleashd-upstream-handled',
+  null,
+  upstreamHandledStorage,
+  { getOnInit: true }
+);
+
+export function markUpstreamHandled(sha: string): void {
+  jotaiStore.set(upstreamHandledShaAtom, sha);
+}
+
+// ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
 

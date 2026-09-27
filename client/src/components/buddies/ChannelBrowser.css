@@ -27,6 +27,11 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.channel-browser-rail-header-row {
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
 .channel-browser-exit {
   font: 500 11px / 1 var(--font-mono);
   text-decoration: none;

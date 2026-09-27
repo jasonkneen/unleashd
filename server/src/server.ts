@@ -74,6 +74,7 @@ import { getProvider, providers } from './providers';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
+import { createUpstreamService } from './upstream/routes';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
 
 import { type SessionRow, defaultRoots } from '@unleashd/ingest';
@@ -588,6 +589,17 @@ registerBuddyRoutes(app, {
   },
 });
 
+// First-run "unleashd" workspace + fetch-only upstream check (upstream/routes.ts).
+// The update action posts through the same owner-post path as the routes above.
+const upstream = createUpstreamService({
+  serverDirectory: __dirname,
+  core: buddiesCore,
+  events: buddyEvents,
+  channels: buddyChannels,
+  uploadsRoot: () => UPLOADS_DIR,
+});
+upstream.registerRoutes(app);
+
 registerSearchRoutes(
   app,
   async (query, limit) => {
@@ -681,6 +693,7 @@ shutdownController = registerShutdownHandlers(
     resumeScheduler: resumeBuddyScheduler,
     stopScheduler: stopBuddyScheduler,
     flushState: async () => {
+      upstream.stop();
       await Promise.all([turnAttemptJournal.flush(), errorJournal.flush()]);
       await buddyMcp?.close();
       if (bootedIngest) {
@@ -732,6 +745,9 @@ void runServerStartup(
         grants: buddyGrants,
         uploadsRoot: () => UPLOADS_DIR,
       });
+      // Background, never awaited: bootstrap and the upstream fetch must not
+      // hold startup, and their failures are logged after capture is installed.
+      upstream.start();
       startupAuditResults = auditLocalAgents();
       await turnAttemptJournal.initialize();
       await persistedServerState.initialize();

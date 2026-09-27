@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { listField, rowFamily } from '../../atoms/conversations';
+import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
@@ -235,14 +236,17 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
       title={directory.workspaceName}
       subtitle="Channels and Buddies"
       headerAside={
-        workspaces.length > 1 ? (
-          <MobileHeaderAction
-            aria-expanded={switching}
-            onClick={() => setSwitching((value) => !value)}
-          >
-            Switch
-          </MobileHeaderAction>
-        ) : null
+        <div className="mobile-channels-header-aside ui-row">
+          {workspaces.length > 1 ? (
+            <MobileHeaderAction
+              aria-expanded={switching}
+              onClick={() => setSwitching((value) => !value)}
+            >
+              Switch
+            </MobileHeaderAction>
+          ) : null}
+          <AppSettingsDropdown />
+        </div>
       }
     >
       {switching && (

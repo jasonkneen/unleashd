@@ -1,0 +1,32 @@
+/* A quiet corner card, not a modal. It renders outside both shells, so it
+   carries its own data-device (G9); on phones it sits above the tab bar. */
+.upstream-update-prompt {
+  position: fixed;
+  right: var(--sp-7);
+  bottom: var(--sp-7);
+  z-index: 900;
+  max-width: 320px;
+  padding: var(--sp-6) var(--sp-7);
+  background: var(--bg-popup);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--pole-bg-deep) 35%, transparent);
+  font-size: var(--fs-4);
+}
+.upstream-update-prompt[data-device="mobile"] {
+  left: var(--sp-6);
+  right: var(--sp-6);
+  max-width: none;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+}
+.upstream-update-prompt-error {
+  color: var(--theme-danger);
+}
+.upstream-update-prompt-actions {
+  justify-content: flex-end;
+  gap: var(--sp-4);
+  margin-top: var(--sp-5);
+}
+/* Three classes: beats .ui-choice.ui-choice whatever the load order. */
+.upstream-update-prompt .ui-choice.upstream-update-prompt-update {
+  background: var(--primary);
+  color: var(--text-on-accent);
+}
