@@ -6,18 +6,21 @@
  * `dm` is a Buddy DM and wins over a channel still in the query, so Back can
  * drop `dm` and return to the channel the DM was opened from.
  *
- *   D = Home (channel list + Buddies) ⊕ Channel ⊕ Thread ⊕ DM
+ *   D = Home (channel list + Buddies) ⊕ Channel ⊕ Thread ⊕ DM ⊕ Workers
  */
 export type MobileChannelScreen =
   | { kind: 'home' }
   | { kind: 'channel'; listId: string }
   | { kind: 'thread'; listId: string; rootId: string; linkedPostId: string | null }
-  | { kind: 'dm'; conversationId: string };
+  | { kind: 'dm'; conversationId: string }
+  | { kind: 'workers'; buddyId: string };
 
 const CHANNELS_PATH = /^\/buddies\/workspaces\/[^/]+\/channels\/?$/;
 
 export function mobileChannelScreen(search: string): MobileChannelScreen {
   const params = new URLSearchParams(search);
+  const workers = params.get('workers');
+  if (workers) return { kind: 'workers', buddyId: workers };
   const dm = params.get('dm');
   if (dm) return { kind: 'dm', conversationId: dm };
   const listId = params.get('channel');
@@ -51,5 +54,7 @@ export function channelsHref(workspaceId: string, screen: MobileChannelScreen): 
     }
     case 'dm':
       return `${base}?dm=${encodeURIComponent(screen.conversationId)}`;
+    case 'workers':
+      return `${base}?workers=${encodeURIComponent(screen.buddyId)}`;
   }
 }

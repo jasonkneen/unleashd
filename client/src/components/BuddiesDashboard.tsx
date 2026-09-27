@@ -480,7 +480,11 @@ export function BuddiesDashboard() {
         )}
 
         {activeTab === 'background' && (
-          <BuddyBackgroundTasks buddyId={employee.buddy.id} workspaces={employee.workspaces} />
+          <BuddyBackgroundTasks
+            buddyId={employee.buddy.id}
+            workspaces={employee.workspaces}
+            projects={employee.projects}
+          />
         )}
 
         {activeTab === 'memory' && (

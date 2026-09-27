@@ -30,7 +30,7 @@ export const EMPLOYEE_TAB_LABELS: Record<EmployeeTab, string> = {
   work: 'Work',
   mailbox: 'Mailbox',
   conversations: 'Conversations',
-  background: 'Background tasks',
+  background: 'Background workers',
   memory: 'Memory',
   automations: 'Automations',
 };
@@ -42,7 +42,7 @@ export const EMPLOYEE_TAB_LABELS_SHORT: Record<EmployeeTab, string> = {
   work: 'Work',
   mailbox: 'Mailbox',
   conversations: 'Chats',
-  background: 'Tasks',
+  background: 'Workers',
   memory: 'Memory',
   automations: 'Autos',
 };

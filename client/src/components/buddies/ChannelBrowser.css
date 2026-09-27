@@ -676,6 +676,7 @@ a.channel-browser-instance:hover {
   position: relative;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .channel-browser-buddy-link {
@@ -728,6 +729,29 @@ a.channel-browser-instance:hover {
 .channel-browser-buddy-actions button:disabled {
   opacity: 0.5;
   cursor: progress;
+}
+
+@media (hover: hover) {
+  /* Keep a running worker's persistent count clear of long Buddy names. */
+  .channel-browser-buddy:has(.buddy-background-link[data-running="true"])
+    .channel-browser-buddy-link {
+    padding-right: 72px;
+  }
+}
+
+/* Landscape tablets use this rail too; touch cannot reveal hover actions. */
+@media (hover: none) {
+  .channel-browser-buddy-actions {
+    position: static;
+    flex: none;
+    transform: none;
+    visibility: visible;
+  }
+
+  .channel-browser-buddy-actions button {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .channel-browser-buddy-status {

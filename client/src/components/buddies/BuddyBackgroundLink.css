@@ -1,0 +1,42 @@
+.buddy-background-link {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 34px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: var(--ui-radius);
+  background: var(--bg-sidebar);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+
+.buddy-background-link:hover,
+.buddy-background-link:focus-visible {
+  color: var(--text-bright);
+  background: color-mix(in srgb, var(--text-emphasis) 10%, var(--bg-sidebar));
+}
+
+.buddy-background-link:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+/* Override the hover-only parent's visibility for running workers. Keep the
+   requested green across palettes whose generic success color is yellow. */
+.buddy-background-link[data-running="true"] {
+  visibility: visible;
+  color: color-mix(in oklch, #27b56b 80%, var(--pole-fg-pop));
+}
+
+@media (max-width: 768px), (hover: none) {
+  .buddy-background-link {
+    min-width: 44px;
+    height: 44px;
+    background: transparent;
+  }
+}

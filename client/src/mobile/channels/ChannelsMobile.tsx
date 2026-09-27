@@ -12,8 +12,11 @@ import { buddyBuilderConversationsAtom } from '../../atoms/buddy-sidebar';
 import { availableConversationIdSetAtom, conversationAtomFamily } from '../../atoms/conversations';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
+import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
+import '../../components/buddies/BuddyBackgroundLink.css';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
+import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { ChannelMarkdown, TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { ConversationEye } from '../../components/buddies/ConversationEye';
@@ -114,6 +117,15 @@ type ScreenContext = {
 
 function renderScreen(screen: MobileChannelScreen, context: ScreenContext) {
   switch (screen.kind) {
+    case 'workers':
+      return (
+        <ChannelWorkers
+          buddyId={screen.buddyId}
+          buddyName={context.directory.buddyNames[screen.buddyId] ?? 'Buddy'}
+          workspaceId={context.workspaceId}
+          tasks={context.directory.tasks}
+        />
+      );
     case 'home':
       return <ChannelsHome context={context} />;
     case 'channel':
@@ -149,6 +161,7 @@ function useChannelsOpenDm(workspaceId: string): OpenDm {
     params.delete('thread');
     params.delete('post');
     params.delete('task');
+    params.delete('workers');
     params.set('dm', conversationId);
     navigate(`/buddies/workspaces/${encodeURIComponent(workspaceId)}/channels?${params}`);
   };
@@ -387,7 +400,7 @@ function BuddySection({
 }
 
 // Slack's DM row: tapping the Buddy opens the DM inside Channels. Wake is a
-// visible button, since touch has no hover.
+// visible button, since touch has no hover. Workers is a separate read-only link.
 function BuddyRow({ member, workspaceId }: { member: ChannelMember; workspaceId: string }) {
   // Back from the DM returns here, not to the Buddies tab.
   const openDm = useChannelsOpenDm(workspaceId);
@@ -419,6 +432,7 @@ function BuddyRow({ member, workspaceId }: { member: ChannelMember; workspaceId:
           linkState={origin}
         />
       )}
+      <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
       <button
         type="button"
         className="mobile-channels-wake"

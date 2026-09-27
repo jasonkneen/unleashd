@@ -25,6 +25,7 @@ import type {
   Sprint,
   Workspace,
 } from '../components/buddies/types';
+import type { TurnAttemptSnapshotLike } from '../utils/turn-diagnostics';
 import { type UsePolledFetchResult, resource, usePolledFetch } from './usePolledFetch';
 
 // =============================================================================
@@ -41,6 +42,15 @@ import { type UsePolledFetchResult, resource, usePolledFetch } from './usePolled
 export const BUDDY_OVERVIEW_URL = '/api/buddies/overview';
 
 export const EMPTY_AUTOMATIONS: BuddyAutomation[] = [];
+
+/** Only visible running workers poll; native workers share their parent's key. */
+export function useBuddyWorkerDiagnostics(conversationId: string, running: boolean) {
+  return usePolledFetch<{ latestAttempt: TurnAttemptSnapshotLike | null }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/diagnostics?limit=1`,
+    5_000,
+    running
+  );
+}
 
 export function useBuddyOverview(
   intervalMs = 0,

@@ -13,25 +13,26 @@ import { availableConversationIdSetAtom, conversationAtomFamily } from '../../at
 import { usePolledFetch } from '../../hooks/usePolledFetch';
 import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
-import { ChannelDm } from './ChannelDm';
 import { BuddyRailRow } from './BuddyRailRow';
 import { BuddySigil } from './BuddySigil';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
+import { ChannelDm } from './ChannelDm';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { ChannelMarkdown, TypingDots } from './ChannelMarkdown';
+import { ChannelWorkers } from './ChannelWorkers';
 import { ConversationEye } from './ConversationEye';
 import { CopyLinkButton } from './CopyLinkButton';
-import { OutOfTokensChannelRetry } from './HarnessRetry';
-import { latestActiveBuddyBuilder } from './channel-buddy-builder';
 import { CreatingBuddyRailRow } from './CreatingBuddyRailRow';
+import { OutOfTokensChannelRetry } from './HarnessRetry';
 import { useChannelNewBuddy } from './buddy-direct-actions';
+import { latestActiveBuddyBuilder } from './channel-buddy-builder';
 import {
   type BuddyMailingListSummary,
-  archivedListsUrl,
   CHANNEL_BACKSTOP_MS,
   type ChannelMember,
   type ChannelRow,
+  archivedListsUrl,
   arrivalMarks,
   authorName,
   channelPostFeed,
@@ -41,11 +42,11 @@ import {
   createChannel,
   feedPhase,
   listsUrl,
-  setChannelArchived,
   ownerUnreadByList,
   postPurposeLabel,
   postPurposeTag,
   renderFeed,
+  setChannelArchived,
   taskPostFeed,
   threadPostFeed,
   useChannelFeed,
@@ -922,6 +923,7 @@ export function ChannelBrowser({
       ...(next.thread ? { thread: next.thread } : {}),
     });
   // An open DM replaces the channel in the main pane; picking a channel closes it.
+  const workersBuddyId = params.get('workers');
   const dm = params.get('dm');
   const openDm: OpenDm = (conversationId) => setParams({ dm: conversationId });
   const newBuddy = useChannelNewBuddy(openDm);
@@ -979,7 +981,9 @@ export function ChannelBrowser({
                   <button
                     type="button"
                     data-unread={channelUnreadAttr(unreadByList.get(list.id))}
-                    aria-current={!dm && selected?.id === list.id ? 'page' : undefined}
+                    aria-current={
+                      !workersBuddyId && !dm && selected?.id === list.id ? 'page' : undefined
+                    }
                     onClick={() => select({ channel: list.id, task: null, thread: null })}
                     title={list.purpose}
                   >
@@ -1056,7 +1060,7 @@ export function ChannelBrowser({
                   member={member}
                   workspaceId={workspaceId}
                   openDm={openDm}
-                  current={member.id === dmBuddyId}
+                  current={member.id === (workersBuddyId ?? dmBuddyId)}
                 />
               ))}
             </ul>
@@ -1064,7 +1068,14 @@ export function ChannelBrowser({
         </div>
       </nav>
       <main className="channel-browser-main">
-        {dm ? (
+        {workersBuddyId ? (
+          <ChannelWorkers
+            buddyId={workersBuddyId}
+            buddyName={buddyNames[workersBuddyId] ?? 'Buddy'}
+            workspaceId={workspaceId}
+            tasks={tasks}
+          />
+        ) : dm ? (
           <DmPane
             conversationId={dm}
             available={availableConversationIds.has(dm)}
