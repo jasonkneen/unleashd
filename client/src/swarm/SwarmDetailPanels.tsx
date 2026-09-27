@@ -1,4 +1,4 @@
-import type { SwarmReviewLog, SwarmRun, SwarmRunSummary } from '@unleashd/shared';
+import type { OompaReviewLog, SwarmRun, SwarmRunSummary } from '@unleashd/shared';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { usePolledFetch } from '../hooks/usePolledFetch';
 import { formatTimeAgo } from '../utils/time';
@@ -6,7 +6,7 @@ import { formatTimeAgo } from '../utils/time';
 // Stable empty fallbacks (AGENTS.md: a fresh [] per render defeats memoisation).
 const NO_COMMITS: GitLogEntry[] = [];
 const NO_RUNS: SwarmRun[] = [];
-const NO_REVIEWS: SwarmReviewLog[] = [];
+const NO_REVIEWS: OompaReviewLog[] = [];
 
 interface GitLogEntry {
   hash: string;
@@ -182,7 +182,7 @@ export function SwarmRunsPanel({
   // A failed re-read keeps the reviews already shown (`stale`); until 2026-09-25
   // any error emptied the list, which read as "no reviews".
   const reviews =
-    usePolledFetch<{ reviews: SwarmReviewLog[] }>(runScoped('/api/swarm-reviews'), 0).data
+    usePolledFetch<{ reviews: OompaReviewLog[] }>(runScoped('/api/swarm-reviews'), 0).data
       ?.reviews ?? NO_REVIEWS;
   const newFiles = usePolledFetch<{ count: number }>(runScoped('/api/swarm-new-files'), 0);
 
@@ -296,7 +296,8 @@ export function SwarmRunsPanel({
         <section className="swarm-detail-card ui-stack ui-card">
           <h4>Review Log ({reviews.length} reviews)</h4>
           {reviews.map((r) => {
-            const key = `${r['worker-id']}-i${r.iteration}-r${r.round}`;
+            // The API serves cycle, not iteration: the stale field duplicated keys across cycles.
+            const key = `${r['worker-id']}-c${r.cycle}-r${r.round}`;
             const open = expandedReview === key;
             return (
               <div key={key} className="swarm-detail-review ui-stack">
@@ -308,7 +309,7 @@ export function SwarmRunsPanel({
                 >
                   <span className="swarm-detail-mono">{r['worker-id']}</span>
                   <span className="ui-muted">
-                    c{r.iteration} r{r.round}
+                    c{r.cycle} r{r.round}
                   </span>
                   <span className="swarm-verdict" data-verdict={r.verdict}>
                     {r.verdict.toUpperCase().replace('-', ' ')}

@@ -25,7 +25,7 @@ export function ChannelWorkers({
           ‹
         </Link>
         <BuddySigil className="channel-workers-sigil" name={buddyName} />
-        <h1>{buddyName}</h1>
+        <h1 className="channel-workers-title ui-truncate">{buddyName}</h1>
       </header>
       <div className="channel-workers-scroll">
         <BuddyBackgroundTasks

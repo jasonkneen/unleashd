@@ -4,6 +4,8 @@
 
 .config-trigger {
   justify-content: center;
+  /* Global button padding squeezed the gear to 0px; settings screenshots guard this. */
+  padding: 0;
   width: 36px;
   height: 36px;
   background: transparent;

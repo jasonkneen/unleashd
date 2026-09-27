@@ -304,13 +304,14 @@ const prep = (body) => `(async () => {${HELPERS}${body}})()`;
 const QUIET_MS = 500;
 const IDLE_TIMEOUT_MS = 20_000;
 
-// Re-pin every pane that is following its bottom (within the app's own 48px
+// Re-pin message panes that are following their bottom (within the app's own 48px
 // follow threshold, channel-data.ts useFollowBottom) just before the shot.
 // The app pins once per render; content that grows after it (lazy markdown,
 // avatars) left the thread 1px short of the bottom in one run and flush in the
 // next, a 7% diff on thread@ipad-portrait (2026-09-25).
 const PIN_FOLLOWED_BOTTOMS = `(() => {
-  for (const el of document.querySelectorAll('*')) {
+  // Pinning every scroll container also scrolled the new-conversation heading offscreen.
+  for (const el of document.querySelectorAll('.channel-browser-scroll, .mobile-channel__scroll, .mobile-chat__messages, .messages-container')) {
     if (el.scrollHeight <= el.clientHeight) continue;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (gap > 0 && gap < 48) el.scrollTop = el.scrollHeight;
