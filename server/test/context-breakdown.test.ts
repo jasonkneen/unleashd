@@ -113,10 +113,7 @@ test('an unrecognised model is reported as unknown, never silently defaulted', (
 
 test('buildContextBreakdown sums history and pairs provider cumulative delta', () => {
   const convo = conversation({
-    messages: [
-      textMessage('user', 'hello'),
-      textMessage('assistant', 'world!'),
-    ],
+    messages: [textMessage('user', 'hello'), textMessage('assistant', 'world!')],
   });
   const usage = {
     sessionId: 'sess-1',
@@ -213,8 +210,11 @@ test('context-breakdown route returns the meter payload for a known conversation
     assert.ok(body.sections.briefing.chars > 0);
     assert.equal(
       body.sections.history.chars,
-      'build a team'.length + 'Checking files.'.length + JSON.stringify(tool).length +
-        'Historical note\n'.length + JSON.stringify(historicalTool).length,
+      'build a team'.length +
+        'Checking files.'.length +
+        JSON.stringify(tool).length +
+        'Historical note\n'.length +
+        JSON.stringify(historicalTool).length,
       'mixed and historical prose and tool payloads contribute to the estimate once'
     );
     // totalChars must account for EVERY section. This previously asserted only
