@@ -111,7 +111,9 @@ test('native workers are deduplicated against descendants, and unconfirmed compl
 
 test('cold worker discovery reads bounded detail only, reuses quiet sessions and retries partial failures', async () => {
   const { workerDetailsResource } = await import('../src/atoms/buddy-background');
-  const { clearResourceCache } = await import('../src/atoms/resources');
+  const { clearResourceCache, resourceCacheSize } = await import('../src/atoms/resources');
+  const { jotaiStore } = await import('../src/atoms/store');
+  const previousRows = jotaiStore.get(rowsAtom);
   clearResourceCache();
   const original = globalThis.fetch;
   const paths: string[] = [];
@@ -126,7 +128,12 @@ test('cold worker discovery reads bounded detail only, reuses quiet sessions and
   };
   try {
     const rows = [make('quiet'), make('temporarily-unavailable')];
-    const source = workerDetailsResource(rows);
+    jotaiStore.set(rowsAtom, new Map(rows.map((row) => [row.id, row])));
+    const source = workerDetailsResource({
+      buddyId: 'lead',
+      workspaceId: 'wave',
+      includeHistory: true,
+    });
     const first = await source.load(new AbortController().signal);
     assert.deepEqual(
       first.details.map((detail) => detail.id),
@@ -139,12 +146,57 @@ test('cold worker discovery reads bounded detail only, reuses quiet sessions and
     assert.deepEqual(second.unavailableIds, []);
     assert.equal(paths.filter((path) => path.endsWith('/quiet')).length, 1);
     assert.equal(paths.filter((path) => path.endsWith('/temporarily-unavailable')).length, 2);
+    const size = resourceCacheSize();
+    const changed = make('quiet', { activityAt: T0 + 1 });
+    jotaiStore.set(
+      rowsAtom,
+      new Map(rows.map((row) => [row.id, row.id === 'quiet' ? changed : row]))
+    );
+    await source.load(new AbortController().signal);
+    assert.equal(paths.filter((path) => path.endsWith('/quiet')).length, 2);
+    assert.equal(resourceCacheSize(), size, 'new activity refreshes the same per-conversation key');
     assert.ok(
       paths.every((path) => !path.includes('/messages')),
       'worker inspection never hydrates transcript bodies'
     );
   } finally {
     globalThis.fetch = original;
+    jotaiStore.set(rowsAtom, previousRows);
+    clearResourceCache();
+  }
+});
+
+test('cold rail badges never fetch idle history, but discover running and queued workers', async () => {
+  const { buddyWorkerCountsFamily, workerDetailsResource } = await import(
+    '../src/atoms/buddy-background'
+  );
+  const { clearResourceCache } = await import('../src/atoms/resources');
+  const { jotaiStore } = await import('../src/atoms/store');
+  const previousRows = jotaiStore.get(rowsAtom);
+  const original = globalThis.fetch;
+  clearResourceCache();
+  const paths: string[] = [];
+  globalThis.fetch = async (input) => {
+    const path = String(input);
+    paths.push(path);
+    return Response.json(syntheticDetail(path.split('/').at(-1)!));
+  };
+  try {
+    const history = Array.from({ length: 1136 }, (_, index) => make(`past-${index}`));
+    jotaiStore.set(rowsAtom, new Map(history.map((row) => [row.id, row])));
+    const scope = { buddyId: 'lead', workspaceId: 'wave', includeHistory: false };
+    const source = workerDetailsResource(scope);
+    await source.load(new AbortController().signal);
+    assert.deepEqual(paths, [], 'opening an idle rail fetches no historical details');
+
+    const rows = [...history, make('live', { run: 'running' }), make('waiting', { run: 'queued' })];
+    jotaiStore.set(rowsAtom, new Map(rows.map((row) => [row.id, row])));
+    await source.load(new AbortController().signal);
+    assert.deepEqual(paths.sort(), ['/api/conversations/live', '/api/conversations/waiting']);
+    assert.equal(jotaiStore.get(buddyWorkerCountsFamily(scope)).active, 2);
+  } finally {
+    globalThis.fetch = original;
+    jotaiStore.set(rowsAtom, previousRows);
     clearResourceCache();
   }
 });

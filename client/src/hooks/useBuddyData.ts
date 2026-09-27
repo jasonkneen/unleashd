@@ -1,7 +1,7 @@
 import { useAtomValue } from 'jotai';
 import {
   buddyBackgroundWorkersAtomFamily,
-  buddyWorkerRowsFamily,
+  buddyWorkerReadRowsFamily,
   workerDetailsResource,
 } from '../atoms/buddy-background';
 import { isRowRunning } from '../utils/conversation-row';
@@ -78,19 +78,23 @@ export function useBuddyPage(
   return { detail, overview, buddy, workspace, talk };
 }
 
-/** Shared by rail badges and the workers screen; cold navigation discovers native session workers. */
-export function useBuddyWorkerRead(buddyId: string, workspaceId: string | null = null) {
-  const scope = { buddyId, workspaceId };
-  const rows = useAtomValue(buddyWorkerRowsFamily(scope));
+/** Badges load live parents only; the workers screen explicitly opts into historical details. */
+export function useBuddyWorkerRead(
+  buddyId: string,
+  workspaceId: string | null = null,
+  includeHistory = false
+) {
+  const scope = { buddyId, workspaceId, includeHistory };
+  const rows = useAtomValue(buddyWorkerReadRowsFamily(scope));
   return usePolledFetch(
-    workerDetailsResource(rows),
+    workerDetailsResource(scope),
     rows.some(isRowRunning) ? 5_000 : 30_000,
     rows.length > 0
   );
 }
 
 export function useBuddyWorkers(buddyId: string, workspaceId: string | null = null) {
-  const read = useBuddyWorkerRead(buddyId, workspaceId);
+  const read = useBuddyWorkerRead(buddyId, workspaceId, true);
   const workers = useAtomValue(buddyBackgroundWorkersAtomFamily({ buddyId, workspaceId }));
   return { workers, read };
 }

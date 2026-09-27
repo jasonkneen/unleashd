@@ -13,6 +13,7 @@ import { jotaiStore } from './store';
 import { sameItems, stableAtom } from './structural';
 
 type Scope = { buddyId: string; workspaceId: string | null };
+type ReadScope = Scope & { includeHistory: boolean };
 const sameScope = (a: Scope, b: Scope) =>
   a.buddyId === b.buddyId && a.workspaceId === b.workspaceId;
 
@@ -34,6 +35,16 @@ export const buddyWorkerRowsFamily = atomFamily(
       return [...ids].flatMap((id) => get(rowFamily(id)) ?? []);
     }, sameItems),
   sameScope
+);
+
+/** Rail badges discover live native workers; historical details load only in the workers view. */
+export const buddyWorkerReadRowsFamily = atomFamily(
+  (scope: ReadScope) =>
+    stableAtom((get) => {
+      const rows = get(buddyWorkerRowsFamily(scope));
+      return scope.includeHistory ? rows : rows.filter((row) => row.run !== 'idle');
+    }, sameItems),
+  (a, b) => sameScope(a, b) && a.includeHistory === b.includeHistory
 );
 
 export type BuddyWorkerStatus =
@@ -61,8 +72,12 @@ const ORDER: Record<BuddyWorkerStatus, number> = {
   idle: 4,
   completed: 5,
 };
-const NO_DETAILS: readonly ConversationDetail[] = [];
 export type WorkerDetails = { details: ConversationDetail[]; unavailableIds: string[] };
+type WorkerDetailSnapshot = {
+  activityAt: number;
+  run: ConversationRow['run'];
+  detail: ConversationDetail;
+};
 
 export function projectBuddyWorkers(
   rows: readonly ConversationRow[],
@@ -86,7 +101,7 @@ export function projectBuddyWorkers(
       let status: BuddyWorkerStatus = agent.status === 'pending' ? 'queued' : agent.status;
       if (
         agent.statusSource === 'inferred_parent_completion' ||
-        ((status === 'running' || status === 'queued') && !isRowRunning(parent))
+        ((status === 'running' || status === 'queued') && parent.run === 'idle')
       )
         status = 'unknown';
       if (child && isRowRunning(child)) status = 'running';
@@ -121,19 +136,18 @@ export function projectBuddyWorkers(
   return workers.sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.sortTime - a.sortTime);
 }
 
-const detailsKey = (rows: readonly ConversationRow[]) =>
-  `buddy-workers:${rows
-    .map((row) => row.id)
-    .sort()
-    .join(',')}`;
+const detailsKey = (scope: ReadScope) =>
+  `buddy-workers:${JSON.stringify([scope.buddyId, scope.workspaceId, scope.includeHistory])}`;
+const detailKey = (id: string) => `buddy-worker-detail:${id}`;
 const valueOf = <T>(entry: ResourceEntry<T>): T | null =>
   entry.kind === 'ready' || entry.kind === 'stale' ? entry.value : null;
 
 /** Details only, never transcript bodies. Quiet sessions reuse the keyed cache until activity changes. */
-export function workerDetailsResource(rows: readonly ConversationRow[]): Resource<WorkerDetails> {
+export function workerDetailsResource(scope: ReadScope): Resource<WorkerDetails> {
   return {
-    key: detailsKey(rows),
+    key: detailsKey(scope),
     async load(signal) {
+      const rows = jotaiStore.get(buddyWorkerReadRowsFamily(scope));
       const result: ConversationDetail[] = [];
       const unavailableIds: string[] = [];
       let index = 0;
@@ -143,21 +157,33 @@ export function workerDetailsResource(rows: readonly ConversationRow[]): Resourc
             const row = rows[index++];
             if (!row) return;
             const url = `/api/conversations/${encodeURIComponent(row.id)}`;
-            const key = `${url}?workerActivity=${row.activityAt}&run=${row.run}`;
-            const cached = jotaiStore.get(resourceAtomFamily(key));
-            if (isRowRunning(row) || cached.kind !== 'ready')
+            const key = detailKey(row.id);
+            const cached = jotaiStore.get(
+              resourceAtomFamily(key)
+            ) as ResourceEntry<WorkerDetailSnapshot>;
+            const snapshot = valueOf(cached);
+            if (
+              row.run !== 'idle' ||
+              cached.kind !== 'ready' ||
+              snapshot?.activityAt !== row.activityAt ||
+              snapshot?.run !== row.run
+            )
               await loadResource({
                 key,
                 async load() {
                   const response = await fetch(url, { signal });
                   if (!response.ok) throw new Error(`Worker detail HTTP ${response.status}`);
-                  return ConversationDetailSchema.parse(await response.json());
+                  return {
+                    activityAt: row.activityAt,
+                    run: row.run,
+                    detail: ConversationDetailSchema.parse(await response.json()),
+                  };
                 },
               });
             const entry = jotaiStore.get(
               resourceAtomFamily(key)
-            ) as ResourceEntry<ConversationDetail>;
-            const detail = valueOf(entry);
+            ) as ResourceEntry<WorkerDetailSnapshot>;
+            const detail = valueOf(entry)?.detail;
             if (detail) result.push(detail);
             if (entry.kind === 'failed' || entry.kind === 'stale') unavailableIds.push(row.id);
           }
@@ -172,12 +198,20 @@ export const buddyBackgroundWorkersAtomFamily = atomFamily(
   (scope: Scope) =>
     atom((get) => {
       const rows = get(buddyWorkerRowsFamily(scope));
-      const details =
-        valueOf(get(resourceAtomFamily(detailsKey(rows))) as ResourceEntry<WorkerDetails>)
-          ?.details ?? NO_DETAILS;
+      // The mounted history result retains the complete screen if its individual snapshots
+      // exceed the shared cache's 300 unmounted-key limit. Badges never request this history.
+      const history = valueOf(
+        get(
+          resourceAtomFamily(detailsKey({ ...scope, includeHistory: true }))
+        ) as ResourceEntry<WorkerDetails>
+      );
+      const merged = new Map(history?.details.map((detail) => [detail.id, detail]));
       // An open conversation's WS-patched detail is newer than the polling backstop.
-      const merged = new Map(details.map((detail) => [detail.id, detail]));
       for (const row of rows) {
+        const snapshot = valueOf(
+          get(resourceAtomFamily(detailKey(row.id))) as ResourceEntry<WorkerDetailSnapshot>
+        );
+        if (snapshot) merged.set(row.id, snapshot.detail);
         const detail = detailOf(get(transcriptFamily(row.id)));
         if (detail) merged.set(row.id, detail);
       }
