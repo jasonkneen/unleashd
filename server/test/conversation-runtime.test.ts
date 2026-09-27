@@ -1594,10 +1594,11 @@ test('codex collab threads become native sub-agents that parent completion leave
     })
   );
   assert.deepEqual([...completed], ['child-1']);
-  const assistant = conversation.messages.find((message) => message.role === 'assistant');
-  assert.match(messageText(assistant), /SUBAGENTS_OK/);
-  assert.equal((messageText(assistant).match(/spawn_agent/g) ?? []).length, 1);
-  assert.doesNotMatch(messageText(assistant), /\bwait\b/);
+  const assistant = conversation.messages.filter((message) => message.role === 'assistant');
+  const visible = assistant.map(messageText).join('\n');
+  assert.match(visible, /SUBAGENTS_OK/);
+  assert.equal((visible.match(/spawn_agent/g) ?? []).length, 1);
+  assert.doesNotMatch(visible, /\bwait\b/);
 });
 
 test('a childless Codex collab completion keeps one visible attempt and no child', async () => {
@@ -1622,13 +1623,10 @@ test('a childless Codex collab completion keeps one visible attempt and no child
     ...completed,
     { type: 'turn.complete', reason: 'success' },
   ]);
-  const assistant = conversation.messages.find((message) => message.role === 'assistant');
-  assert.equal(assistant?.body.t, 'parts');
+  const assistant = conversation.messages.filter((message) => message.role === 'assistant');
   assert.equal(
-    assistant?.body.t === 'parts'
-      ? assistant.body.parts.filter((part) => part.t === 'tool' && part.name === 'spawn_agent')
-          .length
-      : 0,
+    assistant.flatMap((message) => message.body.t === 'parts' ? message.body.parts : [])
+      .filter((part) => part.t === 'tool' && part.name === 'spawn_agent').length,
     1
   );
   assert.equal(conversation.subAgents.length, 0);
