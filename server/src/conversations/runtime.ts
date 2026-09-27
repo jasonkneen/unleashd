@@ -1273,7 +1273,8 @@ export function createConversationRuntime(
       }
       updateBuddyConversationLink(this, 'active');
       this.emit('buddy-turn-started');
-      this._hasStartedSession = true; // Mark session as started for next message
+      // A spawned process is not proof that the provider created a resumable
+      // session. Codex can exit during required MCP startup with no rollout.
       this._startTurnWatchdogs();
       this.broadcastStatus();
 
@@ -1291,6 +1292,7 @@ export function createConversationRuntime(
           this._noteTurnActivity(event);
           switch (event.type) {
             case 'session.started': {
+              this._hasStartedSession = true;
               if (event.sessionId !== this.sessionId) {
                 console.log(`[${this.id}] Session captured: ${event.sessionId}`);
               }
@@ -1380,6 +1382,14 @@ export function createConversationRuntime(
               break;
             }
             case 'error': {
+              if (
+                this.provider === 'codex' &&
+                event.message.includes('no rollout found for thread id')
+              ) {
+                // Repair a legacy phantom binding created by an earlier failed
+                // first turn. The next send must start a fresh Codex thread.
+                this._hasStartedSession = false;
+              }
               this._terminalCauseHint = 'provider_error';
               this._providerFailureMessage = normalizeProviderErrorMessage(event.message);
               this.handleOutput({

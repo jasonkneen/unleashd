@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -76,7 +77,14 @@ function loadEsbuild(): Esbuild {
 export async function startMcpBundleWatch(
   directory: string = MCP_BUNDLE_DIRECTORY
 ): Promise<() => Promise<void>> {
-  state = { kind: 'building' };
+  // A backend restart can coincide with another command rebuilding shared/dist.
+  // Keep the last successful helper bundle available while the first watch
+  // build runs; otherwise the source fallback has the same missing dependency.
+  state = MCP_ENTRYPOINTS.every((entrypoint) =>
+    existsSync(bundledEntrypointPath(directory, entrypoint))
+  )
+    ? { kind: 'ready', directory }
+    : { kind: 'building' };
   const context = await createContext(directory).catch((error: unknown) => {
     state = { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
     throw error;
@@ -114,7 +122,11 @@ function createContext(directory: string): Promise<EsbuildContext> {
               return;
             }
             const message = result.errors.map((error) => error.text).join('; ');
-            state = { kind: 'failed', message };
+            // The shared watch compiler briefly removes/replaces dist files while
+            // writing them. A rebuild can fail in that window even though the
+            // previous helper bundle is still usable. Keep serving that bundle;
+            // the next successful rebuild will replace it.
+            if (state.kind !== 'ready') state = { kind: 'failed', message };
             console.error(`[buddies-mcp] Prebuilt MCP helper bundle failed: ${message}`);
           });
         },
