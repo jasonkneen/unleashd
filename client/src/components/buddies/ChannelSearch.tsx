@@ -21,39 +21,30 @@ function excerpt(body: string): string {
   return compact.length > 180 ? `${compact.slice(0, 177)}…` : compact;
 }
 
-// The header trigger. It holds no state: the palette is mounted once per
-// channel view (below) so ⌘F works in every pane, DMs included.
-export function ChannelSearchButton({ onOpen }: { onOpen: () => void }) {
+function SearchIcon() {
   return (
-    <button
-      type="button"
-      className="channel-search-trigger ui-row"
-      aria-label="Search all channel messages"
-      title="Search all messages (⌘F)"
-      onClick={onOpen}
-    >
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-        <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
-        <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    </button>
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   );
 }
 
+// Search lives in the channel header: a pill that expands in place into the
+// field, with results dropping below it. The pill stays in flow (hidden while
+// open) so the header never reflows; the panel overlays from the same spot.
 export function ChannelSearch({
   workspaceId,
   channelNames,
   buddyNames,
-  open,
-  onOpenChange,
 }: {
   workspaceId: string;
   channelNames: ReadonlyMap<string, string>;
   buddyNames: Readonly<Record<string, string>>;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const trimmed = query.trim();
   const results = usePolledFetch(
@@ -61,54 +52,73 @@ export function ChannelSearch({
     0
   );
 
+  const close = () => {
+    setOpen(false);
+    setQuery('');
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
-        onOpenChange(true);
+        setOpen(true);
       }
       if (open && event.key === 'Escape') {
         event.preventDefault();
-        onOpenChange(false);
+        setOpen(false);
+        setQuery('');
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onOpenChange]);
-
-  useEffect(() => {
-    if (open) inputRef.current?.focus();
   }, [open]);
 
-  const close = () => {
-    onOpenChange(false);
-    setQuery('');
-  };
+  useEffect(() => {
+    if (!open) return;
+    inputRef.current?.focus();
+    // A click anywhere outside the expanded search collapses it.
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
 
   return (
-    <>
+    <div className="channel-search" ref={rootRef}>
+      <button
+        type="button"
+        className="channel-search-trigger ui-row"
+        aria-label="Search all channel messages"
+        aria-expanded={open}
+        title="Search all messages (⌘F)"
+        style={open ? { visibility: 'hidden' } : undefined}
+        onClick={() => setOpen(true)}
+      >
+        <SearchIcon />
+      </button>
       {open && (
-        <div className="search-view-backdrop" onClick={close}>
-          <div
-            className="search-view search-view--palette ui-stack"
-            style={{ alignSelf: 'center', maxHeight: '80vh' }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="search-view__input-row ui-row">
-              <span aria-hidden="true">⌕</span>
-              <input
-                ref={inputRef}
-                type="search"
-                value={query}
-                className="search-view__input"
-                aria-label="Search all channel messages"
-                placeholder="Search all messages…"
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <button type="button" className="search-view__esc ui-card ui-muted" onClick={close}>
-                Esc
-              </button>
-            </div>
+        <div className="channel-search-panel ui-stack">
+          <div className="channel-search-field ui-row">
+            <SearchIcon />
+            <input
+              ref={inputRef}
+              type="text"
+              enterKeyHint="search"
+              value={query}
+              className="search-view__input"
+              aria-label="Search all channel messages"
+              placeholder="Search all messages…"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <button type="button" className="search-view__esc ui-card ui-muted" onClick={close}>
+              Esc
+            </button>
+          </div>
+          <div className="channel-search-results ui-stack">
             {trimmed.length === 0 ? (
               <p className="search-view__status">Search every channel in this workspace.</p>
             ) : trimmed.length < MIN_QUERY_LENGTH ? (
@@ -128,7 +138,7 @@ export function ChannelSearch({
             ) : (
               <ul
                 className="search-view__results"
-                style={{ margin: 0, padding: 'var(--sp-2)', overflowY: 'auto', listStyle: 'none' }}
+                style={{ margin: 0, padding: 'var(--sp-2)', listStyle: 'none' }}
               >
                 {results.data.map((post) => (
                   <li key={post.id}>
@@ -154,6 +164,6 @@ export function ChannelSearch({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

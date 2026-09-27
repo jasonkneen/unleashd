@@ -345,6 +345,19 @@ const OPEN_MENTION_MENU = prep(`
   await tick(50);
   return has('.channel-composer-picker');`);
 
+// Expand the channel header's Search pill in place and type a query so the
+// results drop below it.
+const OPEN_CHANNEL_SEARCH = prep(`
+  const pill = document.querySelector('.channel-search-trigger');
+  if (!pill) return 'SKIP';
+  pill.click();
+  await tick(50);
+  const input = document.querySelector('.channel-search-panel input');
+  if (!input) return false;
+  typeInto(input, 'search');
+  await tick(1500);
+  return has('.channel-search-panel');`);
+
 // Pick the first Buddy from the @ menu with Enter (React handles the native
 // keydown), then click its chip on the bar to open the harness/model picker.
 // A chip that is disabled means the backend predates member execution.
@@ -545,6 +558,11 @@ function buildScreens(found, focus) {
       views: {
         desktop: { path: `${channels}?${channel}&task=${enc(found.taskId)}`, prepare: null },
       },
+    },
+    {
+      name: 'channel-search',
+      missing: noChannel,
+      views: { desktop: { path: `${channels}?${channel}`, prepare: OPEN_CHANNEL_SEARCH } },
     },
     {
       name: 'mention-menu',

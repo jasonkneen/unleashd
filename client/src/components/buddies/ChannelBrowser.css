@@ -288,6 +288,58 @@
   border-color: var(--accent);
 }
 
+/* Open, the pill grows in place into the field (same top edge, centred on it)
+   and results drop beneath; it overlays the pane instead of opening a modal. */
+.channel-search {
+  position: relative;
+}
+.channel-search-panel {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 20;
+  width: min(560px, 60vw);
+  max-height: 70vh;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: var(--bg-panel);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 45%);
+  transform: translateX(-50%);
+  animation: channel-search-expand 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes channel-search-expand {
+  from {
+    width: 66px;
+    max-height: 32px;
+  }
+}
+.channel-search-field {
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--accent);
+}
+.channel-search-field .search-view__input::placeholder {
+  text-align: left;
+}
+.channel-search-results {
+  min-height: 0;
+  overflow-y: auto;
+  animation: channel-search-reveal 260ms ease-out;
+}
+@keyframes channel-search-reveal {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .channel-search-panel,
+  .channel-search-results {
+    animation: none;
+  }
+}
+
 .channel-browser-pane-title h2 {
   display: flex;
   gap: var(--sp-2);

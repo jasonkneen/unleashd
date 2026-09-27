@@ -14,7 +14,7 @@ import { ChannelComposer } from './ChannelComposer';
 import { ChannelDm } from './ChannelDm';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { ChannelMarkdown, TypingDots } from './ChannelMarkdown';
-import { ChannelSearch, ChannelSearchButton } from './ChannelSearch';
+import { ChannelSearch } from './ChannelSearch';
 import { ChannelWorkers } from './ChannelWorkers';
 import { ConversationEye } from './ConversationEye';
 import { CopyLinkButton } from './CopyLinkButton';
@@ -528,7 +528,6 @@ function ChannelPane({
   onThread,
   onTaskFilter,
   openDm,
-  onSearch,
 }: {
   entry: ChannelUnread;
   workspaceId: string;
@@ -541,7 +540,6 @@ function ChannelPane({
   onThread: (rootId: string | null) => void;
   onTaskFilter: (taskId: string | null) => void;
   openDm: OpenDm;
-  onSearch: () => void;
 }) {
   const channelId = entry.channel.id;
   const heading = channelHeading(entry.channel.kind, directory.buddyNames);
@@ -594,7 +592,11 @@ function ChannelPane({
               {heading.name}
             </h2>
           </div>
-          <ChannelSearchButton onOpen={onSearch} />
+          <ChannelSearch
+            workspaceId={workspaceId}
+            channelNames={channelNames}
+            buddyNames={directory.buddyNames}
+          />
           <div className="channel-browser-pane-actions ui-row">
             <ChannelHeaderControls channel={entry.channel} description={heading.about}>
               <TaskFilter
@@ -938,7 +940,6 @@ export function ChannelBrowser({
   useWarmChannelPosts(rail.channels);
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const listed = [
     ...rail.channels,
     ...rail.direct,
@@ -1103,7 +1104,6 @@ export function ChannelBrowser({
               select({ channel: selected.channel.id, thread: params.get('thread'), task })
             }
             openDm={openDm}
-            onSearch={() => setSearchOpen(true)}
           />
         ) : (
           <div className="channel-browser-empty ui-muted ui-row">
@@ -1120,13 +1120,6 @@ export function ChannelBrowser({
           </div>
         )}
       </main>
-      <ChannelSearch
-        workspaceId={workspaceId}
-        channelNames={channelNames}
-        buddyNames={directory.buddyNames}
-        open={searchOpen}
-        onOpenChange={setSearchOpen}
-      />
     </div>
   );
 }
