@@ -197,7 +197,7 @@ export function buildContextBreakdown(
   sessionContext: SessionContextReading | null = null
 ): ContextBreakdownResponse {
   const historyChars = history.reduce(
-    (sum, message) => sum + (typeof message.content === 'string' ? message.content.length : 0),
+    (sum, message) => sum + (message.body.t === 'text' ? message.body.text.length : 0),
     0
   );
 

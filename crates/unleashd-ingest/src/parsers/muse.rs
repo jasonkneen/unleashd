@@ -9,7 +9,7 @@
 use super::{Ctx, Facts, Fold, Line, Previous, Sink, finite, normalize_dir, parse_time, widen};
 use crate::markers::{Hints, Rebuild, buddy_context_from_value, durable_kind_from_value};
 use crate::model::{Compaction, ContextReading, Cwd, Provider, Role};
-use crate::text::{format_buddy_receipt, format_tool_use, js_trim};
+use crate::text::{has_buddy_receipt, js_trim};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,6 +23,8 @@ struct Raw {
     role: Role,
     content: String,
     at: Option<f64>,
+    #[serde(default)]
+    parts_json: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -111,16 +113,21 @@ impl MuseFold {
 
     /// Dedupe against the previous kept message; a reply starts when the message before it did.
     fn fold(&mut self, sink: &mut Sink, raw: Raw) -> Result<(), Rebuild> {
-        if self.prev.is_duplicate(raw.role, &raw.content) {
+        let identity = raw.parts_json.as_deref().unwrap_or(&raw.content);
+        if self.prev.is_duplicate(raw.role, identity) {
             return Ok(());
         }
         let (at, completed) = match raw.role {
             Role::Assistant => (if self.prev.exists() { self.prev.at } else { raw.at }, raw.at),
             _ => (raw.at, None),
         };
-        self.prev.set(raw.role, &raw.content, at);
+        self.prev.set(raw.role, identity, at);
         self.messages += 1;
-        sink.push(raw.role, at, completed, raw.content, None)
+        if let Some(parts_json) = raw.parts_json {
+            let parts = serde_json::from_str(&parts_json).unwrap_or_default();
+            sink.push_parts(raw.role, at, completed, raw.content, parts);
+            Ok(())
+        } else { sink.push(raw.role, at, completed, raw.content, None) }
     }
 
     fn durable(&mut self, sink: &mut Sink, payload_type: &str, payload: &Value) -> Result<(), Rebuild> {
@@ -201,7 +208,7 @@ impl Fold for MuseFold {
             return Ok(Line::Used);
         }
         let Some(event) = payload.get("event").filter(|e| e.is_object()) else { return Ok(Line::Used) };
-        let raw = |role, content| Raw { role, content, at };
+        let raw = |role, content| Raw { role, content, at, parts_json: None };
         match event.get("kind").and_then(Value::as_str) {
             Some("started" | "user_prompt_display") => {
                 if let Some(prompt) = trimmed(event.get("prompt")) {
@@ -215,23 +222,24 @@ impl Fold for MuseFold {
             }
             Some("assistant_tool_calls_committed") => {
                 let calls = event.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default();
-                let lines: Vec<String> = calls
+                let parts: Vec<Value> = calls
                     .iter()
                     .map(|call| {
                         let name = call.get("name").and_then(Value::as_str).unwrap_or("tool");
                         let args = call.get("args").and_then(Value::as_str).and_then(|a| serde_json::from_str::<Value>(a).ok());
-                        format_tool_use(name, args.as_ref())
+                        serde_json::json!({ "t": "tool", "name": name, "input": args })
                     })
                     .collect();
-                if !lines.is_empty() {
-                    self.raw(sink, raw(Role::Assistant, lines.join("\n")))?;
+                if !parts.is_empty() {
+                    self.raw(sink, Raw { role: Role::Assistant, content: String::new(), at, parts_json: Some(Value::Array(parts).to_string()) })?;
                 }
             }
             Some("tool_result_batch_committed") => {
                 if let Some(results) = event.get("results").and_then(Value::as_array) {
                     for output in results {
-                        if let Some(receipt) = format_buddy_receipt(output.get("text").filter(|_| output.is_object())) {
-                            self.raw(sink, raw(Role::Assistant, receipt))?;
+                        if has_buddy_receipt(output.get("text").filter(|_| output.is_object())) {
+                            let parts = serde_json::json!([{ "t": "raw_result", "output": output.get("text") }]);
+                            self.raw(sink, Raw { role: Role::Assistant, content: String::new(), at, parts_json: Some(parts.to_string()) })?;
                         }
                     }
                 }

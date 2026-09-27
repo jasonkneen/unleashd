@@ -15,6 +15,7 @@ import test from 'node:test';
 import {
   ConversationDetailSchema,
   MessagePageSchema,
+  type Message,
   createDefaultConversationConfig,
 } from '@unleashd/shared';
 import express from 'express';
@@ -37,6 +38,10 @@ import { recordStore } from './fixtures/records';
 
 const T0 = Date.parse('2026-09-01T00:00:00Z');
 const OLD_WINDOW = 500;
+function textOf(message: Message): string {
+  assert.equal(message.body.t, 'text');
+  return message.body.t === 'text' ? message.body.text : '';
+}
 
 function sessionId(n: number): string {
   return `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
@@ -132,7 +137,7 @@ async function serve(fixture: ReturnType<typeof ingestHome>) {
     builder,
     /** Every message, paged the way the client pages (500 at a time). */
     async history(id: string) {
-      const messages: { role: string; content: string }[] = [];
+      const messages: Message[] = [];
       let epoch = -1;
       for (let afterSeq = -1; ; ) {
         const response = await fetch(`${base}/${id}/messages?afterSeq=${afterSeq}&limit=500`);
@@ -193,8 +198,8 @@ test('a conversation outside the old 500-transcript window opens with its full h
     assert.equal(ConversationDetailSchema.parse(await detail.json()).sessionId, oldest);
     const { messages } = await server.history(oldest);
     assert.equal(messages.length, 1_200);
-    assert.equal(messages[0].content, 'turn 0');
-    assert.equal(messages[1_199].content, 'turn 1199');
+    assert.equal(textOf(messages[0]), 'turn 0');
+    assert.equal(textOf(messages[1_199]), 'turn 1199');
   } finally {
     await server.close();
     fixture.cleanup();
@@ -229,12 +234,12 @@ test('the live-turn overlay shows once, then gives way to the provider rows at i
     conversation.process = {} as ChildProcess;
     conversation.appendMessage({
       role: 'user',
-      content: 'second question',
+      body: { t: 'text', text: 'second question' },
       timestamp: new Date(sentAt),
     });
     conversation.appendMessage({
       role: 'assistant',
-      content: 'streamed answer',
+      body: { t: 'text', text: 'streamed answer' },
       timestamp: new Date(sentAt + 10),
     });
     assert.equal(conversation.toRow().messageCount, 4);
@@ -248,7 +253,7 @@ test('the live-turn overlay shows once, then gives way to the provider rows at i
     await until(() => server.list.joined(id)?.sessions[0]?.messageCount === 4 || undefined);
     const during = await server.history(id);
     assert.deepEqual(
-      during.messages.map((message) => message.content),
+      during.messages.map(textOf),
       ['first question', 'first answer', 'second question', 'streamed answer']
     );
 
@@ -264,7 +269,7 @@ test('the live-turn overlay shows once, then gives way to the provider rows at i
     assert.equal(settled.messageCount, 4);
     const after = await server.history(id);
     assert.deepEqual(
-      after.messages.map((message) => message.content),
+      after.messages.map(textOf),
       ['first question', 'first answer', 'second question', 'final answer']
     );
     assert.equal(conversation.toRow().messageCount, after.messages.length);
@@ -309,7 +314,7 @@ test('a transcript rewritten on disk makes loaded clients refetch', async () => 
     const after = await server.history(id);
     assert.notEqual(after.epoch, before.epoch);
     assert.deepEqual(
-      after.messages.map((message) => message.content),
+      after.messages.map(textOf),
       ['edited question', 'edited answer']
     );
   } finally {

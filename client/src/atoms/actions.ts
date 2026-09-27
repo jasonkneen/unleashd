@@ -530,19 +530,43 @@ function creationAcknowledged(commandId: string, rows: readonly ConversationRow[
 }
 
 function handleMessageEvent(data: Extract<ServerMessage, { type: 'message' }>): void {
+  if (data.role === 'assistant' && data.body.t === 'parts') {
+    // A typed part follows any pending text chunks in the same provider stream.
+    // Guard: a tool frame must not hide the prose until message_complete.
+    flushChunkBuffer();
+    commitStreamSegment(data.conversationId);
+  }
   // Bodies are kept only for loaded transcripts; the row's activity patch
   // (sent with every message) carries the count for everyone else.
   const loaded = readLoaded(data.conversationId);
   if (!loaded) return;
   // A duplicate assistant record; the live one is already growing.
-  if (data.role === 'assistant' && loaded.messages.at(-1)?.role === 'assistant') return;
+  if (
+    data.role === 'assistant' &&
+    data.body.t === 'text' &&
+    data.body.text === '' &&
+    loaded.messages.at(-1)?.body.t === 'text' &&
+    loaded.messages.at(-1)?.role === 'assistant'
+  ) return;
   putTranscript(data.conversationId, {
     ...loaded,
     messages: [
       ...loaded.messages,
-      { role: data.role, content: data.content, timestamp: new Date() },
+      { role: data.role, body: data.body, timestamp: new Date() },
     ],
   });
+}
+
+function commitStreamSegment(id: string): void {
+  const loaded = readLoaded(id);
+  const last = loaded?.messages.at(-1);
+  const streamed = jotaiStore.get(streamStore.byKey(id));
+  if (!loaded || last?.body.t !== 'text' || !streamed) return;
+  putTranscript(id, { ...loaded, messages: [
+    ...loaded.messages.slice(0, -1),
+    { ...last, body: { t: 'text', text: last.body.text + streamed } },
+  ] });
+  jotaiStore.set(streamStore.patch, { set: [], remove: [id] });
 }
 
 function handleChunk(data: Extract<ServerMessage, { type: 'chunk' }>): void {
@@ -581,7 +605,7 @@ function commitStreamedReply(id: string, reason: NonNullable<Message['completion
       ...loaded.messages.slice(0, -1),
       {
         ...last,
-        content: last.content + streamed,
+        body: last.body.t === 'text' ? { t: 'text', text: last.body.text + streamed } : last.body,
         completedAt: last.completedAt ?? new Date(),
         completionReason: last.completionReason ?? reason,
       },

@@ -226,6 +226,8 @@ export interface Message {
   completedAt?: number
   content: string
   toolCall?: ToolCall
+  /** Ordered provider blocks. JSON is the napi transport for raw provider arguments/results. */
+  partsJson?: string
 }
 
 export interface MessagesOptions {

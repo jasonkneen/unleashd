@@ -1,25 +1,22 @@
 import type { Message } from '@unleashd/shared';
-import { Fragment, memo, useMemo } from 'react';
-import type { Components } from 'react-markdown';
+import { memo, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import { AskUserQuestionWidget, parseAskUserQuestion } from '../../components/AskUserQuestion';
-import { InlineBuddyBuilderResult } from '../../components/buddies/BuddyBuilderResultCard';
+import { AskUserQuestionWidget } from '../../components/AskUserQuestion';
+import { BuddyBuilderResultCard } from '../../components/buddies/BuddyBuilderResultCard';
 import { InlineSwarmRunWidget } from '../../swarm';
 import { ChatActivity } from '../../ui/ChatActivity';
 import type { AssistantResponse, MessageGroup } from '../../utils/chat-message-groups';
 import { messageTranscriptContent } from '../../utils/conversation-transcript';
 import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
 import {
-  type MarkdownPipeline,
   type MarkdownRenderer,
   defineMarkdownFlavor,
   renderMarkdownCached,
   renderMarkdownLive,
 } from '../../utils/markdown-pipeline';
 import { remarkBreaks } from '../../utils/remark-breaks';
-import { splitStructuredMessageContent } from '../../utils/structured-message-segments';
-import { splitToolActivity } from '../../utils/tool-activity-segments';
+import { formatToolUse, freeformExecPreview } from '../../utils/tool-presentation';
 import {
   CopyButton,
   makeMarkdownComponents,
@@ -27,27 +24,7 @@ import {
 } from './markdown-components';
 import './Transcript.css';
 
-/** A readable label for freeform exec calls; the full input stays below it. */
-function execInputPreview(toolCall: Message['toolCall']): string | null {
-  if (!toolCall || !['exec', 'functions.exec'].includes(toolCall.name)) return null;
-  const input = toolCall.input?.replace(/\s+/g, ' ').trim();
-  if (!input) return null;
-  return input.length > 120 ? `${input.slice(0, 119)}…` : input;
-}
-
-/**
- * One transcript row per message group, rendered by BOTH list containers:
- * the desktop virtual list (components/VirtualizedMessageList) and the mobile
- * windowed list (mobile/conversations/ConversationView). Only the containers
- * differ (virtual vs flat, iOS momentum — docs/client-state.md); the rows are
- * this one view.
- *
- * `presentation` picks where a row's actions live, chosen by the caller:
- * - `hover`: an icon Copy button revealed on row hover/focus (pointer devices).
- * - `footer`: a permanent footer with the time and a Copy pill. Touch has no
- *   hover, and a long-press menu would fight the browser's own text-selection
- *   gesture, so the action is always visible but quiet.
- */
+/** One transcript row per message group, rendered by both list containers. */
 export type TranscriptPresentation = 'hover' | 'footer';
 
 interface RowActionsProps {
@@ -59,9 +36,7 @@ interface RowActionsProps {
 function HoverActions({ text, forwardedRef }: RowActionsProps) {
   return (
     <div className="message-actions" ref={forwardedRef}>
-      {text.trim() && (
-        <CopyButton text={text} className="message-action-btn ui-control ui-inline-row ui-muted" />
-      )}
+      {text.trim() && <CopyButton text={text} className="message-action-btn ui-control ui-inline-row ui-muted" />}
     </div>
   );
 }
@@ -70,7 +45,6 @@ function FooterActions({ text, timestamp, forwardedRef }: RowActionsProps) {
   return (
     <div className="message-actions message-actions--footer" ref={forwardedRef}>
       <span className="message-actions__time">{new Date(timestamp).toLocaleTimeString()}</span>
-      {/* Raw content, not the rendered markdown: copying gives back what was written. */}
       {text.trim() && <CopyButton text={text} className="message-footer-copy ui-card ui-muted" />}
     </div>
   );
@@ -80,145 +54,54 @@ const ROW_ACTIONS: Record<TranscriptPresentation, (props: RowActionsProps) => Re
   hover: HoverActions,
   footer: FooterActions,
 };
-
 const CHAT_MARKDOWN = defineMarkdownFlavor([remarkGfm, remarkMath, remarkBreaks]);
-
-function MessageMarkdown({
-  content,
-  collapseTools,
-  pipeline,
-  components,
-  markdown,
-}: {
-  content: string;
-  collapseTools: boolean;
-  pipeline: MarkdownPipeline;
-  components: Components;
-  markdown: MarkdownRenderer;
-}) {
-  const segments = useMemo(
-    () => (collapseTools ? splitToolActivity(content) : []),
-    [content, collapseTools]
-  );
-  if (!segments.some((segment) => segment.type === 'tool_calls')) {
-    return markdown(pipeline, content, components);
-  }
-  return segments.map((segment, index) =>
-    segment.type === 'tool_calls' ? (
-      <ChatActivity
-        key={index}
-        label={`${segment.count} tool ${segment.count === 1 ? 'call' : 'calls'}`}
-      >
-        {markdown(pipeline, segment.content, components)}
-      </ChatActivity>
-    ) : (
-      <Fragment key={index}>{markdown(pipeline, segment.content, components)}</Fragment>
-    )
-  );
-}
 
 interface MessageContentProps {
   msg: Message;
   collapseTools?: boolean;
   workingDirectory: string;
-  /** `renderMarkdownLive` only for the message a streaming turn is growing. */
   markdown: MarkdownRenderer;
 }
 
-const MessageContent = memo(
-  function MessageContent({
-    msg,
-    collapseTools = true,
-    workingDirectory,
-    markdown,
-  }: MessageContentProps) {
-    // katex + highlight.js arrive asynchronously; markdown renders immediately
-    // with the remark plugins and re-renders once the chunk lands.
-    const pipeline = useMarkdownPipeline(CHAT_MARKDOWN);
-
-    const displayContent = useMemo(
-      () => normalizeLatexDelimiters(msg.content || '...'),
-      [msg.content]
-    );
-    const collapseToolActivity = collapseTools && msg.role === 'assistant' && !msg.toolCall;
-
-    // Split content into text + AskUserQuestion widget segments
-    const segments = useMemo(() => splitStructuredMessageContent(displayContent), [displayContent]);
-    const execPreview = execInputPreview(msg.toolCall);
-    const hasWidget = segments.some((s) => s.type !== 'text');
-    // Stable components per workingDirectory so react-markdown doesn't re-mount its tree.
-    const mdComponents = useMemo(
-      () => makeMarkdownComponents(workingDirectory),
-      [workingDirectory]
-    );
-
-    return (
-      <div className="message-content">
-        {execPreview !== null ? (
-          <p>
-            🔧 exec <code>{execPreview}</code>
-          </p>
-        ) : hasWidget ? (
-          // Mixed content: interleave Markdown and interactive widgets
-          segments.map((seg, i) => {
-            if (seg.type === 'text') {
-              const trimmed = seg.content.trim();
-              if (!trimmed) return null;
-              return (
-                <MessageMarkdown
-                  key={i}
-                  content={trimmed}
-                  collapseTools={collapseToolActivity}
-                  pipeline={pipeline}
-                  components={mdComponents}
-                  markdown={markdown}
-                />
-              );
-            }
-            if (seg.type === 'oompa_run') {
-              return <InlineSwarmRunWidget key={i} workingDirectory={workingDirectory} />;
-            }
-            if (seg.type === 'buddy_builder_result') {
-              return <InlineBuddyBuilderResult key={i} payload={seg.json} />;
-            }
-            if (seg.type === 'buddy_worker_thread' || seg.type === 'retired_marker') return null;
-            try {
-              const data = parseAskUserQuestion(seg.json);
-              return <AskUserQuestionWidget key={i} data={data} />;
-            } catch {
-              // Malformed JSON — render raw marker as text
-              return <code key={i}>AskUserQuestion (parse error)</code>;
-            }
-          })
-        ) : (
-          // Fast path: no widgets, render as pure Markdown
-          <MessageMarkdown
-            content={displayContent}
-            collapseTools={collapseToolActivity}
-            pipeline={pipeline}
-            components={mdComponents}
-            markdown={markdown}
-          />
-        )}
-        {msg.toolCall?.input !== undefined && (
-          <pre aria-label="Tool input">
-            <code>{msg.toolCall.input}</code>
-          </pre>
-        )}
-      </div>
-    );
-  },
-  (prev, next) => {
-    return (
-      prev.msg.content === next.msg.content &&
-      prev.msg.role === next.msg.role &&
-      prev.msg.toolCall?.name === next.msg.toolCall?.name &&
-      prev.msg.toolCall?.input === next.msg.toolCall?.input &&
-      prev.collapseTools === next.collapseTools &&
-      prev.workingDirectory === next.workingDirectory &&
-      prev.markdown === next.markdown
-    );
+const MessageContent = memo(function MessageContent({ msg, workingDirectory, markdown }: MessageContentProps) {
+  const pipeline = useMarkdownPipeline(CHAT_MARKDOWN);
+  const mdComponents = useMemo(() => makeMarkdownComponents(workingDirectory), [workingDirectory]);
+  const renderText = (text: string, key: number) => {
+    if (!text.trim()) return null;
+    return <div key={key}>{markdown(pipeline, normalizeLatexDelimiters(text), mdComponents)}</div>;
+  };
+  if (msg.body.t === 'text') {
+    return <div className="message-content">{renderText(msg.body.text || '...', 0)}</div>;
   }
+  return (
+    <div className="message-content">
+      {msg.body.parts.map((part, index) => {
+        switch (part.t) {
+          case 'text':
+            return renderText(part.text, index);
+          case 'tool': {
+            const line = formatToolUse(part.name, part.input, part.displayText);
+            const preview = freeformExecPreview(part.name, part.input);
+            const input = part.input === undefined ? null : typeof part.input === 'string' ? part.input : JSON.stringify(part.input, null, 2);
+            return <div key={index}>{preview ? <p>🔧 exec <code>{preview}</code></p> : renderText(line, index)}{input && <pre aria-label="Tool input"><code>{input}</code></pre>}</div>;
+          }
+          case 'question':
+            return <AskUserQuestionWidget key={index} data={part.question} />;
+          case 'buddy_builder_result':
+            return <BuddyBuilderResultCard key={index} event={part.event} />;
+          case 'buddy_worker_thread':
+            return null;
+          case 'swarm_launch':
+            return <InlineSwarmRunWidget key={index} workingDirectory={workingDirectory} />;
+        }
+      })}
+    </div>
+  );
+}, (prev, next) =>
+  prev.msg.body === next.msg.body &&
+  prev.msg.role === next.msg.role &&
+  prev.workingDirectory === next.workingDirectory &&
+  prev.markdown === next.markdown
 );
 
 const ROLE_LABEL: Record<Message['role'], string> = {

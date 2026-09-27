@@ -27,15 +27,31 @@ import { TurnAttemptSnapshotSchema } from './turn-attempt.js';
 // socket. Guards: server/test/wire-v3.test.ts.
 // =============================================================================
 
-export const MessageSchema = z.object({
+import { MessageBodySchema } from './content-schema.js';
+import { legacyBody, legacyToolInput } from './legacy-content.js';
+import { toolContentPart } from './tool-content.js';
+export { AskUserQuestionSchema, ContentPartSchema, MessageBodySchema } from './content-schema.js';
+export type { AskUserQuestion, ContentPart, MessageBody } from './content-schema.js';
+
+const CurrentMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
+  body: MessageBodySchema,
   timestamp: z.coerce.date(),
-  // Imported tool details stay separate from the compact, groupable summary.
-  toolCall: z.object({ name: z.string(), input: z.string().optional() }).optional(),
   completedAt: z.coerce.date().optional(),
   completionReason: z.enum(['success', 'error', 'out_of_tokens', 'killed']).optional(),
 });
+// An already-open tab can receive an old backend's HTTP page during the dev
+// restart window. Upgrade that historical wire shape once, before rendering.
+export const MessageSchema = z.preprocess((value) => {
+  if (!value || typeof value !== 'object') return value;
+  const message = value as Record<string, unknown>;
+  if (message.body !== undefined || typeof message.content !== 'string') return value;
+  const call = message.toolCall as { name?: unknown; input?: unknown } | undefined;
+  const body = typeof call?.name === 'string'
+    ? { t: 'parts' as const, parts: [toolContentPart(call.name, legacyToolInput(typeof call.input === 'string' ? call.input : undefined))] }
+    : message.role === 'assistant' ? legacyBody(message.content) : { t: 'text' as const, text: message.content };
+  return { ...message, body };
+}, CurrentMessageSchema);
 export type Message = z.infer<typeof MessageSchema>;
 
 export const SubAgentStatusSchema = z.enum(['pending', 'running', 'completed', 'error']);

@@ -1,4 +1,4 @@
-import { type BuddyBuilderEvent, BuddyBuilderEventSchema } from '@unleashd/shared';
+import type { BuddyBuilderEvent } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { useId } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -165,13 +165,4 @@ export function BuddyBuilderResultCard({ event }: { event: BuddyBuilderEvent }) 
       </div>
     </article>
   );
-}
-
-export function InlineBuddyBuilderResult({ payload }: { payload: string }) {
-  try {
-    const event = BuddyBuilderEventSchema.parse(JSON.parse(decodeURIComponent(payload)));
-    return <BuddyBuilderResultCard event={event} />;
-  } catch {
-    return <p role="alert">Could not display this Buddy result.</p>;
-  }
 }

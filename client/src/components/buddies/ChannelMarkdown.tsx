@@ -17,13 +17,10 @@ import { ChatActivity } from '../../ui/ChatActivity';
 import { useMarkdownPipeline } from '../../utils/lazyMarkdownPlugins';
 import { defineMarkdownFlavor, renderMarkdownCached } from '../../utils/markdown-pipeline';
 import { remarkBreaks } from '../../utils/remark-breaks';
-import {
-  type StructuredMessageSegment,
-  splitStructuredMessageContent,
-} from '../../utils/structured-message-segments';
-import { splitToolActivity } from '../../utils/tool-activity-segments';
-import { AskUserQuestionWidget, parseAskUserQuestion } from '../AskUserQuestion';
-import { InlineBuddyBuilderResult } from './BuddyBuilderResultCard';
+import type { ContentPart, MessageBody } from '@unleashd/shared';
+import { formatToolUse } from '../../utils/tool-presentation';
+import { AskUserQuestionWidget } from '../AskUserQuestion';
+import { BuddyBuilderResultCard } from './BuddyBuilderResultCard';
 import { ChannelTaskOverlay } from './ChannelTaskOverlay';
 import { type ChannelTask, isVideoSource, mediaUrl, parseChannelLink } from './channel-text';
 import { taskStatusView } from './ui-contract';
@@ -37,11 +34,8 @@ import './ChannelContent.css';
 //                          the whole paragraph or list item. A click opens the
 //                          Task overlay; it does not leave Channels.
 //   ![alt](/abs/path)    → inline image, or a video player for .mp4/.webm/.mov
-// A mention reply is the Buddy's final assistant message, and live providers
-// embed their tool calls in it as `🔧 name …` / `⚡ Bash …` lines. Those runs
-// collapse into the chat's own "N tool calls" disclosure (splitToolActivity +
-// ChatActivity, the /chat path), never paint as raw lines: on 2026-09-24 a
-// reply opened with 20 of them.
+// Typed Buddy replies keep tool calls as parts; historical generated posts are
+// decoded at channel-data before reaching this renderer.
 
 // react-markdown strips unknown URL schemes; buddy: and task: are ours.
 function channelUrlTransform(url: string): string {
@@ -280,23 +274,40 @@ const CHANNEL_COMPONENTS: Components = {
 // whenever who is replying changes. The cache keeps an unchanged post's body,
 // names and Tasks identical (atoms/resources.ts settledEntry), so only a post
 // that actually changed is parsed again.
+type ChannelPart = ContentPart | { t: 'tool_calls'; calls: Extract<ContentPart, { t: 'tool' }>[]; workers: Extract<ContentPart, { t: 'buddy_worker_thread' }>[] };
+
+function channelParts(body: MessageBody): ChannelPart[] {
+  if (body.t === 'text') return [{ t: 'text', text: body.text }];
+  const result: ChannelPart[] = [];
+  for (const part of body.parts) {
+    if (part.t === 'text' && !part.text.trim() && result.at(-1)?.t === 'tool_calls') continue;
+    if (part.t === 'tool' || part.t === 'buddy_worker_thread') {
+      let last = result.at(-1);
+      if (last?.t !== 'tool_calls') {
+        last = { t: 'tool_calls', calls: [], workers: [] };
+        result.push(last);
+      }
+      if (part.t === 'tool') last.calls.push(part);
+      else last.workers.push(part);
+    } else result.push(part);
+  }
+  return result;
+}
+
 export const ChannelMarkdown = memo(function ChannelMarkdown({
   body,
   buddyNames,
   tasks,
 }: {
-  body: string;
+  body: MessageBody;
   buddyNames: Readonly<Record<string, string>>;
   tasks: ReadonlyMap<string, ChannelTask>;
 }) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const closeTask = useCallback(() => setOpenTaskId(null), []);
-  const data = useMemo(
-    () => ({ buddyNames, tasks, onOpenTask: setOpenTaskId }),
-    [buddyNames, tasks]
-  );
+  const data = useMemo(() => ({ buddyNames, tasks, onOpenTask: setOpenTaskId }), [buddyNames, tasks]);
   const openTask = openTaskId === null ? undefined : tasks.get(openTaskId);
-  const segments = useMemo(() => splitToolActivity(body), [body]);
+  const parts = useMemo(() => channelParts(body), [body]);
   const pipeline = useMarkdownPipeline(CHANNEL_MARKDOWN);
   const markdown = (text: string, key?: number) => (
     <Fragment key={key}>{renderMarkdownCached(pipeline, text, CHANNEL_COMPONENTS)}</Fragment>
@@ -304,77 +315,31 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
   return (
     <ChannelMarkdownDataContext.Provider value={data}>
       <div className="channel-markdown">
-        {openTask && (
-          <ChannelTaskOverlay
-            task={openTask}
-            names={buddyNames}
-            onClose={closeTask}
-          />
-        )}
-        {segments.map((segment, index) =>
-          segment.type === 'tool_calls' ? (
-            <ChatActivity
-              key={index}
-              label={`${segment.count} tool ${segment.count === 1 ? 'call' : 'calls'}`}
-            >
-              {markdown(segment.content)}
-            </ChatActivity>
-          ) : (
-            <ChannelTextBody
-              key={index}
-              content={segment.content}
-              markdown={markdown}
-              startIndex={index * 1000}
-            />
-          )
-        )}
+        {openTask && <ChannelTaskOverlay task={openTask} names={buddyNames} onClose={closeTask} />}
+        {parts.map((part, index) => {
+          switch (part.t) {
+            case 'text':
+              return part.text.trim() ? markdown(part.text, index) : null;
+            case 'tool_calls':
+              return <ChatActivity key={index} label={part.calls.length ? `${part.calls.length} tool ${part.calls.length === 1 ? 'call' : 'calls'}` : 'Work launched'} workerThreads={part.workers.map((worker) => worker.thread)}>
+                {part.calls.map((call, callIndex) => markdown(formatToolUse(call.name, call.input, call.displayText) + (call.status && call.status !== 'completed' && call.status !== 'done' ? ` (${call.status})` : ''), callIndex))}
+              </ChatActivity>;
+            case 'tool':
+              return markdown(formatToolUse(part.name, part.input, part.displayText), index);
+            case 'question':
+              return <AskUserQuestionWidget key={index} data={part.question} />;
+            case 'buddy_builder_result':
+              return <BuddyBuilderResultCard key={index} event={part.event} />;
+            case 'buddy_worker_thread':
+              return null;
+            case 'swarm_launch':
+              return markdown(part.command, index);
+          }
+        })}
       </div>
     </ChannelMarkdownDataContext.Provider>
   );
 });
-
-// Text runs can carry the same provider markers /chat strips
-// (splitStructuredMessageContent): a mention reply is the Buddy's final
-// assistant message, including the server-injected tool-result markers. Raw
-// HTML stays disabled, so an unstripped marker paints as literal text — on
-// 2026-09-24 a team-configuration blob leaked into #general this way. Each
-// marker renders the same widget /chat uses; oompa run lines keep their
-// long-standing plain-text rendering.
-function ChannelTextBody({
-  content,
-  markdown,
-  startIndex,
-}: {
-  content: string;
-  markdown: (text: string, key?: number) => ReactNode;
-  startIndex: number;
-}) {
-  const parts = useMemo(() => splitStructuredMessageContent(content), [content]);
-  return (
-    <>{parts.map((part, offset) => channelStructuredPart(part, markdown, startIndex + offset))}</>
-  );
-}
-
-function channelStructuredPart(
-  part: StructuredMessageSegment,
-  markdown: (text: string, key?: number) => ReactNode,
-  key: number
-): ReactNode {
-  if (part.type === 'text' || part.type === 'oompa_run') {
-    if (!part.content.trim()) return null;
-    return markdown(part.content, key);
-  }
-  if (part.type === 'buddy_worker_thread' || part.type === 'retired_marker') return null;
-  if (part.type === 'buddy_builder_result') {
-    return <InlineBuddyBuilderResult key={key} payload={part.json} />;
-  }
-  try {
-    const data = parseAskUserQuestion(part.json);
-    return <AskUserQuestionWidget key={key} data={data} />;
-  } catch {
-    return <code key={key}>AskUserQuestion (parse error)</code>;
-  }
-}
 
 /** Three pulsing dots: "is replying" / "is checking". Respects reduced motion. */
 export function TypingDots() {

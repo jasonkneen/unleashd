@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { type UnifiedAgentEvent, createParser } from '@nbardy/agent-cli';
 import { buddyKind } from '@unleashd/shared';
-import type { Provider } from '@unleashd/shared';
+import type { Message, Provider } from '@unleashd/shared';
 import { type ConversationConfig, createDefaultConversationConfig } from '@unleashd/shared';
 import type { CompletedBuddyTurn } from '../src/buddies/memory-review';
 import type { BuddyPolicyPort } from '../src/buddies/policy-port';
@@ -24,6 +24,13 @@ const BACKGROUND_AGENT_FIXTURE = join(
   __dirname,
   '../../vendor/agent-cli-tool/test/fixtures/claude-2.1.283-background-agent.jsonl'
 );
+
+function messageText(message: Pick<Message, 'body'> | undefined): string {
+  if (!message) return '';
+  return message.body.t === 'text'
+    ? message.body.text
+    : message.body.parts.map((part) => part.t === 'text' ? part.text : part.t === 'tool' ? part.name : '').join('\n');
+}
 
 function runtimeFixture(
   options: {
@@ -300,7 +307,7 @@ test('provider completion waits for the normalized event stream and session pers
     'automation ownership must not release on turn.complete before process/event drain'
   );
   assert.equal(
-    fixture.conversation.messages.some((message) => message.content.includes('durable output')),
+    fixture.conversation.messages.some((message) => messageText(message).includes('durable output')),
     false,
     'completion must not release ownership while session persistence blocks event consumption'
   );
@@ -310,13 +317,13 @@ test('provider completion waits for the normalized event stream and session pers
   persistence.resolve();
   await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
   assert.equal(
-    fixture.conversation.messages.some((message) => message.content.includes('durable output')),
+    fixture.conversation.messages.some((message) => messageText(message).includes('durable output')),
     true
   );
   assert.equal(automationOutput, 'durable output');
   assert.deepEqual(revoked, ['conversation-id']);
   assert.equal(reviews.length, 1);
-  assert.ok(reviews[0].messages.some((message) => message.content === 'durable output'));
+  assert.ok(reviews[0].messages.some((message) => messageText(message) === 'durable output'));
   assert.ok(reviews[0].attemptId);
 });
 
@@ -617,7 +624,7 @@ test('unsupported Buddy provider leaves a queued message retryable', () => {
   assert.equal(conversation.hasActiveProcess(), false);
   assert.equal(conversation.queue[0]?.status, 'pending');
   assert.match(
-    conversation.messages.at(-1)?.content ?? '',
+    messageText(conversation.messages.at(-1)),
     /cannot start Buddy conversations.*required Buddy state tools/
   );
 });
@@ -761,7 +768,7 @@ test('historical automation transcripts refuse every user turn-admission path', 
   assert.equal(providerStarts, 0);
   assert.equal(conversation.hasActiveProcess(), false);
   assert.deepEqual(conversation.queue, []);
-  assert.match(conversation.messages.at(-1)?.content ?? '', /automation transcript is read-only/);
+  assert.match(messageText(conversation.messages.at(-1)), /automation transcript is read-only/);
 });
 
 test('first message in a user fork inherits the native source session without copying history', () => {
@@ -802,7 +809,7 @@ test('first message in a user fork inherits the native source session without co
     forkSourceSessionId: 'source-native-session',
   });
   assert.deepEqual(
-    child.messages.map((message) => message.content),
+    child.messages.map((message) => messageText(message)),
     ['Continue the original objective from this fork.']
   );
 });
@@ -897,7 +904,7 @@ test('same-provider fork on a fork-incapable harness falls back to string handof
   assert.equal(spawned?.forkSourceSessionId, undefined);
   assert.ok(spawned?.content.includes('Continue the original objective from this fork.'));
   assert.deepEqual(
-    child.messages.filter((message) => message.role === 'system').map((m) => m.content),
+    child.messages.filter((message) => message.role === 'system').map((m) => messageText(m)),
     []
   );
 });
@@ -1133,6 +1140,7 @@ test('a recorded background agent stays running until its task finishes', async 
 test('bridge watchdog terminates a turn when neither unified events nor heartbeats arrive', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
   const stub = openTurnStub();
+  t.after(() => stub.child.emit('close'));
   const { broadcasts, conversation } = runtimeFixture({
     executeTurn: fakeExecuteTurn(() => stub.turn),
   });
@@ -1148,12 +1156,14 @@ test('bridge watchdog terminates a turn when neither unified events nor heartbea
       (message) =>
         typeof message === 'object' &&
         message !== null &&
-        'content' in message &&
-        typeof message.content === 'string' &&
-        message.content.includes('Turn event bridge stalled')
+        'body' in message &&
+        typeof message.body === 'object' &&
+        message.body !== null &&
+        'text' in message.body &&
+        typeof message.body.text === 'string' &&
+        message.body.text.includes('Turn event bridge stalled')
     )
   );
-  stub.child.emit('close');
 });
 
 // First-turn prompt markers are kind-routed: only buddy_builder threads may
@@ -1579,9 +1589,9 @@ test('codex collab threads become native sub-agents that parent completion leave
   );
   assert.deepEqual([...completed], ['child-1']);
   const assistant = conversation.messages.find((message) => message.role === 'assistant');
-  assert.match(assistant?.content ?? '', /SUBAGENTS_OK/);
-  assert.equal((assistant?.content.match(/spawn_agent/g) ?? []).length, 1);
-  assert.doesNotMatch(assistant?.content ?? '', /\bwait\b/);
+  assert.match(messageText(assistant), /SUBAGENTS_OK/);
+  assert.equal((messageText(assistant).match(/spawn_agent/g) ?? []).length, 1);
+  assert.doesNotMatch(messageText(assistant), /\bwait\b/);
 });
 
 test('a childless Codex collab completion keeps one visible attempt and no child', async () => {

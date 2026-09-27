@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import type { ExecuteCommandRequest, UnifiedAgentEvent, executeCommand } from '@nbardy/agent-cli';
 import type {
+  ContentPart,
   Message,
   ProviderTurnUsage,
   ResolvedExecutionConfig,
@@ -9,6 +10,7 @@ import type {
   ServerMessageInput,
   SubAgent,
 } from '@unleashd/shared';
+import { AskUserQuestionSchema, toolContentPart } from '@unleashd/shared';
 import {
   TURN_BRIDGE_TIMEOUT_MS,
   TURN_MAX_RUNTIME_MS,
@@ -32,7 +34,7 @@ import {
   failRunningSubAgents,
   subAgentFoldFor,
 } from './subagents';
-import { formatToolUse, isCompletionOnlyToolUse } from './tool-format';
+import { isCompletionOnlyToolUse } from './tool-format';
 import {
   type TurnTimeoutKind,
   TurnWatchdog,
@@ -458,7 +460,7 @@ export class TurnRunner {
     const lastMsg = host.messages[host.messages.length - 1];
     if (lastMsg && lastMsg.role === 'assistant') return;
     console.log(`[${host.id}] Creating NEW assistant message (msg #${host.messages.length + 1})`);
-    host.appendMessage({ role: 'assistant', content: '', timestamp: new Date() });
+    host.appendMessage({ role: 'assistant', body: { t: 'text', text: '' }, timestamp: new Date() });
     if (!host.isStreaming) {
       host.isStreaming = true;
       this.broadcastStatus();
@@ -467,8 +469,12 @@ export class TurnRunner {
 
   appendText(text: string): void {
     this.ensureAssistantMessage();
-    const currentMsg = this.host.messages[this.host.messages.length - 1];
-    if (currentMsg.role === 'assistant') currentMsg.content += text;
+    let currentMsg = this.host.messages[this.host.messages.length - 1];
+    if (currentMsg.body.t === 'parts') {
+      this.host.appendMessage({ role: 'assistant', body: { t: 'text', text: '' }, timestamp: new Date() });
+      currentMsg = this.host.messages[this.host.messages.length - 1];
+    }
+    if (currentMsg.role === 'assistant' && currentMsg.body.t === 'text') currentMsg.body.text += text;
     if (VERBOSE)
       console.log(
         `[${this.host.id}] chunk (${text.length} chars): "${text.substring(0, 30).replace(/\n/g, '\\n')}..."`
@@ -482,21 +488,13 @@ export class TurnRunner {
     if (this.subAgentFold.toolUse(this.subAgentHost, event) === 'hide') return;
     // Codex shell completion-only events would duplicate the tool line.
     if (isCompletionOnlyToolUse(event.name, event.input, event.displayText)) return;
-    const formattedTool = formatToolUse(event.name, event.input, event.displayText);
-    if (!formattedTool) return;
-    const currentMsg = this.host.messages[this.host.messages.length - 1];
-    const isQuestion = formattedTool.startsWith('<!--ask_user_question:');
-    const needsLeadingNewline =
-      !isQuestion &&
-      currentMsg?.role === 'assistant' &&
-      currentMsg.content.length > 0 &&
-      !currentMsg.content.endsWith('\n');
-    const chunkText = isQuestion
-      ? formattedTool
-      : `${needsLeadingNewline ? '\n' : ''}${formattedTool}\n`;
-    // Keep server-side message text aligned with streamed chunks.
-    if (currentMsg?.role === 'assistant') currentMsg.content += chunkText;
-    this.ports.broadcast({ type: 'chunk', conversationId: this.host.id, text: chunkText });
+    const question = event.name === 'AskUserQuestion'
+      ? AskUserQuestionSchema.safeParse(event.input)
+      : null;
+    const part: ContentPart = question?.success
+      ? { t: 'question', question: question.data }
+      : toolContentPart(event.name, event.input, event.displayText);
+    this.host.appendMessage({ role: 'assistant', body: { t: 'parts', parts: [part] }, timestamp: new Date() });
   }
 
   applySubagentState(event: Extract<UnifiedAgentEvent, { type: 'subagent.state' }>): void {
@@ -515,8 +513,8 @@ export class TurnRunner {
   }
 
   applyToolResult(output: unknown): void {
-    const content = this.host.policy.formatToolResult(output);
-    if (content) this.appendText(`\n${content}\n`);
+    const parts = this.host.policy.toolResultParts(output);
+    if (parts.length) this.host.appendMessage({ role: 'assistant', body: { t: 'parts', parts }, timestamp: new Date() });
   }
 
   /** turn.complete: close the UI stream. Execution ownership ends only at drain. */
@@ -544,7 +542,7 @@ export class TurnRunner {
   /** Surface provider errors (usage limits, auth failures, turn errors) as a system message. */
   surfaceError(message: string): void {
     console.error(`[${this.host.id}] Provider error: ${message}`);
-    this.host.appendMessage({ role: 'system', content: message, timestamp: new Date() });
+    this.host.appendMessage({ role: 'system', body: { t: 'text', text: message }, timestamp: new Date() });
   }
 
   // --- drain -------------------------------------------------------------------------
@@ -625,7 +623,7 @@ export class TurnRunner {
       const completedAssistant = [...host.messages]
         .reverse()
         .find((message) => message.role === 'assistant');
-      host.emit('buddy-turn-complete', completedAssistant?.content ?? '');
+      host.emit('buddy-turn-complete', completedAssistant?.body.t === 'text' ? completedAssistant.body.text : '');
     }
     host.processQueue();
   }
@@ -655,7 +653,7 @@ export class TurnRunner {
     });
     if (systemMessage) {
       if (systemMessage.level === 'error') console.error(`[${host.id}] ${systemMessage.text}`);
-      host.appendMessage({ role: 'system', content: systemMessage.text, timestamp: new Date() });
+      host.appendMessage({ role: 'system', body: { t: 'text', text: systemMessage.text }, timestamp: new Date() });
     }
 
     // INVARIANT: a dead process cannot stream (every path that skipped turn.complete).

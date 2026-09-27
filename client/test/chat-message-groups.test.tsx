@@ -4,8 +4,8 @@ import { createRequire, register } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { type Message, MessageSchema } from '@unleashd/shared';
-import { formatBuddyWorkerToolResult } from '@unleashd/shared';
+import type { Message } from '@unleashd/shared';
+import { parseBuddyWorkerToolResult } from '@unleashd/shared';
 import { Provider, createStore } from 'jotai';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
@@ -26,6 +26,7 @@ import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-con
 const ingestAddon = createRequire(new URL('../../server/package.json', import.meta.url))(
   '@unleashd/ingest'
 );
+const { sessionMessages } = createRequire(import.meta.url)('../../server/src/ingest/history.ts') as typeof import('../../server/src/ingest/history');
 
 /** Parse Codex rollout records the way the server does: through the ingest store. */
 async function savedCodexMessages(records: unknown[]): Promise<Message[]> {
@@ -48,21 +49,7 @@ async function savedCodexMessages(records: unknown[]): Promise<Message[]> {
     () => undefined
   );
   try {
-    const natives = await ingest.messages(sessionId, { afterSeq: -1, limit: 100 });
-    return natives.map(
-      (native: {
-        role: Message['role'];
-        content: string;
-        at?: number;
-        toolCall?: Message['toolCall'];
-      }) =>
-        MessageSchema.parse({
-          role: native.role,
-          content: native.content,
-          timestamp: new Date(native.at ?? timestamp.getTime()),
-          ...(native.toolCall ? { toolCall: native.toolCall } : {}),
-        })
-    );
+    return await sessionMessages(ingest, { sessionId, createdAt: timestamp.getTime() }, 100);
   } finally {
     await ingest.stop();
     await fs.rm(home, { recursive: true, force: true });
@@ -101,9 +88,19 @@ function seed(store: ReturnType<typeof createStore>, conversation: TestConversat
 
 const message = (role: Message['role'], content: string, final = false): Message => ({
   role,
-  content,
+  body: { t: 'text', text: content },
   timestamp,
   ...(final ? { completedAt: timestamp, completionReason: 'success' as const } : {}),
+});
+
+const toolMessage = (name: string, input?: unknown): Message => ({
+  ...message('assistant', ''),
+  body: { t: 'parts', parts: [{ t: 'tool', name, input }] },
+});
+
+const toolsMessage = (...names: string[]): Message => ({
+  ...message('assistant', ''),
+  body: { t: 'parts', parts: names.map((name) => ({ t: 'tool' as const, name })) },
 });
 
 test('fork drafts continue the task without adding diagnostic rules or removing authored history', () => {
@@ -119,7 +116,7 @@ test('fork drafts continue the task without adding diagnostic rules or removing 
     assert.ok(draft.includes(`User: ${userText}\n\nAssistant: Search layout is ready.`));
     assert.equal(draft.split(diagnosticText).length - 1, userText === diagnosticText ? 1 : 0);
     assert.match(draft, /\n\nContinue the original objective from this fork\.$/);
-    assert.equal(conversation.messages[0].content, userText);
+    assert.deepEqual(conversation.messages[0].body, { t: 'text', text: userText });
   }
 });
 
@@ -174,12 +171,12 @@ test('one assistant response contains all prose and widgets while streaming stay
     `${messages.slice(1).map(messageTranscriptContent).join('\n\n')} streamed text`
   );
   assert.equal(messagesOf(store.get(transcriptFamily(conversation.id))), messages);
-  assert.equal(messages.at(-1)?.content, 'Current');
+  assert.deepEqual(messages.at(-1)?.body, { t: 'text', text: 'Current' });
 
   store.set(streamStore.all, new Map());
-  assert.equal(
-    store.get(groupsFamily(conversation.id)).at(-1)?.messages.at(-1)?.content,
-    'Current'
+  assert.deepEqual(
+    store.get(groupsFamily(conversation.id)).at(-1)?.messages.at(-1)?.body,
+    { t: 'text', text: 'Current' }
   );
 });
 
@@ -190,16 +187,16 @@ test('response boundaries own one Copy action and preserve ordered tool runs and
     kind: { kind: 'general' },
     messages: [
       message('user', 'Inspect the project'),
-      message('assistant', '🔧 exec\n🔧 exec'),
-      message('assistant', '⚡ shell pwd'),
+      toolsMessage('exec', 'exec'),
+      toolMessage('shell', { command: 'pwd' }),
       message('assistant', 'First answer', true),
-      message('assistant', '🔧 get_inbox'),
+      toolMessage('get_inbox'),
       message('assistant', 'Second answer', true),
       message('assistant', 'Checking the result'),
-      message('assistant', '🔧 exec'),
+      toolMessage('exec'),
       message('assistant', 'Final answer', true),
-      message('assistant', '📖 one.ts\n📖 two.ts'),
-      message('assistant', '✏️ three.ts'),
+      toolsMessage('one.ts', 'two.ts'),
+      toolMessage('three.ts'),
       message('user', 'Next question'),
       message('assistant', 'Next answer', true),
       message('system', 'Execution stopped'),
@@ -299,15 +296,17 @@ test('streamed tool runs and saved calls render the same compact disclosure with
       ),
       (match) => match[0]
     );
-  const calls = '🔧 exec\n\n⚡ shell pwd';
-  store.set(streamStore.all, new Map([[conversation.id, calls]]));
+  const firstCalls = [toolMessage('exec'), toolMessage('shell', { command: 'pwd' })];
+  seed(store, { ...conversation, messages: [conversation.messages[0], ...firstCalls, conversation.messages[1]] });
   const first = render();
   assert.equal(disclosures(first).length, 1);
   assert.match(disclosures(first)[0], /2 tool calls/);
 
   const answer =
     'Result:\n\n```text\n🔧 fenced example\n⚡ another example\n📖 third example\n```\n\nFinished.';
-  store.set(streamStore.all, new Map([[conversation.id, `${calls}\n📖 source.ts\n\n${answer}`]]));
+  const savedCalls = [...firstCalls, toolMessage('Read', { file_path: 'source.ts' })];
+  seed(store, { ...conversation, messages: [conversation.messages[0], ...savedCalls, conversation.messages[1]] });
+  store.set(streamStore.all, new Map([[conversation.id, answer]]));
   const live = render();
   assert.equal(disclosures(live).length, 1);
   assert.match(disclosures(live)[0], /aria-expanded="false".*3 tool calls/);
@@ -315,16 +314,14 @@ test('streamed tool runs and saved calls render the same compact disclosure with
   assert.match(live, /🔧 fenced example/);
   assert.match(live, /Finished\./);
   assert.doesNotMatch(live, /tool uses|×|shell pwd|source\.ts/);
-  assert.equal(conversation.messages[1].content, '');
+  assert.deepEqual(conversation.messages[1].body, { t: 'text', text: '' });
 
   store.set(streamStore.all, new Map());
   seed(store, {
     ...conversation,
     messages: [
       conversation.messages[0],
-      message('assistant', '🔧 exec'),
-      message('assistant', '⚡ shell pwd'),
-      message('assistant', '📖 source.ts'),
+      ...savedCalls,
       message('assistant', answer, true),
     ],
   });
@@ -347,7 +344,12 @@ test('saved freeform input reaches desktop and mobile as literal code, with comp
       payload: { type: 'custom_tool_call', name: 'exec', call_id: 'exec-1', input },
     },
   ]);
-  assert.equal(toolMessage.toolCall?.input, input);
+  assert.equal(toolMessage.body.t, 'parts');
+  if (toolMessage.body.t !== 'parts') throw new Error('Expected tool body');
+  assert.equal(toolMessage.body.parts[0].t, 'tool');
+  if (toolMessage.body.parts[0].t !== 'tool') throw new Error('Expected tool input');
+  assert.equal(toolMessage.body.parts[0].name, 'exec');
+  assert.equal(toolMessage.body.parts[0].input, input);
   assert.equal(messageTranscriptContent(toolMessage), `🔧 exec\n\n${input}`);
   const escapedInput = input
     .replaceAll('&', '&amp;')
@@ -416,12 +418,12 @@ test('saved freeform input reaches desktop and mobile as literal code, with comp
   assert.equal((markup.match(/class="message-actions"/g) ?? []).length, 1);
   assert.match(markup, /Before tool/);
   assert.match(markup, /After tool/);
-  assert.equal(conversation.messages[2].toolCall?.input, input);
+  assert.equal(conversation.messages[2], toolMessage);
 });
 
 test('worker launch receipts stay inline in collapsed tool rows on both shells', () => {
   const thread = { conversationId: 'worker-thread', buddyId: 'engineer', label: 'Engineering' };
-  const receipt = formatBuddyWorkerToolResult({
+  const receipt = parseBuddyWorkerToolResult({
     content: [
       {
         type: 'text',
@@ -431,25 +433,26 @@ test('worker launch receipts stay inline in collapsed tool rows on both shells',
         }),
       },
     ],
-  })!;
-  assert.ok(receipt);
-  assert.equal(
-    formatBuddyWorkerToolResult({ isError: true, data: { buddyWorkerThread: thread } }),
-    null
+  });
+  assert.deepEqual(receipt, [thread]);
+  assert.deepEqual(
+    parseBuddyWorkerToolResult({ isError: true, data: { buddyWorkerThread: thread } }),
+    []
   );
-  assert.equal(
-    formatBuddyWorkerToolResult({ preview: true, data: { buddyWorkerThread: thread } }),
-    null
+  assert.deepEqual(
+    parseBuddyWorkerToolResult({ preview: true, data: { buddyWorkerThread: thread } }),
+    []
   );
   for (const messages of [
     [
-      {
-        ...message('assistant', '🔧 unleashd_buddy.send'),
-        toolCall: { name: 'unleashd_buddy.send' },
-      },
-      message('assistant', receipt),
+      toolMessage('unleashd_buddy.send'),
+      { ...message('assistant', ''), body: { t: 'parts' as const, parts: [{ t: 'buddy_worker_thread' as const, thread }] } },
     ],
-    [message('assistant', `🔧 unleashd_buddy.send\n${receipt}\nDone dispatching.`)],
+    [{ ...message('assistant', ''), body: { t: 'parts' as const, parts: [
+      { t: 'tool' as const, name: 'unleashd_buddy.send' },
+      { t: 'buddy_worker_thread' as const, thread },
+      { t: 'text' as const, text: 'Done dispatching.' },
+    ] } }],
   ]) {
     const response = groupChatMessages(messages, null)[0];
     assert.equal(response.type, 'assistant');
@@ -644,10 +647,7 @@ function longTranscript(turns: number): Message[] {
   for (let turn = 0; turn < turns; turn++) {
     records.push(message('user', `Question ${turn}`));
     records.push(message('assistant', `Looking at ${turn}`));
-    records.push({
-      ...message('assistant', ''),
-      toolCall: { name: 'Read', input: `{"path":"/f${turn}"}` },
-    } as Message);
+    records.push(toolMessage('Read', { path: `/f${turn}` }));
     records.push(message('assistant', `Answer ${turn}`, true));
   }
   return records;
@@ -672,7 +672,7 @@ test('a streaming frame rebuilds only the last group, and matches a full regroup
     const streamed = messages.slice();
     streamed[streamed.length - 1] = {
       ...messages[messages.length - 1],
-      content: messages[messages.length - 1].content + text,
+      body: { t: 'text', text: messageTranscriptContent(messages[messages.length - 1]) + text },
     };
     assert.deepEqual(live, groupChatMessages(streamed, null));
   }
@@ -686,8 +686,7 @@ test('regrouping after records change matches a full pass for every transcript p
     () => message('system', 'note'),
     () =>
       ({
-        ...message('assistant', ''),
-        toolCall: { name: 'Bash', input: '{"command":"ls"}' },
+        ...toolMessage('Bash', { command: 'ls' }),
       }) as Message,
   ];
   // Deterministic pseudo-random role sequences.
@@ -711,7 +710,7 @@ test('regrouping after records change matches a full pass for every transcript p
     }
     // A replaced earlier record (a fresh snapshot) falls back to a full pass.
     const replaced = records.slice();
-    replaced[0] = { ...records[0], content: `${records[0].content}!` };
+    replaced[0] = { ...records[0], body: { t: 'text', text: `${messageTranscriptContent(records[0])}!` } };
     assert.deepEqual(
       regroupChatMessages(previous, previousRecords, replaced, null),
       groupChatMessages(replaced, null)

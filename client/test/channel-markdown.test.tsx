@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
+import { legacyBody } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 register(
@@ -35,7 +36,7 @@ test('tool-call lines in a post collapse into the chat activity disclosure', () 
   ].join('\n');
   const html = renderToStaticMarkup(
     <MemoryRouter>
-      <ChannelMarkdown body={body} buddyNames={{}} tasks={new Map()} />
+      <ChannelMarkdown body={legacyBody(body)} buddyNames={{}} tasks={new Map()} />
     </MemoryRouter>
   );
   const toggles = [...html.matchAll(/class="chat-activity-toggle"[^>]*>(.*?)<\/button>/g)].map(
@@ -68,7 +69,7 @@ test('a Task ref is an inline chip in a sentence and a card on its own line', ()
   const render = (body: string) =>
     renderToStaticMarkup(
       <MemoryRouter>
-        <ChannelMarkdown body={body} buddyNames={{}} tasks={new Map([[task.id, task]])} />
+        <ChannelMarkdown body={{ t: 'text', text: body }} buddyNames={{}} tasks={new Map([[task.id, task]])} />
       </MemoryRouter>
     );
 
@@ -94,7 +95,7 @@ test('a Task ref is an inline chip in a sentence and a card on its own line', ()
 const renderChannel = (body: string) =>
   renderToStaticMarkup(
     <MemoryRouter>
-      <ChannelMarkdown body={body} buddyNames={{}} tasks={new Map()} />
+      <ChannelMarkdown body={legacyBody(body)} buddyNames={{}} tasks={new Map()} />
     </MemoryRouter>
   );
 

@@ -21,7 +21,7 @@ export function syntheticId(index: number): string {
 }
 
 export function syntheticMessage(role: Message['role'], content: string, timestamp: Date): Message {
-  return { role, content, timestamp };
+  return { role, body: { t: 'text', text: content }, timestamp };
 }
 
 export function syntheticConversation(

@@ -3,6 +3,7 @@ import type { BuddyContext } from '@unleashd/shared';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { SwarmConvoPrefix } from '../swarm';
 import type { MessageGroup } from '../utils/chat-message-groups';
+import { messageTranscriptContent } from '../utils/conversation-transcript';
 import { TranscriptGroup } from '../views/transcript/TranscriptGroup';
 import { BuddyConvoHeader } from './BuddyConvoHeader';
 
@@ -48,13 +49,13 @@ function estimateGroupSize(group: MessageGroup): number {
           height +
           (part.type === 'tool_calls'
             ? 24
-            : Math.min(40 + Math.ceil(part.message.content.length / 100) * 20, 600)),
+            : Math.min(40 + Math.ceil(messageTranscriptContent(part.message).length / 100) * 20, 600)),
         0
       )
     );
   }
   return group.messages.reduce(
-    (height, msg) => height + Math.min(80 + Math.ceil(msg.content.length / 100) * 20, 600),
+    (height, msg) => height + Math.min(80 + Math.ceil(messageTranscriptContent(msg).length / 100) * 20, 600),
     0
   );
 }

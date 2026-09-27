@@ -127,9 +127,22 @@ impl Sink {
             Role::User => self.visible.user_message(&content)?,
             Role::Assistant | Role::System => content,
         };
-        self.out.push(Message { seq: self.next_seq, role, at, completed_at, content, tool_call });
+        let parts_json = tool_call.as_ref().map(|call| {
+            let input = call.input.as_ref().map(|text| serde_json::from_str::<Value>(text).unwrap_or(Value::String(text.clone())));
+            if call.name == "__raw_result__" {
+                serde_json::json!([{ "t": "raw_result", "output": input }]).to_string()
+            } else {
+                serde_json::json!([{ "t": "tool", "name": call.name, "input": input }]).to_string()
+            }
+        });
+        self.out.push(Message { seq: self.next_seq, role, at, completed_at, content: if parts_json.is_some() { String::new() } else { content }, tool_call: None, parts_json });
         self.next_seq += 1;
         Ok(())
+    }
+
+    pub fn push_parts(&mut self, role: Role, at: Option<f64>, completed_at: Option<f64>, content: String, parts: Vec<Value>) {
+        self.out.push(Message { seq: self.next_seq, role, at, completed_at, content, tool_call: None, parts_json: Some(Value::Array(parts).to_string()) });
+        self.next_seq += 1;
     }
 }
 
@@ -140,6 +153,7 @@ pub struct DocMessage {
     pub at: Option<f64>,
     pub completed_at: Option<f64>,
     pub content: String,
+    pub parts_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

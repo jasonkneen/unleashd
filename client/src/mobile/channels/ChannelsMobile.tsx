@@ -29,6 +29,7 @@ import {
   type WorkspaceDirectory,
   authorName,
   channelFeed,
+  channelPostBody,
   channelHeading,
   channelRequestCount,
   channelRows,
@@ -605,7 +606,7 @@ function Row({ row, context }: { row: ChannelRow; context: RowContext }) {
               />
             </div>
             <ChannelMarkdown
-              body={row.post.body}
+              body={channelPostBody(row.post)}
               buddyNames={context.directory.buddyNames}
               tasks={context.directory.taskById}
             />
@@ -630,7 +631,7 @@ function Row({ row, context }: { row: ChannelRow; context: RowContext }) {
               linkState={linkState}
             />
             <ChannelMarkdown
-              body={row.post.body}
+              body={channelPostBody(row.post)}
               buddyNames={context.directory.buddyNames}
               tasks={context.directory.taskById}
             />

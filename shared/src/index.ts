@@ -14,7 +14,8 @@ import {
   ConversationIdSchema,
   ModelIdSchema,
 } from './conversation-config.js';
-import { CreateKindSchema, EncodedRowsSchema, RowPatchSchema } from './conversation.js';
+import { CreateKindSchema, EncodedRowsSchema, MessageBodySchema, RowPatchSchema } from './conversation.js';
+import { legacyBody } from './legacy-content.js';
 import {
   PROVIDER_METADATA,
   PROVIDER_OPTIONS,
@@ -27,6 +28,8 @@ import {
 export * from './conversation-config.js';
 export * from './conversation.js';
 export * from './turn-attempt.js';
+export * from './legacy-content.js';
+export * from './tool-content.js';
 export * from './buddy.js';
 export * from './provider-catalog.js';
 
@@ -618,7 +621,7 @@ const MessageMessageSchema = z.object({
   type: z.literal('message'),
   conversationId: ConversationIdSchema,
   role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
+  body: MessageBodySchema,
 });
 
 const ChunkMessageSchema = z.object({
@@ -700,7 +703,12 @@ export function classifyServerFrame(raw: unknown): ServerFrame {
       serverVersion: typeof protocol?.version === 'number' ? protocol.version : 2,
     };
   }
-  const parsed = ServerMessageSchema.safeParse(raw);
+  // During a Vite/backend reload an older v3 server still sends `content`.
+  // Normalize at the wire edge so its message remains visible to the new UI.
+  const frame = record.type === 'message' && record.body === undefined && typeof record.content === 'string'
+    ? { ...record, body: record.role === 'assistant' ? legacyBody(record.content) : { t: 'text', text: record.content } }
+    : raw;
+  const parsed = ServerMessageSchema.safeParse(frame);
   return parsed.success
     ? { t: 'message', message: parsed.data }
     : { t: 'invalid', issues: parsed.error.issues.map((issue) => issue.message).join('; ') };
@@ -717,8 +725,6 @@ export type {
 export * from './buddy-workspace-activity.js';
 export * from './buddy-channel-posts.js';
 export * from './harness-retry.js';
-export * from './buddy-team-configuration.js';
 
-export * from './buddy-team-configuration-result.js';
 
 export * from './upstream.js';

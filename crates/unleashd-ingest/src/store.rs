@@ -25,6 +25,7 @@ use std::path::Path;
 
 /// 2: `usage_turn`, `session.context`, `session.rate_limits` (T13a).
 pub const SCHEMA_VERSION: i64 = 2;
+const PARTS_RECORD: &str = "__content_parts_v1__";
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;
@@ -227,9 +228,10 @@ impl Writer {
                     Apply::Withdraw(seqs) => withdraw(&tx, id, seqs)?,
                 }
                 for m in &outcome.messages {
-                    let (tool_name, tool_input) = match &m.tool_call {
-                        Some(call) => (Some(call.name.as_str()), call.input.as_deref()),
-                        None => (None, None),
+                    let (tool_name, tool_input) = match (&m.parts_json, &m.tool_call) {
+                        (Some(parts), _) => (Some(PARTS_RECORD), Some(parts.as_str())),
+                        (None, Some(call)) => (Some(call.name.as_str()), call.input.as_deref()),
+                        (None, None) => (None, None),
                     };
                     insert_message.execute(params![id, m.seq, m.role.as_str(), m.at, m.completed_at, m.content, tool_name, tool_input])?;
                 }
@@ -489,7 +491,8 @@ impl Reader {
                 at,
                 completed_at,
                 content,
-                tool_call: tool_name.map(|name| ToolCall { name, input: tool_input }),
+                parts_json: (tool_name.as_deref() == Some(PARTS_RECORD)).then(|| tool_input.clone()).flatten(),
+                tool_call: tool_name.filter(|name| name != PARTS_RECORD).map(|name| ToolCall { name, input: tool_input }),
             })
         })
         .collect()
@@ -510,7 +513,7 @@ impl Reader {
         rows.map(|row| {
             let (session_id, seq, role, at, completed_at, content, tool_name, tool_input) = row?;
             let role = Role::parse(&role).ok_or_else(|| StoreError::Corrupt(format!("role {role}")))?;
-            Ok(SearchHit { session_id, message: Message { seq, role, at, completed_at, content, tool_call: tool_name.map(|name| ToolCall { name, input: tool_input }) } })
+            Ok(SearchHit { session_id, message: Message { seq, role, at, completed_at, content, parts_json: (tool_name.as_deref() == Some(PARTS_RECORD)).then(|| tool_input.clone()).flatten(), tool_call: tool_name.filter(|name| name != PARTS_RECORD).map(|name| ToolCall { name, input: tool_input }) } })
         })
         .collect()
     }

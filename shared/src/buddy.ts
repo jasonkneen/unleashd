@@ -111,11 +111,6 @@ export function parseBuddyBuilderToolResult(value: unknown, depth = 0): BuddyBui
   return null;
 }
 
-export function formatBuddyBuilderToolResult(output: unknown): string | null {
-  const event = parseBuddyBuilderToolResult(output);
-  return event ? `<!--buddy_builder_result:${encodeURIComponent(JSON.stringify(event))}-->` : null;
-}
-
 /** Host-issued launch receipt, preserved in live and hydrated tool output. */
 export const BuddyWorkerThreadSchema = z.object({
   conversationId: z.string().min(1),
@@ -124,7 +119,7 @@ export const BuddyWorkerThreadSchema = z.object({
 });
 export type BuddyWorkerThread = z.infer<typeof BuddyWorkerThreadSchema>;
 
-export function formatBuddyWorkerToolResult(output: unknown): string | null {
+export function parseBuddyWorkerToolResult(output: unknown): BuddyWorkerThread[] {
   const threads = new Map<string, BuddyWorkerThread>();
   const visit = (value: unknown, depth = 0): void => {
     if (depth > 10) return;
@@ -149,9 +144,5 @@ export function formatBuddyWorkerToolResult(output: unknown): string | null {
       if (key in record) visit(record[key], depth + 1);
   };
   visit(output);
-  return threads.size
-    ? [...threads.values()]
-        .map((thread) => `<!--buddy_worker_thread:${encodeURIComponent(JSON.stringify(thread))}-->`)
-        .join('\n')
-    : null;
+  return [...threads.values()];
 }

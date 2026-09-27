@@ -2,7 +2,7 @@
  * AskUserQuestion Widget
  *
  * Renders interactive question cards when Claude uses the AskUserQuestion tool.
- * Detected via <!--ask_user_question:{json}--> markers in assistant message content.
+ * Receives a typed question from the transcript ingress.
  *
  * This is display-only — Claude Code handles the actual tool response internally.
  * The widget shows the questions and options so the user can see what Claude is asking,
@@ -10,41 +10,12 @@
  */
 
 import { useState } from 'react';
-import { ASK_USER_QUESTION_RE } from '../utils/structured-message-segments';
+import type { AskUserQuestion } from '@unleashd/shared';
 import './AskUserQuestion.css';
 
-interface QuestionOption {
-  label: string;
-  description?: string;
-}
+type Question = AskUserQuestion['questions'][number];
 
-interface Question {
-  question: string;
-  header?: string;
-  options: QuestionOption[];
-  multiSelect?: boolean;
-}
-
-interface AskUserQuestionInput {
-  questions: Question[];
-}
-
-// Regex to detect the marker in message content.
-// Used by VirtualizedMessageList to split content around these markers.
-// NOTE: No `g` flag — module-level regexes with `g` are stateful singletons
-// (lastIndex persists across calls) and race under concurrent React rendering.
-// Consumers that need multi-match .exec() loops must create a local copy with `g`.
-export { ASK_USER_QUESTION_RE };
-
-/**
- * Parse marker string into structured data.
- * @throws on malformed JSON — caller should handle gracefully.
- */
-export function parseAskUserQuestion(jsonStr: string): AskUserQuestionInput {
-  return JSON.parse(jsonStr) as AskUserQuestionInput;
-}
-
-export function AskUserQuestionWidget({ data }: { data: AskUserQuestionInput }) {
+export function AskUserQuestionWidget({ data }: { data: AskUserQuestion }) {
   return (
     <div className="ask-user-question">
       {data.questions.map((q, qi) => (

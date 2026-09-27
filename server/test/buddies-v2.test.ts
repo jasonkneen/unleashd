@@ -797,13 +797,13 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
       context: { buddyId: lead.id, workspaceId: ws, coordinationRunId: 'run-chat' },
       completedAt: new Date().toISOString(),
       messages: [
-        { role: 'user', content: 'I prefer dark mode' },
+        { role: 'user', body: { t: 'text', text: 'I prefer dark mode' } },
         {
           role: 'assistant',
-          content: '',
-          toolCall: { name: 'Read', input: `agent_notes/theme.md ${'y'.repeat(600)}` },
+          body: { t: 'parts', parts: [{ t: 'tool', name: 'Read', input: `agent_notes/theme.md ${'y'.repeat(600)}` }] },
+
         },
-        { role: 'assistant', content: '', toolCall: { name: 'exec_command' } },
+        { role: 'assistant', body: { t: 'parts', parts: [{ t: 'tool', name: 'exec_command' }] }, },
       ],
     });
     const receipt = await until(
@@ -901,7 +901,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
       conversationId: 'chat',
       context: { buddyId: lead.id, workspaceId: ws, coordinationRunId: 'run-chat' },
       completedAt: new Date().toISOString(),
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', body: { t: 'text', text: 'hello' } }],
     });
     const receipt = await until(
       async () =>
@@ -1040,8 +1040,8 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
       context: chat('chat-A'),
       completedAt: new Date().toISOString(),
       messages: [
-        { role: 'user', content: 'Do steps 1 and 2 of the migration; I will approve step 3.' },
-        { role: 'assistant', content: 'Steps 1 and 2 are done.' },
+        { role: 'user', body: { t: 'text', text: 'Do steps 1 and 2 of the migration; I will approve step 3.' } },
+        { role: 'assistant', body: { t: 'text', text: 'Steps 1 and 2 are done.' } },
       ],
     });
     const receipt = await until(
@@ -1151,7 +1151,7 @@ test('native child events cannot bypass restricted Buddy runs', async () => {
       conversationId: 'chat',
       context: { buddyId: w.lead.id, workspaceId: w.ws },
       completedAt: new Date().toISOString(),
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', body: { t: 'text', text: 'hello' } }],
     });
     const receipt = await until(
       async () =>

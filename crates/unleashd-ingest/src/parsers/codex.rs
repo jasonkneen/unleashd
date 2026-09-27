@@ -10,7 +10,7 @@
 use super::{Ctx, Facts, Fold, Line, Previous, Sink, finite, normalize_dir, parse_time, widen};
 use crate::markers::{Hints, Rebuild, Visible};
 use crate::model::{Compaction, ContextReading, Cwd, Provider, Role, ToolCall, Usage, UsageTurn};
-use crate::text::{format_buddy_receipt, format_tool_use, pretty_json};
+use crate::text::{has_buddy_receipt, pretty_json};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -326,7 +326,6 @@ impl CodexFold {
             return Ok(());
         }
         let raw = payload.get("arguments").filter(|v| !v.is_null()).or_else(|| payload.get("input"));
-        let mut input = raw.cloned();
         let mut input_text = match raw {
             Some(Value::String(s)) => Some(s.clone()),
             Some(v) => Some(pretty_json(v)),
@@ -336,13 +335,8 @@ impl CodexFold {
             && let Ok(parsed) = serde_json::from_str::<Value>(s)
         {
             input_text = Some(pretty_json(&parsed));
-            input = Some(parsed);
         }
-        // Native shell calls use function names; the live CLI stream calls them shell.
-        let bare = name.strip_prefix("functions.").unwrap_or(name);
-        let display = if bare == "exec_command" || bare == "shell_command" { "shell" } else { name };
-        let content = format_tool_use(display, input.as_ref());
-        self.other(sink, content, at, Some(ToolCall { name: name.to_string(), input: input_text }))
+        self.other(sink, String::new(), at, Some(ToolCall { name: name.to_string(), input: input_text }))
     }
 
     fn lifecycle(&mut self, sink: &mut Sink, kind: &str, payload: &Value, entry_at: Option<f64>) -> Result<(), Rebuild> {
@@ -491,8 +485,8 @@ impl Fold for CodexFold {
         match (entry_type, payload_type) {
             (Some("response_item"), Some(kind @ ("function_call" | "custom_tool_call"))) => self.tool_call(sink, kind, &payload, at)?,
             (Some("response_item"), Some("function_call_output" | "custom_tool_call_output")) => {
-                if let Some(receipt) = format_buddy_receipt(payload.get("output")) {
-                    self.other(sink, receipt, at, None)?;
+                if has_buddy_receipt(payload.get("output")) {
+                    self.other(sink, String::new(), at, Some(ToolCall { name: "__raw_result__".to_string(), input: payload.get("output").map(Value::to_string) }))?;
                 }
             }
             (Some("event_msg"), Some(kind @ ("user_message" | "agent_message"))) => {

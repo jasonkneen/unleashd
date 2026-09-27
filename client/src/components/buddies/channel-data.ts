@@ -12,7 +12,9 @@
 import {
   type BuddyMemberExecution,
   type ConversationConfig,
+  type MessageBody,
   ConversationConfigSchema,
+  legacyBody,
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type UIEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -42,6 +44,13 @@ import type {
   ThreadStat,
 } from './types';
 import { taskStatusView } from './ui-contract';
+
+/** Legacy generated replies carried markers; owner posts remain literal prose. */
+export function channelPostBody(post: Post): MessageBody {
+  return post.author.kind === 'buddy' && post.conversationId
+    ? legacyBody(post.body)
+    : { t: 'text', text: post.body };
+}
 
 export function authorKey(author: Actor): string {
   switch (author.kind) {

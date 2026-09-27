@@ -8,7 +8,6 @@
 use super::{Ctx, Facts, Fold, Line, Previous, Sink, normalize_dir, parse_iso};
 use crate::markers::Rebuild;
 use crate::model::{Cwd, Provider, Role};
-use crate::text::format_tool_use;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,31 +23,29 @@ pub struct CursorFold {
     created_tag: Option<f64>,
 }
 
-fn content(blocks: &[Value]) -> String {
+fn content(blocks: &[Value]) -> (String, Option<Vec<Value>>) {
     let mut text = Vec::new();
-    let mut tools = Vec::new();
+    let mut parts = Vec::new();
+    let mut has_tools = false;
     for block in blocks {
         match block.get("type").and_then(Value::as_str) {
             Some("text") => {
                 if let Some(t) = block.get("text").and_then(Value::as_str).filter(|t| !t.is_empty()) {
                     text.push(t);
+                    parts.push(serde_json::json!({ "t": "text", "text": t }));
                 }
             }
             Some("tool_use") => {
                 if let Some(name) = block.get("name").and_then(Value::as_str) {
-                    tools.push(format_tool_use(name, block.get("input")));
+                    has_tools = true;
+                    parts.push(serde_json::json!({ "t": "tool", "name": name, "input": block.get("input") }));
                 }
             }
             _ => {}
         }
     }
     let text = text.join("\n");
-    match (text.is_empty(), tools.is_empty()) {
-        (false, true) => text,
-        (true, false) => tools.join("\n"),
-        (false, false) => format!("{text}\n{}", tools.join("\n")),
-        (true, true) => String::new(),
-    }
+    (text, has_tools.then_some(parts))
 }
 
 impl Fold for CursorFold {
@@ -64,16 +61,18 @@ impl Fold for CursorFold {
             _ => return Ok(Line::Skipped),
         };
         let Some(Value::Array(blocks)) = entry.get("message").and_then(|m| m.get("content")) else { return Ok(Line::Skipped) };
-        let body = content(blocks);
-        if body.is_empty() || self.prev.is_duplicate(role, &body) {
+        let (body, parts) = content(blocks);
+        let identity = parts.as_ref().map(|parts| Value::Array(parts.clone()).to_string()).unwrap_or_else(|| body.clone());
+        if identity.is_empty() || self.prev.is_duplicate(role, &identity) {
             return Ok(Line::Used);
         }
         if self.messages == 0 && role == Role::User {
             self.created_tag = TIMESTAMP_TAG.captures(&body).and_then(|c| parse_iso(&c[1]));
         }
         self.messages += 1;
-        self.prev.set(role, &body, None);
-        sink.push(role, None, None, body, None)?;
+        self.prev.set(role, &identity, None);
+        if let Some(parts) = parts { sink.push_parts(role, None, None, body, parts); }
+        else { sink.push(role, None, None, body, None)?; }
         Ok(Line::Used)
     }
 
