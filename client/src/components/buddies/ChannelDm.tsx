@@ -3,7 +3,9 @@ import { useAtomValue } from 'jotai';
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { queueMessage, setConversationDone } from '../../atoms/actions';
+import { setConversationConfig } from '../../atoms/commands';
 import {
+  commandFor,
   detailOf,
   groupsFamily,
   messagesOf,
@@ -16,7 +18,10 @@ import { useConversationBodies } from '../../hooks/useConversationBodies';
 import { useConversationDraft } from '../../hooks/useConversationDraft';
 import { uploadFilesWithDrainRetry } from '../../hooks/usePendingAttachments';
 import { usePolledFetch } from '../../hooks/usePolledFetch';
+import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useTurnDiagnostics } from '../../hooks/useTurnDiagnostics';
+import { ConfigOverlay } from '../../views/config/ConfigOverlay';
+import { modelSummary } from '../../views/config/config-options';
 import { BuddySigil } from './BuddySigil';
 import type { ComposerSubmit } from './ChannelComposer';
 import { ChannelLoader } from './ChannelLoader';
@@ -134,7 +139,10 @@ export function ChannelDm({
   const f = FRAMES[frame];
   const row = useAtomValue(rowFamily(conversationId));
   const transcript = useAtomValue(transcriptFamily(conversationId));
+  const configCommand = useAtomValue(commandFor(conversationId)).config;
   const bodies = useConversationBodies(conversationId);
+  const { catalog } = useProviderCatalog();
+  const [modelOpen, setModelOpen] = useState(false);
   const stream = useAtomValue(streamFamily(conversationId));
   const groups = useAtomValue(groupsFamily(conversationId));
   const chain = usePolledFetch<DirectChain>(directChainUrl(buddyId), 15_000);
@@ -153,6 +161,10 @@ export function ChannelDm({
     onConversation(next);
   };
   const retryText = lastOwnerText(messages);
+  const detail = detailOf(transcript);
+  const config = detail?.config.config ?? null;
+  const configSaving = configCommand?.state.tag === 'sent';
+  const configError = configCommand?.state.tag === 'rejected' ? configCommand.state.message : null;
   const outOfTokens =
     !running && diagnostics.attempt?.terminalCause === 'out_of_tokens' && retryText !== null;
   return (
@@ -167,8 +179,42 @@ export function ChannelDm({
           {frame === 'desktop' ? <h2>{buddyName}</h2> : <h1>{buddyName}</h1>}
           <p>{buddyRole}</p>
         </div>
+        <button
+          type="button"
+          className="channel-dm-model channel-inline-action ui-truncate"
+          title="Change this DM's model"
+          aria-label={`Change model for ${buddyName}: ${config ? modelSummary(config, catalog) : 'loading'}`}
+          aria-haspopup="dialog"
+          aria-expanded={modelOpen}
+          disabled={config === null}
+          onClick={() => setModelOpen(true)}
+        >
+          {config ? modelSummary(config, catalog) : 'Model'}
+          {configSaving ? ' …' : ''} ▾
+        </button>
         <CopyLinkButton className={f.link} path={linkPath} label="Copy link to DM" />
       </header>
+      {modelOpen && (
+        <ConfigOverlay
+          presentation={frame === 'mobile' ? 'sheet' : 'popover'}
+          value={config}
+          onClose={() => setModelOpen(false)}
+          onChange={(next) => {
+            if (!detail) return;
+            setConversationConfig({
+              conversationId,
+              expectedRevision: detail.config.revision,
+              patch: { kind: 'replace', config: next },
+            });
+          }}
+          picker={{ disabled: configSaving, providerDisabled: true, defaults: 'inline' }}
+          notes={[
+            { tone: 'info', text: 'This choice applies to the next turn in this DM.' },
+            ...(configSaving ? [{ tone: 'info' as const, text: 'Saving…' }] : []),
+            ...(configError ? [{ tone: 'error' as const, text: configError }] : []),
+          ]}
+        />
+      )}
       <div className={f.scroll} ref={follow.scrollRef} onScroll={follow.onScroll}>
         {bodies.error && (
           <p className={f.error} role="alert">
