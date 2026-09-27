@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
-import type { Message } from '@unleashd/shared';
+import { type Message, legacyBody } from '@unleashd/shared';
 import express from 'express';
 import { type ContextWindow, resolveContextWindow } from '../src/conversations/context-window';
 import type { MessageSource } from '../src/conversations/messages';
@@ -172,9 +172,23 @@ test('context-breakdown route 404s identically to the conversation route', async
 });
 
 test('context-breakdown route returns the meter payload for a known conversation', async () => {
+  const tool = { t: 'tool' as const, name: 'Read', input: { file_path: '/team.md' } };
+  const historical = legacyBody('Historical note\n📖 Read /old.md');
+  assert.equal(historical.t, 'parts', 'the stored legacy tool line is decoded at ingress');
+  if (historical.t !== 'parts') throw new Error('Expected historical tool parts');
+  const historicalTool = historical.parts.find((part) => part.t === 'tool');
+  assert.ok(historicalTool);
   const convo = conversation({
     kind: { t: 'builder' },
-    messages: [textMessage('user', 'build a team')],
+    messages: [
+      textMessage('user', 'build a team'),
+      {
+        role: 'assistant',
+        body: { t: 'parts', parts: [{ t: 'text', text: 'Checking files.' }, tool] },
+        timestamp: new Date(),
+      },
+      { role: 'assistant', body: historical, timestamp: new Date() },
+    ],
   });
   const app = express();
   registerConversationRoutes(
@@ -197,6 +211,12 @@ test('context-breakdown route returns the meter payload for a known conversation
     const body = (await response.json()) as ReturnType<typeof buildContextBreakdown>;
     assert.equal(body.conversationId, 'convo-1');
     assert.ok(body.sections.briefing.chars > 0);
+    assert.equal(
+      body.sections.history.chars,
+      'build a team'.length + 'Checking files.'.length + JSON.stringify(tool).length +
+        'Historical note\n'.length + JSON.stringify(historicalTool).length,
+      'mixed and historical prose and tool payloads contribute to the estimate once'
+    );
     // totalChars must account for EVERY section. This previously asserted only
     // history + briefing, which silently ignored the 460 chars of MCP spec a
     // buddy_builder thread carries.

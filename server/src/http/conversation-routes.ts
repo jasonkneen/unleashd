@@ -174,6 +174,15 @@ export function splitBriefing(briefing: string): { briefing: string; memory: str
   return { briefing: briefing.slice(0, index), memory: briefing.slice(index) };
 }
 
+/** Approximate the history actually sent to a provider, including typed tool payloads. */
+function historyBodyChars(body: Message['body']): number {
+  if (body.t === 'text') return body.text.length;
+  return body.parts.reduce(
+    (sum, part) => sum + (part.t === 'text' ? part.text.length : JSON.stringify(part).length),
+    0
+  );
+}
+
 // The tool definitions a turn's provider loads from the one Buddy endpoint (mcp.ts).
 function mcpSpecJson(conversation: ContextSubject): string {
   switch (conversation.kind.t) {
@@ -196,10 +205,7 @@ export function buildContextBreakdown(
   contextWindow: ContextWindow,
   sessionContext: SessionContextReading | null = null
 ): ContextBreakdownResponse {
-  const historyChars = history.reduce(
-    (sum, message) => sum + (message.body.t === 'text' ? message.body.text.length : 0),
-    0
-  );
+  const historyChars = history.reduce((sum, message) => sum + historyBodyChars(message.body), 0);
 
   let briefingText = '';
   let memoryText = '';
