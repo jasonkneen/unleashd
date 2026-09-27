@@ -1584,6 +1584,33 @@ test('codex collab threads become native sub-agents that parent completion leave
   assert.doesNotMatch(assistant?.content ?? '', /\bwait\b/);
 });
 
+test('a childless Codex collab completion keeps one visible attempt and no child', async () => {
+  const started = codexCollab('spawn_agent', 'started', {
+    id: 'failed-spawn',
+    prompt: 'Inspect the files',
+  });
+  const completed = codexCollab('spawn_agent', 'completed', {
+    id: 'failed-spawn',
+    prompt: 'Inspect the files',
+    status: 'failed',
+  });
+  assert.equal(started[0]?.type, 'tool.use');
+  assert.equal(completed[0]?.type, 'tool.use', 'the no-tools gate still observes completion');
+  if (started[0]?.type === 'tool.use' && completed[0]?.type === 'tool.use') {
+    assert.equal(started[0].phase, 'started');
+    assert.equal(completed[0].phase, 'completed');
+  }
+  const { conversation } = await runScriptedTurn('codex', [
+    { type: 'turn.started' },
+    ...started,
+    ...completed,
+    { type: 'turn.complete', reason: 'success' },
+  ]);
+  const assistant = conversation.messages.find((message) => message.role === 'assistant');
+  assert.equal((assistant?.content.match(/spawn_agent/g) ?? []).length, 1);
+  assert.equal(conversation.subAgents.length, 0);
+});
+
 test('native sub-agent operations are applied once and follow-ups can reopen a child', async () => {
   const observation = (id: string, tool: string, status: string) =>
     codexCollab(tool, 'completed', {

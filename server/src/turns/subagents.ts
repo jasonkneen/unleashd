@@ -183,7 +183,9 @@ function applyNativeState(host: SubAgentHost, event: NativeStateEvent): void {
 function nativeFold(): ToolFold {
   return {
     // Parent tool calls do not identify work by a particular native child.
-    toolUse: () => 'show',
+    // A childless completion still reaches no-tools guards; its started line already rendered.
+    // Guard: conversation-runtime.test.ts "a childless Codex collab completion keeps one visible attempt".
+    toolUse: (_host, event) => (event.phase === 'completed' ? 'hide' : 'show'),
     taskStarted() {},
     taskFinished() {},
     parentCompleted(host, completedAt) {
