@@ -83,7 +83,7 @@ export function useWorkspaceInbox(workspaceId: string) {
   return usePolledFetch<Inbox>(inboxUrl(workspaceId), CHANNEL_BACKSTOP_MS);
 }
 
-/** What the rail lists: public channels and the owner's DMs. Task channels live on their task. */
+/** Route-addressable channels: public channels and direct channels. Task channels live on their task. */
 export type RailChannels = { channels: ChannelUnread[]; direct: ChannelUnread[] };
 
 const NO_RAIL: RailChannels = { channels: [], direct: [] };

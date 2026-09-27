@@ -152,9 +152,9 @@ test('channel browser shows an empty state without channels', async () => {
 // The body is markdown with app links: an owner mention, a live Task chip and
 // inline media must each render as their own element — a regression to plain
 // text would show raw `[@Lead](buddy:lead)` tokens and absolute file paths.
-// The inbox's direct channels are DMs, named by their Buddy members (never
-// "You"), with the count of requests waiting on the owner.
-test('posts render markdown mentions, Task chips and media; DMs list by member with requests', async () => {
+// The inbox can still contain direct channels for deep links, but the rail
+// presents the Buddy's ongoing DM row instead of duplicating that channel.
+test('posts render markdown mentions, Task chips and media; the rail keeps one Buddy list', async () => {
   const dm: Channel = {
     id: 'ch_dm',
     workspaceId: 'ws-rich',
@@ -232,10 +232,9 @@ test('posts render markdown mentions, Task chips and media; DMs list by member w
   assert.match(html, /placeholder="Message #general"/);
   assert.match(html, /channel-browser-buddies/);
   assert.doesNotMatch(html, />Gone</);
-  // The DM row: named by its Buddy, badged with the request awaiting the owner.
-  const dms = html.slice(html.indexOf('Direct messages'));
-  assert.match(dms, /channel-browser-channel-name[^"]*">Lead</);
-  assert.match(dms, /aria-label="1 requests waiting on you"/);
+  // Direct channel rows are no longer duplicated above the Buddy list.
+  assert.doesNotMatch(html, /Direct messages/);
+  assert.match(html, /class="channel-browser-buddy-link"[^>]*aria-label="Message Lead"/);
   assert.match(html, /data-unread="new"/);
 });
 

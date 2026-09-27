@@ -3,19 +3,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { listField, rowFamily } from '../../atoms/conversations';
-import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
-import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
+import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
-import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import {
   ArchivedChannels,
   ChannelArchiveButton,
   useArchivedChannels,
 } from '../../components/buddies/ChannelArchive';
+import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
 import { ChannelMarkdown, TypingDots } from '../../components/buddies/ChannelMarkdown';
+import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
 import { ConversationEye } from '../../components/buddies/ConversationEye';
 import { CopyLinkButton } from '../../components/buddies/CopyLinkButton';
 import { ReplyRetry } from '../../components/buddies/HarnessPicker';
@@ -68,7 +68,7 @@ import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './ChannelsIndex'
 import { type MobileChannelScreen, channelsHref, mobileChannelScreen } from './channel-route';
 
 // Channels on a phone, following Slack's mobile app: one screen at a time.
-//   Home    — channels, DMs and Buddies, tab bar visible
+//   Home    — channels and Buddies, tab bar visible
 //   Channel — full-height transcript, composer pinned, no tab bar
 //   Thread  — the root, its replies, a reply composer
 //   Task    — one Task's posts across every channel (the Task filter)
@@ -322,11 +322,6 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
         {inbox === null && <MobileEmptyPanel>Loading channels…</MobileEmptyPanel>}
       </MobileSection>
       <ArchivedChannels workspaceId={workspaceId} channels={context.archived} />
-      {rail.direct.length > 0 && (
-        <MobileSection title="Direct messages">
-          <ul className="mobile-channels-list">{rail.direct.map(row)}</ul>
-        </MobileSection>
-      )}
       <MobileSection title="Buddies" meta="Tap to message · ☀ to wake">
         <BuddySection members={directory.activeMembers} />
       </MobileSection>

@@ -27,7 +27,7 @@
 }
 
 .mobile-channels-row {
-  gap: var(--sp-6);
+  gap: var(--sp-4);
   width: 100%;
   min-height: 48px;
   padding: var(--sp-3) var(--sp-2);

@@ -204,13 +204,12 @@ test('a reply permalink opens its thread with the reply highlighted and the root
   assert.match(html, /class="mobile-channel-compose__head"><span>Thread in # general<\/span>/);
 });
 
-test('mobile channels Home lists channels, DMs by Buddy, and Buddies with a visible Wake', async () => {
+test('mobile channels Home lists channels and Buddies with a visible Wake', async () => {
   await seed();
   const html = render(CHANNELS);
   assert.match(html, /mobile-channels-row__name[^"]*">general</);
   assert.match(html, /Add channel/);
-  const dms = html.slice(html.indexOf('Direct messages'));
-  assert.match(dms, /href="\/buddies\/workspaces\/ws-phone\/channels\?channel=ch_dm"/);
+  assert.doesNotMatch(html, /Direct messages/);
   assert.match(html, /mobile-channels-row__name[^"]*">Lead</);
   assert.match(html, /aria-label="Wake Lead: catch up on the channels and act"/);
 });

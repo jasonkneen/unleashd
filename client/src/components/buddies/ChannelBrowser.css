@@ -144,7 +144,7 @@
 }
 
 .channel-browser-rail-section:not(:first-child) {
-  margin-top: 22px;
+  margin-top: var(--sp-6);
 }
 
 .channel-browser-rail-empty {
@@ -167,7 +167,7 @@
 .channel-browser-buddy-link {
   display: flex;
   align-items: center;
-  gap: var(--sp-4);
+  gap: var(--sp-2);
   width: 100%;
   height: 30px;
   padding: 0 var(--sp-4);
@@ -552,7 +552,7 @@ a.channel-browser-buddy-done {
 
 .channel-browser-rail-section-row {
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: var(--sp-3);
 }
 
 .channel-browser-rail-section-row .channel-browser-rail-section {

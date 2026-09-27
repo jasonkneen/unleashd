@@ -8,13 +8,13 @@ import { Chat } from '../Chat';
 import { AppSettingsDropdown } from './AppSettingsDropdown';
 import { BuddyRailRow, CreatingBuddyRailRow } from './BuddyRailRow';
 import { BuddySigil } from './BuddySigil';
+import { ArchivedChannels, ChannelArchiveButton, useArchivedChannels } from './ChannelArchive';
 import { ChannelAuthor, type OpenDm } from './ChannelAuthor';
 import { ChannelComposer } from './ChannelComposer';
-import { ArchivedChannels, ChannelArchiveButton, useArchivedChannels } from './ChannelArchive';
-import { ChannelWorkers } from './ChannelWorkers';
 import { ChannelDm } from './ChannelDm';
 import { ChannelHistory, ChannelLoader } from './ChannelLoader';
 import { ChannelMarkdown, TypingDots } from './ChannelMarkdown';
+import { ChannelWorkers } from './ChannelWorkers';
 import { ConversationEye } from './ConversationEye';
 import { CopyLinkButton } from './CopyLinkButton';
 import { ReplyRetry } from './HarnessPicker';
@@ -1022,12 +1022,6 @@ export function ChannelBrowser({
             <ul className="channel-browser-channels">{rail.channels.map(railRow)}</ul>
           )}
           <ArchivedChannels workspaceId={workspaceId} channels={archived.data ?? []} />
-          {rail.direct.length > 0 && (
-            <>
-              <h3 className="channel-browser-rail-section ui-muted">Direct messages</h3>
-              <ul className="channel-browser-channels">{rail.direct.map(railRow)}</ul>
-            </>
-          )}
           <div className="channel-browser-rail-section-row ui-row">
             <h3 className="channel-browser-rail-section ui-muted">Buddies</h3>
             <button
