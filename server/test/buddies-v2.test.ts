@@ -1321,9 +1321,16 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       read: { search: 'quarterly' },
     });
     assert.deepEqual(
-      searched.value.map((post: Post) => post.id),
+      searched.value.posts.map((post: Post) => post.id),
       [written.post.id]
     );
+    // Search pages like a channel: `before` once went unforwarded, so a Buddy saw only the
+    // newest hits forever (2026-09-27). Nothing older than the only hit remains.
+    const older = await call(w.endpoint.spec(grant), 'channel_read', {
+      read: { search: 'quarterly' },
+      before: { ord: written.post.ord },
+    });
+    assert.deepEqual(older.value.posts, []);
 
     // The Builder saves a new hire's first task (it has no Buddy of its own: ownerId is required).
     const builder = w.endpoint.spec(w.grants.issueBuilder('builder-chat'));
