@@ -12,6 +12,8 @@ import { buddyBuilderConversationsAtom } from '../../atoms/buddy-sidebar';
 import { availableConversationIdSetAtom, conversationAtomFamily } from '../../atoms/conversations';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
+import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
+import '../../components/buddies/BuddyBackgroundLink.css';
 import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
@@ -387,7 +389,7 @@ function BuddySection({
 }
 
 // Slack's DM row: tapping the Buddy opens the DM inside Channels. Wake is a
-// visible button, since touch has no hover.
+// visible button, since touch has no hover. Workers is a separate read-only link.
 function BuddyRow({ member, workspaceId }: { member: ChannelMember; workspaceId: string }) {
   // Back from the DM returns here, not to the Buddies tab.
   const openDm = useChannelsOpenDm(workspaceId);
@@ -419,6 +421,7 @@ function BuddyRow({ member, workspaceId }: { member: ChannelMember; workspaceId:
           linkState={origin}
         />
       )}
+      <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
       <button
         type="button"
         className="mobile-channels-wake"

@@ -1,0 +1,40 @@
+import { useAtomValue } from 'jotai';
+import { Link } from 'react-router-dom';
+import { buddyActiveWorkerCountAtomFamily } from '../../atoms/buddy-background';
+import { conversationLoadCompleteAtom } from '../../atoms/conversations';
+import { buddyTabPath } from './buddy-tabs';
+
+/** A separate link beside Message/Wake, so inspecting workers never starts a turn. */
+export function BuddyBackgroundLink({
+  buddyId,
+  workspaceId,
+  name,
+}: { buddyId: string; workspaceId: string; name: string }) {
+  const count = useAtomValue(buddyActiveWorkerCountAtomFamily({ buddyId, workspaceId }));
+  const loaded = useAtomValue(conversationLoadCompleteAtom);
+  const label = `${name}: ${loaded ? `${count} active background workers` : 'loading background workers'}`;
+  return (
+    <Link
+      className="buddy-background-link"
+      to={`${buddyTabPath(buddyId, 'background')}?workspace=${encodeURIComponent(workspaceId)}`}
+      aria-label={label}
+      title={`${label}. View workers and recent activity`}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        aria-hidden="true"
+      >
+        <rect x="6.5" y="2" width="7" height="5" rx="1" />
+        <path d="M10 7v3M4 13v-3h12v3" />
+        <rect x="1" y="13" width="6" height="5" rx="1" />
+        <rect x="13" y="13" width="6" height="5" rx="1" />
+      </svg>
+      <span>{loaded ? count : '…'}</span>
+    </Link>
+  );
+}

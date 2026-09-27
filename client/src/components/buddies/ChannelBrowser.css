@@ -676,6 +676,7 @@ a.channel-browser-instance:hover {
   position: relative;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .channel-browser-buddy-link {
@@ -728,6 +729,21 @@ a.channel-browser-instance:hover {
 .channel-browser-buddy-actions button:disabled {
   opacity: 0.5;
   cursor: progress;
+}
+
+/* Landscape tablets use this rail too; touch cannot reveal hover actions. */
+@media (hover: none) {
+  .channel-browser-buddy-actions {
+    position: static;
+    flex: none;
+    transform: none;
+    visibility: visible;
+  }
+
+  .channel-browser-buddy-actions button {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .channel-browser-buddy-status {

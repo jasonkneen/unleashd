@@ -1,4 +1,6 @@
+import { BuddyBackgroundLink } from './BuddyBackgroundLink';
 import { BuddySigil } from './BuddySigil';
+import './BuddyBackgroundLink.css';
 import type { OpenDm } from './ChannelAuthor';
 import { WakeIcon, WakeIndicator } from './WakeIndicator';
 import { useBuddyDirectActions } from './buddy-direct-actions';
@@ -45,6 +47,7 @@ export function BuddyRailRow({
         />
       )}
       <span className="channel-browser-buddy-actions">
+        <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
         <button
           type="button"
           title={`Wake ${member.name}: catch up on the channels and act`}
