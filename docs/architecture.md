@@ -319,7 +319,8 @@ running the code on disk.
   on failure the current backend keeps serving.
 - **Only a real content change reloads, judged after the writes settle.** Every
   `pnpm dev` start re-emits `shared/dist` and the agent-cli-tool `dist`
-  byte-for-byte, and `tsc` truncates each file before writing it. The runner
+  byte-for-byte. Shared outputs now replace each file atomically; the CLI
+  compiler can still truncate one while writing it. The runner
   compares touched files against the digests the backend loaded once events go
   quiet, never per event. Digesting per event read the empty intermediate as a
   change and restarted a backend mid-startup, so the history loaded twice

@@ -13,7 +13,7 @@
 // pass. A watcher that starts beside the backend rewrites dist/ while the
 // backend loads it, which is what restarted a backend mid-startup on
 // 2026-09-25 (see tools/watch-server.mjs).
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -40,8 +40,9 @@ export function linePrefixer(prefix, write) {
  * unchanged sources re-checks instead of re-emitting everything. The first pass
  * gates the backend and Vite, and a full rebuild of all three projects took
  * 1m46s on a loaded machine (2026-09-25). Build state trusts its outputs
- * exist, and other sessions clean-rebuild dist/ (`pnpm build`/`typecheck` rm it
- * first), so a missing `sentinel` output discards the state: one full rebuild.
+ * exist. A missing `sentinel` output discards the state: one full rebuild.
+ * One-shot builds stage before publishing, and watch writes replace each file
+ * atomically, so active consumers do not observe truncated modules.
  */
 export function startCompiler({ name, configPath, sentinel, stateDirectory, log }) {
   const ts = createRequire(configPath)('typescript');
@@ -72,6 +73,22 @@ export function startCompiler({ name, configPath, sentinel, stateDirectory, log 
       if (errorCount !== undefined) markReady();
     }
   );
+  let writeNumber = 0;
+  watchHost.writeFile = (fileName, data, writeByteOrderMark, onError) => {
+    // tsc's direct write truncates a live module before its replacement is
+    // complete. Readers then see syntax errors or missing exports mid-rebuild.
+    // A same-directory rename makes each emitted file visible in one step.
+    mkdirSync(path.dirname(fileName), { recursive: true });
+    const temporary = `${fileName}.${process.pid}.${writeNumber++}.tmp`;
+    try {
+      writeFileSync(temporary, `${writeByteOrderMark ? '\uFEFF' : ''}${data}`, 'utf8');
+      renameSync(temporary, fileName);
+    } catch (error) {
+      rmSync(temporary, { force: true });
+      if (onError) onError(String(error));
+      else throw error;
+    }
+  };
   const program = ts.createWatchProgram(watchHost);
   return { ready, close: () => program.close() };
 }

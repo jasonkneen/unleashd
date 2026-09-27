@@ -7,10 +7,10 @@
 //
 // Dev tasks claim one dev runtime per data directory (a lock file holding the
 // owner's PID) and refuse dev ports held by anything else. `--replace` stops the
-// recorded owner first. Build and typecheck take no lock: when they clean-rebuild
-// shared/dist under a running dev runtime, the backend runner ignores the
-// byte-identical rewrite, and a restart that races the rebuild backs off and
-// retries (tools/watch-server.mjs).
+// recorded owner first. Build and typecheck take no dev-runtime lock. The shared
+// package stages each one-shot build and atomically replaces its emitted files;
+// a restart that races a separate source change backs off and retries
+// (tools/watch-server.mjs).
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';

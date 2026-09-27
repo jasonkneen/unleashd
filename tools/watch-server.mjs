@@ -137,11 +137,11 @@ export function createBackendRunner({
     }
   }
 
-  // A clean build (pnpm typecheck / build) and every `tsc --watch` start rewrite
+  // A build (pnpm typecheck / build) and every compiler watch start rewrite
   // shared/dist and the agent-cli-tool dist byte-for-byte; only a real content
   // change may restart the backend. Files are compared once the writes settle,
-  // never per event: tsc truncates a file and then writes it, and digesting the
-  // empty intermediate read as a change. On 2026-09-25 that made the cli
+  // never per event: the cli compiler can truncate a file while writing it,
+  // and digesting the empty intermediate read as a change. On 2026-09-25 that made the cli
   // watcher's initial emit restart a backend mid-startup, so every `pnpm dev`
   // parsed the conversation history twice (~135s each on a loaded machine).
   function onFileEvent(file) {

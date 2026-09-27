@@ -26,7 +26,7 @@
     "test:client": "pnpm exec tsx --tsconfig client/tsconfig.test.json --test client/test/*.test.ts client/test/*.test.tsx",
     "screenshot:mobile": "node tools/screenshot-mobile.mjs",
     "screenshots": "node tools/screenshots.mjs",
-    "test:dev-supervisor": "node --test tools/dev-supervisor.test.mjs tools/local-domain.test.mjs tools/watch-server.test.mjs",
+    "test:dev-supervisor": "node --test tools/dev-supervisor.test.mjs tools/local-domain.test.mjs tools/shared-build.test.mjs tools/watch-server.test.mjs",
     "test:tools": "node --test tools/lib/pixel-diff.test.mjs tools/ensure-addons.test.mjs",
     "test:cli": "pnpm --dir vendor/agent-cli-tool test",
     "test:api": "node test/api.test.js",
