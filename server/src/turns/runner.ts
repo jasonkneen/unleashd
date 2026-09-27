@@ -471,10 +471,15 @@ export class TurnRunner {
     this.ensureAssistantMessage();
     let currentMsg = this.host.messages[this.host.messages.length - 1];
     if (currentMsg.body.t === 'parts') {
-      this.host.appendMessage({ role: 'assistant', body: { t: 'text', text: '' }, timestamp: new Date() });
+      this.host.appendMessage({
+        role: 'assistant',
+        body: { t: 'text', text: '' },
+        timestamp: new Date(),
+      });
       currentMsg = this.host.messages[this.host.messages.length - 1];
     }
-    if (currentMsg.role === 'assistant' && currentMsg.body.t === 'text') currentMsg.body.text += text;
+    if (currentMsg.role === 'assistant' && currentMsg.body.t === 'text')
+      currentMsg.body.text += text;
     if (VERBOSE)
       console.log(
         `[${this.host.id}] chunk (${text.length} chars): "${text.substring(0, 30).replace(/\n/g, '\\n')}..."`
@@ -488,13 +493,16 @@ export class TurnRunner {
     if (this.subAgentFold.toolUse(this.subAgentHost, event) === 'hide') return;
     // Codex shell completion-only events would duplicate the tool line.
     if (isCompletionOnlyToolUse(event.name, event.input, event.displayText)) return;
-    const question = event.name === 'AskUserQuestion'
-      ? AskUserQuestionSchema.safeParse(event.input)
-      : null;
+    const question =
+      event.name === 'AskUserQuestion' ? AskUserQuestionSchema.safeParse(event.input) : null;
     const part: ContentPart = question?.success
       ? { t: 'question', question: question.data }
       : toolContentPart(event.name, event.input, event.displayText);
-    this.host.appendMessage({ role: 'assistant', body: { t: 'parts', parts: [part] }, timestamp: new Date() });
+    this.host.appendMessage({
+      role: 'assistant',
+      body: { t: 'parts', parts: [part] },
+      timestamp: new Date(),
+    });
   }
 
   applySubagentState(event: Extract<UnifiedAgentEvent, { type: 'subagent.state' }>): void {
@@ -514,7 +522,12 @@ export class TurnRunner {
 
   applyToolResult(output: unknown): void {
     const parts = this.host.policy.toolResultParts(output);
-    if (parts.length) this.host.appendMessage({ role: 'assistant', body: { t: 'parts', parts }, timestamp: new Date() });
+    if (parts.length)
+      this.host.appendMessage({
+        role: 'assistant',
+        body: { t: 'parts', parts },
+        timestamp: new Date(),
+      });
   }
 
   /** turn.complete: close the UI stream. Execution ownership ends only at drain. */
@@ -542,7 +555,11 @@ export class TurnRunner {
   /** Surface provider errors (usage limits, auth failures, turn errors) as a system message. */
   surfaceError(message: string): void {
     console.error(`[${this.host.id}] Provider error: ${message}`);
-    this.host.appendMessage({ role: 'system', body: { t: 'text', text: message }, timestamp: new Date() });
+    this.host.appendMessage({
+      role: 'system',
+      body: { t: 'text', text: message },
+      timestamp: new Date(),
+    });
   }
 
   // --- drain -------------------------------------------------------------------------
@@ -623,7 +640,10 @@ export class TurnRunner {
       const completedAssistant = [...host.messages]
         .reverse()
         .find((message) => message.role === 'assistant');
-      host.emit('buddy-turn-complete', completedAssistant?.body.t === 'text' ? completedAssistant.body.text : '');
+      host.emit(
+        'buddy-turn-complete',
+        completedAssistant?.body.t === 'text' ? completedAssistant.body.text : ''
+      );
     }
     host.processQueue();
   }
@@ -653,7 +673,11 @@ export class TurnRunner {
     });
     if (systemMessage) {
       if (systemMessage.level === 'error') console.error(`[${host.id}] ${systemMessage.text}`);
-      host.appendMessage({ role: 'system', body: { t: 'text', text: systemMessage.text }, timestamp: new Date() });
+      host.appendMessage({
+        role: 'system',
+        body: { t: 'text', text: systemMessage.text },
+        timestamp: new Date(),
+      });
     }
 
     // INVARIANT: a dead process cannot stream (every path that skipped turn.complete).

@@ -29,7 +29,9 @@ function messageText(message: Pick<Message, 'body'> | undefined): string {
   if (!message) return '';
   return message.body.t === 'text'
     ? message.body.text
-    : message.body.parts.map((part) => part.t === 'text' ? part.text : part.t === 'tool' ? part.name : '').join('\n');
+    : message.body.parts
+        .map((part) => (part.t === 'text' ? part.text : part.t === 'tool' ? part.name : ''))
+        .join('\n');
 }
 
 function runtimeFixture(
@@ -307,7 +309,9 @@ test('provider completion waits for the normalized event stream and session pers
     'automation ownership must not release on turn.complete before process/event drain'
   );
   assert.equal(
-    fixture.conversation.messages.some((message) => messageText(message).includes('durable output')),
+    fixture.conversation.messages.some((message) =>
+      messageText(message).includes('durable output')
+    ),
     false,
     'completion must not release ownership while session persistence blocks event consumption'
   );
@@ -317,7 +321,9 @@ test('provider completion waits for the normalized event stream and session pers
   persistence.resolve();
   await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
   assert.equal(
-    fixture.conversation.messages.some((message) => messageText(message).includes('durable output')),
+    fixture.conversation.messages.some((message) =>
+      messageText(message).includes('durable output')
+    ),
     true
   );
   assert.equal(automationOutput, 'durable output');
@@ -1617,7 +1623,14 @@ test('a childless Codex collab completion keeps one visible attempt and no child
     { type: 'turn.complete', reason: 'success' },
   ]);
   const assistant = conversation.messages.find((message) => message.role === 'assistant');
-  assert.equal((assistant?.content.match(/spawn_agent/g) ?? []).length, 1);
+  assert.equal(assistant?.body.t, 'parts');
+  assert.equal(
+    assistant?.body.t === 'parts'
+      ? assistant.body.parts.filter((part) => part.t === 'tool' && part.name === 'spawn_agent')
+          .length
+      : 0,
+    1
+  );
   assert.equal(conversation.subAgents.length, 0);
 });
 

@@ -49,13 +49,17 @@ function estimateGroupSize(group: MessageGroup): number {
           height +
           (part.type === 'tool_calls'
             ? 24
-            : Math.min(40 + Math.ceil(messageTranscriptContent(part.message).length / 100) * 20, 600)),
+            : Math.min(
+                40 + Math.ceil(messageTranscriptContent(part.message).length / 100) * 20,
+                600
+              )),
         0
       )
     );
   }
   return group.messages.reduce(
-    (height, msg) => height + Math.min(80 + Math.ceil(messageTranscriptContent(msg).length / 100) * 20, 600),
+    (height, msg) =>
+      height + Math.min(80 + Math.ceil(messageTranscriptContent(msg).length / 100) * 20, 600),
     0
   );
 }

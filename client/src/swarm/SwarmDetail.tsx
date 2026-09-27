@@ -53,7 +53,13 @@ interface WorkerViewProps {
 function extractVerdict(conv: ConversationRow): Verdict {
   for (const msg of readConversationMessages(conv.id)) {
     if (msg.role !== 'assistant') continue;
-    const text = msg.body.t === 'text' ? msg.body.text : msg.body.parts.filter((part) => part.t === 'text').map((part) => part.text).join('\n');
+    const text =
+      msg.body.t === 'text'
+        ? msg.body.text
+        : msg.body.parts
+            .filter((part) => part.t === 'text')
+            .map((part) => part.text)
+            .join('\n');
     if (text.includes('VERDICT: APPROVED')) return 'approved';
     if (text.includes('VERDICT: NEEDS_CHANGES')) return 'needs-changes';
     if (text.includes('VERDICT: REJECTED')) return 'rejected';

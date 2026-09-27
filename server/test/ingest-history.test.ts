@@ -252,10 +252,12 @@ test('the live-turn overlay shows once, then gives way to the provider rows at i
     );
     await until(() => server.list.joined(id)?.sessions[0]?.messageCount === 4 || undefined);
     const during = await server.history(id);
-    assert.deepEqual(
-      during.messages.map(textOf),
-      ['first question', 'first answer', 'second question', 'streamed answer']
-    );
+    assert.deepEqual(during.messages.map(textOf), [
+      'first question',
+      'first answer',
+      'second question',
+      'streamed answer',
+    ]);
 
     // Idle: the provider's rows replace the live ones; still four messages, no duplicates.
     const sentBefore = server.sent.length;
@@ -268,10 +270,12 @@ test('the live-turn overlay shows once, then gives way to the provider rows at i
     });
     assert.equal(settled.messageCount, 4);
     const after = await server.history(id);
-    assert.deepEqual(
-      after.messages.map(textOf),
-      ['first question', 'first answer', 'second question', 'final answer']
-    );
+    assert.deepEqual(after.messages.map(textOf), [
+      'first question',
+      'first answer',
+      'second question',
+      'final answer',
+    ]);
     assert.equal(conversation.toRow().messageCount, after.messages.length);
   } finally {
     await server.close();
@@ -313,10 +317,7 @@ test('a transcript rewritten on disk makes loaded clients refetch', async () => 
     );
     const after = await server.history(id);
     assert.notEqual(after.epoch, before.epoch);
-    assert.deepEqual(
-      after.messages.map(textOf),
-      ['edited question', 'edited answer']
-    );
+    assert.deepEqual(after.messages.map(textOf), ['edited question', 'edited answer']);
   } finally {
     await server.close();
     fixture.cleanup();

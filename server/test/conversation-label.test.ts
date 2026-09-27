@@ -3,7 +3,11 @@ import test from 'node:test';
 import { conversationLabel } from '../src/conversations/runtime';
 
 function userMessage(content: string) {
-  return { role: 'user' as const, body: { t: 'text' as const, text: content }, timestamp: new Date('2026-09-22T00:00:00.000Z') };
+  return {
+    role: 'user' as const,
+    body: { t: 'text' as const, text: content },
+    timestamp: new Date('2026-09-22T00:00:00.000Z'),
+  };
 }
 
 // Regression (2026-09-22): Buddy-spawned turns showed the base64

@@ -3,7 +3,13 @@ import { messageTranscriptContent } from './conversation-transcript';
 
 export type AssistantResponsePart =
   | { type: 'content'; key: string; message: Message }
-  | { type: 'tool_calls'; key: string; messages: Message[]; count: number; workerThreads?: BuddyWorkerThread[] };
+  | {
+      type: 'tool_calls';
+      key: string;
+      messages: Message[];
+      count: number;
+      workerThreads?: BuddyWorkerThread[];
+    };
 
 export type AssistantResponse = {
   type: 'assistant';
@@ -13,18 +19,27 @@ export type AssistantResponse = {
   firstMessageIndex: number;
 };
 
-export type MessageGroup = AssistantResponse | { type: 'single'; messages: Message[]; firstMessageIndex: number };
+export type MessageGroup =
+  | AssistantResponse
+  | { type: 'single'; messages: Message[]; firstMessageIndex: number };
 
 function fragment(message: Message, part: ContentPart): Message {
   return { ...message, body: { t: 'parts', parts: [part] } };
 }
 
 /** Provider records stay ordered; one assistant response owns the display and Copy action. */
-export function groupChatMessages(messages: readonly Message[], prefix: string | null): MessageGroup[] {
+export function groupChatMessages(
+  messages: readonly Message[],
+  prefix: string | null
+): MessageGroup[] {
   return groupMessageRange(messages, prefix, 0);
 }
 
-function groupMessageRange(messages: readonly Message[], prefix: string | null, firstIndex: number): MessageGroup[] {
+function groupMessageRange(
+  messages: readonly Message[],
+  prefix: string | null,
+  firstIndex: number
+): MessageGroup[] {
   const groups: MessageGroup[] = [];
   let response: AssistantResponse | undefined;
   const content = (message: Message, key: string) => {
@@ -46,21 +61,40 @@ function groupMessageRange(messages: readonly Message[], prefix: string | null, 
       response.parts.push(last);
     }
     last.workerThreads ??= [];
-    if (!last.workerThreads.some((item) => item.conversationId === thread.conversationId)) last.workerThreads.push(thread);
+    if (!last.workerThreads.some((item) => item.conversationId === thread.conversationId))
+      last.workerThreads.push(thread);
   };
   for (const [localIndex, message] of messages.entries()) {
     const index = firstIndex + localIndex;
-    const msg = index === 0 && message.role === 'user' && prefix && message.body.t === 'text' && message.body.text.startsWith(prefix)
-      ? { ...message, body: { t: 'text' as const, text: message.body.text.slice(prefix.length).replace(/^\n\n/, '') } }
-      : message;
+    const msg =
+      index === 0 &&
+      message.role === 'user' &&
+      prefix &&
+      message.body.t === 'text' &&
+      message.body.text.startsWith(prefix)
+        ? {
+            ...message,
+            body: {
+              t: 'text' as const,
+              text: message.body.text.slice(prefix.length).replace(/^\n\n/, ''),
+            },
+          }
+        : message;
     if (msg.role !== 'assistant') {
-      if (response) response.copyText = response.messages.map(messageTranscriptContent).join('\n\n');
+      if (response)
+        response.copyText = response.messages.map(messageTranscriptContent).join('\n\n');
       response = undefined;
       groups.push({ type: 'single', messages: [msg], firstMessageIndex: index });
       continue;
     }
     if (!response) {
-      response = { type: 'assistant', messages: [], parts: [], copyText: '', firstMessageIndex: index };
+      response = {
+        type: 'assistant',
+        messages: [],
+        parts: [],
+        copyText: '',
+        firstMessageIndex: index,
+      };
       groups.push(response);
     }
     response.messages.push(msg);
@@ -70,8 +104,14 @@ function groupMessageRange(messages: readonly Message[], prefix: string | null, 
     }
     for (const [partIndex, part] of msg.body.parts.entries()) {
       const key = `${index}:${partIndex}`;
-      if (part.t === 'buddy_worker_thread') { worker(part.thread, key); continue; }
-      if (part.t === 'tool') { tool(fragment(msg, part), key); continue; }
+      if (part.t === 'buddy_worker_thread') {
+        worker(part.thread, key);
+        continue;
+      }
+      if (part.t === 'tool') {
+        tool(fragment(msg, part), key);
+        continue;
+      }
       if (part.t === 'text' && !part.text.trim()) continue;
       content(fragment(msg, part), key);
     }
@@ -81,20 +121,38 @@ function groupMessageRange(messages: readonly Message[], prefix: string | null, 
 }
 
 /** Rebuild only the last group while every earlier record keeps identity. */
-export function regroupChatMessages(previousGroups: readonly MessageGroup[], previousMessages: readonly Message[], messages: readonly Message[], prefix: string | null): MessageGroup[] {
+export function regroupChatMessages(
+  previousGroups: readonly MessageGroup[],
+  previousMessages: readonly Message[],
+  messages: readonly Message[],
+  prefix: string | null
+): MessageGroup[] {
   const tail = previousGroups.at(-1);
   if (!tail || messages.length < tail.firstMessageIndex) return groupChatMessages(messages, prefix);
   const start = tail.firstMessageIndex;
-  for (let i = 0; i < start; i++) if (messages[i] !== previousMessages[i]) return groupChatMessages(messages, prefix);
-  return [...previousGroups.slice(0, -1), ...groupMessageRange(messages.slice(start), prefix, start)];
+  for (let i = 0; i < start; i++)
+    if (messages[i] !== previousMessages[i]) return groupChatMessages(messages, prefix);
+  return [
+    ...previousGroups.slice(0, -1),
+    ...groupMessageRange(messages.slice(start), prefix, start),
+  ];
 }
 
 /** Text frames grow only the last assistant text record; structured frames arrive as records. */
-export function withStreamingTail(settled: MessageGroup[], messages: readonly Message[], streamingText: string, prefix: string | null): MessageGroup[] {
+export function withStreamingTail(
+  settled: MessageGroup[],
+  messages: readonly Message[],
+  streamingText: string,
+  prefix: string | null
+): MessageGroup[] {
   const last = messages.at(-1);
   const tail = settled.at(-1);
-  if (!streamingText || !last || last.role !== 'assistant' || last.body.t !== 'text' || !tail) return settled;
+  if (!streamingText || !last || last.role !== 'assistant' || last.body.t !== 'text' || !tail)
+    return settled;
   const window = messages.slice(tail.firstMessageIndex);
-  window[window.length - 1] = { ...last, body: { t: 'text', text: last.body.text + streamingText } };
+  window[window.length - 1] = {
+    ...last,
+    body: { t: 'text', text: last.body.text + streamingText },
+  };
   return [...settled.slice(0, -1), ...groupMessageRange(window, prefix, tail.firstMessageIndex)];
 }

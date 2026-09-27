@@ -10,7 +10,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
-
 function normalizeLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -19,7 +18,6 @@ function truncate(value: string, maxLen: number): string {
   if (value.length <= maxLen) return value;
   return `${value.slice(0, maxLen - 3)}...`;
 }
-
 
 // Claude Code names and the other harnesses' names for the same tools.
 const TOOL_EMOJI = new Map<string, string>([

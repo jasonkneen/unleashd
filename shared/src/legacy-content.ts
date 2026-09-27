@@ -4,12 +4,18 @@ import { toolContentPart } from './tool-content.js';
 
 export function legacyToolInput(input: string | undefined): unknown {
   if (input === undefined) return undefined;
-  try { return JSON.parse(input); } catch { return input; }
+  try {
+    return JSON.parse(input);
+  } catch {
+    return input;
+  }
 }
 
 // Historical provider output only. New writes carry a typed body at their producer.
-const MARKER = /(?:^[ \t]*🔧[ \t]+mcp_tool[ \t]*\r?\n\s*)?<!--\s*(ask_user_question|buddy_builder_result|buddy_worker_thread|buddy_team_configuration)\s*:(.*?)\s*-->|<!-- unleashd:buddy-review-result -->[\s\S]*?<!-- \/unleashd:buddy-review-result -->/gms;
-const TOOL_LINE = /^(?:📖|✍️|✏️|⚡|💻|📂|🔍|🌐|📓|📝|🔧|▶️|📦|🔀|📁|🔒|🗑️|❌)[ \t]+(\S+)(?:[ \t]+([^\n]*))?$/gm;
+const MARKER =
+  /(?:^[ \t]*🔧[ \t]+mcp_tool[ \t]*\r?\n\s*)?<!--\s*(ask_user_question|buddy_builder_result|buddy_worker_thread|buddy_team_configuration)\s*:(.*?)\s*-->|<!-- unleashd:buddy-review-result -->[\s\S]*?<!-- \/unleashd:buddy-review-result -->/gms;
+const TOOL_LINE =
+  /^(?:📖|✍️|✏️|⚡|💻|📂|🔍|🌐|📓|📝|🔧|▶️|📦|🔀|📁|🔒|🗑️|❌)[ \t]+(\S+)(?:[ \t]+([^\n]*))?$/gm;
 
 function fencedRanges(content: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
@@ -20,7 +26,12 @@ function fencedRanges(content: string): Array<[number, number]> {
     const wasFenced = fence !== null;
     if (marker) {
       if (!fence) fence = { marker: marker[1][0], length: marker[1].length };
-      else if (marker[1][0] === fence.marker && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      else if (
+        marker[1][0] === fence.marker &&
+        marker[1].length >= fence.length &&
+        !marker[2].trim()
+      )
+        fence = null;
     }
     if (wasFenced || fence) ranges.push([offset, offset + line.length + 1]);
     offset += line.length + 1;
@@ -42,7 +53,9 @@ function decodeMarker(kind: string | undefined, payload: string): ContentPart[] 
       const thread = BuddyWorkerThreadSchema.parse(JSON.parse(decodeURIComponent(payload)));
       return [{ t: 'buddy_worker_thread', thread }];
     }
-  } catch { /* malformed historical marker stays hidden, never becomes a live affordance */ }
+  } catch {
+    /* malformed historical marker stays hidden, never becomes a live affordance */
+  }
   return [];
 }
 
@@ -52,7 +65,9 @@ export function legacyBody(content: string): MessageBody {
   const fences = fencedRanges(content);
   const inFence = (index: number) => fences.some(([start, end]) => index >= start && index < end);
   let cursor = 0;
-  const appendText = (text: string) => { if (text) parts.push({ t: 'text', text }); };
+  const appendText = (text: string) => {
+    if (text) parts.push({ t: 'text', text });
+  };
   for (const marker of content.matchAll(MARKER)) {
     if (inFence(marker.index)) continue;
     if (marker.index > cursor) appendText(content.slice(cursor, marker.index));
@@ -66,7 +81,10 @@ export function legacyBody(content: string): MessageBody {
   }
   const typed: ContentPart[] = [];
   for (const part of parts) {
-    if (part.t !== 'text') { typed.push(part); continue; }
+    if (part.t !== 'text') {
+      typed.push(part);
+      continue;
+    }
     const partFences = fencedRanges(part.text);
     let start = 0;
     for (const line of part.text.matchAll(TOOL_LINE)) {

@@ -45,7 +45,7 @@ test('a history replaced during the first load is read again before it lands', a
     const transcript = jotaiStore.get(transcriptFamily(id));
     assert.equal(transcript.tag, 'loaded');
     assert.deepEqual(
-      messagesOf(transcript).map((message) => message.body.t === 'text' ? message.body.text : ''),
+      messagesOf(transcript).map((message) => (message.body.t === 'text' ? message.body.text : '')),
       ['after rewrite']
     );
   } finally {

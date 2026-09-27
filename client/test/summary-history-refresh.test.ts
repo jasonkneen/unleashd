@@ -20,7 +20,11 @@ import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-con
 const openId = '21111111-1111-4111-8111-111111111111';
 
 function message(content: string): Message {
-  return { role: 'assistant', body: { t: 'text', text: content }, timestamp: new Date('2026-09-25T00:00:00.000Z') };
+  return {
+    role: 'assistant',
+    body: { t: 'text', text: content },
+    timestamp: new Date('2026-09-25T00:00:00.000Z'),
+  };
 }
 
 test('a moved message count pages in the open chat tail and keeps its history on screen', () => {
@@ -47,7 +51,9 @@ test('a moved message count pages in the open chat tail and keeps its history on
     // Regression (review of c21b131): unloading made every reopened external
     // chat flash "Loading conversation history…".
     assert.deepEqual(
-      messagesOf(jotaiStore.get(transcriptFamily(openId))).map((entry) => entry.body.t === 'text' ? entry.body.text : ''),
+      messagesOf(jotaiStore.get(transcriptFamily(openId))).map((entry) =>
+        entry.body.t === 'text' ? entry.body.text : ''
+      ),
       ['one', 'two']
     );
     assert.equal(bodiesStep(transcript, 2), 'none', 'a current chat is not refetched');

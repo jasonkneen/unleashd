@@ -134,7 +134,11 @@ test('boot lists record-joined rows from the ingest store and patches appended a
     // multi-line prompt exactly as the crate does, so the label does not jump when it lands.
     assert.equal(
       conversationLabel(undefined, [
-        { role: 'user', body: { t: 'text', text: 'Fix the flaky test\nmore detail' }, timestamp: new Date(T0) },
+        {
+          role: 'user',
+          body: { t: 'text', text: 'Fix the flaky test\nmore detail' },
+          timestamp: new Date(T0),
+        },
       ]),
       listed.label
     );
@@ -216,7 +220,10 @@ test('a record created after boot joins the list and its overlapping sessions co
     const page = await list.page(LATER, { afterSeq: -1, limit: 100 });
     assert.deepEqual(
       page?.messages.map((message) => message.body),
-      ['Plan the release', 'Here is a plan.', 'Ship it', 'Shipped.'].map((text) => ({ t: 'text', text }))
+      ['Plan the release', 'Here is a plan.', 'Ship it', 'Shipped.'].map((text) => ({
+        t: 'text',
+        text,
+      }))
     );
   } finally {
     list.stop();

@@ -800,10 +800,12 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
         { role: 'user', body: { t: 'text', text: 'I prefer dark mode' } },
         {
           role: 'assistant',
-          body: { t: 'parts', parts: [{ t: 'tool', name: 'Read', input: `agent_notes/theme.md ${'y'.repeat(600)}` }] },
-
+          body: {
+            t: 'parts',
+            parts: [{ t: 'tool', name: 'Read', input: `agent_notes/theme.md ${'y'.repeat(600)}` }],
+          },
         },
-        { role: 'assistant', body: { t: 'parts', parts: [{ t: 'tool', name: 'exec_command' }] }, },
+        { role: 'assistant', body: { t: 'parts', parts: [{ t: 'tool', name: 'exec_command' }] } },
       ],
     });
     const receipt = await until(
@@ -1040,7 +1042,10 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
       context: chat('chat-A'),
       completedAt: new Date().toISOString(),
       messages: [
-        { role: 'user', body: { t: 'text', text: 'Do steps 1 and 2 of the migration; I will approve step 3.' } },
+        {
+          role: 'user',
+          body: { t: 'text', text: 'Do steps 1 and 2 of the migration; I will approve step 3.' },
+        },
         { role: 'assistant', body: { t: 'text', text: 'Steps 1 and 2 are done.' } },
       ],
     });

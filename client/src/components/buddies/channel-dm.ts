@@ -76,7 +76,8 @@ export function dmRows(groups: readonly MessageGroup[], queued: readonly QueuedM
         break;
     }
   }
-  for (const item of queued) push(`q:${item.id}`, 'owner', new Date(item.queuedAt), { t: 'text', text: item.content });
+  for (const item of queued)
+    push(`q:${item.id}`, 'owner', new Date(item.queuedAt), { t: 'text', text: item.content });
   return rows;
 }
 
@@ -84,7 +85,8 @@ export function dmRows(groups: readonly MessageGroup[], queued: readonly QueuedM
 export function lastOwnerText(messages: readonly Message[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.role === 'user' && message.body.t === 'text' && message.body.text.trim()) return message.body.text;
+    if (message.role === 'user' && message.body.t === 'text' && message.body.text.trim())
+      return message.body.text;
   }
   return null;
 }

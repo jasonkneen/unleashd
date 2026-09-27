@@ -36,7 +36,9 @@ interface RowActionsProps {
 function HoverActions({ text, forwardedRef }: RowActionsProps) {
   return (
     <div className="message-actions" ref={forwardedRef}>
-      {text.trim() && <CopyButton text={text} className="message-action-btn ui-control ui-inline-row ui-muted" />}
+      {text.trim() && (
+        <CopyButton text={text} className="message-action-btn ui-control ui-inline-row ui-muted" />
+      )}
     </div>
   );
 }
@@ -63,45 +65,72 @@ interface MessageContentProps {
   markdown: MarkdownRenderer;
 }
 
-const MessageContent = memo(function MessageContent({ msg, workingDirectory, markdown }: MessageContentProps) {
-  const pipeline = useMarkdownPipeline(CHAT_MARKDOWN);
-  const mdComponents = useMemo(() => makeMarkdownComponents(workingDirectory), [workingDirectory]);
-  const renderText = (text: string, key: number) => {
-    if (!text.trim()) return null;
-    return <div key={key}>{markdown(pipeline, normalizeLatexDelimiters(text), mdComponents)}</div>;
-  };
-  if (msg.body.t === 'text') {
-    return <div className="message-content">{renderText(msg.body.text || '...', 0)}</div>;
-  }
-  return (
-    <div className="message-content">
-      {msg.body.parts.map((part, index) => {
-        switch (part.t) {
-          case 'text':
-            return renderText(part.text, index);
-          case 'tool': {
-            const line = formatToolUse(part.name, part.input, part.displayText);
-            const preview = freeformExecPreview(part.name, part.input);
-            const input = part.input === undefined ? null : typeof part.input === 'string' ? part.input : JSON.stringify(part.input, null, 2);
-            return <div key={index}>{preview ? <p>🔧 exec <code>{preview}</code></p> : renderText(line, index)}{input && <pre aria-label="Tool input"><code>{input}</code></pre>}</div>;
+const MessageContent = memo(
+  function MessageContent({ msg, workingDirectory, markdown }: MessageContentProps) {
+    const pipeline = useMarkdownPipeline(CHAT_MARKDOWN);
+    const mdComponents = useMemo(
+      () => makeMarkdownComponents(workingDirectory),
+      [workingDirectory]
+    );
+    const renderText = (text: string, key: number) => {
+      if (!text.trim()) return null;
+      return (
+        <div key={key}>{markdown(pipeline, normalizeLatexDelimiters(text), mdComponents)}</div>
+      );
+    };
+    if (msg.body.t === 'text') {
+      return <div className="message-content">{renderText(msg.body.text || '...', 0)}</div>;
+    }
+    return (
+      <div className="message-content">
+        {msg.body.parts.map((part, index) => {
+          switch (part.t) {
+            case 'text':
+              return renderText(part.text, index);
+            case 'tool': {
+              const line = formatToolUse(part.name, part.input, part.displayText);
+              const preview = freeformExecPreview(part.name, part.input);
+              const input =
+                part.input === undefined
+                  ? null
+                  : typeof part.input === 'string'
+                    ? part.input
+                    : JSON.stringify(part.input, null, 2);
+              return (
+                <div key={index}>
+                  {preview ? (
+                    <p>
+                      🔧 exec <code>{preview}</code>
+                    </p>
+                  ) : (
+                    renderText(line, index)
+                  )}
+                  {input && (
+                    <pre aria-label="Tool input">
+                      <code>{input}</code>
+                    </pre>
+                  )}
+                </div>
+              );
+            }
+            case 'question':
+              return <AskUserQuestionWidget key={index} data={part.question} />;
+            case 'buddy_builder_result':
+              return <BuddyBuilderResultCard key={index} event={part.event} />;
+            case 'buddy_worker_thread':
+              return null;
+            case 'swarm_launch':
+              return <InlineSwarmRunWidget key={index} workingDirectory={workingDirectory} />;
           }
-          case 'question':
-            return <AskUserQuestionWidget key={index} data={part.question} />;
-          case 'buddy_builder_result':
-            return <BuddyBuilderResultCard key={index} event={part.event} />;
-          case 'buddy_worker_thread':
-            return null;
-          case 'swarm_launch':
-            return <InlineSwarmRunWidget key={index} workingDirectory={workingDirectory} />;
-        }
-      })}
-    </div>
-  );
-}, (prev, next) =>
-  prev.msg.body === next.msg.body &&
-  prev.msg.role === next.msg.role &&
-  prev.workingDirectory === next.workingDirectory &&
-  prev.markdown === next.markdown
+        })}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.msg.body === next.msg.body &&
+    prev.msg.role === next.msg.role &&
+    prev.workingDirectory === next.workingDirectory &&
+    prev.markdown === next.markdown
 );
 
 const ROLE_LABEL: Record<Message['role'], string> = {

@@ -21,7 +21,11 @@ function receiptParts(output: unknown): ContentPart[] {
 export function nativeBody(partsJson: string | undefined, content: string): MessageBody {
   if (!partsJson) return legacyBody(content);
   let raw: unknown;
-  try { raw = JSON.parse(partsJson); } catch { return legacyBody(content); }
+  try {
+    raw = JSON.parse(partsJson);
+  } catch {
+    return legacyBody(content);
+  }
   if (!Array.isArray(raw)) return legacyBody(content);
   const parts: ContentPart[] = [];
   for (const item of raw) {
@@ -30,9 +34,18 @@ export function nativeBody(partsJson: string | undefined, content: string): Mess
     if (part.t === 'text' && typeof part.text === 'string') {
       parts.push({ t: 'text', text: part.text });
     } else if (part.t === 'tool' && typeof part.name === 'string') {
-      const question = part.name === 'AskUserQuestion' ? AskUserQuestionSchema.safeParse(part.input) : null;
+      const question =
+        part.name === 'AskUserQuestion' ? AskUserQuestionSchema.safeParse(part.input) : null;
       if (question?.success) parts.push({ t: 'question', question: question.data });
-      else parts.push(toolContentPart(part.name, part.input, undefined, typeof part.status === 'string' ? part.status : undefined));
+      else
+        parts.push(
+          toolContentPart(
+            part.name,
+            part.input,
+            undefined,
+            typeof part.status === 'string' ? part.status : undefined
+          )
+        );
     } else if (part.t === 'raw_result') {
       parts.push(...receiptParts(part.output));
     }

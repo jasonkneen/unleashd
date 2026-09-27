@@ -463,7 +463,11 @@ export class Conversation extends EventEmitter {
   }
 
   private addSystemMessage(content: string): void {
-    this.appendMessage({ role: 'system', body: { t: 'text', text: content }, timestamp: new Date() });
+    this.appendMessage({
+      role: 'system',
+      body: { t: 'text', text: content },
+      timestamp: new Date(),
+    });
   }
 
   // The one resume/fresh decision, for both --resume and the prompt's wording.
@@ -937,7 +941,9 @@ export function conversationLabel(title: string | undefined, messages: readonly 
   const source = messages.find((message) => message.role === 'user') ?? messages[0];
   if (!source) return 'New conversation';
   const visible = (source.body.t === 'text' ? source.body.text : '')
-    .replace(HIDDEN_ENVELOPE_RE, '').trim().replace(OOMPA_TAG_RE, '');
+    .replace(HIDDEN_ENVELOPE_RE, '')
+    .trim()
+    .replace(OOMPA_TAG_RE, '');
   const line = visible.split(/\s+/).filter(Boolean).join(' ');
   if (!line) return 'New conversation';
   return line.length > LABEL_MAX_UNITS ? `${line.slice(0, LABEL_MAX_UNITS - 1)}…` : line;

@@ -274,7 +274,13 @@ const CHANNEL_COMPONENTS: Components = {
 // whenever who is replying changes. The cache keeps an unchanged post's body,
 // names and Tasks identical (atoms/resources.ts settledEntry), so only a post
 // that actually changed is parsed again.
-type ChannelPart = ContentPart | { t: 'tool_calls'; calls: Extract<ContentPart, { t: 'tool' }>[]; workers: Extract<ContentPart, { t: 'buddy_worker_thread' }>[] };
+type ChannelPart =
+  | ContentPart
+  | {
+      t: 'tool_calls';
+      calls: Extract<ContentPart, { t: 'tool' }>[];
+      workers: Extract<ContentPart, { t: 'buddy_worker_thread' }>[];
+    };
 
 function channelParts(body: MessageBody): ChannelPart[] {
   if (body.t === 'text') return [{ t: 'text', text: body.text }];
@@ -305,7 +311,10 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
 }) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const closeTask = useCallback(() => setOpenTaskId(null), []);
-  const data = useMemo(() => ({ buddyNames, tasks, onOpenTask: setOpenTaskId }), [buddyNames, tasks]);
+  const data = useMemo(
+    () => ({ buddyNames, tasks, onOpenTask: setOpenTaskId }),
+    [buddyNames, tasks]
+  );
   const openTask = openTaskId === null ? undefined : tasks.get(openTaskId);
   const parts = useMemo(() => channelParts(body), [body]);
   const pipeline = useMarkdownPipeline(CHANNEL_MARKDOWN);
@@ -321,9 +330,27 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
             case 'text':
               return part.text.trim() ? markdown(part.text, index) : null;
             case 'tool_calls':
-              return <ChatActivity key={index} label={part.calls.length ? `${part.calls.length} tool ${part.calls.length === 1 ? 'call' : 'calls'}` : 'Work launched'} workerThreads={part.workers.map((worker) => worker.thread)}>
-                {part.calls.map((call, callIndex) => markdown(formatToolUse(call.name, call.input, call.displayText) + (call.status && call.status !== 'completed' && call.status !== 'done' ? ` (${call.status})` : ''), callIndex))}
-              </ChatActivity>;
+              return (
+                <ChatActivity
+                  key={index}
+                  label={
+                    part.calls.length
+                      ? `${part.calls.length} tool ${part.calls.length === 1 ? 'call' : 'calls'}`
+                      : 'Work launched'
+                  }
+                  workerThreads={part.workers.map((worker) => worker.thread)}
+                >
+                  {part.calls.map((call, callIndex) =>
+                    markdown(
+                      formatToolUse(call.name, call.input, call.displayText) +
+                        (call.status && call.status !== 'completed' && call.status !== 'done'
+                          ? ` (${call.status})`
+                          : ''),
+                      callIndex
+                    )
+                  )}
+                </ChatActivity>
+              );
             case 'tool':
               return markdown(formatToolUse(part.name, part.input, part.displayText), index);
             case 'question':

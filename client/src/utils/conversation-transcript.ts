@@ -17,19 +17,28 @@ export interface OpenConversation {
 
 export function messageTranscriptContent(message: Message): string {
   if (message.body.t === 'text') return message.body.text;
-  return message.body.parts.map((part) => {
-    switch (part.t) {
-      case 'text': return part.text;
-      case 'tool': {
-        const summary = formatToolUse(part.name, part.input, part.displayText);
-        return part.input === undefined ? summary : `${summary}\n\n${typeof part.input === 'string' ? part.input : JSON.stringify(part.input, null, 2)}`;
+  return message.body.parts
+    .map((part) => {
+      switch (part.t) {
+        case 'text':
+          return part.text;
+        case 'tool': {
+          const summary = formatToolUse(part.name, part.input, part.displayText);
+          return part.input === undefined
+            ? summary
+            : `${summary}\n\n${typeof part.input === 'string' ? part.input : JSON.stringify(part.input, null, 2)}`;
+        }
+        case 'question':
+          return `[Question] ${JSON.stringify(part.question)}`;
+        case 'buddy_builder_result':
+          return `[Buddy Builder result] ${JSON.stringify(part.event)}`;
+        case 'buddy_worker_thread':
+          return `[Buddy worker thread] ${part.thread.label}`;
+        case 'swarm_launch':
+          return `[Swarm launch] ${part.command}`;
       }
-      case 'question': return `[Question] ${JSON.stringify(part.question)}`;
-      case 'buddy_builder_result': return `[Buddy Builder result] ${JSON.stringify(part.event)}`;
-      case 'buddy_worker_thread': return `[Buddy worker thread] ${part.thread.label}`;
-      case 'swarm_launch': return `[Swarm launch] ${part.command}`;
-    }
-  }).join('\n');
+    })
+    .join('\n');
 }
 
 export function buildThreadTranscript({ row, detail, messages }: OpenConversation): string {
@@ -54,7 +63,11 @@ export function buildThreadTranscript({ row, detail, messages }: OpenConversatio
   const body = messages
     .map((msg, index) => {
       const content =
-        index === 0 && msg.role === 'user' && prefix && msg.body.t === 'text' && msg.body.text.startsWith(prefix)
+        index === 0 &&
+        msg.role === 'user' &&
+        prefix &&
+        msg.body.t === 'text' &&
+        msg.body.text.startsWith(prefix)
           ? msg.body.text.slice(prefix.length).replace(/^\n\n/, '')
           : messageTranscriptContent(msg);
       return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${content}`;

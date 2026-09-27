@@ -140,7 +140,10 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
     if (!initialMessage || !claimToken) return;
     try {
       const alreadyVisible = conversation.messages.some(
-        (message) => message.role === 'user' && message.body.t === 'text' && message.body.text === initialMessage
+        (message) =>
+          message.role === 'user' &&
+          message.body.t === 'text' &&
+          message.body.text === initialMessage
       );
       if (!alreadyVisible) {
         const currentOptions = dispatchOptions.get(conversation.id);

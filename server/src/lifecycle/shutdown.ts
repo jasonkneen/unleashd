@@ -94,7 +94,11 @@ export function createShutdownController(
   const interrupt = (reason: string) => {
     for (const conversation of activeRuns()) {
       const content = `Server is restarting (${reason}); interrupted current turn.`;
-      conversation.messages.push({ role: 'system', body: { t: 'text', text: content }, timestamp: new Date() });
+      conversation.messages.push({
+        role: 'system',
+        body: { t: 'text', text: content },
+        timestamp: new Date(),
+      });
       ports.broadcastMessage(conversation.id, content);
       conversation.stop('server_restart');
     }

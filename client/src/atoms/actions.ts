@@ -547,13 +547,11 @@ function handleMessageEvent(data: Extract<ServerMessage, { type: 'message' }>): 
     data.body.text === '' &&
     loaded.messages.at(-1)?.body.t === 'text' &&
     loaded.messages.at(-1)?.role === 'assistant'
-  ) return;
+  )
+    return;
   putTranscript(data.conversationId, {
     ...loaded,
-    messages: [
-      ...loaded.messages,
-      { role: data.role, body: data.body, timestamp: new Date() },
-    ],
+    messages: [...loaded.messages, { role: data.role, body: data.body, timestamp: new Date() }],
   });
 }
 
@@ -562,10 +560,13 @@ function commitStreamSegment(id: string): void {
   const last = loaded?.messages.at(-1);
   const streamed = jotaiStore.get(streamStore.byKey(id));
   if (!loaded || last?.body.t !== 'text' || !streamed) return;
-  putTranscript(id, { ...loaded, messages: [
-    ...loaded.messages.slice(0, -1),
-    { ...last, body: { t: 'text', text: last.body.text + streamed } },
-  ] });
+  putTranscript(id, {
+    ...loaded,
+    messages: [
+      ...loaded.messages.slice(0, -1),
+      { ...last, body: { t: 'text', text: last.body.text + streamed } },
+    ],
+  });
   jotaiStore.set(streamStore.patch, { set: [], remove: [id] });
 }
 

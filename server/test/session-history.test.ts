@@ -4,7 +4,11 @@ import type { Message } from '@unleashd/shared';
 import { mergeSessionMessages } from '../src/lifecycle/session-history';
 
 function message(role: Message['role'], content: string, offset: number): Message {
-  return { role, body: { t: 'text', text: content }, timestamp: new Date(Date.UTC(2026, 8, 12) + offset) };
+  return {
+    role,
+    body: { t: 'text', text: content },
+    timestamp: new Date(Date.UTC(2026, 8, 12) + offset),
+  };
 }
 
 test('missing middle sessions survive while native turns replace live rows with shifted timestamps', () => {
@@ -50,8 +54,14 @@ test('identical prompts use ordered nearest turns and preserve genuinely missing
 
 test('exact inherited rows deduplicate without collapsing repeated tool occurrences', () => {
   const user = message('user', 'Inspect', 0);
-  const tool: Message = { ...message('assistant', '', 1), body: { t: 'parts', parts: [{ t: 'tool', name: 'read', input: 'a.txt' }] } };
-  const otherInput: Message = { ...tool, body: { t: 'parts', parts: [{ t: 'tool', name: 'read', input: 'b.txt' }] } };
+  const tool: Message = {
+    ...message('assistant', '', 1),
+    body: { t: 'parts', parts: [{ t: 'tool', name: 'read', input: 'a.txt' }] },
+  };
+  const otherInput: Message = {
+    ...tool,
+    body: { t: 'parts', parts: [{ t: 'tool', name: 'read', input: 'b.txt' }] },
+  };
   const next = message('assistant', 'Done', 2);
   const original = [user, tool, { ...tool }, otherInput];
   assert.deepEqual(mergeSessionMessages([original, [...original, next]]), [...original, next]);

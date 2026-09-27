@@ -190,7 +190,12 @@ function eventsForA(kind: 'content' | 'list'): Array<() => void> {
   return [
     // A new record moves A's last activity, so it re-sorts the list.
     () => {
-      handleMessage({ type: 'message', conversationId: A, role: 'user', body: { t: 'text', text: 'hi' } });
+      handleMessage({
+        type: 'message',
+        conversationId: A,
+        role: 'user',
+        body: { t: 'text', text: 'hi' },
+      });
       handleMessage({
         type: 'patch',
         id: A,
@@ -255,7 +260,12 @@ test('the same events for B do reach Chat(B) (the guard is not vacuous)', () => 
   seed();
   const chatReads = renderChatRecordingReads(B);
   for (const atom of chatReads.keys()) jotaiStore.sub(atom, () => {});
-  handleMessage({ type: 'message', conversationId: B, role: 'user', body: { t: 'text', text: 'for B' } });
+  handleMessage({
+    type: 'message',
+    conversationId: B,
+    role: 'user',
+    body: { t: 'text', text: 'for B' },
+  });
   const changed = [...chatReads].filter(([atom, before]) => jotaiStore.get(atom) !== before);
   assert.ok(
     changed.some(([atom]) => labelOf(atom) === `groups:${B}`),

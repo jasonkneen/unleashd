@@ -23,8 +23,13 @@ function toMessage(native: NativeMessage, previousAt: number): Message {
     body: native.partsJson
       ? nativeBody(native.partsJson, native.content)
       : native.toolCall
-        ? { t: 'parts', parts: [toolContentPart(native.toolCall.name, legacyToolInput(native.toolCall.input))] }
-        : native.role === 'assistant' ? nativeBody(undefined, native.content) : { t: 'text', text: native.content },
+        ? {
+            t: 'parts',
+            parts: [toolContentPart(native.toolCall.name, legacyToolInput(native.toolCall.input))],
+          }
+        : native.role === 'assistant'
+          ? nativeBody(undefined, native.content)
+          : { t: 'text', text: native.content },
     timestamp: new Date(at),
     ...(native.completedAt !== undefined ? { completedAt: new Date(native.completedAt) } : {}),
   };
@@ -65,7 +70,8 @@ export function extendsHistory(previous: readonly Message[], next: readonly Mess
   for (let index = 0; index < previous.length - 1; index += 1) {
     const a = previous[index];
     const b = next[index];
-    if (a !== b && (a.role !== b.role || JSON.stringify(a.body) !== JSON.stringify(b.body))) return false;
+    if (a !== b && (a.role !== b.role || JSON.stringify(a.body) !== JSON.stringify(b.body)))
+      return false;
   }
   return true;
 }

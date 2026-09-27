@@ -90,8 +90,14 @@ doc_write replaces a whole doc: pass kind, content, reason and the revision you 
 
 /** One tool call as a transcript line: its verbatim harness name plus a bounded input. */
 const TOOL_INPUT_MAX = 400;
-const cleanProse = (text: string) => text.replace(/<!-- unleashd:buddy-context-v2[\s\S]*?<!-- \/unleashd:buddy-context-v2 -->/g, '').trim();
-function toolLine({ name, input }: Extract<Message['body'], { t: 'parts' }>['parts'][number] & { t: 'tool' }): string {
+const cleanProse = (text: string) =>
+  text
+    .replace(/<!-- unleashd:buddy-context-v2[\s\S]*?<!-- \/unleashd:buddy-context-v2 -->/g, '')
+    .trim();
+function toolLine({
+  name,
+  input,
+}: Extract<Message['body'], { t: 'parts' }>['parts'][number] & { t: 'tool' }): string {
   const text = input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input);
   const shown =
     text.length > TOOL_INPUT_MAX
@@ -113,17 +119,20 @@ export function reviewTranscript(messages: CompletedBuddyTurn['messages']) {
       continue;
     }
     const prose = message.body.t === 'text' ? cleanProse(message.body.text) : '';
-    const parts = message.body.t === 'parts' ? message.body.parts.map((part) => {
-      if (part.t === 'text') return cleanProse(part.text);
-      if (part.t === 'tool') return toolLine(part);
-      if (part.t === 'question') return `[question] ${JSON.stringify(part.question)}`;
-      if (part.t === 'buddy_builder_result') return `[Buddy Builder result] ${JSON.stringify(part.event)}`;
-      if (part.t === 'buddy_worker_thread') return `[Buddy worker thread] ${JSON.stringify(part.thread)}`;
-      return `[swarm launch] ${part.command}`;
-    }) : [];
-    const clean = [prose, ...parts]
-      .filter(Boolean)
-      .join('\n');
+    const parts =
+      message.body.t === 'parts'
+        ? message.body.parts.map((part) => {
+            if (part.t === 'text') return cleanProse(part.text);
+            if (part.t === 'tool') return toolLine(part);
+            if (part.t === 'question') return `[question] ${JSON.stringify(part.question)}`;
+            if (part.t === 'buddy_builder_result')
+              return `[Buddy Builder result] ${JSON.stringify(part.event)}`;
+            if (part.t === 'buddy_worker_thread')
+              return `[Buddy worker thread] ${JSON.stringify(part.thread)}`;
+            return `[swarm launch] ${part.command}`;
+          })
+        : [];
+    const clean = [prose, ...parts].filter(Boolean).join('\n');
     const bytes = Buffer.from(clean);
     const content =
       bytes.length > remaining ? bytes.subarray(bytes.length - remaining).toString('utf8') : clean;

@@ -47,9 +47,20 @@ export const MessageSchema = z.preprocess((value) => {
   const message = value as Record<string, unknown>;
   if (message.body !== undefined || typeof message.content !== 'string') return value;
   const call = message.toolCall as { name?: unknown; input?: unknown } | undefined;
-  const body = typeof call?.name === 'string'
-    ? { t: 'parts' as const, parts: [toolContentPart(call.name, legacyToolInput(typeof call.input === 'string' ? call.input : undefined))] }
-    : message.role === 'assistant' ? legacyBody(message.content) : { t: 'text' as const, text: message.content };
+  const body =
+    typeof call?.name === 'string'
+      ? {
+          t: 'parts' as const,
+          parts: [
+            toolContentPart(
+              call.name,
+              legacyToolInput(typeof call.input === 'string' ? call.input : undefined)
+            ),
+          ],
+        }
+      : message.role === 'assistant'
+        ? legacyBody(message.content)
+        : { t: 'text' as const, text: message.content };
   return { ...message, body };
 }, CurrentMessageSchema);
 export type Message = z.infer<typeof MessageSchema>;

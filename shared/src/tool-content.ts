@@ -246,14 +246,24 @@ export function commandFromDisplayText(name: string, displayText?: string): stri
 }
 
 /** Classify a provider tool once, at live or historical ingress. */
-export function toolContentPart(name: string, input?: unknown, displayText?: string, status?: string): ContentPart {
-  const record = input && typeof input === 'object' ? input as Record<string, unknown> : null;
-  const command = typeof record?.command === 'string' ? record.command
-    : typeof record?.cmd === 'string' ? record.cmd
-    : commandFromDisplayText(name, displayText);
+export function toolContentPart(
+  name: string,
+  input?: unknown,
+  displayText?: string,
+  status?: string
+): ContentPart {
+  const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : null;
+  const command =
+    typeof record?.command === 'string'
+      ? record.command
+      : typeof record?.cmd === 'string'
+        ? record.cmd
+        : commandFromDisplayText(name, displayText);
   if (SHELL_TOOL_NAMES.has(name) && command && detectOompaSubcommand(command))
     return { t: 'swarm_launch', command };
-  return { t: 'tool', name,
+  return {
+    t: 'tool',
+    name,
     ...(input === undefined ? {} : { input }),
     ...(displayText === undefined ? {} : { displayText }),
     ...(status === undefined ? {} : { status }),

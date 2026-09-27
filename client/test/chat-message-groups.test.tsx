@@ -26,7 +26,9 @@ import { syntheticConversation, syntheticDetail } from './fixtures/synthetic-con
 const ingestAddon = createRequire(new URL('../../server/package.json', import.meta.url))(
   '@unleashd/ingest'
 );
-const { sessionMessages } = createRequire(import.meta.url)('../../server/src/ingest/history.ts') as typeof import('../../server/src/ingest/history');
+const { sessionMessages } = createRequire(import.meta.url)(
+  '../../server/src/ingest/history.ts'
+) as typeof import('../../server/src/ingest/history');
 
 /** Parse Codex rollout records the way the server does: through the ingest store. */
 async function savedCodexMessages(records: unknown[]): Promise<Message[]> {
@@ -174,10 +176,10 @@ test('one assistant response contains all prose and widgets while streaming stay
   assert.deepEqual(messages.at(-1)?.body, { t: 'text', text: 'Current' });
 
   store.set(streamStore.all, new Map());
-  assert.deepEqual(
-    store.get(groupsFamily(conversation.id)).at(-1)?.messages.at(-1)?.body,
-    { t: 'text', text: 'Current' }
-  );
+  assert.deepEqual(store.get(groupsFamily(conversation.id)).at(-1)?.messages.at(-1)?.body, {
+    t: 'text',
+    text: 'Current',
+  });
 });
 
 test('response boundaries own one Copy action and preserve ordered tool runs and every completed answer', () => {
@@ -297,7 +299,10 @@ test('streamed tool runs and saved calls render the same compact disclosure with
       (match) => match[0]
     );
   const firstCalls = [toolMessage('exec'), toolMessage('shell', { command: 'pwd' })];
-  seed(store, { ...conversation, messages: [conversation.messages[0], ...firstCalls, conversation.messages[1]] });
+  seed(store, {
+    ...conversation,
+    messages: [conversation.messages[0], ...firstCalls, conversation.messages[1]],
+  });
   const first = render();
   assert.equal(disclosures(first).length, 1);
   assert.match(disclosures(first)[0], /2 tool calls/);
@@ -305,7 +310,10 @@ test('streamed tool runs and saved calls render the same compact disclosure with
   const answer =
     'Result:\n\n```text\n🔧 fenced example\n⚡ another example\n📖 third example\n```\n\nFinished.';
   const savedCalls = [...firstCalls, toolMessage('Read', { file_path: 'source.ts' })];
-  seed(store, { ...conversation, messages: [conversation.messages[0], ...savedCalls, conversation.messages[1]] });
+  seed(store, {
+    ...conversation,
+    messages: [conversation.messages[0], ...savedCalls, conversation.messages[1]],
+  });
   store.set(streamStore.all, new Map([[conversation.id, answer]]));
   const live = render();
   assert.equal(disclosures(live).length, 1);
@@ -319,11 +327,7 @@ test('streamed tool runs and saved calls render the same compact disclosure with
   store.set(streamStore.all, new Map());
   seed(store, {
     ...conversation,
-    messages: [
-      conversation.messages[0],
-      ...savedCalls,
-      message('assistant', answer, true),
-    ],
+    messages: [conversation.messages[0], ...savedCalls, message('assistant', answer, true)],
   });
   const saved = render();
   assert.deepEqual(disclosures(saved), disclosures(live));
@@ -446,13 +450,24 @@ test('worker launch receipts stay inline in collapsed tool rows on both shells',
   for (const messages of [
     [
       toolMessage('unleashd_buddy.send'),
-      { ...message('assistant', ''), body: { t: 'parts' as const, parts: [{ t: 'buddy_worker_thread' as const, thread }] } },
+      {
+        ...message('assistant', ''),
+        body: { t: 'parts' as const, parts: [{ t: 'buddy_worker_thread' as const, thread }] },
+      },
     ],
-    [{ ...message('assistant', ''), body: { t: 'parts' as const, parts: [
-      { t: 'tool' as const, name: 'unleashd_buddy.send' },
-      { t: 'buddy_worker_thread' as const, thread },
-      { t: 'text' as const, text: 'Done dispatching.' },
-    ] } }],
+    [
+      {
+        ...message('assistant', ''),
+        body: {
+          t: 'parts' as const,
+          parts: [
+            { t: 'tool' as const, name: 'unleashd_buddy.send' },
+            { t: 'buddy_worker_thread' as const, thread },
+            { t: 'text' as const, text: 'Done dispatching.' },
+          ],
+        },
+      },
+    ],
   ]) {
     const response = groupChatMessages(messages, null)[0];
     assert.equal(response.type, 'assistant');
@@ -710,7 +725,10 @@ test('regrouping after records change matches a full pass for every transcript p
     }
     // A replaced earlier record (a fresh snapshot) falls back to a full pass.
     const replaced = records.slice();
-    replaced[0] = { ...records[0], body: { t: 'text', text: `${messageTranscriptContent(records[0])}!` } };
+    replaced[0] = {
+      ...records[0],
+      body: { t: 'text', text: `${messageTranscriptContent(records[0])}!` },
+    };
     assert.deepEqual(
       regroupChatMessages(previous, previousRecords, replaced, null),
       groupChatMessages(replaced, null)

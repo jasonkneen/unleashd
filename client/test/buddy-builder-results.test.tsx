@@ -22,9 +22,7 @@ register(
   `)}`,
   import.meta.url
 );
-const { BuddyBuilderResultCard } = await import(
-  '../src/components/buddies/BuddyBuilderResultCard'
-);
+const { BuddyBuilderResultCard } = await import('../src/components/buddies/BuddyBuilderResultCard');
 
 const result: BuddyBuilderResult = {
   conversationId: 'builder-wave',
@@ -145,14 +143,24 @@ test('the compact result replaces only its adjacent generic MCP tool label', () 
   assert.equal(body.t, 'parts');
   if (body.t !== 'parts') return;
   assert.equal(body.parts.filter((part) => part.t === 'buddy_builder_result').length, 1);
-  const text = body.parts.filter((part) => part.t === 'text').map((part) => part.text).join('');
+  const text = body.parts
+    .filter((part) => part.t === 'text')
+    .map((part) => part.text)
+    .join('');
   assert.doesNotMatch(text, /mcp_tool/);
-  assert.equal(body.parts.some((part) => part.t === 'tool' && part.name === 'unrelated_tool'), true);
+  assert.equal(
+    body.parts.some((part) => part.t === 'tool' && part.name === 'unrelated_tool'),
+    true
+  );
   assert.match(text, /Before/);
   assert.match(text, /After/);
-  assert.deepEqual(legacyBody('🔧 mcp_tool\nTool failed'), { t: 'parts', parts: [
-    { t: 'tool', name: 'mcp_tool', displayText: '' }, { t: 'text', text: '\nTool failed' },
-  ] });
+  assert.deepEqual(legacyBody('🔧 mcp_tool\nTool failed'), {
+    t: 'parts',
+    parts: [
+      { t: 'tool', name: 'mcp_tool', displayText: '' },
+      { t: 'text', text: '\nTool failed' },
+    ],
+  });
   const html = renderToolResult(result);
   assert.match(html, /popover="auto"/);
   assert.match(html, /popoverTarget=/i);

@@ -26,11 +26,17 @@ test('status, dry-run and help commands remain ordinary tool calls', () => {
 });
 
 test('tool classification can use a shell displayText command', () => {
-  assert.equal(toolContentPart('shell', {}, 'env -u CLAUDECODE oompa run oompa/oompa.spark4.json').t, 'swarm_launch');
+  assert.equal(
+    toolContentPart('shell', {}, 'env -u CLAUDECODE oompa run oompa/oompa.spark4.json').t,
+    'swarm_launch'
+  );
 });
 
 test('Codex completion-only shell events are suppressed', () => {
-  assert.equal(isCompletionOnlyToolUse('shell', { command: 'ls -la', exit_code: 0 }, undefined), true);
+  assert.equal(
+    isCompletionOnlyToolUse('shell', { command: 'ls -la', exit_code: 0 }, undefined),
+    true
+  );
   assert.equal(isCompletionOnlyToolUse('shell', { exit_code: 0 }, 'ls -la'), false);
   assert.equal(isCompletionOnlyToolUse('Bash', { exit_code: 0 }, undefined), false);
 });
