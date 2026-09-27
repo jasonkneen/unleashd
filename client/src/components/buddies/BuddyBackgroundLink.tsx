@@ -1,6 +1,9 @@
 import { useAtomValue } from 'jotai';
 import { Link } from 'react-router-dom';
-import { buddyActiveWorkerCountAtomFamily } from '../../atoms/buddy-background';
+import {
+  buddyActiveWorkerCountAtomFamily,
+  buddyHasRunningWorkersAtomFamily,
+} from '../../atoms/buddy-background';
 import { conversationLoadCompleteAtom } from '../../atoms/conversations';
 import { buddyTabPath } from './buddy-tabs';
 
@@ -11,11 +14,13 @@ export function BuddyBackgroundLink({
   name,
 }: { buddyId: string; workspaceId: string; name: string }) {
   const count = useAtomValue(buddyActiveWorkerCountAtomFamily({ buddyId, workspaceId }));
+  const running = useAtomValue(buddyHasRunningWorkersAtomFamily({ buddyId, workspaceId }));
   const loaded = useAtomValue(conversationLoadCompleteAtom);
   const label = `${name}: ${loaded ? `${count} active background workers` : 'loading background workers'}`;
   return (
     <Link
       className="buddy-background-link"
+      data-running={loaded && running ? 'true' : undefined}
       to={`${buddyTabPath(buddyId, 'background')}?workspace=${encodeURIComponent(workspaceId)}`}
       aria-label={label}
       title={`${label}. View workers and recent activity`}

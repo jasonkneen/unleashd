@@ -731,6 +731,14 @@ a.channel-browser-instance:hover {
   cursor: progress;
 }
 
+@media (hover: hover) {
+  /* Keep a running worker's persistent count clear of long Buddy names. */
+  .channel-browser-buddy:has(.buddy-background-link[data-running="true"])
+    .channel-browser-buddy-link {
+    padding-right: 72px;
+  }
+}
+
 /* Landscape tablets use this rail too; touch cannot reveal hover actions. */
 @media (hover: none) {
   .channel-browser-buddy-actions {

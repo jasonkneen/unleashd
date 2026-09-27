@@ -26,6 +26,13 @@
   outline-offset: 1px;
 }
 
+/* Override the hover-only parent's visibility for running workers. Keep the
+   requested green across palettes whose generic success color is yellow. */
+.buddy-background-link[data-running="true"] {
+  visibility: visible;
+  color: color-mix(in oklch, #27b56b 80%, var(--pole-fg-pop));
+}
+
 @media (max-width: 768px), (hover: none) {
   .buddy-background-link {
     min-width: 44px;

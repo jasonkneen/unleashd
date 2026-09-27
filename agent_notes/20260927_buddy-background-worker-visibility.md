@@ -55,3 +55,25 @@ created a conversation is outside this conversation-based view.
 The shared checkout contains other sessions' changes. Only this feature's files
 and the three small mobile DM-row edits belong to its commit; the unrelated
 mobile channel-archive edits are retained in the working tree.
+
+## Owner follow-up: green without hover
+
+Running workers now keep the DM-row icon and count visible in green even when
+neither the row nor the link is hovered or focused. A scalar derived atom uses
+the same worker status authority as the detail page. Queued-only work still
+counts as active but does not claim to be running. Stopped or unconfirmed workers
+also do not receive the green state. Long Buddy names reserve room for the
+persistent indicator on desktop; touch layouts retain their 44px targets.
+
+- Live Chrome/CDP with real wave_sim data: Product Lead had four running workers.
+  Desktop, phone and landscape tablet each reported `visibility: visible`, green
+  computed color, `:hover` false, `:focus-within` false and a successful center-point
+  hit test for the running link. No horizontal overflow. All three PNGs inspected.
+- Reproduction and evidence: `output/background-worker-green/review.mjs`,
+  `evidence.json` and `running-workers-{desktop,phone,tablet}.png` (gitignored).
+- Client `tsc -b`, four focused rendered/atom/rail regressions and all six client
+  invariant gates passed in both the shared checkout and the isolated feature
+  checkout. The regression verifies running, queued-only and stopped states.
+- The five implementation/test files were copied into the isolated checked
+  snapshot for comparison with the follow-up commit. The earlier full-suite
+  baseline failures documented above are unchanged by this presentation update.

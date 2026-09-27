@@ -146,3 +146,11 @@ export const buddyActiveWorkerCountAtomFamily = atomFamily(
     ),
   (a, b) => a.buddyId === b.buddyId && a.workspaceId === b.workspaceId
 );
+
+export const buddyHasRunningWorkersAtomFamily = atomFamily(
+  (scope: BuddyScope) =>
+    atom((get) =>
+      get(buddyBackgroundWorkersAtomFamily(scope)).some((worker) => worker.status === 'running')
+    ),
+  (a, b) => a.buddyId === b.buddyId && a.workspaceId === b.workspaceId
+);

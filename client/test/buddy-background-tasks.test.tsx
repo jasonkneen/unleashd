@@ -199,6 +199,7 @@ test('DM worker count and page include native workers, deduplicate transcripts a
     );
   const html = render();
   assert.match(html, /Lead: 2 active background workers/);
+  assert.match(html, /class="buddy-background-link" data-running="true"/);
   assert.match(html, /href="\/buddies\/lead\/background\?workspace=wave"/);
   assert.match(html, /1 running · 1 queued · 3 total/);
   assert.match(html, /Review the build/);
@@ -208,11 +209,20 @@ test('DM worker count and page include native workers, deduplicate transcripts a
   assert.match(html, /this worker’s result was not confirmed/);
   assert.equal((html.match(/href="\/chat\/child"/g) ?? []).length, 1);
 
+  // Waiting for capacity is active work, but must not claim a worker is running.
+  store.set(
+    conversationsAtom,
+    new Map([[parent.id, { ...parent, subAgents: [parent.subAgents[1]] }]])
+  );
+  assert.match(render(), /Lead: 1 active background workers/);
+  assert.doesNotMatch(render(), /data-running="true"/);
+
   // A stopped parent cannot leave two supposedly live workers in the count.
   // Removing the child falls back to its existing parent; never links a dead id.
   store.set(conversationsAtom, new Map([[parent.id, { ...parent, isRunning: false }]]));
   const stopped = render();
   assert.match(stopped, /Lead: 0 active background workers/);
+  assert.doesNotMatch(stopped, /data-running="true"/);
   assert.match(stopped, /last reported state may be stale/);
   assert.doesNotMatch(stopped, /href="\/chat\/child"/);
   assert.match(stopped, /Open parent conversation/);
