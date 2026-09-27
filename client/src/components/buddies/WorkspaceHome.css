@@ -53,6 +53,9 @@
 }
 .workspace-home-tiles,
 .workspace-home-list {
+  /* The rewrite dropped this reset and exposed bullets beside every card.
+     Guard: tools/check-workspace-navigation.mjs and workspace-home screenshots. */
+  list-style: none;
   gap: var(--sp-6);
 }
 .workspace-home-link {

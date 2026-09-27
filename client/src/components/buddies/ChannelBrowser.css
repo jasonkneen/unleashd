@@ -136,15 +136,11 @@
 }
 
 .channel-browser-rail-section {
-  margin: 0 0 6px;
+  margin: 0;
   padding: 0 var(--sp-4);
   font: 600 11px / 1.6 var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-
-.channel-browser-rail-section:not(:first-child) {
-  margin-top: var(--sp-6);
 }
 
 .channel-browser-rail-empty {
@@ -483,6 +479,7 @@ a.channel-browser-instance:hover {
    left of it. */
 .channel-browser-buddy {
   position: relative;
+  min-width: 0;
 }
 
 .channel-browser-pane-title,
@@ -553,10 +550,6 @@ a.channel-browser-buddy-done {
 .channel-browser-rail-section-row {
   justify-content: space-between;
   margin-bottom: var(--sp-3);
-}
-
-.channel-browser-rail-section-row .channel-browser-rail-section {
-  margin: 0;
 }
 
 .channel-browser-rail-add {
