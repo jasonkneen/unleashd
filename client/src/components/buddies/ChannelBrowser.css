@@ -315,8 +315,8 @@
   }
 }
 .channel-search-field {
-  gap: var(--sp-4);
-  padding: var(--sp-3) var(--sp-6);
+  gap: var(--sp-5);
+  padding: var(--sp-6) var(--sp-8);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--accent);
 }
