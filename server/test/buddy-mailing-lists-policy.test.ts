@@ -120,6 +120,34 @@ test('fresh default-policy run admits new_list, post and get_list through the MC
       ).data.lists[0].unread,
       0
     );
+
+    const archived = await client.call('set_list_archived', {
+      listId: list.id,
+      key: 'archive-standups',
+      archived: true,
+    });
+    assert.equal(archived.response.isError, undefined, JSON.stringify(archived.response));
+    assert.equal(raw.listLists({ workspace: w.id }).length, 0);
+    assert.equal(raw.listLists({ workspace: w.id, includeArchived: true }).length, 1);
+    const archivedInbox = await client.call('get_inbox', {});
+    assert.equal(
+      (archivedInbox.response.structuredContent as { data: { lists: unknown[] } }).data.lists
+        .length,
+      0
+    );
+    const preserved = await client.call('get_list', { listId: list.id });
+    assert.equal(
+      (preserved.response.structuredContent as { data: { posts: Array<{ body: string }> } }).data
+        .posts[0].body,
+      'Shipped the lists stream'
+    );
+    const restored = await client.call('set_list_archived', {
+      listId: list.id,
+      key: 'restore-standups',
+      archived: false,
+    });
+    assert.equal(restored.response.isError, undefined, JSON.stringify(restored.response));
+    assert.equal(raw.listLists({ workspace: w.id }).length, 1);
   } finally {
     await client.close();
     raw.close();

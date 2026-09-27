@@ -162,6 +162,7 @@ export interface BuddyMailingList {
   purpose: string;
   createdBy: BuddyListAuthor;
   createdAt: string;
+  archivedAt?: string | null;
 }
 
 export interface BuddyMailingListSummary extends BuddyMailingList {
@@ -506,7 +507,13 @@ export interface BuddiesStorePort {
     purpose: string;
   }): { list: BuddyMailingList };
   getList(id: string): BuddyMailingList | null;
-  listLists(input: { workspace: string }): BuddyMailingListSummary[];
+  setListArchived(input: {
+    list: string;
+    author: BuddyListAuthor;
+    key: string;
+    archived: boolean;
+  }): { list: BuddyMailingList };
+  listLists(input: { workspace: string; includeArchived?: boolean }): BuddyMailingListSummary[];
   listWorkspaces(): BuddyWorkspace[];
   createPost(input: {
     list: string;

@@ -46,6 +46,7 @@ export interface BuddyMailingListSummary {
   purpose: string;
   createdBy: BuddyListAuthor;
   createdAt: string;
+  archivedAt?: string | null;
   postCount: number;
   latestPostAt: string | null;
 }
@@ -80,6 +81,18 @@ export const CHANNEL_BACKSTOP_MS = 30_000;
 
 export function listsUrl(workspaceId: string): string {
   return `/api/buddies/lists?workspaceId=${encodeURIComponent(workspaceId)}`;
+}
+
+export function archivedListsUrl(workspaceId: string): string {
+  return `${listsUrl(workspaceId)}&archivedOnly=true`;
+}
+
+export async function setChannelArchived(listId: string, archived: boolean): Promise<void> {
+  await buddyApi(`/api/buddies/lists/${encodeURIComponent(listId)}/archive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: newId(), archived }),
+  });
 }
 
 /** Posts per page read; the newest page is what every channel warms. */

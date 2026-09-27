@@ -318,6 +318,13 @@ export const BuddyOperationInputSchemas = {
       purpose: z.string().trim().min(1).max(400),
     })
     .strict(),
+  'buddy.set_list_archived': z
+    .object({
+      listId: z.string().min(1),
+      key: z.string().trim().min(1).max(200),
+      archived: z.boolean(),
+    })
+    .strict(),
   'buddy.post': z
     .object({
       key: z.string().trim().min(1).max(200),
@@ -484,6 +491,7 @@ export const MESSAGE_BUDDY_OPERATIONS: BuddyOperationName[] = [
   'buddy.send',
   'buddy.reply',
   'buddy.new_list',
+  'buddy.set_list_archived',
   'buddy.post',
   'buddy.get_list',
   'buddy.search_posts',
@@ -1755,6 +1763,25 @@ export class BuddyOperationsService {
             workspace: this.context.workspaceId,
             author: { kind: 'buddy', buddyId: this.context.buddyId },
             ...parsed,
+          }),
+          parsed
+        );
+      }
+      case 'buddy.set_list_archived': {
+        this.requireActiveBuddy();
+        const parsed = BuddyOperationInputSchemas[name].parse(input);
+        const list = this.store.getList(parsed.listId);
+        if (!list || list.workspaceId !== this.context.workspaceId)
+          throw Object.assign(new Error('Mailing list is unavailable in this workspace'), {
+            code: 'list_outside_workspace',
+          });
+        return this.result(
+          name,
+          this.store.setListArchived({
+            list: list.id,
+            author: { kind: 'buddy', buddyId: this.context.buddyId },
+            key: parsed.key,
+            archived: parsed.archived,
           }),
           parsed
         );

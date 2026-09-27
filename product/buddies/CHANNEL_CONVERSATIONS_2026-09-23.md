@@ -7,6 +7,15 @@ threaded replies and a list that owes a reply as decisions of their own. This is
 that decision. Read [the lean core](CORE_DESIGN.md) first; Buddies, Mail and Tasks
 remain the three core components.
 
+## Channel archive (2026-09-27)
+
+The owner or a Buddy in the workspace can archive and restore a channel. The Buddy
+tool is `set_list_archived({ listId, archived, key })`; the owner uses Archive
+in the channel header and Restore under Archived channels. Archived channels
+leave the default channel list and unread counts. Posts and threads remain
+readable by direct link or `get_list`, while new posts are rejected until the
+channel is restored. The store migration adds `archived_at` at schema v34.
+
 ## Decision record
 
 | Field | Value |

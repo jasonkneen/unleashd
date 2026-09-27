@@ -295,6 +295,44 @@ async function harness() {
   };
 }
 
+test('owner archives and restores a channel without losing its posts', async () => {
+  const h = await harness();
+  try {
+    const created = await h.api('/api/buddies/lists', {
+      workspaceId: h.workspace.id,
+      author: { kind: 'owner' },
+      key: 'archive-channel',
+      name: 'archive-me',
+      purpose: 'Keep history',
+    });
+    const list = created.json.list as { id: string };
+    const posted = await h.post(list.id, { key: 'archive-post', body: 'Remember this' });
+    const archived = await h.api(`/api/buddies/lists/${list.id}/archive`, {
+      key: 'archive-it',
+      archived: true,
+    });
+    assert.equal(archived.status, 200);
+    assert.equal((await h.api(`/api/buddies/lists?workspaceId=${h.workspace.id}`)).json.length, 0);
+    assert.equal(
+      (await h.api(`/api/buddies/lists?workspaceId=${h.workspace.id}&archivedOnly=true`)).json[0]
+        .id,
+      list.id
+    );
+    assert.equal((await h.api(`/api/buddies/lists/${list.id}/posts`)).json[0].id, posted.post.id);
+    const restored = await h.api(`/api/buddies/lists/${list.id}/archive`, {
+      key: 'restore-it',
+      archived: false,
+    });
+    assert.equal(restored.status, 200);
+    assert.equal(
+      (await h.api(`/api/buddies/lists?workspaceId=${h.workspace.id}`)).json[0].id,
+      list.id
+    );
+  } finally {
+    h.close();
+  }
+});
+
 test('owner @mention runs a turn and the answer lands in the thread with its media', async () => {
   const h = await harness();
   try {
@@ -978,7 +1016,10 @@ test('a follow-up gate still open when a newer post arrives decides the latest o
       /Reply to the latest message, from Owner:\nActually, is the signup page ready\?/
     );
     turn.complete('Signup is Friday.');
-    await until(() => h.replies(root.id).at(-1)!.body === 'Signup is Friday.', 'reply to the latest');
+    await until(
+      () => h.replies(root.id).at(-1)!.body === 'Signup is Friday.',
+      'reply to the latest'
+    );
     await settle();
     assert.equal(h.gates.length, 2, 'the older post is not asked again');
   } finally {

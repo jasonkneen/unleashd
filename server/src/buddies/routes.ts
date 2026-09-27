@@ -849,10 +849,17 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
   route.get('/api/buddies/lists', 400, async (req, res) => {
     const buddies = await getStore();
     const input = z
-      .object({ workspaceId: z.string().min(1) })
+      .object({
+        workspaceId: z.string().min(1),
+        archivedOnly: z.enum(['true', 'false']).optional(),
+      })
       .strict()
       .parse(req.query);
-    res.json(buddies.listLists({ workspace: input.workspaceId }));
+    const lists = buddies.listLists({
+      workspace: input.workspaceId,
+      includeArchived: input.archivedOnly === 'true',
+    });
+    res.json(input.archivedOnly === 'true' ? lists.filter((list) => list.archivedAt) : lists);
   });
 
   route.post('/api/buddies/lists', 400, async (req, res) => {
@@ -869,6 +876,20 @@ export function registerBuddyRoutes(app: Express, dependencies: BuddyRouteDepend
       .parse(req.body);
     const { workspaceId, ...rest } = input;
     res.status(201).json(buddies.createList({ workspace: workspaceId, ...rest }));
+  });
+
+  route.post('/api/buddies/lists/:listId/archive', 400, async (req, res) => {
+    const buddies = await getStore();
+    const input = z
+      .object({ key: z.string().trim().min(1).max(200), archived: z.boolean() })
+      .strict()
+      .parse(req.body);
+    const list = buddies.getList(req.params.listId);
+    if (!list) {
+      res.status(404).json({ error: 'Mailing list not found' });
+      return;
+    }
+    res.json(buddies.setListArchived({ list: list.id, author: { kind: 'owner' }, ...input }));
   });
 
   // Top-level posts, newest-first: the newest page, `before=<post>` for the

@@ -61,6 +61,7 @@ const TOOL_NAMES = [
   'buddy.send',
   'buddy.reply',
   'buddy.new_list',
+  'buddy.set_list_archived',
   'buddy.post',
   'buddy.get_list',
   'buddy.search_posts',
@@ -128,6 +129,8 @@ const TOOL_DESCRIPTIONS: Record<(typeof TOOL_NAMES)[number], string> = {
     'Reply to a message assigned to this Buddy conversation with a free-text outcome, body, and concrete evidence references. A manual final reply cannot complete unfinished managed background work; record progress and evidence through update_project, and the runtime returns its final disposition. Only the owner can answer owner-directed messages.',
   'buddy.new_list':
     'Create a public mailing list in this workspace with a stable key, unique name and purpose. Everyone in the workspace can read and post; there is no membership. Replaying the key returns the same list.',
+  'buddy.set_list_archived':
+    'Archive or restore a channel in this workspace with a stable key. Archived channels leave default navigation and unread counts; posts remain available by direct link and the channel can be restored. Supply archived:true to archive, false to restore.',
   'buddy.post':
     'Post to a mailing list with a stable key. Posts are public to the workspace, immutable, wake nobody and carry no reply obligation. Use purpose for the kind of post (standup, handoff, announcement, decision). Link a Task with projectId; discussion about a Task belongs on the Task. Reply in a thread with threadId (the root post id of the thread; threads are one level). The body is markdown: embed an image or video with ![alt](/absolute/path) (png jpg gif webp mp4 webm mov, 50 MB; the file is copied into the channel) and reference a Task with [title](task:<projectId>). Anything needing action still goes through send or update_project.',
   'buddy.get_list':
@@ -309,11 +312,13 @@ export function createBuddyMcpServer(
             operation === 'buddy.update_soul' ||
             operation === 'buddy.update_project' ||
             operation === 'buddy.set_automation' ||
-            operation === 'buddy.update_memory',
+            operation === 'buddy.update_memory' ||
+            operation === 'buddy.set_list_archived',
           idempotentHint:
             operation === 'buddy.list_task_comments' ||
             operation === 'buddy.append_task_comment' ||
             operation === 'buddy.new_list' ||
+            operation === 'buddy.set_list_archived' ||
             operation === 'buddy.post' ||
             operation === 'buddy.get_list' ||
             operation.startsWith('buddy.get_') ||

@@ -28,6 +28,7 @@ import { CreatingBuddyRailRow } from './CreatingBuddyRailRow';
 import { useChannelNewBuddy } from './buddy-direct-actions';
 import {
   type BuddyMailingListSummary,
+  archivedListsUrl,
   CHANNEL_BACKSTOP_MS,
   type ChannelMember,
   type ChannelRow,
@@ -40,6 +41,7 @@ import {
   createChannel,
   feedPhase,
   listsUrl,
+  setChannelArchived,
   ownerUnreadByList,
   postPurposeLabel,
   postPurposeTag,
@@ -428,19 +430,21 @@ function ThreadPane({
           </div>
         )}
       </div>
-      <ChannelComposer
-        key={rootId}
-        listId={list.id}
-        threadRootId={rootId}
-        placeholder={root ? `Reply to ${plainChannelText(root.body).slice(0, 40)}…` : 'Reply…'}
-        references={references}
-        seats={thread.data?.seats}
-        submit="enter"
-        onPosted={() => {
-          follow.pin();
-          void thread.refetch();
-        }}
-      />
+      {!list.archivedAt && (
+        <ChannelComposer
+          key={rootId}
+          listId={list.id}
+          threadRootId={rootId}
+          placeholder={root ? `Reply to ${plainChannelText(root.body).slice(0, 40)}…` : 'Reply…'}
+          references={references}
+          seats={thread.data?.seats}
+          submit="enter"
+          onPosted={() => {
+            follow.pin();
+            void thread.refetch();
+          }}
+        />
+      )}
     </aside>
   );
 }
@@ -460,9 +464,11 @@ function ChannelPane({
   onThread,
   openDm,
   ownerUnread,
+  onArchive,
 }: {
   list: BuddyMailingListSummary;
   ownerUnread: OwnerListUnread | undefined;
+  onArchive: (listId: string, archived: boolean) => void;
   workspaceId: string;
   channelNameById: ReadonlyMap<string, string>;
   buddyNames: Readonly<Record<string, string>>;
@@ -540,6 +546,15 @@ function ChannelPane({
             path={channelLinkPath(workspaceId, { kind: 'channel', listId: list.id })}
             label="Copy link to channel"
           />
+          <button
+            type="button"
+            className="channel-browser-header-action channel-browser-archive-action"
+            onClick={() => onArchive(list.id, !list.archivedAt)}
+            title={list.archivedAt ? 'Restore channel' : 'Archive channel'}
+            aria-label={`${list.archivedAt ? 'Restore' : 'Archive'} #${list.name}`}
+          >
+            {list.archivedAt ? 'Restore' : 'Archive'}
+          </button>
           {taskIds.length > 0 && (
             <label className="channel-browser-task-filter">
               <span>Task</span>
@@ -602,20 +617,22 @@ function ChannelPane({
             ),
           })}
         </div>
-        <ChannelComposer
-          listId={list.id}
-          threadRootId={null}
-          placeholder={`Message #${list.name}`}
-          references={references}
-          submit="enter"
-          onPosted={(result: BuddyOwnerPostResult) => {
-            follow.pin();
-            void channelFeed.refetch();
-            // Mentioning a Buddy opens the thread its reply will land in.
-            if (result.mentions.some((mention) => mention.status === 'started'))
-              onThread(result.post.id);
-          }}
-        />
+        {!list.archivedAt && (
+          <ChannelComposer
+            listId={list.id}
+            threadRootId={null}
+            placeholder={`Message #${list.name}`}
+            references={references}
+            submit="enter"
+            onPosted={(result: BuddyOwnerPostResult) => {
+              follow.pin();
+              void channelFeed.refetch();
+              // Mentioning a Buddy opens the thread its reply will land in.
+              if (result.mentions.some((mention) => mention.status === 'started'))
+                onThread(result.post.id);
+            }}
+          />
+        )}
       </section>
       {threadId && (
         <ThreadPane
@@ -860,6 +877,10 @@ export function ChannelBrowser({
     listsUrl(workspaceId),
     CHANNEL_BACKSTOP_MS
   );
+  const archivedLists = usePolledFetch<BuddyMailingListSummary[]>(
+    archivedListsUrl(workspaceId),
+    CHANNEL_BACKSTOP_MS
+  );
   const { data } = lists;
   useWarmChannelPosts(data);
   const ownerUnread = useOwnerUnread();
@@ -869,6 +890,17 @@ export function ChannelBrowser({
   );
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const changeArchive = async (listId: string, archived: boolean) => {
+    try {
+      setArchiveError(null);
+      await setChannelArchived(listId, archived);
+      await Promise.all([lists.refetch(), archivedLists.refetch()]);
+    } catch (error) {
+      setArchiveError(error instanceof Error ? error.message : 'Could not change channel archive');
+    }
+  };
   const channelNameById = useMemo(
     () => new Map((data ?? []).map((list) => [list.id, list.name])),
     [data]
@@ -878,7 +910,11 @@ export function ChannelBrowser({
     [workspaceName, members, tasks]
   );
   const creatingBuddy = latestActiveBuddyBuilder(useAtomValue(buddyBuilderConversationsAtom));
-  const selected = data?.find((list) => list.id === params.get('channel')) ?? data?.[0] ?? null;
+  const selected =
+    data?.find((list) => list.id === params.get('channel')) ??
+    archivedLists.data?.find((list) => list.id === params.get('channel')) ??
+    data?.[0] ??
+    null;
   const select = (next: { channel: string; task: string | null; thread: string | null }) =>
     setParams({
       channel: next.channel,
@@ -957,6 +993,34 @@ export function ChannelBrowser({
               ))}
             </ul>
           )}
+          {archiveError && (
+            <p className="channel-browser-rail-empty" role="alert">
+              {archiveError}
+            </p>
+          )}
+          {(archivedLists.data?.length ?? 0) > 0 && (
+            <>
+              <button
+                type="button"
+                className="channel-browser-archived-toggle"
+                onClick={() => setShowArchived(!showArchived)}
+              >
+                Archived channels ({archivedLists.data?.length})
+              </button>
+              {showArchived && (
+                <ul className="channel-browser-archived-list">
+                  {archivedLists.data?.map((list) => (
+                    <li key={list.id}>
+                      <span>#{list.name}</span>
+                      <button type="button" onClick={() => void changeArchive(list.id, false)}>
+                        Restore
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
           <div className="channel-browser-rail-section-row">
             <h3 className="channel-browser-rail-section">Buddies</h3>
             <button
@@ -1033,6 +1097,7 @@ export function ChannelBrowser({
             }
             openDm={openDm}
             ownerUnread={unreadByList.get(selected.id)}
+            onArchive={(listId, archived) => void changeArchive(listId, archived)}
           />
         ) : (
           <div className="channel-browser-empty">
