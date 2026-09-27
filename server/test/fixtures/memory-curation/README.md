@@ -13,18 +13,23 @@ grading. Project agents discover it through the root `AGENTS.md` and
 | [Current reviewer](../../../src/buddies/memory-review.ts) | Candidate instructions, runtime configuration and the reviewer's tool schema (`doc_read`/`doc_write`, `server/src/buddies/mcp.ts`) |
 | [September 13 report](../../../../docs/memory-curation-evaluation-2026-09-13.md) | Method, selection rationale, results and known misses |
 | [Historical evidence](../../../../docs/benchmarks/memory-curation/2026-09-13/README.md) | Prompts, grades and hashes; raw runs and source snapshots are local-only |
+| [September 26 run, archived September 27](../../../../docs/benchmarks/memory-curation/2026-09-27/README.md) | 28 reviews, original automated outcomes, limited rubric review and Cursor infrastructure correction |
 | [Thread preservation](../../../../docs/benchmarks/memory-curation/2026-09-13-closeout/README.md) | Lessons, private-corpus boundaries and six prepared fresh-session fixtures |
 
 The September 13 selected prompt scored **19/20** manually graded case runs
 versus **16/20** for the original control. Those are historical observations,
 not an expected score for every rerun or a production reliability estimate.
 
-**2026-09-26 change (M3, unbenchmarked).** `MEMORY_REVIEW_INSTRUCTIONS` was
+**2026-09-26 change (M3).** `MEMORY_REVIEW_INSTRUCTIONS` was
 rewritten around the two docs and "update when relevant" (in-flight → working,
 resolved → removed from working, lasting preference/lesson → long_term, nothing
 new → NONE, read workspace files read-only to check a claim, never write). The
-live harness was ported in M4 but has NOT been run (owner gate: it costs credits): the 19/20 above describes the
-September 13 prompt, not this one. Four other variables changed in the same
+live harness was ported in M4 and ran 14 cases twice on September 26: 25 automated
+checks-passed, two fixture-related checks-failed and one infrastructure failure.
+The [archived report](../../../../docs/benchmarks/memory-curation/2026-09-27/README.md)
+keeps those counts separate from semantic quality; A.r2 passes checks but misses
+its frozen rubric. The 19/20 above describes the September 13 prompt, not this
+one. Four other variables changed in the same
 commit and must be labelled separately on the next rerun: the transcript now
 carries tool-call lines (name + input capped at 400 chars), the reviewer runs in
 the Buddy's workspace root with read-only file tools per harness, and the
@@ -87,9 +92,9 @@ UNLEASHD_MEMORY_CURATION_RESULTS=/tmp/memory-curation-NEW-RUN-ID \
 pnpm exec tsx --test server/test/buddy-memory-curation.test.ts
 ```
 
-**Cost: cases × repeats reviews.** With 15 cases and 2 repeats that is **30 reviews = 30 model
+**Cost: cases × repeats reviews.** With 14 cases and 2 repeats that is **28 reviews = 28 model
 calls** when the first rung (codex) has credits. A review climbs the ladder only on
-`out_of_tokens` or a rung timeout, so the ceiling is 4 calls per review (120 for the full run).
+`out_of_tokens` or a rung timeout, so the ceiling is 4 calls per review (112 for the full run).
 Up to 2 reviews run concurrently. Each rung has `MEMORY_REVIEW_TIMEOUT_MS` (300 s); each
 subtest allows every rung its timeout plus margin.
 
