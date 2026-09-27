@@ -375,8 +375,8 @@ async function runTests() {
       });
       const defaultedEffort = (await detail(defaulted.row.id)).config.resolution.value
         .reasoningEffort;
-      if (defaultedEffort !== 'xhigh') {
-        throw new Error(`Expected Terra default xhigh, got ${defaultedEffort}`);
+      if (defaultedEffort !== 'medium') {
+        throw new Error(`Expected Terra app default medium, got ${defaultedEffort}`);
       }
 
       const noReasoning = await createConversation(ws, {
@@ -428,8 +428,8 @@ async function runTests() {
       if (resolved.modelId !== claudeDefault) {
         throw new Error(`Expected Claude default ${claudeDefault}, got ${resolved.modelId}`);
       }
-      if (resolved.reasoningEffort !== 'high') {
-        throw new Error(`Expected Claude default effort high, got ${resolved.reasoningEffort}`);
+      if (resolved.reasoningEffort !== 'medium') {
+        throw new Error(`Expected Claude app default effort medium, got ${resolved.reasoningEffort}`);
       }
 
       const deletedOnSecond = waitForRemoved(ws2, id);
