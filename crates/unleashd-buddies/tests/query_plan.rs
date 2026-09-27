@@ -57,8 +57,9 @@ fn workload(s: &mut unleashd_buddies::Store) {
     s.list_posts_from(&ic, PostQuery::Channel { channel_id: channel.id.clone() }, &top.id, 5).unwrap();
     assert_eq!(s.thread_stats(&ic, &channel.id, &[top.id.clone(), ask.id.clone()]).unwrap().len(), 1);
     s.inbox(&ic, WS).unwrap();
-    assert_eq!(s.search_posts(&ic, WS, "reply", 5).unwrap().len(), 1);
-    s.search_posts(&owner, WS, "on it", 5).unwrap();
+    assert_eq!(s.search_posts(&ic, WS, "reply", None, 5).unwrap().posts.len(), 1);
+    s.search_posts(&owner, WS, "on it", None, 5).unwrap();
+    s.search_posts(&owner, WS, "on it", cursor.clone(), 5).unwrap();
     s.inbox(&owner, WS).unwrap();
     s.mark_read(&ic, &channel.id, &top.id).unwrap();
     s.mark_read(&ic, &ask.channel_id, &ask.id).unwrap();

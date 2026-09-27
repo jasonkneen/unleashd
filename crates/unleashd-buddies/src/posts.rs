@@ -402,21 +402,38 @@ impl Store {
 
     /// Posts in `workspace_id` whose body contains every word of `query` (literal words, not FTS
     /// syntax), newest first, from the channels the actor may read: public and task channels, and
-    /// the direct channels it is a member of (the owner reads every one).
-    pub fn search_posts(&self, actor: &Actor, workspace_id: &str, query: &str, limit: i64) -> Result<Vec<Post>> {
+    /// the direct channels it is a member of (the owner reads every one). Pages older with `before`
+    /// (keyset on `ord`, like `task_posts`); until 2026-09-27 search took no cursor, so the MCP
+    /// `before` was silently ignored and a Buddy could never see past the newest `limit` hits.
+    pub fn search_posts(&self, actor: &Actor, workspace_id: &str, query: &str, before: Option<Cursor>, limit: i64) -> Result<PostPage> {
         require(&self.conn, actor, Op::SearchPosts, &Subject::Owner)?;
         let words: Vec<String> = query.split_whitespace().map(|w| format!("\"{}\"", w.replace('"', "\"\""))).collect();
         if words.is_empty() {
             return Err(CoreError::Invalid("an empty search".into()));
         }
+        let mut args: Vec<Value> = vec![words.join(" ").into(), workspace_id.to_string().into(), actor.key().to_string().into()];
+        let keyset = match before {
+            None => "",
+            Some(Cursor { ord }) => {
+                args.push(ord.into());
+                " AND p.ord < ?4"
+            }
+        };
+        args.push((limit + 1).into());
         let sql = format!(
             "SELECT {POST_COLS} FROM post_search s JOIN post p ON p.rowid = s.rowid JOIN channel c ON c.id = p.channel_id
-             WHERE post_search MATCH ?1 AND c.workspace_id = ?2
+             WHERE post_search MATCH ?1 AND c.workspace_id = ?2{keyset}
                AND (?3 = 'owner' OR c.kind != 'direct'
                     OR EXISTS (SELECT 1 FROM channel_member m WHERE m.channel_id = c.id AND m.member = ?3))
-             ORDER BY p.ord DESC LIMIT ?4"
+             ORDER BY p.ord DESC LIMIT ?{}",
+            args.len()
         );
-        collect(self.conn.prepare_cached(&sql)?.query_map(params![words.join(" "), workspace_id, actor.key(), limit], post_row)?)
+        let mut posts = collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?;
+        let next = (posts.len() as i64 > limit).then(|| {
+            posts.truncate(limit as usize);
+            posts.last().map(|p| Cursor { ord: p.ord.clone() })
+        });
+        Ok(PostPage { posts, next: next.flatten() })
     }
 
     /// Moves the actor's cursor forward to `post_id`; an older post never moves it back.

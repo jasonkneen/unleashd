@@ -534,13 +534,42 @@ fn post_search_finds_words_only_in_channels_the_reader_may_read() {
     s.post(&buddy("lead"), ChannelRef::Id { id: general.id.clone() }, say("Deploy the ranking model on Friday", "p1")).unwrap();
     s.post(&buddy("mid"), dm("mid", "ic"), say("secret ranking numbers", "p2")).unwrap();
     // Every word must match, in any order, case-insensitively; FTS syntax in the query is literal.
-    let hits = |who: &Actor, q: &str| s.search_posts(who, WS, q, 10).unwrap().into_iter().map(|p| p.body).collect::<Vec<_>>();
+    let hits = |who: &Actor, q: &str| s.search_posts(who, WS, q, None, 10).unwrap().posts.into_iter().map(|p| p.body).collect::<Vec<_>>();
     assert_eq!(hits(&buddy("peer"), "friday RANKING"), ["Deploy the ranking model on Friday"]);
     assert_eq!(hits(&buddy("peer"), "ranking"), ["Deploy the ranking model on Friday"], "a DM is private to its members");
     assert_eq!(hits(&buddy("ic"), "ranking").len(), 2, "a member finds its DM");
     assert_eq!(hits(&Actor::Owner, "ranking").len(), 2, "the owner reads every DM");
     assert!(hits(&Actor::Owner, "rank* OR NEAR(").is_empty(), "operators are words, not syntax");
-    assert!(matches!(s.search_posts(&buddy("gone"), WS, "ranking", 10), Err(CoreError::Denied(_))), "archived buddies cannot search");
+    assert!(matches!(s.search_posts(&buddy("gone"), WS, "ranking", None, 10), Err(CoreError::Denied(_))), "archived buddies cannot search");
+}
+
+#[test]
+fn post_search_pages_older_hits_with_its_cursor() {
+    // Search once took no cursor, so a Buddy could only ever see the newest `limit` hits (2026-09-27).
+    let mut f = fixture();
+    let s = &mut f.store;
+    let general = s
+        .create_channel(
+            &Actor::Owner,
+            ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() },
+        )
+        .unwrap();
+    let say = |body: &str, key: &str| PostInput { kind: PostKind::Inform, ..request(body, key) };
+    for i in 0..5 {
+        s.post(&Actor::Owner, ChannelRef::Id { id: general.id.clone() }, say(&format!("rollout note {i}"), &format!("n{i}"))).unwrap();
+    }
+    s.post(&Actor::Owner, ChannelRef::Id { id: general.id.clone() }, say("unrelated", "u")).unwrap();
+    let mut seen = Vec::new();
+    let mut before = None;
+    loop {
+        let page = s.search_posts(&Actor::Owner, WS, "rollout", before, 2).unwrap();
+        seen.extend(page.posts.into_iter().map(|p| p.body));
+        match page.next {
+            Some(cursor) => before = Some(cursor),
+            None => break,
+        }
+    }
+    assert_eq!(seen, ["rollout note 4", "rollout note 3", "rollout note 2", "rollout note 1", "rollout note 0"]);
 }
 
 #[test]
@@ -750,7 +779,7 @@ fn channel_archive_preserves_history_and_restores_posting() {
     assert!(!s.inbox(&Actor::Owner, WS).unwrap().channels.iter().any(|c| c.channel.id == channel.id));
     assert_eq!(s.archived_channels(&Actor::Owner, WS).unwrap()[0].id, channel.id);
     assert_eq!(s.open_channel(&Actor::Owner, channel_ref()).unwrap().archived_at, archived.archived_at);
-    assert_eq!(s.search_posts(&Actor::Owner, WS, "remember", 10).unwrap()[0].id, post.id);
+    assert_eq!(s.search_posts(&Actor::Owner, WS, "remember", None, 10).unwrap().posts[0].id, post.id);
     assert!(s.post(&Actor::Owner, channel_ref(), PostInput { kind: PostKind::Inform, reply_to_id: Some(post.id.clone()), ..request("no", "no") }).is_err());
     s.set_channel_archived(&Actor::Owner, &channel.id, false, "restore").unwrap();
     assert!(s.archived_channels(&Actor::Owner, WS).unwrap().is_empty());

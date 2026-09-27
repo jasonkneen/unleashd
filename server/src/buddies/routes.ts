@@ -381,13 +381,17 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     // ---- channels, DMs and the owner's inbox (everything is a post in a channel) ----------------
     'GET 200 /api/buddies/workspaces/:workspaceId/inbox': (req) =>
       core.inbox(OWNER, p(req, 'workspaceId')),
-    'GET 200 /api/buddies/workspaces/:workspaceId/search': (req) =>
-      core.searchPosts(
-        OWNER,
-        p(req, 'workspaceId'),
-        z.string().trim().min(1).parse(q(req, 'q')),
-        50
-      ),
+    // The channel Search panel shows the newest 50 hits; paging is the Buddy tool's (channel_read).
+    'GET 200 /api/buddies/workspaces/:workspaceId/search': async (req) =>
+      (
+        await core.searchPosts(
+          OWNER,
+          p(req, 'workspaceId'),
+          z.string().trim().min(1).parse(q(req, 'q')),
+          null,
+          50
+        )
+      ).posts,
     'GET 200 /api/buddies/workspaces/:workspaceId/channels/archived': (req) =>
       core.archivedChannels(OWNER, p(req, 'workspaceId')),
     'POST 200 /api/buddies/channels/:channelId/archive': async (req) => {

@@ -13,7 +13,7 @@ export declare class BuddiesCore {
   listPostsFrom(actor: Actor, query: PostQuery, postId: string, limit: number): Promise<PostPage>
   threadStats(actor: Actor, channelId: string, rootIds: Array<string>): Promise<Array<ThreadStat>>
   taskPosts(actor: Actor, taskId: string, before: Cursor | undefined | null, limit: number): Promise<PostPage>
-  searchPosts(actor: Actor, workspaceId: string, query: string, limit: number): Promise<Array<Post>>
+  searchPosts(actor: Actor, workspaceId: string, query: string, before: Cursor | undefined | null, limit: number): Promise<PostPage>
   inbox(actor: Actor, workspaceId: string): Promise<Inbox>
   markRead(actor: Actor, channelId: string, postId: string): Promise<void>
   archivedChannels(actor: Actor, workspaceId: string): Promise<Array<Channel>>

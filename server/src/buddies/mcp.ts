@@ -276,7 +276,7 @@ const BUDDY_TOOLS = {
   }),
   channel_read: buddyTool({
     description:
-      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here for posts containing all the given words. Page older with `before` from the previous page. Reading a channel from its newest post marks it read.',
+      'Read a channel (top-level posts, newest first) or one thread, or search every channel you can read here for posts containing all the given words (newest first). Every read returns { posts, next }; page older by passing `next` back as `before`. Reading a channel from its newest post marks it read.',
     writes: false,
     schema: z.object({
       read: z.union([
@@ -293,6 +293,7 @@ const BUDDY_TOOLS = {
           grant.author,
           grant.workspaceId,
           input.read.search,
+          input.before,
           input.limit
         );
       const query =
