@@ -17,6 +17,7 @@ const snap = async (name) => {
       dialog: box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null,
       text: document.querySelector('.channel-composer-model')?.textContent || '',
       chip: document.querySelector('.channel-composer-mention')?.textContent || '',
+      viewport: { width: innerWidth, mobile: matchMedia('(max-width: 768px)').matches },
     };
   });
   await session.capture(path.join(out, `${name}.png`));
@@ -24,6 +25,7 @@ const snap = async (name) => {
 };
 try {
   await session.setViewport({ width: 1487, height: 941, deviceScaleFactor: 2, mobile: false });
+  await session.goto('http://localhost:7489/', 1200);
   // Stay in the same document so the capture guard survives route changes.
   await evaluate(() => {
     const original = window.fetch;
@@ -71,6 +73,10 @@ try {
       if (!input) throw new Error('Missing provider ${provider}');
       input.click();
     })()`);
+    if (provider === 'codex') {
+      await sleep(200);
+      await evaluate(() => document.querySelector('.channel-composer-model input[value="gpt-6-astra"]').click());
+    }
     await snap(`03-${provider}`);
   }
   await evaluate(() => {
