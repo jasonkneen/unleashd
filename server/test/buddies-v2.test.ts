@@ -1340,6 +1340,7 @@ test('follow-ups stop after three Buddy posts in a row, and a failed gate on an 
 async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
   const app = express();
   app.use(express.json());
+  const builderDirectories: Array<string | undefined> = [];
   registerBuddyRoutes(app, {
     core: w.core,
     events: { emit: w.emit, on: () => () => undefined },
@@ -1348,7 +1349,10 @@ async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
     uploadsRoot: () => join(w.scratch, 'uploads'),
     channelChanged: () => undefined,
     onBuddyArchived: () => undefined,
-    createBuilderConversation: async () => ({ conversationId: 'builder' }),
+    createBuilderConversation: async (workingDirectory) => {
+      builderDirectories.push(workingDirectory);
+      return { conversationId: 'builder' };
+    },
   });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -1364,8 +1368,27 @@ async function ownerHttp(w: Awaited<ReturnType<typeof world>>) {
       body: (await response.json()) as { error: string; requests: Post[] },
     };
   };
-  return { server, http };
+  return { server, http, builderDirectories };
 }
+
+test('builder opened from a workspace uses that workspace root', async () => {
+  const w = await world();
+  const { server, http, builderDirectories } = await ownerHttp(w);
+  try {
+    const root = (await w.core.listWorkspaces()).find((item) => item.id === w.ws)?.rootPath;
+    const opened = await http('POST', '/api/buddies/builder', { workspaceId: w.ws });
+    assert.equal(opened.status, 201, JSON.stringify(opened.body));
+    assert.deepEqual(builderDirectories, [root]);
+    const missing = await http('POST', '/api/buddies/builder', { workspaceId: 'workspace_missing' });
+    assert.equal(missing.status, 404);
+    const sidebar = await http('POST', '/api/buddies/builder', {});
+    assert.equal(sidebar.status, 201);
+    assert.deepEqual(builderDirectories, [root, undefined]);
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
 
 test('owner routes: a DM request is answered over HTTP, typed errors keep their status, and literal paths are never read as a buddy id', async () => {
   const w = await world();

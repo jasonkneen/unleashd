@@ -1186,6 +1186,9 @@ test('first-turn markers are kind-exclusive: builder, buddy, general', async () 
   const builder = await firstPrompt({ t: 'builder' }, 'builder-thread');
   assert.match(builder, /unleashd:buddy-builder-v1/);
   assert.doesNotMatch(builder, /unleashd:buddy-context-v2/);
+  // The Builder hires into the conversation directory. Slack New Buddy sets that to the workspace.
+  assert.match(builder, /Working directory: \/tmp\n/);
+  assert.match(builder, /Hire into the workspace with that root path/);
 
   // The hidden briefing is injected once, with its memory generation, and never the swarm prefix.
   const buddy = await firstPrompt(

@@ -972,7 +972,7 @@ export function ChannelBrowser({
   const openDm: OpenDm = (conversationId) => setParams({ dm: conversationId });
   const dmConversation = useAtomValue(rowFamily(dm ?? ''));
   const dmBuddyId = rowBuddy(dmConversation)?.buddyId;
-  const newBuddy = useNewBuddy(openDm);
+  const newBuddy = useNewBuddy(openDm, workspaceId);
   // The newest unfinished Buddy Builder chat, surfaced in the rail as "Creating buddy".
   const creatingBuddy = useAtomValue(listField('builders')).find((entry) => !entry.done);
   const railRow = (entry: ChannelUnread) => (

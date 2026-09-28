@@ -43,6 +43,7 @@ export interface BuddyTurnPolicyDependencies {
 /** What a Buddy policy may see and do on its conversation. */
 export interface BuddyPolicyHost {
   readonly id: string;
+  readonly workingDirectory: string;
   readonly view: ConversationRuntimeView;
   visibility(): BuddyVisibility;
   provider(): ProviderName;
@@ -90,9 +91,13 @@ function buddyBriefedPrompt(context: BuddyContext, memory: MemorySnapshot, conte
   return `<!-- unleashd:buddy-context-v2 ${encodedContext} ${briefing.length} -->\n${briefing}\n<!-- /unleashd:buddy-context-v2 -->\n\n${content}`;
 }
 
-function builderFirstTurnPrompt(content: string, firstUnstartedTurn: boolean): string {
+function builderFirstTurnPrompt(
+  content: string,
+  firstUnstartedTurn: boolean,
+  workingDirectory: string
+): string {
   if (!firstUnstartedTurn) return content;
-  return `<!-- unleashd:buddy-builder-v1 ${BUDDY_BUILDER_BRIEFING.length} -->\n${BUDDY_BUILDER_BRIEFING}\n<!-- /unleashd:buddy-builder-v1 -->\n\n${content}`;
+  return `<!-- unleashd:buddy-builder-v1 ${BUDDY_BUILDER_BRIEFING.length} -->\n${BUDDY_BUILDER_BRIEFING}\n<!-- /unleashd:buddy-builder-v1 -->\nWorking directory: ${workingDirectory}\n\n${content}`;
 }
 
 // --- Run-slot admission tick -----------------------------------------------
@@ -193,7 +198,11 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
     return null;
   }
   providerPrompt(turn: { content: string; messageCount: number; hasStartedSession: boolean }) {
-    return builderFirstTurnPrompt(turn.content, turn.messageCount === 0 && !turn.hasStartedSession);
+    return builderFirstTurnPrompt(
+      turn.content,
+      turn.messageCount === 0 && !turn.hasStartedSession,
+      this.host.workingDirectory
+    );
   }
   admitted(): void {}
   preflight(provider: ProviderName): void {
