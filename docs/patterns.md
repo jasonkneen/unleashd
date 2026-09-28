@@ -29,7 +29,7 @@ Updates cost what changed, not n.
 **Pattern:** the kinds are a sum type, fixed once at the boundary. One thin exhaustive dispatcher picks a handler,
 and each handler has one clean path with no structural branching (see ~/.claude/CLAUDE.md "One Clean Path").
 **Here:** `ConversationKindSchema` (chat | buddy | builder | worker, `shared/src/conversation-config.ts`) and its
-list projection `RowKind`; crate `types.rs` (`ChannelKind`, `RequestState`, `RunInput`); `McpServerSpec {kind:'stdio'|'http'}` in
+list projection `RowKind`; crate `types.rs` (`ChannelKind`, `RequestState`, `RunInput`, `RunWaiting`); `McpServerSpec {kind:'stdio'|'http'}` in
 agent-cli; the conversation's `TurnPolicy`, chosen once by kind (`policyFor` in `conversations/runtime.ts`:
 `ChatTurnPolicy` / `BuddyTurnPolicy` / `BuddyBuilderTurnPolicy`).
 
@@ -47,7 +47,7 @@ with no re-checks and no silent fallbacks (a typed error or a typed "unknown" va
 ## table-driven
 **Smell:** long if/switch ladders keyed by name (tools, routes, harness features).
 **Pattern:** a table of `{name, schema, handler}` rows plus one generic loop. Adding a case means adding a row.
-**Here:** the MCP tool table (T11: 47 tools → 12); agent-cli `mcp-encoding.ts` (one handler per harness per
+**Here:** the MCP tool table (T11: 47 tools → 12, with task comments and answers folded into `post`); agent-cli `mcp-encoding.ts` (one handler per harness per
 kind); `SUB_AGENT_FOLDS` in `server/src/turns/subagents.ts` (codex collab threads vs the generic Task fold).
 
 ## pure-core
@@ -60,7 +60,7 @@ conversation applies the effects.
 ## one-write-path
 **Smell:** one mutation method or one table per variant of the same thing.
 **Pattern:** one append/write path for a concept, with read models derived from it.
-**Here:** crate `posts.rs`, where every DM, channel post, reply and task comment is a `post` in a channel; `records/store.rs` `put`, the one write of a conversation record and its session index. Ingest crate
+**Here:** crate `posts.rs`, where every DM, channel post, reply, request answer and task comment is a `post` in a channel; the MCP exposes those through one `post` tool; `records/store.rs` `put`, the one write of a conversation record and its session index. Ingest crate
 `store.rs` `Writer::apply`: transcripts are parsed once, and the usage/cost numbers (`usage_turn`) and the context
 meter (`session.context`) are read models of that one ingest. The server reads them through
 `server/src/ingest/instance.ts` (`/api/usage` in `usage-routes.ts`, the meter in `session-context.ts`);
@@ -113,6 +113,8 @@ keep an older id carry the ordered id in a separate column assigned in their ori
 **Smell:** the same helper, regex or constant pasted inline in many files.
 **Pattern:** one named definition, imported everywhere.
 **Here:** `shortenHomePath` in `client/src/utils/directories.ts` (it was inline in 13 files).
+The Buddy run queue's `WAITING_REASON_SQL` in `crates/unleashd-buddies/src/runs.rs` is both the
+list reason and the claim predicate (`reason IS NULL`), so an observation cannot drift from admission.
 
 ## deep-modules
 **Smell:** wrappers, relays and adapters that only forward calls.

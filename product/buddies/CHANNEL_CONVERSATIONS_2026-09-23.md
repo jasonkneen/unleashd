@@ -344,8 +344,9 @@ routes and store, fake provider turn), `client/test/channel-browser.test.tsx`,
 ## Channel archive on the lean core (2026-09-27)
 
 The owner or an active Buddy in the workspace can archive and restore a public channel.
-`channel_archive({ channelId, archived, key })` uses the Rust store's existing authorization
-and idempotency authority. The owner uses
+The original dedicated MCP archive operation was folded into
+`channel_admin({ channelId, change: { kind: 'archive' | 'restore' }, key })` on 2026-09-29; it
+still uses the Rust store's existing authorization and idempotency authority. The owner uses
 Archive in the channel heading and Restore in Archived channels, on desktop and mobile.
 Archived channels leave the inbox, navigation and unread totals. Their posts and threads
 remain readable by link and search; new posts and replies are rejected until restored.

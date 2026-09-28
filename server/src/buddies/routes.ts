@@ -382,7 +382,8 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
     'GET 200 /api/buddies/runs/:runId': (req) => core.getRun(p(req, 'runId')),
     'POST 200 /api/buddies/runs/:runId/cancel': (req) => runner.cancel(p(req, 'runId')),
     // ---- schedules ------------------------------------------------------------------------------
-    'GET 200 /api/buddies/:buddyId/schedules': (req) => core.listSchedules(p(req, 'buddyId')),
+    'GET 200 /api/buddies/:buddyId/schedules': (req) =>
+      core.listSchedules({ kind: 'buddy', buddyId: p(req, 'buddyId') }),
     'POST 201 /api/buddies/:buddyId/schedules': (req) => putSchedule(req, undefined),
     'PUT 200 /api/buddies/:buddyId/schedules/:scheduleId': (req) =>
       putSchedule(req, p(req, 'scheduleId')),
@@ -499,7 +500,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       const [buddy, tasks, schedules, runs] = await Promise.all([
         core.getBuddy(buddyId),
         core.listTasks({ kind: 'owner', buddyId }),
-        core.listSchedules(buddyId),
+        core.listSchedules({ kind: 'buddy', buddyId }),
         core.listRuns({ kind: 'buddy', buddyId }, 30),
       ]);
       return { buddy, tasks, schedules, runs };

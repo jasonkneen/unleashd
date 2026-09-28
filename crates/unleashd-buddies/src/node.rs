@@ -227,13 +227,18 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn list_run_rows(&self, query: RunQuery, limit: i64) -> napi::Result<Vec<RunRow>> {
+        call(&self.store, move |s| s.list_run_rows(query, limit)).await
+    }
+
+    #[napi]
     pub async fn put_schedule(&self, actor: Actor, input: ScheduleInput) -> napi::Result<Schedule> {
         call(&self.store, move |s| s.put_schedule(&actor, input)).await
     }
 
     #[napi]
-    pub async fn list_schedules(&self, buddy_id: String) -> napi::Result<Vec<Schedule>> {
-        call(&self.store, move |s| s.list_schedules(&buddy_id)).await
+    pub async fn list_schedules(&self, query: ScheduleQuery) -> napi::Result<Vec<Schedule>> {
+        call(&self.store, move |s| s.list_schedules(query)).await
     }
 
     #[napi]

@@ -10,8 +10,6 @@ import {
   type BuddiesCore,
   BuddyChangesSchema,
   BuddyCreateFieldsSchema,
-  ChannelArchiveSchema,
-  ChannelRenameSchema,
   OWNER,
   ScheduleFieldsSchema,
   TaskChangesSchema,
@@ -74,6 +72,27 @@ const channelRef = z.union([
     ),
   z.object({ task: z.string().min(1) }).describe("A task's channel (its comments)"),
 ]);
+
+// Pattern: sum-types (docs/patterns.md#sum-types)
+// Every list uses the same scope vocabulary; the tool-specific adapter only translates it to the
+// crate query name. This replaces four subtly different list selectors.
+const scopeSchema = z.union([
+  z.object({ buddyId: z.string().min(1) }).strict(),
+  z.object({ taskId: z.string().min(1) }).strict(),
+  z.object({ workspace: z.string().min(1) }).strict(),
+]);
+type Scope = z.infer<typeof scopeSchema>;
+const teamTargetSchema = z.union([
+  z.object({ buddyId: z.string().min(1) }).strict(),
+  z.object({ workspace: z.string().min(1) }).strict(),
+]);
+
+const scopeQuery = (scope: Scope) =>
+  'buddyId' in scope
+    ? ({ kind: 'buddy', buddyId: scope.buddyId } as const)
+    : 'taskId' in scope
+      ? ({ kind: 'task', taskId: scope.taskId } as const)
+      : ({ kind: 'workspace', workspaceId: scope.workspace } as const);
 
 function toChannelRef(author: Actor, ref: z.infer<typeof channelRef>): ChannelRef {
   if ('id' in ref) return { kind: 'id', id: ref.id };
@@ -142,12 +161,6 @@ const taskWriteSchema = () =>
         baseRevision: z.number().int().positive(),
         changes: TaskChangesSchema,
       }),
-      z.object({
-        kind: z.literal('comment'),
-        taskId: z.string().min(1),
-        body: z.string().min(1).max(32_000),
-        evidence,
-      }),
     ]),
     key,
   });
@@ -178,54 +191,64 @@ async function writeTask(
       });
     case 'update':
       return deps.core.upsertTask(grant.principal, { ...write, key: input.key });
-    case 'comment': {
-      const post = await deps.core.post(
-        grant.author,
-        { kind: 'task', taskId: write.taskId },
-        {
-          kind: 'inform',
-          body: write.body,
-          evidence: write.evidence,
-          taskId: write.taskId,
-          fromConversationId: grant.conversationId,
-          broadcast: false,
-          key: input.key,
-        }
-      );
-      return (await announcePost(deps, grant.author, post)).post;
-    }
   }
 }
 
-type TaskView =
-  | { kind: 'owner'; buddyId: string }
-  | { kind: 'workspace'; workspaceId: string }
-  | { kind: 'task'; taskId: string };
 // Lists default to open tasks: the CEO's full list was 109 tasks (92 closed, ~206k chars) and
 // overflowed the tool result on 2026-09-27. `include: 'all'` still reaches the closed ones.
 const taskInclude = z.enum(['open', 'all']).default('open');
 type TaskInclude = z.infer<typeof taskInclude>;
 const isOpenTask = (task: { status: string }) =>
   task.status !== 'done' && task.status !== 'cancelled';
-const readTasks = async (
-  deps: ToolDeps,
-  grant: TurnGrant,
-  view: TaskView,
-  include: TaskInclude
-) => {
-  if (view.kind === 'task') return taskDetail(deps.core, grant.author, view.taskId, 20);
-  const tasks = await deps.core.listTasks(view);
-  return include === 'all' ? tasks : tasks.filter(isOpenTask);
+const taskRow = (task: Awaited<ReturnType<BuddiesCore['getTask']>>) => ({
+  id: task.id,
+  ownerId: task.ownerId,
+  parentId: task.parentId,
+  title: task.title,
+  status: task.status,
+  paused: task.paused,
+  updatedAt: task.updatedAt,
+});
+const readTaskRows = async (deps: ToolDeps, scope: Scope, include: TaskInclude) => {
+  const query =
+    'buddyId' in scope
+      ? ({ kind: 'owner', buddyId: scope.buddyId } as const)
+      : 'taskId' in scope
+        ? ({ kind: 'children', parentId: scope.taskId } as const)
+        : ({ kind: 'workspace', workspaceId: scope.workspace } as const);
+  const tasks = await deps.core.listTasks(query);
+  return (include === 'all' ? tasks : tasks.filter(isOpenTask)).map(taskRow);
 };
+
+const TASKS_TOOL = teamTool({
+  description:
+    "List task rows by {buddyId}, {taskId} (children), or {workspace}; get one full task. Lists default to open tasks; include 'all' reaches closed ones.",
+  writes: false,
+  schema: z.object({
+    action: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('list'), scope: scopeSchema, include: taskInclude }),
+      z.object({ kind: z.literal('get'), taskId: z.string().min(1) }),
+    ]),
+  }),
+  handler: (deps, grant, { action }) =>
+    action.kind === 'get'
+      ? taskDetail(deps.core, grant.author, action.taskId, 20)
+      : readTaskRows(deps, action.scope, action.include),
+});
 
 // Pattern: table-driven (docs/patterns.md#table-driven)
 const BUDDY_TOOLS = {
   post: buddyTool({
     description:
-      "Write a post. `channel`: a channel id, {direct:[members]} (a DM, created on first use), or {task}. kind 'request' (DMs only) asks the other members for an answer and starts their turn; 'inform' wakes nobody. Reply in a thread with replyToId. In a public channel, mention a Buddy as [@Name](buddy:<id>) (ids from `team`): it wakes that Buddy, which must reply in the thread; a Buddy who posted in the thread may also follow up. Embed media as ![alt](/absolute/path). Spawn a tracked background worker: kind 'request' with `worker` {provider, model, reasoningEffort?} to {direct:[]} (yourself) or a direct report; each request is its own run (parallel up to your run limit, visible and cancellable with `runs`), and its answer wakes this conversation. Never shell out to agent CLIs for this.",
+      'Write to a channel, DM ({direct:[ids]}) or task, or answer one request with `answers`. A DM request starts its recipient; inform wakes nobody. Use replyToId for a thread and [@Name](buddy:<id>) to mention. Embed media as ![alt](/absolute/path). A request with `worker` runs on that model and returns here. Never shell out to agent CLIs.',
     writes: true,
     schema: z.object({
-      channel: channelRef,
+      channel: channelRef.optional().describe('Required unless answers is set'),
+      answers: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('A request id; mutually exclusive with channel'),
       body: z.string().min(1).max(32_000),
       kind: z.enum(['inform', 'request']).default('inform'),
       replyToId: z.string().optional(),
@@ -237,12 +260,26 @@ const BUDDY_TOOLS = {
       evidence,
       key,
     }),
-    async handler(deps, grant, { worker, ...input }) {
+    async handler(deps, grant, { worker, answers, channel: ref, ...input }) {
+      if (answers) {
+        if (ref || worker)
+          throw new Error('post answers is mutually exclusive with channel and worker');
+        return (
+          await announcePost(
+            deps,
+            grant.author,
+            await deps.core.answer(grant.author, {
+              requestId: answers,
+              body: input.body,
+              evidence: input.evidence,
+              key: input.key,
+            })
+          )
+        ).post;
+      }
+      if (!ref) throw new Error('post needs channel or answers');
       const runConfig = worker && checkedRunConfig(worker);
-      const channel = await deps.core.openChannel(
-        grant.author,
-        toChannelRef(grant.author, input.channel)
-      );
+      const channel = await deps.core.openChannel(grant.author, toChannelRef(grant.author, ref));
       const body = requireCanonicalPostMedia(input.body, {
         uploadsRoot: deps.uploadsRoot(),
         channelId: channel.id,
@@ -257,21 +294,6 @@ const BUDDY_TOOLS = {
       return post;
     },
   }),
-  answer: buddyTool({
-    description:
-      'Answer a request you owe (inbox.requests): the answer is posted in its thread and the requester is woken with it. One answer per request.',
-    writes: true,
-    schema: z.object({
-      requestId: z.string().min(1),
-      body: z.string().min(1).max(32_000),
-      evidence,
-      key,
-    }),
-    async handler(deps, grant, input) {
-      return (await announcePost(deps, grant.author, await deps.core.answer(grant.author, input)))
-        .post;
-    },
-  }),
   inbox: buddyTool({
     description:
       'Requests you owe an answer, your own open requests, and your channels here with unread counts.',
@@ -279,21 +301,23 @@ const BUDDY_TOOLS = {
     schema: z.object({}),
     handler: (deps, grant) => deps.core.inbox(grant.author, grant.workspaceId),
   }),
-  channel_archive: buddyTool({
+  channel_admin: buddyTool({
     description:
-      'Archive or restore a public channel in your workspace. Archived channels leave navigation and unread counts; history stays readable, and posting resumes after restore.',
+      'Rename, archive or restore a public channel. Its identity and history stay intact; archived channels remain readable.',
     writes: true,
-    schema: ChannelArchiveSchema.extend({ channelId: z.string().min(1) }),
-    handler: (deps, grant, input) =>
-      deps.core.setChannelArchived(grant.author, input.channelId, input.archived, input.key),
-  }),
-  channel_rename: buddyTool({
-    description:
-      'Rename a public channel in your workspace. The channel keeps its history and id; use a stable key so retries replay the same result.',
-    writes: true,
-    schema: ChannelRenameSchema.extend({ channelId: z.string().min(1) }),
-    handler: (deps, grant, input) =>
-      deps.core.renameChannel(grant.author, input.channelId, input.name, input.key),
+    schema: z.object({
+      channelId: z.string().min(1),
+      change: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('rename'), name: z.string().trim().min(1).max(80) }),
+        z.object({ kind: z.literal('archive') }),
+        z.object({ kind: z.literal('restore') }),
+      ]),
+      key,
+    }),
+    handler: (deps, grant, { channelId, change, key }) =>
+      change.kind === 'rename'
+        ? deps.core.renameChannel(grant.author, channelId, change.name, key)
+        : deps.core.setChannelArchived(grant.author, channelId, change.kind === 'archive', key),
   }),
   channel_read: buddyTool({
     description:
@@ -328,36 +352,10 @@ const BUDDY_TOOLS = {
       return page;
     },
   }),
-  tasks: buddyTool({
-    description:
-      "Read tasks: yours, another buddy's, the workspace's, or one task with its subtasks and latest comments. Lists hold open tasks only unless include is 'all'.",
-    writes: false,
-    schema: z.object({
-      view: z
-        .discriminatedUnion('kind', [
-          z.object({ kind: z.literal('mine') }),
-          z.object({ kind: z.literal('owner'), buddyId: z.string().min(1) }),
-          z.object({ kind: z.literal('workspace') }),
-          z.object({ kind: z.literal('task'), taskId: z.string().min(1) }),
-        ])
-        .default({ kind: 'mine' }),
-      include: taskInclude,
-    }),
-    handler: (deps, grant, { view, include }) =>
-      readTasks(
-        deps,
-        grant,
-        view.kind === 'mine'
-          ? { kind: 'owner', buddyId: grant.buddyId }
-          : view.kind === 'workspace'
-            ? { kind: 'workspace', workspaceId: grant.workspaceId }
-            : view,
-        include
-      ),
-  }),
+  tasks: TASKS_TOOL,
   task_write: buddyTool({
     description:
-      'Create a task (a subtask with parentId), update one (compare-and-swap on baseRevision; pausing, cancelling or reassigning cancels its queued runs), or comment on one.',
+      'Create or compare-and-swap update a task. Pausing, cancelling or reassigning cancels queued runs. Comments use post {channel:{task}}.',
     writes: true,
     schema: taskWriteSchema(),
     handler: (deps, grant, input) => writeTask(deps, grant, input, grant.buddyId),
@@ -385,11 +383,11 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      "List a buddy's runs (default: yours), read one, or cancel one (a running one's turn is stopped).",
+      'List slim run rows by {buddyId}, {taskId}, or {workspace}; get one full run; or cancel. Queued rows include waiting.',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
-        z.object({ kind: z.literal('list'), buddyId: z.string().optional() }),
+        z.object({ kind: z.literal('list'), scope: scopeSchema }),
         z.object({ kind: z.literal('get'), runId: z.string().min(1) }),
         z.object({ kind: z.literal('cancel'), runId: z.string().min(1) }),
       ]),
@@ -397,10 +395,7 @@ const BUDDY_TOOLS = {
     async handler(deps, grant, input) {
       switch (input.action.kind) {
         case 'list':
-          return deps.core.listRuns(
-            { kind: 'buddy', buddyId: input.action.buddyId ?? grant.buddyId },
-            20
-          );
+          return deps.core.listRunRows(scopeQuery(input.action.scope), 20);
         case 'get':
           return deps.core.getRun(input.action.runId);
         case 'cancel': {
@@ -417,7 +412,7 @@ const BUDDY_TOOLS = {
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
-        z.object({ kind: z.literal('list'), buddyId: z.string().optional() }),
+        z.object({ kind: z.literal('list'), scope: scopeSchema }),
         ScheduleFieldsSchema.extend({
           kind: z.literal('put'),
           id: z.string().optional().describe('Absent: create'),
@@ -430,7 +425,7 @@ const BUDDY_TOOLS = {
       const action = input.action;
       switch (action.kind) {
         case 'list':
-          return deps.core.listSchedules(action.buddyId ?? grant.buddyId);
+          return deps.core.listSchedules(scopeQuery(action.scope));
         case 'put':
           return deps.core.putSchedule(grant.principal, {
             ...action,
@@ -444,19 +439,42 @@ const BUDDY_TOOLS = {
 
 const TEAM_TOOLS = {
   team: teamTool({
-    description: 'The team directory: workspaces and their buddies (role, manager, model, status).',
+    description: 'List workspace and Buddy rows, or get one full workspace or Buddy.',
     writes: false,
-    schema: z.object({ workspaceId: z.string().optional().describe('Default: every workspace') }),
-    async handler(deps, _grant, input) {
+    schema: z.object({
+      action: z
+        .discriminatedUnion('kind', [
+          z.object({ kind: z.literal('list'), workspace: z.string().min(1).optional() }),
+          z.object({ kind: z.literal('get'), target: teamTargetSchema }),
+        ])
+        .default({ kind: 'list' }),
+    }),
+    async handler(deps, _grant, { action }) {
+      if (action.kind === 'get') {
+        const target = action.target;
+        if ('buddyId' in target) return deps.core.getBuddy(target.buddyId);
+        const workspaces = await deps.core.listWorkspaces();
+        const workspace = workspaces.find((item) => item.id === target.workspace);
+        if (!workspace) throw new Error(`workspace ${target.workspace} not found`);
+        return workspace;
+      }
       const workspaces = (await deps.core.listWorkspaces()).filter(
-        (workspace) => !input.workspaceId || workspace.id === input.workspaceId
+        (workspace) => !action.workspace || workspace.id === action.workspace
       );
-      return Promise.all(
-        workspaces.map(async (workspace) => ({
-          ...workspace,
-          buddies: await deps.core.listBuddies(workspace.id),
-        }))
-      );
+      const buddies = (await Promise.all(workspaces.map((item) => deps.core.listBuddies(item.id))))
+        .flat()
+        .map(({ id, workspaceId, name, role, status, managerId }) => ({
+          id,
+          workspaceId,
+          name,
+          role,
+          status,
+          managerId,
+        }));
+      return {
+        workspaces: workspaces.map(({ id, name }) => ({ id, name })),
+        buddies,
+      };
     },
   }),
   team_admin: teamTool({
@@ -513,23 +531,10 @@ const TEAM_TOOLS = {
 // The Builder saves work for the staff it hires (as the owner's old Builder tools did). It has no
 // Buddy of its own, so every view and every new task names its Buddy.
 const BUILDER_TOOLS = {
-  tasks: teamTool({
-    description:
-      "Read a buddy's tasks, a workspace's, or one task with its subtasks and comments. Lists hold open tasks only unless include is 'all'.",
-    writes: false,
-    schema: z.object({
-      view: z.discriminatedUnion('kind', [
-        z.object({ kind: z.literal('owner'), buddyId: z.string().min(1) }),
-        z.object({ kind: z.literal('workspace'), workspaceId: z.string().min(1) }),
-        z.object({ kind: z.literal('task'), taskId: z.string().min(1) }),
-      ]),
-      include: taskInclude,
-    }),
-    handler: (deps, grant, { view, include }) => readTasks(deps, grant, view, include),
-  }),
+  tasks: TASKS_TOOL,
   task_write: teamTool({
     description:
-      'Create a task for a buddy (ownerId required), update one (compare-and-swap on baseRevision), or comment on one.',
+      'Create a task (ownerId required), or compare-and-swap update one. Comments use post {channel:{task}}.',
     writes: true,
     schema: taskWriteSchema(),
     handler: (deps, grant, input) => writeTask(deps, grant, input, null),

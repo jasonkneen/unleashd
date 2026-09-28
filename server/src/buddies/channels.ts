@@ -140,7 +140,7 @@ export const WAKE_MESSAGE = [
   'Wake-up check: catch up on the workspace channels and act on what matters to you.',
   '1. Call inbox: requests you owe, and every channel with your unread count.',
   '2. Read each channel with unread posts with channel_read (reading from the top marks it read); open threads with channel_read({read:{threadId}}).',
-  '3. For each thing that concerns you: answer it in its thread (post with replyToId) when a reply helps, start the work (task_write), hand it to its owner (post a request in a DM), or leave it.',
+  '3. For each thing that concerns you: answer it in its thread (post with replyToId) when a reply helps, create/update the work (task_write) and comment via post {channel:{task}}, hand it to its owner (post a request in a DM), or leave it.',
   '4. Finish with a short summary: what you read, what you replied to, what work you started (with ids).',
 ].join('\n');
 

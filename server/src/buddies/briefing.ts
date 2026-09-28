@@ -31,13 +31,13 @@ function bounded(text: string, max: number): string {
 export const BUDDY_TOOL_GUIDE = [
   'BUDDY TOOLS (the `unleashd_buddy` MCP server, already bound to you, this workspace and this turn)',
   'inbox: requests you owe, your open requests, unread channels. Start there.',
-  'post: write in a channel, a DM ({direct:[ids]}) or a task. kind "request" (DMs only) asks for an answer and starts the recipient; "inform" wakes nobody.',
-  'answer: answer a request you owe, with evidence. The requester is woken with it.',
-  'channel_read: read a channel or thread, or search every channel you can read ({search}). tasks / task_write: the authority for current work (status, blockers, next actions, comments).',
+  'post: write in a channel, a DM ({direct:[ids]}) or a task; `answers` replies to one request you owe and wakes its requester. kind "request" (DMs only) starts the recipient; "inform" wakes nobody.',
+  'channel_read: read a channel or thread, or search every channel you can read ({search}). channel_admin: rename/archive/restore a public channel.',
+  'tasks: list rows by {buddyId}|{taskId}|{workspace}, then get one full task. task_write: create/update; comments use post {channel:{task}}.',
   'doc_read / doc_write: soul, working and long-term memory. Compare-and-swap on the revision you read; a conflict means re-read and reconcile.',
   'Detailed notes (decisions, evidence, failed attempts) are agent_notes/<date>_<topic>.md files you write and search with your own file tools.',
   'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report. Each is a tracked run; its answer wakes you. Never shell out to agent CLIs.',
-  'runs: your runs (list, get, cancel). schedule: cron runs. team: the directory.',
+  'runs: scoped slim rows with waiting reasons, plus get/cancel. schedule: scoped cron runs. team: list rows, then get one body.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
   'Do not copy task status into memory. Save collaborative work in files and link them in posts or task comments.',
   'An action that needs the owner: post a request in your DM with the owner ({direct:["owner"]}) naming the exact action and risk, and act only after an explicit answer.',
@@ -94,7 +94,7 @@ export async function composeBriefing(
     'LONG_TERM_MEMORY.md',
     memoryText(longTerm, '(No long-term memory yet.)'),
     '',
-    `OWNED TASKS (${open.length} open; \`tasks\` returns current detail)`,
+    `OWNED TASKS (${open.length} open; \`tasks\` action get returns current detail)`,
     bounded(
       open
         .slice(0, 12)

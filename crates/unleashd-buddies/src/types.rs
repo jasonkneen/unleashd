@@ -386,6 +386,36 @@ pub struct Run {
     pub config: Option<RunConfig>,
 }
 
+/// Why a queued run cannot be claimed yet. This is derived from the claim predicate on every
+/// read; it is never stored.
+// Pattern: sum-types (docs/patterns.md#sum-types)
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+pub enum RunWaiting {
+    NotBefore { at: String },
+    BuddyArchived,
+    BackgroundOff,
+    AfterRun { run_id: String },
+    ConversationBusy,
+    PoolFull { active: i64, max: i64 },
+    TaskPaused,
+}
+
+/// The bounded list projection. Full execution state and outcomes stay on `get_run`.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct RunRow {
+    pub id: String,
+    pub status: RunStatus,
+    pub input: RunInput,
+    pub task_id: Option<String>,
+    pub requester: Option<Actor>,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub waiting: Option<RunWaiting>,
+}
+
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Claim {
@@ -524,11 +554,23 @@ pub enum RunQuery {
     Task {
         task_id: String,
     },
+    /// Queued and running runs: the workspace's current work and wait queue.
+    Workspace {
+        workspace_id: String,
+    },
     Queued,
     /// Running (or cancel-requested) runs in a workspace: what its buddies are doing now.
     Live {
         workspace_id: String,
     },
+}
+
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
+#[derive(Debug, Clone)]
+pub enum ScheduleQuery {
+    Buddy { buddy_id: String },
+    Task { task_id: String },
+    Workspace { workspace_id: String },
 }
 
 /// Keyset position: posts strictly older than this ordered id.

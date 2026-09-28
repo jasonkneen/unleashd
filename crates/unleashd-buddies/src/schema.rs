@@ -182,6 +182,14 @@ const TASK_LIVE_INDEX: &str = "
 CREATE INDEX IF NOT EXISTS task_live ON task(workspace_id, owner_id, status)
   WHERE parent_id IS NULL AND status IN ('open','in_progress','blocked','review');";
 
+/// The shared MCP list scopes. Without these, a workspace run/schedule read walks the entire
+/// table; `query_plan.rs` exercises every scope and rejects that regression.
+const LIST_SCOPE_INDEXES: &str = "
+CREATE INDEX IF NOT EXISTS schedule_task ON schedule(task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS schedule_workspace ON schedule(workspace_id);
+CREATE INDEX IF NOT EXISTS run_workspace_live ON run(workspace_id, status, created_at)
+  WHERE status IN ('queued','running','cancel_requested');";
+
 /// A file imported before ordered ids has no `post.ord`: it cannot be ordered correctly, so it is
 /// refused with the fix (re-import), never opened half-working. No live file predates it (T15).
 fn require_ordered_ids(conn: &Connection, path: &str) -> Result<()> {
@@ -263,6 +271,7 @@ fn ensure_threads(conn: &Connection) -> Result<()> {
 fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
+    conn.execute_batch(LIST_SCOPE_INDEXES)?;
     let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'post_search')", [], |r| r.get(0))?;
     match present {
         true => Ok(()),

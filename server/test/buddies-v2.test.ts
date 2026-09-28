@@ -384,7 +384,12 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     let request!: Post;
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
-      assert.ok((await toolNames(turn.mcp)).includes('team_admin'));
+      const names = await toolNames(turn.mcp);
+      assert.equal(names.length, 12);
+      assert.ok(names.includes('team_admin'));
+      assert.ok(names.includes('channel_admin'));
+      for (const removed of ['answer', 'channel_archive', 'channel_rename'])
+        assert.equal(names.includes(removed), false);
       assert.equal(await probe(turn.mcp), 200);
       const posted = await call(turn.mcp, 'post', {
         channel: { direct: [w.designer.id] },
@@ -397,8 +402,8 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     });
     w.during.set(2, async (turn) => {
       assert.match(turn.request.prompt, /Draw the logo/);
-      const answered = await call(turn.mcp, 'answer', {
-        requestId: request.id,
+      const answered = await call(turn.mcp, 'post', {
+        answers: request.id,
         body: 'Logo drawn',
         evidence: ['logo.png'],
         key: 'answer-logo',
@@ -479,6 +484,73 @@ test('an MCP write fires the change bus in this process (B2)', async () => {
       fired.some((e) => e.kind === 'changed'),
       'changed'
     );
+  } finally {
+    await w.close();
+  }
+});
+
+// Pattern: fix-guards (docs/patterns.md#fix-guards). The queue view once had no reason and could
+// drift from claim admission. This crosses the real HTTP MCP endpoint; the crate test pins the
+// single SQL expression used by both list and claim.
+test('workspace run rows expose background_off and clear it when the run becomes claimable', async () => {
+  const w = await world();
+  try {
+    w.runner.stop();
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.designer.id,
+      changes: { backgroundEnabled: false },
+      key: 'waiting-off',
+    });
+    const request = await w.core.post(
+      buddyActor(w.lead.id),
+      { kind: 'direct', members: [buddyActor(w.lead.id), buddyActor(w.designer.id)] },
+      {
+        kind: 'request',
+        body: 'Held work',
+        evidence: [],
+        broadcast: false,
+        key: 'waiting-request',
+      }
+    );
+    const spec = w.endpoint.spec(
+      w.grants.issueBuddy({
+        role: 'worker',
+        buddyId: w.lead.id,
+        workspaceId: w.ws,
+        conversationId: 'waiting-view',
+        runId: null,
+      })
+    );
+    const listed = await call(spec, 'runs', {
+      action: { kind: 'list', scope: { workspace: w.ws } },
+    });
+    assert.equal(listed.isError, false, listed.text);
+    const row = listed.value.find(
+      (item: { input: { kind: string; postId?: string } }) => item.input.postId === request.id
+    );
+    assert.deepEqual(row.waiting, { kind: 'background_off' });
+    assert.deepEqual(row.requester, buddyActor(w.lead.id));
+    for (const bodyField of [
+      'outcome',
+      'workspaceId',
+      'inputKey',
+      'leaseExpiresAt',
+      'readyAt',
+      'attempt',
+    ])
+      assert.equal(bodyField in row, false, `${bodyField} stays on runs get`);
+
+    await w.core.updateBuddy(OWNER, {
+      buddyId: w.designer.id,
+      changes: { backgroundEnabled: true },
+      key: 'waiting-on',
+    });
+    const released = await call(spec, 'runs', {
+      action: { kind: 'list', scope: { workspace: w.ws } },
+    });
+    const releasedRow = released.value.find((item: { id: string }) => item.id === row.id);
+    assert.equal(releasedRow.waiting ?? null, null);
+    assert.equal((await w.core.claimRun(60_000))?.run.id, row.id);
   } finally {
     await w.close();
   }
@@ -1725,19 +1797,86 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       })
     );
     const ids = (listed: { value: Array<{ id: string }> }) => listed.value.map((t) => t.id).sort();
-    assert.deepEqual(ids(await call(designerGrant, 'tasks', {})), [task.value.id]);
     assert.deepEqual(
-      ids(await call(designerGrant, 'tasks', { include: 'all' })),
+      ids(
+        await call(designerGrant, 'tasks', {
+          action: { kind: 'list', scope: { buddyId: w.designer.id } },
+        })
+      ),
+      [task.value.id]
+    );
+    assert.deepEqual(
+      ids(
+        await call(designerGrant, 'tasks', {
+          action: { kind: 'list', scope: { buddyId: w.designer.id }, include: 'all' },
+        })
+      ),
       [task.value.id, closed.id].sort()
     );
     assert.deepEqual(
       ids(
         await call(builder, 'tasks', {
-          view: { kind: 'owner', buddyId: w.designer.id },
+          action: { kind: 'list', scope: { buddyId: w.designer.id } },
         })
       ),
       [task.value.id]
     );
+    const taskRows = await call(builder, 'tasks', {
+      action: { kind: 'list', scope: { workspace: w.ws } },
+    });
+    const taskRow = taskRows.value.find((item: { id: string }) => item.id === task.value.id);
+    assert.equal('doneCriteria' in taskRow, false);
+    assert.equal('evidence' in taskRow, false);
+    const taskBody = await call(builder, 'tasks', {
+      action: { kind: 'get', taskId: task.value.id },
+    });
+    assert.equal(taskBody.value.task.doneCriteria, 'Shipped');
+
+    const teamRows = await call(builder, 'team', {
+      action: { kind: 'list', workspace: w.ws },
+    });
+    const buddyRow = teamRows.value.buddies.find(
+      (item: { id: string }) => item.id === w.designer.id
+    );
+    assert.equal('model' in buddyRow, false);
+    const buddyBody = await call(builder, 'team', {
+      action: { kind: 'get', target: { buddyId: w.designer.id } },
+    });
+    assert.equal(buddyBody.value.id, w.designer.id);
+
+    const removedComment = await call(designerGrant, 'task_write', {
+      write: { kind: 'comment', taskId: task.value.id, body: 'old path' },
+      key: 'old-comment',
+    });
+    assert.equal(removedComment.isError, true);
+    const comment = await call(designerGrant, 'post', {
+      channel: { task: task.value.id },
+      body: 'New path',
+      key: 'new-comment',
+    });
+    assert.equal(comment.isError, false, comment.text);
+
+    const schedule = await w.core.putSchedule(OWNER, {
+      buddyId: w.designer.id,
+      taskId: task.value.id,
+      name: 'Logo check',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      prompt: 'Check the logo',
+      limits: '{}',
+      enabled: true,
+      key: 'logo-check',
+    });
+    for (const scope of [
+      { buddyId: w.designer.id },
+      { taskId: task.value.id },
+      { workspace: w.ws },
+    ]) {
+      const schedules = await call(designerGrant, 'schedule', {
+        action: { kind: 'list', scope },
+      });
+      assert.ok(schedules.value.some((item: { id: string }) => item.id === schedule.id));
+    }
   } finally {
     server.close();
     await w.close();
@@ -1984,9 +2123,9 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
       conversationId: 'archive-test',
       runId: null,
     });
-    const archived = await call(w.endpoint.spec(grant), 'channel_archive', {
+    const archived = await call(w.endpoint.spec(grant), 'channel_admin', {
       channelId: w.general.id,
-      archived: true,
+      change: { kind: 'archive' },
       key: 'archive',
     });
     assert.equal(archived.isError, false, archived.text);
@@ -2012,15 +2151,12 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
       ).status,
       400
     );
-    assert.equal(
-      (
-        await http('POST', `/api/buddies/channels/${w.general.id}/archive`, {
-          archived: false,
-          key: 'restore',
-        })
-      ).status,
-      200
-    );
+    const restored = await call(w.endpoint.spec(grant), 'channel_admin', {
+      channelId: w.general.id,
+      change: { kind: 'restore' },
+      key: 'restore',
+    });
+    assert.equal(restored.isError, false, restored.text);
     assert.equal(
       (
         await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
@@ -2058,9 +2194,9 @@ test('Buddy MCP renames a public channel without changing its identity or histor
       conversationId: 'rename-test',
       runId: null,
     });
-    const renamed = await call(w.endpoint.spec(grant), 'channel_rename', {
+    const renamed = await call(w.endpoint.spec(grant), 'channel_admin', {
       channelId: w.general.id,
-      name: 'features',
+      change: { kind: 'rename', name: 'features' },
       key: 'rename',
     });
     assert.equal(renamed.isError, false, renamed.text);

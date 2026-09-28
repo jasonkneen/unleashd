@@ -17,6 +17,37 @@ const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, 
     task_epoch, after_run_id, status, deadline, lease_expires_at, snapshot, outcome, error_code, error, ready_at, \
     created_at, started_at, ended_at, config";
 
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// A run once appeared runnable in one view while the claimer held it for another condition. The
+// list and claim now use this exact expression; the crate test fails if either path can drift.
+const WAITING_REASON_SQL: &str = r#"CASE
+    WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
+    WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
+    WHEN r.input_kind <> 'chat' AND b.background_enabled = 0 THEN json_object('kind','background_off')
+    WHEN r.after_run_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM run a WHERE a.id = r.after_run_id AND a.status IN ('complete','failed','cancelled')
+    ) THEN json_object('kind','after_run','runId',r.after_run_id)
+    WHEN r.conversation_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
+          AND c.status IN ('running','cancel_requested')
+    ) THEN json_object('kind','conversation_busy')
+    WHEN (
+        SELECT count(*) FROM run l WHERE l.buddy_id = r.buddy_id
+          AND l.status IN ('running','cancel_requested')
+    ) >= b.max_active_runs THEN json_object(
+        'kind','pool_full',
+        'active',(
+            SELECT count(*) FROM run l WHERE l.buddy_id = r.buddy_id
+              AND l.status IN ('running','cancel_requested')
+        ),
+        'max',b.max_active_runs
+    )
+    WHEN r.task_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM task t WHERE t.id = r.task_id AND t.paused = 0
+    ) THEN json_object('kind','task_paused')
+    ELSE NULL
+END"#;
+
 fn run_row(r: &Row) -> rusqlite::Result<Run> {
     let ready_at: String = r.get(18)?;
     Ok(Run {
@@ -135,18 +166,11 @@ impl Store {
             // Background work is always claimable: the per-buddy `background_enabled` hold was
             // removed 2026-09-29 (owner) after it silently parked requests as "delivered but held".
             let candidate: Option<String> = tx
-                .prepare_cached(
+                .prepare_cached(&format!(
                     "SELECT r.id FROM run r JOIN buddy b ON b.id = r.buddy_id
-                     WHERE r.status = 'queued' AND r.ready_at <= ?1 AND b.status = 'active'
-                       AND (r.after_run_id IS NULL OR EXISTS (SELECT 1 FROM run a WHERE a.id = r.after_run_id
-                            AND a.status IN ('complete','failed','cancelled')))
-                       AND (r.conversation_id IS NULL OR NOT EXISTS (SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
-                            AND c.status IN ('running','cancel_requested')))
-                       AND (SELECT count(*) FROM run l WHERE l.buddy_id = r.buddy_id AND l.status IN ('running','cancel_requested'))
-                            < b.max_active_runs
-                       AND (r.task_id IS NULL OR EXISTS (SELECT 1 FROM task t WHERE t.id = r.task_id AND t.paused = 0))
-                     ORDER BY r.ready_at, r.id LIMIT 1",
-                )?
+                     WHERE r.status = 'queued' AND ({WAITING_REASON_SQL}) IS NULL
+                     ORDER BY r.ready_at, r.id LIMIT 1"
+                ))?
                 .query_row([now], |r| r.get(0))
                 .optional()?;
             let Some(id) = candidate else { return Ok(None) };
@@ -263,6 +287,10 @@ impl Store {
                 ("conversation_id = ? ORDER BY created_at DESC, id DESC", vec![conversation_id.into()])
             }
             RunQuery::Task { task_id } => ("task_id = ? ORDER BY created_at DESC, id DESC", vec![task_id.into()]),
+            RunQuery::Workspace { workspace_id } => (
+                "status IN ('queued','running','cancel_requested') AND workspace_id = ? ORDER BY created_at DESC, id DESC",
+                vec![workspace_id.into()],
+            ),
             RunQuery::Queued => ("status = 'queued' ORDER BY ready_at, id", vec![]),
             RunQuery::Live { workspace_id } => {
                 ("status IN ('running','cancel_requested') AND workspace_id = ? ORDER BY started_at", vec![workspace_id.into()])
@@ -271,6 +299,51 @@ impl Store {
         args.push(limit.into());
         let sql = format!("SELECT {RUN_COLS} FROM run WHERE {filter} LIMIT ?");
         collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), run_row)?)
+    }
+
+    pub fn list_run_rows(&self, query: RunQuery, limit: i64) -> Result<Vec<RunRow>> {
+        let (filter, scope) = match query {
+            RunQuery::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
+            RunQuery::Task { task_id } => ("r.task_id = ?2", task_id),
+            RunQuery::Workspace { workspace_id } => {
+                ("r.workspace_id = ?2 AND r.status IN ('queued','running','cancel_requested')", workspace_id)
+            }
+            RunQuery::Conversation { .. } | RunQuery::Queued | RunQuery::Live { .. } => {
+                return Err(CoreError::Invalid("run rows require buddy, task or workspace scope".into()));
+            }
+        };
+        let requester = "CASE
+            WHEN r.input_kind = 'chat' THEN 'owner'
+            WHEN r.input_kind = 'post' THEN coalesce((SELECT p.author_id FROM post p WHERE p.id = r.input_id), 'owner')
+            WHEN r.input_kind = 'reply' THEN coalesce((SELECT a.author_id FROM post p JOIN post a ON a.id = p.answer_id WHERE p.id = r.input_id), 'owner')
+            ELSE NULL END";
+        let sql = format!(
+            "SELECT r.id, r.status, r.input_kind, r.input_id, r.ready_at, r.task_id,
+                    {requester}, r.started_at, r.ended_at,
+                    CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END
+             FROM run r JOIN buddy b ON b.id = r.buddy_id
+             WHERE {filter} ORDER BY r.created_at DESC, r.id DESC LIMIT ?3"
+        );
+        collect(self.conn.prepare_cached(&sql)?.query_map(params![now_iso(), scope, limit], |r| {
+            let ready_at: String = r.get(4)?;
+            let waiting = r
+                .get::<_, Option<String>>(9)?
+                .map(|json| {
+                    serde_json::from_str::<RunWaiting>(&json)
+                        .map_err(|error| corrupt(CoreError::Corrupt(format!("run waiting reason {json:?}: {error}"))))
+                })
+                .transpose()?;
+            Ok(RunRow {
+                id: r.get(0)?,
+                status: r.get(1)?,
+                input: RunInput::from_columns(&r.get::<_, String>(2)?, r.get(3)?, &ready_at).map_err(corrupt)?,
+                task_id: r.get(5)?,
+                requester: r.get::<_, Option<String>>(6)?.map(|key| Actor::from_key(&key)),
+                started_at: r.get(7)?,
+                ended_at: r.get(8)?,
+                waiting,
+            })
+        })?)
     }
 
     // ---- schedules ---------------------------------------------------------------------------
@@ -308,9 +381,14 @@ impl Store {
         })
     }
 
-    pub fn list_schedules(&self, buddy_id: &str) -> Result<Vec<Schedule>> {
-        let sql = format!("SELECT {SCHEDULE_COLS} FROM schedule WHERE buddy_id = ?1 ORDER BY name");
-        collect(self.conn.prepare_cached(&sql)?.query_map([buddy_id], schedule_row)?)
+    pub fn list_schedules(&self, query: ScheduleQuery) -> Result<Vec<Schedule>> {
+        let (column, id) = match query {
+            ScheduleQuery::Buddy { buddy_id } => ("buddy_id", buddy_id),
+            ScheduleQuery::Task { task_id } => ("task_id", task_id),
+            ScheduleQuery::Workspace { workspace_id } => ("workspace_id", workspace_id),
+        };
+        let sql = format!("SELECT {SCHEDULE_COLS} FROM schedule WHERE {column} = ?1 ORDER BY name");
+        collect(self.conn.prepare_cached(&sql)?.query_map([id], schedule_row)?)
     }
 
     /// Enqueues one `Schedule` run per due schedule and advances it to its next slot after `now`.

@@ -41,8 +41,9 @@ export declare class BuddiesCore {
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
   getRun(id: string): Promise<Run>
   listRuns(query: RunQuery, limit: number): Promise<Array<Run>>
+  listRunRows(query: RunQuery, limit: number): Promise<Array<RunRow>>
   putSchedule(actor: Actor, input: ScheduleInput): Promise<Schedule>
-  listSchedules(buddyId: string): Promise<Array<Schedule>>
+  listSchedules(query: ScheduleQuery): Promise<Array<Schedule>>
   dueSchedules(now: string): Promise<Array<Run>>
   appendEvent(actor: Actor, input: EventInput): Promise<Event>
   listEvents(buddyId: string, beforeSeq: number, limit: number): Promise<Array<Event>>
@@ -418,10 +419,36 @@ export type RunQuery =
   | { kind: 'buddy'; buddyId: string }
   | { kind: 'conversation'; conversationId: string }
   | { kind: 'task'; taskId: string }
+  | { kind: 'workspace'; workspaceId: string }
   | { kind: 'queued' }
   | { kind: 'live'; workspaceId: string }
 
+/** The bounded list projection. Full execution state and outcomes stay on `get_run`. */
+export interface RunRow {
+  id: string
+  status: RunStatus
+  input: RunInput
+  taskId?: string
+  requester?: Actor
+  startedAt?: string
+  endedAt?: string
+  waiting?: RunWaiting
+}
+
 export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'complete' | 'failed' | 'cancelled'
+
+/**
+ * Why a queued run cannot be claimed yet. This is derived from the claim predicate on every
+ * read; it is never stored.
+ */
+export type RunWaiting =
+  | { kind: 'not_before'; at: string }
+  | { kind: 'buddy_archived' }
+  | { kind: 'background_off' }
+  | { kind: 'after_run'; runId: string }
+  | { kind: 'conversation_busy' }
+  | { kind: 'pool_full'; active: number; max: number }
+  | { kind: 'task_paused' }
 
 export interface Schedule {
   id: string
@@ -452,6 +479,11 @@ export interface ScheduleInput {
   enabled: boolean
   key: string
 }
+
+export type ScheduleQuery =
+  | { kind: 'buddy'; buddyId: string }
+  | { kind: 'task'; taskId: string }
+  | { kind: 'workspace'; workspaceId: string }
 
 /**
  * A profile field's new value: a named choice, or back to the server's default (column NULL).
