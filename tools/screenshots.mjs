@@ -564,6 +564,19 @@ function buildScreens(found, focus) {
     },
     { name: 'channel', missing: noChannel, views: onBoth(`${channels}?${channel}`) },
     { name: 'thread', missing: noThread, views: onBoth(thread) },
+    // The Threads view (product/buddies/THREADS_VIEW_2026-09-28.md). Its fold expands in place on
+    // desktop only; mobile's opens the thread screen.
+    { name: 'threads', missing: null, views: onBoth(`${channels}?view=threads`) },
+    {
+      name: 'threads-expanded',
+      missing: null,
+      views: {
+        desktop: {
+          path: `${channels}?view=threads`,
+          prepare: clickThen('.threads-fold', '.threads-card'),
+        },
+      },
+    },
     // The Task filter is desktop-only (the mobile channel screen has no picker).
     {
       name: 'task-filter',
