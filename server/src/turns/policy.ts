@@ -70,7 +70,7 @@ export interface TurnPolicy {
   startTurn(
     input: TurnInput,
     config: ResolvedExecutionConfig
-  ): { mcpServers?: Record<string, McpServerSpec> };
+  ): { mcpServers?: Record<string, McpServerSpec>; extraArgs?: readonly string[] };
   spawned(review: { attemptId: string; messageStart: number }): void;
   spawnFailed(): void;
   formatToolResult(output: unknown): string | null;

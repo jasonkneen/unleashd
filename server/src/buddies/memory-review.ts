@@ -9,6 +9,7 @@ import { readBuddyState } from './briefing';
 import { type BuddiesCore, buddyActor } from './core';
 import { runDetached } from './detached-cli';
 import type { BuddyGrant, Grants } from './grants';
+import { HARNESS_MEMORY_OFF } from './harness-memory';
 
 /**
  * The post-turn memory reviewer: a fresh CLI run, no Buddy session, that curates the Buddy's
@@ -238,6 +239,7 @@ const HARNESSES: Record<MemoryReviewModelChoice['harness'], Harness> = {
         MEMORY_REVIEW_INSTRUCTIONS,
         '--setting-sources',
         '',
+        ...HARNESS_MEMORY_OFF.claude,
         '--no-session-persistence',
         '--allowedTools',
         ...[...TOOL_NAMES].map((name) => `mcp__${SERVER}__${name}`),
