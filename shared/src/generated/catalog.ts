@@ -1,9 +1,9 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-24.gpt-6-sol-luna)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-28.claude-sonnet-5-5)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
-export const CLAUDE_MODEL_IDS = ["fable","claude-opus-5-5","sonnet","haiku"] as const;
+export const CLAUDE_MODEL_IDS = ["fable","claude-opus-5-5","claude-sonnet-5-5","sonnet","haiku"] as const;
 export const GEMINI_MODEL_IDS = ["gemini-3.1-pro-preview","gemini-2.5-pro","gemini-2.5-flash","gemini-2.0-flash"] as const;
 export const MUSE_MODEL_IDS = ["muse-spark-1.1","muse-spark-1.2-contributor","muse-spark-1.3","muse-spark-1.3-contributor"] as const;
 
@@ -91,6 +91,7 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProviderEntry[] = [
     models: [
       { id: "fable", displayName: "Claude Fable 5.1", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
       { id: "claude-opus-5-5", displayName: "Opus 5.5", isDefault: true, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
+      { id: "claude-sonnet-5-5", displayName: "Sonnet 5.5", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
       { id: "sonnet", displayName: "Sonnet", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
       { id: "haiku", displayName: "Haiku", isDefault: false, reasoning: { levels: ["low","medium","high","xhigh","max"], defaultEffort: "high" } },
     ],
