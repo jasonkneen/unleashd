@@ -38,7 +38,7 @@ const NEW = '11111111-1111-4111-8111-000000000002';
 const at = (minute: number) => new Date(Date.UTC(2026, 8, 26, 9, minute));
 const message = (role: Message['role'], content: string, minute: number): Message => ({
   role,
-  content,
+  body: { t: 'text', text: content },
   timestamp: at(minute),
 });
 

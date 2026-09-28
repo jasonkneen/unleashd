@@ -165,6 +165,23 @@ test('a socket from a pre-v3 client is closed with the protocol mismatch code', 
   }
 });
 
+// Message frames changed from `content` to `body` in v4. A v3 tab must get the
+// close reason its existing mismatch handler turns into the reload banner.
+test('a protocol v3 socket is closed with the v4 reload reason', async () => {
+  const wss = new WebSocketServer({ noServer: true });
+  registerConversationWebSocket(wss, {} as never);
+  const { server, port } = await listen(wss);
+  const oldClient = new WebSocket(`ws://127.0.0.1:${port}/ws?protocol=3`);
+  try {
+    const [code, reason] = (await once(oldClient, 'close')) as [number, Buffer];
+    assert.equal(code, PROTOCOL_MISMATCH_CLOSE_CODE);
+    assert.equal(reason.toString(), 'protocol 4');
+  } finally {
+    wss.close();
+    server.close();
+  }
+});
+
 test(
   'liveness terminates a half-open peer and keeps a responsive one',
   { timeout: 10_000 },

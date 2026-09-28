@@ -20,17 +20,22 @@ delegation chain it tested) now
 round-trips its snapshots, runtime broadcasts and owner commands through the
 shared wire decoders. Review-document UUIDs retain their UUID contract.
 
-## Protocol v3: rows, patches, bodies on demand (T09, 2026-09-25)
+## Protocol v4: typed bodies on the v3 row/patch layout
+
+T09 introduced rows, patches, and bodies on demand in v3 (2026-09-25). V4 keeps that layout and
+changes transcript messages from a `content` string to a typed `body`. The server sends no duplicate
+`content` field. Old v3 tabs must reload before reading v4 frames.
 
 | Server → client | Contract |
 |---|---|
-| `hello` | `protocol.version: 3`, `defaultCwd`, `loading`, `archivedBuddyIds`, and every conversation as a `ConversationRow` (id, kind, parent, resumedFrom, provider, cwd, label, createdAt, activityAt, messageCount, run, done). Rows travel encoded (`encodeRows`: each cwd and Buddy once per message); `decodeRows` rebuilds them. |
+| `hello` | `protocol.version: 4`, `defaultCwd`, `loading`, `archivedBuddyIds`, and every conversation as a `ConversationRow` (id, kind, parent, resumedFrom, provider, cwd, label, createdAt, activityAt, messageCount, run, done). Rows travel encoded (`encodeRows`: each cwd and Buddy once per message); `decodeRows` rebuilds them. |
 | `rows` | Upserts rows: startup batches, the disk poller, a creation seen by other sockets. |
 | `removed` | Deleted ids. |
 | `ready` | Startup hydration finished; `conversationIds` is the authoritative membership. |
 | `patch` | `{id, patch: RowPatch}` — one field group: `run`, `done`, `label`, `activity`, `config` (with the setter's `commandId`), `queue`, `session`, `subagent`, `turn`. Row-level ones move the row; detail-level ones apply only where that detail is loaded. |
 | `ack` | The one acknowledgement: `created` (with the new row, to the creating socket), `accepted` (queue/interrupt admitted), `rejected` (typed error; never a snapshot — the authoritative state goes out as a patch first). |
-| `message`, `chunk`, `message_complete`, `error`, `buddy_*`, `channel_changed` | Unchanged. |
+| `message` | `{conversationId, role, body}`. `body` is text or ordered typed parts (text, tool use, question, Buddy result/thread, or swarm launch); renderers consume those parts without parsing marker text. |
+| `chunk`, `message_complete`, `error`, `buddy_*`, `channel_changed` | Unchanged. |
 
 Deleted: `init`, `conversations_updated`, `conversation_created`, `conversation_updated`,
 `conversation_deleted`, `conversation_load_complete`, `status`, `session_bound`, `queue_updated`,
@@ -40,15 +45,18 @@ Deleted: `init`, `conversations_updated`, `conversation_created`, `conversation_
 Bodies and details load on demand: `GET /api/conversations/:id` (detail: config state, queue,
 sub-agents, latest turn's observed model and usage, swarm prefix) and
 `GET /api/conversations/:id/messages?afterSeq=&limit=` (a `MessagePage`: `epoch`, `total`, messages
-with seq > afterSeq). The epoch changes only when the server REPLACED history (not an append), so a
-client refreshes a grown transcript by paging from its last held message.
+with seq > afterSeq, each with the same typed `body`). The epoch changes only when the server
+REPLACED history (not an append), so a client refreshes a grown transcript by paging from its last
+held message.
 
 `create_conversation` carries `kind: {t:'chat'} | {t:'buddy', context} | {t:'fork', from}` — the one
 kind encoding. A fork inherits its source's kind on the server.
 
-**Version skew.** A v2 backend greets with `init`; `classifyServerFrame` returns `{t:'skew'}` and the
-client keeps its rows, shows "backend reloading" and reconnects. A v2 client facing a v3 backend drops
-`hello` as an unknown type and keeps its list. Guard: `client/test/protocol-skew.test.ts`.
+**Version skew.** Every socket names its protocol in the upgrade URL. A v3 client facing a v4
+backend gets close code `4426` with reason `protocol 4`, which shows its reload banner. A v4 client
+facing an older v3 backend gets a skew state, keeps its rows, and reconnects until the backend
+reloads. A v2 backend still greets with `init`; `classifyServerFrame` also treats that as skew.
+Guards: `server/test/websocket-lifecycle.test.ts`, `client/test/protocol-skew.test.ts`.
 
 ## Pending commands are separate from server rows
 

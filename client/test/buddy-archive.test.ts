@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { type ServerMessage, encodeRows } from '@unleashd/shared';
+import { PROTOCOL_VERSION, type ServerMessage, encodeRows } from '@unleashd/shared';
 import { handleMessage } from '../src/atoms/actions';
 import { buddySidebarAtom, buddySidebarOverviewAtom } from '../src/atoms/buddy-sidebar';
 import { listIndexAtom, rowFamily } from '../src/atoms/conversations';
@@ -17,7 +17,7 @@ test('archived Buddy threads stay hidden despite stale overview and later row up
   });
   handleMessage({
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/',
     loading: false,
     archivedBuddyIds: [],

@@ -81,7 +81,10 @@ They arrive with the server rewrite (T11), when a route needs them.
 
 ## Import (done)
 
-The one-time import and verify tools ran in the 2026-09-27 live swap and were then deleted (last at 03fc931).
+The one-time import and verify tools ran in the 2026-09-27 live swap and were then deleted.
+Their corrected recovery source is pinned at `archive/t15-importer-93367be`
+(`93367beeb3f76c08408c435e4afc53f7996e4801`), including the v34 scheduled-run fix.
+The earlier release `03fc931` lacks that fix.
 The procedure, counts and verification are in agent_notes/2026-09-25_lean-rewrite/T15-RUNBOOK.md.
 
 ## Tests

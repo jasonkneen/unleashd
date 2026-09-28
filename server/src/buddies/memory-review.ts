@@ -48,8 +48,8 @@ export interface CompletedBuddyTurn {
   conversationId: string;
   context: BuddyContext;
   completedAt: string;
-  /** `toolCall` is what the turn did; without it the reviewer saw prose and tried to verify. */
-  messages: Array<{ role: string; content: string; toolCall?: Message['toolCall'] }>;
+  /** Typed parts preserve the calls the reviewer must see as evidence. */
+  messages: Pick<Message, 'role' | 'body'>[];
 }
 
 type ReviewStatus = 'complete' | 'failed' | 'interrupted' | 'skipped';
@@ -90,11 +90,19 @@ doc_write replaces a whole doc: pass kind, content, reason and the revision you 
 
 /** One tool call as a transcript line: its verbatim harness name plus a bounded input. */
 const TOOL_INPUT_MAX = 400;
-function toolLine({ name, input = '' }: NonNullable<Message['toolCall']>): string {
+const cleanProse = (text: string) =>
+  text
+    .replace(/<!-- unleashd:buddy-context-v2[\s\S]*?<!-- \/unleashd:buddy-context-v2 -->/g, '')
+    .trim();
+function toolLine({
+  name,
+  input,
+}: Extract<Message['body'], { t: 'parts' }>['parts'][number] & { t: 'tool' }): string {
+  const text = input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input);
   const shown =
-    input.length > TOOL_INPUT_MAX
-      ? `${input.slice(0, TOOL_INPUT_MAX)}…[truncated ${input.length - TOOL_INPUT_MAX} chars]`
-      : input;
+    text.length > TOOL_INPUT_MAX
+      ? `${text.slice(0, TOOL_INPUT_MAX)}…[truncated ${text.length - TOOL_INPUT_MAX} chars]`
+      : text;
   return `[tool call] ${name} ${shown}`.trimEnd();
 }
 
@@ -110,12 +118,21 @@ export function reviewTranscript(messages: CompletedBuddyTurn['messages']) {
       omitted += 1;
       continue;
     }
-    const prose = message.content
-      .replace(/<!-- unleashd:buddy-context-v2[\s\S]*?<!-- \/unleashd:buddy-context-v2 -->/g, '')
-      .trim();
-    const clean = [prose, ...(message.toolCall ? [toolLine(message.toolCall)] : [])]
-      .filter(Boolean)
-      .join('\n');
+    const prose = message.body.t === 'text' ? cleanProse(message.body.text) : '';
+    const parts =
+      message.body.t === 'parts'
+        ? message.body.parts.map((part) => {
+            if (part.t === 'text') return cleanProse(part.text);
+            if (part.t === 'tool') return toolLine(part);
+            if (part.t === 'question') return `[question] ${JSON.stringify(part.question)}`;
+            if (part.t === 'buddy_builder_result')
+              return `[Buddy Builder result] ${JSON.stringify(part.event)}`;
+            if (part.t === 'buddy_worker_thread')
+              return `[Buddy worker thread] ${JSON.stringify(part.thread)}`;
+            return `[swarm launch] ${part.command}`;
+          })
+        : [];
+    const clean = [prose, ...parts].filter(Boolean).join('\n');
     const bytes = Buffer.from(clean);
     const content =
       bytes.length > remaining ? bytes.subarray(bytes.length - remaining).toString('utf8') : clean;
@@ -277,7 +294,12 @@ async function runAttempt(
   const cancel = () => rung.abort();
   signal.addEventListener('abort', cancel, { once: true });
   const result = await runDetached(execute, harness.request(launch), rung.signal, (event, stop) => {
-    if (event.type === 'tool.use' && !harness.authorizes(event.name)) {
+    // Native child states are tool activity too, even without a preceding tool.use.
+    // Guard: buddies-v2.test.ts "native child events cannot bypass restricted Buddy runs".
+    if (event.type === 'subagent.state') {
+      failure = `Memory reviewer attempted a sub-agent operation: ${event.operation}`;
+      stop();
+    } else if (event.type === 'tool.use' && !harness.authorizes(event.name)) {
       failure = `Memory reviewer attempted a tool outside its read-only set: ${event.name}`;
       stop();
     } else if (event.type === 'error') failure = event.message;

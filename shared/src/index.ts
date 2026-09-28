@@ -14,7 +14,13 @@ import {
   ConversationIdSchema,
   ModelIdSchema,
 } from './conversation-config.js';
-import { CreateKindSchema, EncodedRowsSchema, RowPatchSchema } from './conversation.js';
+import {
+  CreateKindSchema,
+  EncodedRowsSchema,
+  MessageBodySchema,
+  RowPatchSchema,
+} from './conversation.js';
+import { legacyBody } from './legacy-content.js';
 import {
   PROVIDER_METADATA,
   PROVIDER_OPTIONS,
@@ -26,6 +32,10 @@ import {
 
 export * from './conversation-config.js';
 export * from './conversation.js';
+export { bodyText } from './content-schema.js';
+export * from './turn-attempt.js';
+export * from './legacy-content.js';
+export * from './tool-content.js';
 export * from './buddy.js';
 export * from './provider-catalog.js';
 
@@ -505,18 +515,18 @@ export type DeviceUiPrefs = z.infer<typeof DeviceUiPrefsSchema>;
 export const SeenMessageIndexSchema = z.record(z.string(), z.number());
 
 // =============================================================================
-// Server → Client Messages (protocol v3, T09 2026-09-25)
+// Server → Client Messages (protocol v4; T09 introduced the v3 row/patch layout)
 //
 // Skew rule: the client reads `hello.protocol.version` before anything else. A
 // v2 backend (still running while Vite already serves this client) sends
-// `init`, which this client recognises by type and answers with a typed
-// "backend reloading" state + reconnect — it never replaces the list with an
-// empty one. A v2 client talking to a v3 backend rejects `hello` as an
-// unknown type and keeps the list it had. Fields ADDED within v3 still need
-// `.default(...)` (CLAUDE.md). Guard: client/test/protocol-skew.test.ts.
+// `init`, which this client recognises as a typed "backend reloading" skew.
+// A v3 backend is rejected at the socket upgrade until it reloads. The v4
+// message frame carries `body` instead of `content`; an old v3 client must
+// reload before receiving one. New fields within v4 still need `.default(...)`.
+// Guard: client/test/protocol-skew.test.ts.
 // =============================================================================
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 // Pattern: sum-types (docs/patterns.md#sum-types)
 // A tab left open across a protocol swap kept its list and silently stopped
@@ -617,7 +627,7 @@ const MessageMessageSchema = z.object({
   type: z.literal('message'),
   conversationId: ConversationIdSchema,
   role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
+  body: MessageBodySchema,
 });
 
 const ChunkMessageSchema = z.object({
@@ -680,7 +690,7 @@ export function safeParseClientMessage(data: unknown) {
 }
 
 /**
- * What one server frame means to this client (protocol v3). A v2 backend —
+ * What one server frame means to this client (protocol v4). A v2 backend —
  * still running while Vite already serves this client during a dev reload —
  * greets with `init`; that is a typed version skew, never a parse failure that
  * the caller might answer by clearing state. Guard: client/test/protocol-skew.test.ts.
@@ -699,7 +709,19 @@ export function classifyServerFrame(raw: unknown): ServerFrame {
       serverVersion: typeof protocol?.version === 'number' ? protocol.version : 2,
     };
   }
-  const parsed = ServerMessageSchema.safeParse(raw);
+  // During a Vite/backend reload an older v3 server still sends `content`.
+  // Normalize at the wire edge so its message remains visible to the new UI.
+  const frame =
+    record.type === 'message' && record.body === undefined && typeof record.content === 'string'
+      ? {
+          ...record,
+          body:
+            record.role === 'assistant'
+              ? legacyBody(record.content)
+              : { t: 'text', text: record.content },
+        }
+      : raw;
+  const parsed = ServerMessageSchema.safeParse(frame);
   return parsed.success
     ? { t: 'message', message: parsed.data }
     : { t: 'invalid', issues: parsed.error.issues.map((issue) => issue.message).join('; ') };
@@ -716,8 +738,5 @@ export type {
 export * from './buddy-workspace-activity.js';
 export * from './buddy-channel-posts.js';
 export * from './harness-retry.js';
-export * from './buddy-team-configuration.js';
-
-export * from './buddy-team-configuration-result.js';
 
 export * from './upstream.js';

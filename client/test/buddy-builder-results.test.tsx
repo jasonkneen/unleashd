@@ -4,13 +4,13 @@ import test from 'node:test';
 import {
   type BuddyBuilderProject,
   type BuddyBuilderResult,
-  formatBuddyBuilderToolResult,
+  legacyBody,
+  parseBuddyBuilderToolResult,
 } from '@unleashd/shared';
 import { Provider, createStore } from 'jotai';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { archivedBuddyIdsAtom } from '../src/atoms/buddy-visibility';
-import { splitStructuredMessageContent } from '../src/utils/structured-message-segments';
 
 // Node renders the real card and router; stylesheet assets are handled by Vite in the app.
 register(
@@ -22,9 +22,7 @@ register(
   `)}`,
   import.meta.url
 );
-const { InlineBuddyBuilderResult } = await import(
-  '../src/components/buddies/BuddyBuilderResultCard'
-);
+const { BuddyBuilderResultCard } = await import('../src/components/buddies/BuddyBuilderResultCard');
 
 const result: BuddyBuilderResult = {
   conversationId: 'builder-wave',
@@ -64,16 +62,14 @@ const outreach: BuddyBuilderProject = {
 };
 
 function renderToolResult(value: unknown, archivedIds: string[] = []): string {
-  const marker = formatBuddyBuilderToolResult(value);
-  assert.ok(marker, 'a successful canonical Builder result reaches the transcript renderer');
-  const payload = marker.match(/^<!--buddy_builder_result:(.*)-->$/)?.[1];
-  assert.ok(payload);
+  const event = parseBuddyBuilderToolResult(value);
+  assert.ok(event, 'a successful canonical Builder result reaches the transcript renderer');
   const store = createStore();
   store.set(archivedBuddyIdsAtom, new Set(archivedIds));
   return renderToStaticMarkup(
     <Provider store={store}>
       <MemoryRouter>
-        <InlineBuddyBuilderResult payload={payload} />
+        <BuddyBuilderResultCard event={event} />
       </MemoryRouter>
     </Provider>
   );
@@ -142,22 +138,29 @@ test('saved work renders canonical blockers and the Work route without claiming 
 });
 
 test('the compact result replaces only its adjacent generic MCP tool label', () => {
-  const marker = formatBuddyBuilderToolResult(result)!;
-  const segments = splitStructuredMessageContent(
-    `Before\n🔧 unrelated_tool\n🔧 mcp_tool\n\n${marker}\nAfter`
-  );
-  assert.equal(segments.filter((segment) => segment.type === 'buddy_builder_result').length, 1);
-  const text = segments
-    .filter((segment) => segment.type === 'text')
-    .map((segment) => segment.content)
+  const marker = `<!--buddy_builder_result:${encodeURIComponent(JSON.stringify({ action: 'created', result }))}-->`;
+  const body = legacyBody(`Before\n🔧 unrelated_tool\n🔧 mcp_tool\n\n${marker}\nAfter`);
+  assert.equal(body.t, 'parts');
+  if (body.t !== 'parts') return;
+  assert.equal(body.parts.filter((part) => part.t === 'buddy_builder_result').length, 1);
+  const text = body.parts
+    .filter((part) => part.t === 'text')
+    .map((part) => part.text)
     .join('');
   assert.doesNotMatch(text, /mcp_tool/);
-  assert.match(text, /unrelated_tool/);
+  assert.equal(
+    body.parts.some((part) => part.t === 'tool' && part.name === 'unrelated_tool'),
+    true
+  );
   assert.match(text, /Before/);
   assert.match(text, /After/);
-  assert.deepEqual(splitStructuredMessageContent('🔧 mcp_tool\nTool failed'), [
-    { type: 'text', content: '🔧 mcp_tool\nTool failed' },
-  ]);
+  assert.deepEqual(legacyBody('🔧 mcp_tool\nTool failed'), {
+    t: 'parts',
+    parts: [
+      { t: 'tool', name: 'mcp_tool', displayText: '' },
+      { t: 'text', text: '\nTool failed' },
+    ],
+  });
   const html = renderToolResult(result);
   assert.match(html, /popover="auto"/);
   assert.match(html, /popoverTarget=/i);

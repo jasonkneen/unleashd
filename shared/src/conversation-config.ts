@@ -118,21 +118,6 @@ export const ProviderTurnUsageSchema = z.object({
 });
 export type ProviderTurnUsage = z.infer<typeof ProviderTurnUsageSchema>;
 
-export const ConversationSessionBindingSchema = z.object({
-  provider: ProviderSchema,
-  sessionId: z.string().min(1),
-  // Host-verified disclosure audience for this exact native session. Legacy
-  // bindings without it must establish a fresh Buddy context before reuse.
-  buddyAudienceKey: z.string().min(1).optional(),
-  // Last provider-counted usage seen on THIS session, so the context meter
-  // survives a server reload without re-parsing the transcript. Bound to the
-  // session rather than the conversation because a session rotation starts a
-  // fresh provider context; carrying the old number forward would overstate it.
-  latestUsage: ProviderTurnUsageSchema.optional(),
-});
-
-export const ConversationLifecycleStatusSchema = z.enum(['active', 'deleted']);
-
 // Conversation IDs are opaque: Buddy runs use deterministic prefixed IDs and
 // older provider imports can be non-UUIDs. Use the same contract on disk and
 // across the wire.
@@ -259,42 +244,6 @@ export const ConversationCreationMetadataSchema = z.object({
   resumedFromConversationId: ConversationIdSchema.optional(),
 });
 export type ConversationCreationMetadata = z.infer<typeof ConversationCreationMetadataSchema>;
-
-// v2 (T09, 2026-09-25): `kind` is required and is the only identity; v1's
-// creation.buddyContext / purpose / placement are gone. The one-time v1 → v2
-// rewrite was the one-time record migration, deleted after the 2026-09-27 swap (last at 03fc931).
-export const CONVERSATION_RECORD_VERSION = 2;
-export const PersistedConversationConfigRecordSchema = z.object({
-  version: z.literal(CONVERSATION_RECORD_VERSION),
-  conversationId: ConversationIdSchema,
-  kind: ConversationKindSchema,
-  // Historical aliases remain indexed for transcript discovery. The session to
-  // resume is stored separately so rotation never depends on array ordering.
-  sessionBindings: z.array(ConversationSessionBindingSchema),
-  currentSession: ConversationSessionBindingSchema.optional(),
-  status: ConversationLifecycleStatusSchema.default('active'),
-  // Owner marked this conversation done: hidden from working lists, still
-  // loaded and resumable. It lives here, keyed by the stable conversationId,
-  // because the retired client-synced list keyed hides by provider sessionId,
-  // which the server rotates (session.started, reset, resume) — every rotation
-  // silently un-hid the conversation. Absent on older records = never marked.
-  done: z.boolean().default(false),
-  workingDirectory: z.string().min(1).optional(),
-  creation: ConversationCreationMetadataSchema.optional(),
-  deletedAt: z.string().datetime().optional(),
-  config: ConversationConfigSchema,
-  // Internal persistence CAS token. Unlike configRevision, this advances for
-  // lifecycle, session, and delivery-marker writes too.
-  recordRevision: z.number().int().nonnegative().default(0),
-  configRevision: z.number().int().nonnegative(),
-  lastResolvedConfig: ResolvedExecutionConfigSchema.optional(),
-  provenance: z.enum(['user', 'legacy_inferred', 'external_discovered']),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-export type PersistedConversationConfigRecord = z.infer<
-  typeof PersistedConversationConfigRecordSchema
->;
 
 export function createDefaultConversationConfig(provider: Provider = 'claude'): ConversationConfig {
   return {

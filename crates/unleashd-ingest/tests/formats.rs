@@ -5,7 +5,11 @@ mod common;
 
 use common::*;
 use serde_json::{Value, json};
-use unleashd_ingest::model::{Cwd, Format, Identity, Role, ToolCall, Usage};
+use unleashd_ingest::model::{Cwd, Format, Identity, Message, Role, Usage};
+
+fn parts(message: &Message) -> Vec<Value> {
+    serde_json::from_str(message.parts_json.as_deref().expect("structured content")).unwrap()
+}
 
 fn codex_row(kind: &str, payload: Value) -> Value {
     json!({ "timestamp": "2026-09-10T07:00:00.000Z", "type": kind, "payload": payload })
@@ -58,10 +62,13 @@ fn codex_history_keeps_tool_calls_in_event_and_response_modes() {
         let (messages, row) = parse(Format::Codex, &path);
         assert_eq!(
             contents(&messages),
-            ["Inspect the project", "⚡ shell pwd", "🔧 exec", "🔧 exec", "🔧 get_inbox", "Inspection complete"]
+            ["Inspect the project", "", "", "", "", "Inspection complete"]
         );
-        assert_eq!(messages[1].tool_call, Some(ToolCall { name: "exec_command".into(), input: Some("{\n  \"cmd\": \"pwd\"\n}".into()) }));
-        assert_eq!(messages[4].tool_call.as_ref().unwrap().input.as_deref(), Some("{"), "unparseable arguments stay inspectable");
+        assert_eq!(parts(&messages[1]), vec![json!({ "t": "tool", "name": "exec_command", "input": { "cmd": "pwd" } })]);
+        assert_eq!(parts(&messages[2])[0]["name"], "exec");
+        assert_eq!(parts(&messages[3])[0]["name"], "exec");
+        assert_eq!(parts(&messages[4])[0]["name"], "get_inbox");
+        assert_eq!(parts(&messages[4])[0]["input"], "{", "unparseable arguments stay inspectable");
         let row = row.unwrap();
         assert_eq!(row.facts.session_id, "session");
         assert_eq!(row.facts.cwd, Cwd::Transcript { path: "/work".into() });
@@ -152,8 +159,9 @@ fn claude_titles_usage_receipts_and_reply_times() {
     let path = dir.path().join("-tmp-work").join("abc.jsonl");
     write(&path, &text);
     let (messages, row) = parse(Format::Claude, &path);
-    assert_eq!(contents(&messages)[..3], ["hello", "Reading", "📖 Read /a.rs"]);
-    assert!(messages[3].content.starts_with("<!--buddy_worker_thread:"));
+    assert_eq!(contents(&messages)[..3], ["hello", "Reading", ""]);
+    assert_eq!(parts(&messages[2]), vec![json!({ "t": "tool", "name": "Read", "input": { "file_path": "/a.rs" } })]);
+    assert_eq!(parts(&messages[3])[0]["t"], "raw_result");
     assert_eq!(messages[4].content, "Done");
     // A reply starts when the message before it did; its completion is its own line's time.
     assert_eq!(messages[1].at, messages[0].at);
@@ -184,7 +192,8 @@ fn claude_agent_tool_is_a_sub_agent() {
     let path = dir.path().join("-w").join("agent.jsonl");
     write(&path, &text);
     let (messages, row) = parse(Format::Claude, &path);
-    assert_eq!(contents(&messages)[1], "▶️ Agent Run background task and reply");
+    assert_eq!(parts(&messages[1])[0]["name"], "Agent");
+    assert_eq!(parts(&messages[1])[0]["input"]["description"], "Run background task and reply");
     let sub_agents = row.unwrap().facts.sub_agents;
     assert_eq!(sub_agents.iter().map(|a| a.description.as_str()).collect::<Vec<_>>(), ["Run background task and reply"]);
 }
@@ -235,7 +244,8 @@ fn cursor_messages_have_no_invented_times() {
     let path = dir.path().join("Users-nobody-proj").join("agent-transcripts").join("sid").join("sid.jsonl");
     write(&path, &text);
     let (messages, row) = parse(Format::Cursor, &path);
-    assert_eq!(contents(&messages), ["<timestamp>2026-09-01T10:00:00Z</timestamp> fix the bug", "On it\n🔍 Grep bug"]);
+    assert_eq!(contents(&messages), ["<timestamp>2026-09-01T10:00:00Z</timestamp> fix the bug", "On it"]);
+    assert_eq!(parts(&messages[1])[1]["name"], "Grep");
     assert!(messages.iter().all(|m| m.at.is_none()));
     let row = row.unwrap();
     assert_eq!(row.created_at, unleashd_ingest::parsers::parse_iso("2026-09-01T10:00:00Z").unwrap());
@@ -266,7 +276,8 @@ fn muse_sorts_by_record_time_and_reads_durable_identity() {
     let path = dir.path().join("01a0-muse").join("session.jsonl");
     write(&path, &text);
     let (messages, row) = parse(Format::Muse, &path);
-    assert_eq!(contents(&messages), ["hi", "📖 Read /x", "second"]);
+    assert_eq!(contents(&messages), ["hi", "", "second"]);
+    assert_eq!(parts(&messages[1])[0]["name"], "Read");
     let row = row.unwrap();
     assert_eq!(row.facts.model.as_deref(), Some("muse-spark-1.3"));
     assert_eq!(row.identity, Identity::Builder);
@@ -295,7 +306,8 @@ fn gemini_document_with_tool_calls_and_sub_agents() {
     let path = project.join("chats").join("session-2026-gem1.json");
     write(&path, &doc.to_string());
     let (messages, row) = parse(Format::Gemini, &path);
-    assert_eq!(contents(&messages), ["find it", "Looking\n🔧 codebase_investigator\n📖 read_file /g/a"]);
+    assert_eq!(contents(&messages), ["find it", "Looking"]);
+    assert_eq!(parts(&messages[1]).iter().filter_map(|p| p.get("name").and_then(Value::as_str)).collect::<Vec<_>>(), ["codebase_investigator", "read_file"]);
     let row = row.unwrap();
     assert_eq!(row.facts.cwd, Cwd::Transcript { path: "/g/project".into() });
     assert_eq!(row.facts.sub_agents.len(), 1);
@@ -324,7 +336,8 @@ fn opencode_session_directory_with_parts_metadata_and_usage() {
         &json!({ "directory": "/oc/dir", "time": { "created": 500, "updated": 2500 } }).to_string(),
     );
     let (messages, row) = parse(Format::Opencode, &session);
-    assert_eq!(contents(&messages), ["quoted prompt", "Patched\n[Patch: 2 files]"]);
+    assert_eq!(contents(&messages), ["quoted prompt", "Patched"]);
+    assert_eq!(parts(&messages[1])[1], json!({ "t": "tool", "name": "patch", "input": { "files": 2 } }));
     let row = row.unwrap();
     assert_eq!(row.facts.cwd, Cwd::Transcript { path: "/oc/dir".into() });
     assert_eq!(row.facts.model.as_deref(), Some("opencode/big-pickle"));

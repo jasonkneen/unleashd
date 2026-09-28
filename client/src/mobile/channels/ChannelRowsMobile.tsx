@@ -11,6 +11,7 @@ import {
   type ChannelRow,
   type WorkspaceDirectory,
   authorName,
+  channelPostBody,
   clockTime,
   postPurposeLabel,
   postPurposeTag,
@@ -157,7 +158,7 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
               />
             </div>
             <ChannelMarkdown
-              body={row.post.body}
+              body={channelPostBody(row.post)}
               buddyNames={context.directory.buddyNames}
               tasks={context.directory.taskById}
             />
@@ -183,7 +184,7 @@ export function Row({ row, context }: { row: ChannelRow; context: RowContext }) 
               linkState={linkState}
             />
             <ChannelMarkdown
-              body={row.post.body}
+              body={channelPostBody(row.post)}
               buddyNames={context.directory.buddyNames}
               tasks={context.directory.taskById}
             />

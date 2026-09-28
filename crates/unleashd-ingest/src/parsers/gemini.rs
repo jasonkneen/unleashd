@@ -4,7 +4,7 @@
 use super::{Ctx, Doc, DocMessage, Facts, normalize_dir, parse_time};
 use crate::model::{Cwd, Provider, Role};
 use crate::subagents::SubAgentFold;
-use crate::text::{format_tool_use, js_trim};
+use crate::text::js_trim;
 use serde_json::Value;
 use std::path::Path;
 
@@ -33,21 +33,23 @@ pub fn read(path: &Path, ctx: &Ctx) -> std::io::Result<Option<Doc>> {
                     .collect();
                 let text = js_trim(&text);
                 if !text.is_empty() {
-                    messages.push(DocMessage { role: Role::User, at, completed_at: None, content: text.to_string() });
+                    messages.push(DocMessage { role: Role::User, at, completed_at: None, content: text.to_string(), parts_json: None });
                 }
             }
             Some("gemini") => {
                 if model.is_none() {
                     model = m.get("model").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
                 }
-                let mut parts: Vec<String> = Vec::new();
+                let mut parts: Vec<Value> = Vec::new();
+                let mut prose = String::new();
                 if let Some(c) = m.get("content").and_then(Value::as_str).filter(|c| !c.is_empty()) {
-                    parts.push(c.to_string());
+                    prose = c.to_string();
+                    parts.push(serde_json::json!({ "t": "text", "text": c }));
                 }
                 for call in m.get("toolCalls").and_then(Value::as_array).into_iter().flatten() {
                     let name = call.get("name").and_then(Value::as_str).unwrap_or("tool");
                     let args = call.get("args");
-                    parts.push(format_tool_use(name, args));
+                    parts.push(serde_json::json!({ "t": "tool", "name": name, "input": args }));
                     let id = call
                         .get("id")
                         .and_then(Value::as_str)
@@ -55,10 +57,9 @@ pub fn read(path: &Path, ctx: &Ctx) -> std::io::Result<Option<Doc>> {
                         .unwrap_or_else(|| format!("{name}-{}", at.unwrap_or(0.0)));
                     sub_agents.tool_use(Provider::Gemini, &id, name, args.unwrap_or(&Value::Null), at);
                 }
-                let full = parts.join("\n");
-                let full = js_trim(&full);
-                if !full.is_empty() {
-                    messages.push(DocMessage { role: Role::Assistant, at, completed_at: None, content: full.to_string() });
+                if !parts.is_empty() {
+                    let has_tool = parts.iter().any(|part| part.get("t").and_then(Value::as_str) == Some("tool"));
+                    messages.push(DocMessage { role: Role::Assistant, at, completed_at: None, content: js_trim(&prose).to_string(), parts_json: has_tool.then(|| Value::Array(parts).to_string()) });
                 }
             }
             _ => {}

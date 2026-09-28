@@ -5,7 +5,7 @@
 
 use super::{Ctx, Doc, DocMessage, Facts, finite, normalize_dir, parse_time, widen};
 use crate::model::{ContextReading, Cwd, Provider, Role, Usage, UsageTurn};
-use crate::text::{format_buddy_receipt, format_tool_use, js_trim};
+use crate::text::js_trim;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -68,6 +68,7 @@ struct Part {
     tool: Option<String>,
     status: Option<String>,
     output: Option<Value>,
+    input: Option<Value>,
     files: usize,
     order: f64,
     id: String,
@@ -89,6 +90,7 @@ fn parts(root: &Path, message_id: &str) -> Vec<Part> {
                 tool: data.get("tool").and_then(Value::as_str).map(str::to_string),
                 status: data.pointer("/state/status").and_then(Value::as_str).map(str::to_string),
                 output: data.pointer("/state/output").cloned(),
+                input: data.pointer("/state/input").cloned(),
                 files: data.get("files").and_then(Value::as_array).map_or(0, |f| f.iter().filter(|v| v.is_string()).count()),
                 order,
                 id: file.file_stem()?.to_str()?.to_string(),
@@ -112,49 +114,41 @@ fn decode_text(text: &str) -> String {
     trimmed.to_string()
 }
 
-fn content(role: Role, parts: &[Part], summary_title: Option<&str>) -> String {
+fn content(role: Role, parts: &[Part], summary_title: Option<&str>) -> (String, Option<String>) {
     let assistant = role == Role::Assistant;
     let has_tools = assistant && parts.iter().any(|p| p.kind == "tool" || p.kind == "patch");
     let mut out: Vec<String> = Vec::new();
+    let mut structured: Vec<Value> = Vec::new();
     for part in parts {
         match part.kind.as_str() {
             "text" => {
                 if let Some(text) = part.text.as_deref().filter(|t| !t.is_empty()) {
                     let decoded = decode_text(text);
                     if !decoded.is_empty() {
+                        structured.push(serde_json::json!({ "t": "text", "text": decoded }));
                         out.push(decoded);
                     }
                 }
             }
             "tool" if assistant => {
-                let line = format_tool_use(part.tool.as_deref().unwrap_or("tool"), None);
-                match part.status.as_deref() {
-                    Some(status) if !status.is_empty() && status != "completed" && status != "done" => {
-                        out.push(format!("{line} ({status})"))
-                    }
-                    _ => {
-                        out.push(line);
-                        if let Some(receipt) = format_buddy_receipt(part.output.as_ref()) {
-                            out.push(receipt);
-                        }
+                structured.push(serde_json::json!({ "t": "tool", "name": part.tool.as_deref().unwrap_or("tool"), "input": part.input, "status": part.status }));
+                if matches!(part.status.as_deref(), None | Some("completed" | "done")) {
+                    if let Some(output) = &part.output && crate::text::has_buddy_receipt(Some(output)) {
+                        structured.push(serde_json::json!({ "t": "raw_result", "output": output }));
                     }
                 }
             }
-            "patch" if assistant => out.push(match part.files {
-                0 => "[Patch]".to_string(),
-                1 => "[Patch: 1 file]".to_string(),
-                n => format!("[Patch: {n} files]"),
-            }),
+            "patch" if assistant => structured.push(serde_json::json!({ "t": "tool", "name": "patch", "input": { "files": part.files } })),
             _ => {}
         }
     }
     let joined = out.join(if has_tools { "\n" } else { "" });
     if !joined.is_empty() {
-        return joined;
+        return (joined, has_tools.then(|| Value::Array(structured).to_string()));
     }
     match (role, summary_title) {
-        (Role::User, Some(title)) => js_trim(title).to_string(),
-        _ => String::new(),
+        (Role::User, Some(title)) => (js_trim(title).to_string(), None),
+        _ => (String::new(), has_tools.then(|| Value::Array(structured).to_string())),
     }
 }
 
@@ -235,9 +229,10 @@ pub fn read(session_dir: &Path, ctx: &Ctx) -> std::io::Result<Option<Doc>> {
             }
         }
         let title = data.pointer("/summary/title").and_then(Value::as_str);
-        let body = js_trim(&content(role, &parts(root, &message_id), title)).to_string();
-        if !body.is_empty() {
-            messages.push(DocMessage { role, at, completed_at: None, content: body });
+        let (body, parts_json) = content(role, &parts(root, &message_id), title);
+        let body = js_trim(&body).to_string();
+        if !body.is_empty() || parts_json.is_some() {
+            messages.push(DocMessage { role, at, completed_at: None, content: body, parts_json });
         }
     }
     if let Some(meta) = metadata_file(session_dir).as_deref().and_then(read_json) {

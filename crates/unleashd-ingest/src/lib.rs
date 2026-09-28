@@ -3,6 +3,7 @@
 //! Replaces server/src/adapters (jsonl.ts, the session cache, the 5 s poller).
 
 pub mod discover;
+pub mod attempts;
 pub mod engine;
 pub mod filewatch;
 pub mod lines;

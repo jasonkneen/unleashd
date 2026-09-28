@@ -1,14 +1,15 @@
 import {
-  ConversationDetailSchema,
   type ConversationDetail,
+  ConversationDetailSchema,
   type ConversationRow,
   type SubAgent,
+  type TurnAttemptSnapshot,
 } from '@unleashd/shared';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import { isRowRunning } from '../utils/conversation-row';
 import { detailOf, listField, rowFamily, transcriptFamily } from './conversations';
-import { loadResource, resourceAtomFamily, type Resource, type ResourceEntry } from './resources';
+import { type Resource, type ResourceEntry, loadResource, resourceAtomFamily } from './resources';
 import { jotaiStore } from './store';
 import { sameItems, stableAtom } from './structural';
 
@@ -62,6 +63,7 @@ export type BuddyBackgroundWorker = {
   agent: SubAgent | null;
   status: BuddyWorkerStatus;
   sortTime: number;
+  latestAttempt: TurnAttemptSnapshot | null;
 };
 const ORDER: Record<BuddyWorkerStatus, number> = {
   running: 0,
@@ -84,6 +86,7 @@ export function projectBuddyWorkers(
   details: readonly ConversationDetail[]
 ): BuddyBackgroundWorker[] {
   const byId = new Map(rows.map((row) => [row.id, row]));
+  const detailById = new Map(details.map((detail) => [detail.id, detail]));
   const byThread = new Map(rows.map((row) => [`${row.provider}:${row.id}`, row]));
   for (const detail of details) {
     const row = byId.get(detail.id);
@@ -112,6 +115,7 @@ export function projectBuddyWorkers(
         agent,
         status,
         sortTime: new Date(agent.completedAt ?? agent.startedAt).getTime(),
+        latestAttempt: detailById.get((child ?? parent).id)?.latestAttempt ?? null,
       });
     }
   }
@@ -131,6 +135,7 @@ export function projectBuddyWorkers(
       agent: null,
       status: isRowRunning(row) ? 'running' : row.run === 'queued' ? 'queued' : 'idle',
       sortTime: row.activityAt,
+      latestAttempt: detailById.get(row.id)?.latestAttempt ?? null,
     });
   }
   return workers.sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.sortTime - a.sortTime);

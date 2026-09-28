@@ -9,6 +9,7 @@ import {
   type ChannelRow,
   type WorkspaceDirectory,
   authorName,
+  channelPostBody,
   clockTime,
   postPurposeLabel,
   postPurposeTag,
@@ -247,7 +248,7 @@ function MessageActions({ post, context }: { post: Post; context: RowContext }) 
 function PostBody({ post, context }: { post: Post; context: RowContext }) {
   return (
     <ChannelMarkdown
-      body={post.body}
+      body={channelPostBody(post)}
       buddyNames={context.directory.buddyNames}
       tasks={context.directory.taskById}
     />

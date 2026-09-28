@@ -4,11 +4,12 @@ import type {
   BuddyContext,
   BuddyKind,
   BuddyVisibility,
+  ContentPart,
   Message,
   Provider as ProviderName,
   ResolvedExecutionConfig,
 } from '@unleashd/shared';
-import { formatBuddyBuilderToolResult } from '@unleashd/shared';
+import { parseBuddyBuilderToolResult } from '@unleashd/shared';
 import type { ConversationRuntimeView } from '../conversations/runtime';
 import type { TurnTerminalCause } from '../observability';
 import { noteActivity } from '../observability/event-loop-stall';
@@ -19,7 +20,7 @@ import {
   type TurnEnd,
   type TurnGate,
   type TurnPolicy,
-  formatCommonToolResult,
+  commonToolResultParts,
 } from '../turns/policy';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
 import type { BuddyPolicyPort } from './policy-port';
@@ -209,8 +210,11 @@ export class BuddyBuilderTurnPolicy implements TurnPolicy {
   spawnFailed(): void {
     this.revoke();
   }
-  formatToolResult(output: unknown): string | null {
-    return formatCommonToolResult(output) ?? formatBuddyBuilderToolResult(output);
+  toolResultParts(output: unknown): ContentPart[] {
+    const common = commonToolResultParts(output);
+    if (common.length) return common;
+    const event = parseBuddyBuilderToolResult(output);
+    return event ? [{ t: 'buddy_builder_result', event }] : [];
   }
   streamCompleted(): void {}
   reviewCompleted(): void {}
@@ -515,8 +519,8 @@ export class BuddyTurnPolicy implements TurnPolicy {
     this.briefedMemoryGeneration = null;
   }
 
-  formatToolResult(output: unknown): string | null {
-    return formatCommonToolResult(output);
+  toolResultParts(output: unknown): ContentPart[] {
+    return commonToolResultParts(output);
   }
 
   streamCompleted(): void {}
@@ -531,9 +535,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
         conversationId: this.host.id,
         context: { ...ticket.context },
         completedAt: new Date().toISOString(),
-        messages: messages
-          .slice(ticket.messageStart)
-          .map(({ role, content, toolCall }) => ({ role, content, toolCall })),
+        messages: messages.slice(ticket.messageStart),
       });
     } catch (error) {
       console.error('[buddies] Could not enqueue memory review', this.host.id, error);

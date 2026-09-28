@@ -188,7 +188,7 @@ export function Chat({ id }: { id: string }) {
   const isRunning = conversation?.run === 'running' || conversation?.run === 'streaming';
   const isStreaming = conversation?.run === 'streaming';
   const runtimeTurnActive = isRunning || isStreaming;
-  const { attempt: latestTurnAttempt } = useTurnDiagnostics(id, runtimeTurnActive);
+  const { attempt: latestTurnAttempt } = useTurnDiagnostics(id);
   const restartRecovery = useRestartRecovery(id ?? '', latestTurnAttempt, runtimeTurnActive);
   // A plain chat that ran out of tokens can rerun its last message on another harness. Buddy
   // conversations retry inside Channels (the DM's new chat, the thread's new seat).

@@ -6,7 +6,7 @@ use super::{Ctx, Facts, Fold, Line, Previous, Sink, finite, normalize_dir, parse
 use crate::markers::Rebuild;
 use crate::model::{Compaction, ContextReading, Cwd, Role, Usage, UsageTurn};
 use crate::subagents::SubAgentFold;
-use crate::text::{format_buddy_receipt, format_tool_use, js_trim};
+use crate::text::js_trim;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -111,6 +111,13 @@ impl ClaudeFold {
         }
         sink.push(role, at, completed, content, None)
     }
+
+    fn push_parts(&mut self, sink: &mut Sink, parts: Vec<Value>, content: String, at: Option<f64>, completed: Option<f64>) {
+        let identity = Value::Array(parts.clone()).to_string();
+        let duplicate = self.prev.is_duplicate(Role::Assistant, &identity);
+        self.prev.set(Role::Assistant, &identity, at);
+        if !duplicate { sink.push_parts(Role::Assistant, at, completed, content, parts); }
+    }
 }
 
 impl Fold for ClaudeFold {
@@ -157,8 +164,8 @@ impl Fold for ClaudeFold {
                     if crate::text::truthy(block.get("is_error")) {
                         continue;
                     }
-                    if let Some(receipt) = format_buddy_receipt(Some(content)) {
-                        self.push(sink, Role::Assistant, receipt, at, None)?;
+                    if crate::text::has_buddy_receipt(Some(content)) {
+                        self.push_parts(sink, vec![serde_json::json!({ "t": "raw_result", "output": content })], String::new(), at, None);
                     }
                 }
             }
@@ -183,14 +190,21 @@ impl Fold for ClaudeFold {
             self.observe_context(&message);
         }
         let provider = provider_from_model(self.model.as_deref());
-        let mut parts: Vec<String> = Vec::new();
+        let mut parts: Vec<Value> = Vec::new();
+        let mut prose = Vec::new();
+        let mut has_tool = false;
         if let Some(Value::Array(blocks)) = message.get("content") {
             for block in blocks {
                 match block.get("type").and_then(Value::as_str) {
-                    Some("text") => parts.push(block.get("text").and_then(Value::as_str).unwrap_or("").to_string()),
+                    Some("text") => {
+                        let text = block.get("text").and_then(Value::as_str).unwrap_or("");
+                        prose.push(text.to_string());
+                        parts.push(serde_json::json!({ "t": "text", "text": text }));
+                    }
                     Some("tool_use") => {
                         let name = block.get("name").and_then(Value::as_str).unwrap_or("undefined");
-                        parts.push(format_tool_use(name, block.get("input")));
+                        has_tool = true;
+                        parts.push(serde_json::json!({ "t": "tool", "name": name, "input": block.get("input") }));
                         let id = block.get("id").and_then(Value::as_str).unwrap_or("");
                         let input = block.get("input").cloned().unwrap_or(Value::Null);
                         self.sub_agents.tool_use(provider, id, name, &input, at);
@@ -199,10 +213,11 @@ impl Fold for ClaudeFold {
                 }
             }
         }
-        let content = parts.join("\n");
-        if !content.is_empty() {
+        let content = prose.join("\n");
+        if !parts.is_empty() {
             let started = if self.prev.exists() { self.prev.at } else { at };
-            self.push(sink, Role::Assistant, content, started, at)?;
+            if has_tool { self.push_parts(sink, parts, content, started, at); }
+            else { self.push(sink, Role::Assistant, content, started, at)?; }
         }
         Ok(Line::Used)
     }

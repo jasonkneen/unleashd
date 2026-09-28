@@ -11,6 +11,7 @@ import {
   matchConversationKind,
 } from './conversation-config.js';
 import { ProviderSchema } from './provider-catalog.js';
+import { TurnAttemptSnapshotSchema } from './turn-attempt.js';
 
 // =============================================================================
 // Conversation read models (protocol v3, T09 2026-09-25)
@@ -26,15 +27,42 @@ import { ProviderSchema } from './provider-catalog.js';
 // socket. Guards: server/test/wire-v3.test.ts.
 // =============================================================================
 
-export const MessageSchema = z.object({
+import { MessageBodySchema } from './content-schema.js';
+import { legacyBody, legacyToolInput } from './legacy-content.js';
+import { toolContentPart } from './tool-content.js';
+export { AskUserQuestionSchema, ContentPartSchema, MessageBodySchema } from './content-schema.js';
+export type { AskUserQuestion, ContentPart, MessageBody } from './content-schema.js';
+
+const CurrentMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
+  body: MessageBodySchema,
   timestamp: z.coerce.date(),
-  // Imported tool details stay separate from the compact, groupable summary.
-  toolCall: z.object({ name: z.string(), input: z.string().optional() }).optional(),
   completedAt: z.coerce.date().optional(),
   completionReason: z.enum(['success', 'error', 'out_of_tokens', 'killed']).optional(),
 });
+// An already-open tab can receive an old backend's HTTP page during the dev
+// restart window. Upgrade that historical wire shape once, before rendering.
+export const MessageSchema = z.preprocess((value) => {
+  if (!value || typeof value !== 'object') return value;
+  const message = value as Record<string, unknown>;
+  if (message.body !== undefined || typeof message.content !== 'string') return value;
+  const call = message.toolCall as { name?: unknown; input?: unknown } | undefined;
+  const body =
+    typeof call?.name === 'string'
+      ? {
+          t: 'parts' as const,
+          parts: [
+            toolContentPart(
+              call.name,
+              legacyToolInput(typeof call.input === 'string' ? call.input : undefined)
+            ),
+          ],
+        }
+      : message.role === 'assistant'
+        ? legacyBody(message.content)
+        : { t: 'text' as const, text: message.content };
+  return { ...message, body };
+}, CurrentMessageSchema);
 export type Message = z.infer<typeof MessageSchema>;
 
 export const SubAgentStatusSchema = z.enum(['pending', 'running', 'completed', 'error']);
@@ -161,6 +189,7 @@ export const ConversationDetailSchema = z.object({
   queue: z.array(QueuedMessageSchema),
   subAgents: z.array(SubAgentSchema),
   latestTurn: TurnObservationSchema,
+  latestAttempt: TurnAttemptSnapshotSchema.nullable().default(null),
   /** Swarm debug prefix hidden from the first message (chat kind only). */
   swarmDebugPrefix: z.string().nullable(),
 });
@@ -201,6 +230,7 @@ export const RowPatchSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('session'), sessionId: z.string() }),
   z.object({ t: z.literal('subagent'), subAgent: SubAgentSchema }),
   z.object({ t: z.literal('turn'), latestTurn: TurnObservationSchema }),
+  z.object({ t: z.literal('attempt'), latestAttempt: TurnAttemptSnapshotSchema.nullable() }),
   // History was REPLACED, not appended (a transcript rewritten on disk, or the live overlay
   // absorbed into the provider's own rows): a loaded transcript refetches even when its length
   // did not change. Guard: server/test/ingest-history.test.ts.
@@ -343,6 +373,7 @@ export function applyRowPatch(row: ConversationRow, patch: RowPatch): Conversati
     case 'session':
     case 'subagent':
     case 'turn':
+    case 'attempt':
     case 'rewritten':
       return row;
   }
@@ -367,6 +398,8 @@ export function applyDetailPatch(detail: ConversationDetail, patch: RowPatch): C
     }
     case 'turn':
       return { ...detail, latestTurn: patch.latestTurn };
+    case 'attempt':
+      return { ...detail, latestAttempt: patch.latestAttempt };
     case 'run':
     case 'done':
     case 'label':

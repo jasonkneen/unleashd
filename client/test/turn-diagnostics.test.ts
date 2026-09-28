@@ -9,7 +9,6 @@ import {
   isActiveTurnStatus,
   shouldPresentTurnAttempt,
   turnDiagnosticsFromAttempt,
-  turnDiagnosticsPollDelay,
 } from '../src/utils/turn-diagnostics';
 
 register(
@@ -50,16 +49,6 @@ test('active runtime suppresses a stale terminal attempt until the current attem
   assert.equal(shouldPresentTurnAttempt(previousTerminal, true), false);
   assert.equal(shouldPresentTurnAttempt(currentRunning, true), true);
   assert.equal(shouldPresentTurnAttempt(previousTerminal, false), true);
-});
-
-test('diagnostics polling retries 404 with bounded exponential backoff', () => {
-  assert.equal(turnDiagnosticsPollDelay(false, null, 1), 1_000);
-  assert.equal(turnDiagnosticsPollDelay(false, null, 2), 2_000);
-  assert.equal(turnDiagnosticsPollDelay(false, null, 6), 30_000);
-  assert.equal(turnDiagnosticsPollDelay(false, null, 20), 30_000);
-  assert.equal(turnDiagnosticsPollDelay(true, null, 0), 2_000);
-  assert.equal(turnDiagnosticsPollDelay(false, 'running', 0), 2_000);
-  assert.equal(turnDiagnosticsPollDelay(false, 'succeeded', 0), 30_000);
 });
 
 test('terminal projection remains distinct from active lifecycle states', () => {
@@ -209,7 +198,7 @@ test('native progress and visible output remain distinct', () => {
     state: 'running',
     lastActivityAt: '2026-07-29T00:00:04.000Z',
     lastActivity: {
-      source: 'provider_native_activity',
+      source: 'native_session',
       providerEventType: 'progress',
       providerEventSource: 'codex.native_session',
     },

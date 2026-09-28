@@ -10,7 +10,8 @@
  */
 
 import type { Ingest, Message as NativeMessage, SessionRow } from '@unleashd/ingest';
-import type { Message } from '@unleashd/shared';
+import { type Message, legacyToolInput, toolContentPart } from '@unleashd/shared';
+import { nativeBody } from './content';
 
 const READ_PAGE = 5_000;
 
@@ -19,9 +20,17 @@ function toMessage(native: NativeMessage, previousAt: number): Message {
   const at = native.at ?? previousAt;
   return {
     role: native.role,
-    content: native.content,
+    body: native.partsJson
+      ? nativeBody(native.partsJson, native.content)
+      : native.toolCall
+        ? {
+            t: 'parts',
+            parts: [toolContentPart(native.toolCall.name, legacyToolInput(native.toolCall.input))],
+          }
+        : native.role === 'assistant'
+          ? nativeBody(undefined, native.content)
+          : { t: 'text', text: native.content },
     timestamp: new Date(at),
-    ...(native.toolCall ? { toolCall: native.toolCall } : {}),
     ...(native.completedAt !== undefined ? { completedAt: new Date(native.completedAt) } : {}),
   };
 }
@@ -61,7 +70,8 @@ export function extendsHistory(previous: readonly Message[], next: readonly Mess
   for (let index = 0; index < previous.length - 1; index += 1) {
     const a = previous[index];
     const b = next[index];
-    if (a !== b && (a.role !== b.role || a.content !== b.content)) return false;
+    if (a !== b && (a.role !== b.role || JSON.stringify(a.body) !== JSON.stringify(b.body)))
+      return false;
   }
   return true;
 }

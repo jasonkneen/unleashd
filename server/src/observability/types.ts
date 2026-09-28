@@ -1,100 +1,31 @@
-export const TURN_ATTEMPT_STATES = [
-  'queued',
-  'starting',
-  'running',
-  'stopping',
-  'succeeded',
-  'failed',
-  'cancelled',
-  'interrupted',
-] as const;
-
-export type TurnAttemptState = (typeof TURN_ATTEMPT_STATES)[number];
-
-export const TERMINAL_TURN_ATTEMPT_STATES = [
-  'succeeded',
-  'failed',
-  'cancelled',
-  'interrupted',
-] as const;
-
-export type TerminalTurnAttemptState = (typeof TERMINAL_TURN_ATTEMPT_STATES)[number];
-
-export const TURN_TERMINAL_CAUSES = [
-  'provider_complete',
-  'provider_error',
-  'out_of_tokens',
-  'user_stop',
-  'process_killed',
-  'process_exit',
-  'spawn_failed',
-  'idle_timeout',
-  'bridge_timeout',
-  'provider_idle_timeout',
-  'max_runtime_timeout',
-  // Kept for backwards compatibility with journals written before timeout
-  // causes were split by watchdog.
-  'timeout',
-  'server_restart',
-  'unknown',
-] as const;
-
-export type TurnTerminalCause = (typeof TURN_TERMINAL_CAUSES)[number];
-
-export const TURN_ACTIVITY_SOURCES = [
-  'runtime',
-  'provider_event',
-  'agent_cli_heartbeat',
-  'native_session',
-  'legacy_unknown',
-] as const;
-
-export type TurnActivitySource = (typeof TURN_ACTIVITY_SOURCES)[number];
-
-export interface TurnHeartbeatDiagnostics {
-  unifiedEventSilentSeconds?: number;
-  rawStdoutSilentSeconds?: number;
-  phase?: 'startup' | 'running';
-  stdoutStreamEvent?: 'attached' | 'resume' | 'pause' | 'close';
-  stdoutReadableFlowing?: boolean | null;
-  stdoutReadableLengthBytes?: number;
-  nativeSessionAvailable?: boolean;
-  nativeSessionAdvanced?: boolean;
-  nativeSessionSilentSeconds?: number;
-  nativeSessionSizeBytes?: number;
-}
-
-/**
- * Privacy-safe metadata describing the event that proved a turn was alive.
- * Prompt, response, tool input, stderr, and other content never belong here.
- */
-export interface TurnAttemptActivity {
-  source: TurnActivitySource;
-  providerEventType: string;
-  providerEventSource?: string;
-  heartbeat?: TurnHeartbeatDiagnostics;
-}
-
+import {
+  TerminalTurnAttemptStateSchema,
+  TurnActivitySourceSchema,
+  TurnTerminalCauseSchema,
+} from '@unleashd/shared';
+import type {
+  TerminalTurnAttemptState,
+  TurnAttemptActivity,
+  TurnAttemptState,
+  TurnTerminalCause,
+} from '@unleashd/shared';
+export { isTerminalAttemptState } from '@unleashd/shared';
+export type {
+  TurnAttemptSnapshot,
+  TurnAttemptState,
+  TerminalTurnAttemptState,
+  TurnAttemptActivity,
+  TurnActivitySource,
+  TurnTerminalCause,
+} from '@unleashd/shared';
+export const TERMINAL_TURN_ATTEMPT_STATES = TerminalTurnAttemptStateSchema.options;
+export const TURN_TERMINAL_CAUSES = TurnTerminalCauseSchema.options;
+export const TURN_ACTIVITY_SOURCES = TurnActivitySourceSchema.options;
 export interface TurnAttemptIdentity {
   attemptId: string;
   conversationId: string;
   queueMessageId?: string;
   providerSessionId?: string;
-}
-
-export interface TurnAttemptSnapshot extends TurnAttemptIdentity {
-  originServerBootId: string;
-  state: TurnAttemptState;
-  stateTimestamps: Partial<Record<TurnAttemptState, string>>;
-  terminalCause?: TurnTerminalCause;
-  createdAt: string;
-  updatedAt: string;
-  lastActivityAt?: string;
-  lastActivity?: TurnAttemptActivity;
-  lastBridgeActivityAt?: string;
-  lastProviderProgressAt?: string;
-  startedAt?: string;
-  terminalAt?: string;
 }
 
 interface JournalEventBase {
@@ -169,8 +100,4 @@ export interface RecentEventQuery {
   conversationId?: string;
   since?: string;
   limit?: number;
-}
-
-export function isTerminalAttemptState(state: TurnAttemptState): state is TerminalTurnAttemptState {
-  return (TERMINAL_TURN_ATTEMPT_STATES as readonly string[]).includes(state);
 }

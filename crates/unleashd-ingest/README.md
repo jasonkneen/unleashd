@@ -103,15 +103,20 @@ await records.setConfig({ conversationId, expectedConfigRevision, config, lastRe
 // {t:'committed'} | {t:'revision_conflict', current} | {t:'tombstoned', current} | {t:'missing'}
 ```
 
-`ConversationRecord` has the `PersistedConversationConfigRecord` shape minus `version`
-(always 2: T09's stored `kind`). The server (`server/src/conversations/config-records.ts`)
+`ConversationRecord` is the Rust-owned stored contract, generated into `index.d.ts`.
+The old JSON file's `version` was not a stored field. Shared Zod schemas still validate
+active input and wire values; Rust validates semantic constraints at the SQLite write.
+The server (`server/src/conversations/config-records.ts`)
 opens its own file, `<app data>/conversation-records.sqlite`, never the ingest cache file:
 records are authoritative, and deleting the cache must never delete them. Every mutation is read-modify-write in one `BEGIN IMMEDIATE` transaction and
 goes through `store::put`, which validates the Zod refinements and rebuilds the
 `conversation_session` index rows. Errors reject as `[sqlite|corrupt|invalid|schema] …`;
 conflicts are return values.
 
-The one-time import and verify tools ran in the 2026-09-27 live swap and were then deleted (last at 03fc931).
+The one-time import and verify tools ran in the 2026-09-27 live swap and were then deleted.
+Their corrected recovery source is pinned at `archive/t15-importer-93367be`
+(`93367beeb3f76c08408c435e4afc53f7996e4801`), including the v34 scheduled-run fix.
+The earlier release `03fc931` lacks that fix.
 The procedure, counts and verification are in agent_notes/2026-09-25_lean-rewrite/T15-RUNBOOK.md.
 
 Nothing is dropped: unparseable, future-version, schema-invalid, duplicate, stray and

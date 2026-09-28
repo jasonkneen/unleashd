@@ -147,7 +147,7 @@ export function ChannelDm({
   const groups = useAtomValue(groupsFamily(conversationId));
   const chain = usePolledFetch<DirectChain>(directChainUrl(buddyId), 15_000);
   const running = row !== null && row.run !== 'idle';
-  const diagnostics = useTurnDiagnostics(conversationId, running);
+  const diagnostics = useTurnDiagnostics(conversationId);
   const queue = queueOf(transcript);
   const messages = messagesOf(transcript);
   const follow = useFollowBottom(messages.length + queue.length, groups, null);
