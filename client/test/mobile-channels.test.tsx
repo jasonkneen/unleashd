@@ -347,7 +347,7 @@ test('the mobile Task filter opens from a channel and links each post into its o
   // Task filtering available inside settings without occupying the reading header.
   assert.match(channel, /aria-label="Channel description"/);
   assert.match(channel, /<details class="channel-header-settings">/);
-  assert.match(channel, /channel-header-settings__menu ui-stack"><select/);
+  assert.match(channel, /ui-popover ui-popover--end ui-stack"><select/);
   assert.match(channel, /aria-label="Copy link to channel"/);
   assert.match(
     channel,

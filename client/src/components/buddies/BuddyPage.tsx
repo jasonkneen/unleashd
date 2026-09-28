@@ -13,6 +13,7 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { archivedBuddyIdsAtom } from '../../atoms/buddy-visibility';
 import { useBuddyPage } from '../../hooks/useBuddyData';
 import type { UsePolledFetchResult } from '../../hooks/usePolledFetch';
+import { BuddyAbout } from './BuddyAboutCard';
 import { BuddySectionNav } from './BuddySectionNav';
 import { BuddyTabContent } from './BuddyTabContent';
 import { buddyAction, errorText } from './api';
@@ -93,15 +94,14 @@ export function BuddyPage({
                 <h1>{buddy.name}</h1>
                 <span>{buddy.status}</span>
               </div>
-              <details className="buddy-detail-about">
-                <summary aria-label={`About ${buddy.name}`} title={`About ${buddy.name}`}>
-                  ⓘ
-                </summary>
-                <div className="buddy-detail-nav__menu ui-card" style={{ left: 0, right: 'auto' }}>
-                  <p className="buddy-page__role">{buddy.role}</p>
-                  <BuddyRelations buddy={buddy} overview={overview.data} />
-                </div>
-              </details>
+              <BuddyAbout
+                buddyId={buddy.id}
+                name={buddy.name}
+                role={buddy.role}
+                facts={[buddy.model ?? 'Default model']}
+              >
+                <BuddyRelations buddy={buddy} overview={overview.data} />
+              </BuddyAbout>
               <RefreshNotice read={detail} />
             </div>
           </div>

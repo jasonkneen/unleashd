@@ -1,0 +1,156 @@
+/* Buddy Memory tab (BuddyMemory.tsx), both trees: read-first docs beside a compact
+   index. Prose keeps a ~70ch measure; dated entries hang their date in a gutter. */
+.buddy-memory {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: var(--sp-9);
+  align-items: start;
+}
+.buddy-memory--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.buddy-memory__index {
+  position: sticky;
+  top: 0;
+}
+.buddy-memory__index ol,
+.buddy-memory__timeline,
+.buddy-memory__history {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.buddy-memory__index a {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-5);
+  border-left: 2px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--fs-4);
+  text-decoration: none;
+}
+.buddy-memory__index a:hover,
+.buddy-memory__index a[aria-current] {
+  color: var(--text-bright);
+}
+.buddy-memory__index a[aria-current] {
+  border-left-color: var(--accent);
+}
+.buddy-memory__index small,
+.buddy-memory__meta {
+  color: var(--text-muted);
+  font-size: var(--fs-2);
+  font-variant-numeric: tabular-nums;
+}
+.buddy-memory__docs {
+  display: grid;
+  gap: var(--sp-11);
+  min-width: 0;
+  max-width: calc(8rem + var(--sp-8) + 70ch);
+}
+.buddy-memory__doc {
+  display: grid;
+  gap: var(--sp-6);
+  min-width: 0;
+  scroll-margin-top: var(--sp-7);
+}
+.buddy-memory__head {
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-6);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.buddy-memory__head h3 {
+  margin: 0;
+  color: var(--text-bright);
+  font-size: var(--fs-6);
+  font-weight: 600;
+}
+.buddy-memory__meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.buddy-memory__meta > * + *::before {
+  content: "·";
+  margin-right: var(--sp-3);
+}
+.buddy-memory__edit {
+  margin-left: auto;
+  padding: var(--sp-1) var(--sp-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--ui-radius);
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-3);
+  cursor: pointer;
+}
+.buddy-memory__edit:hover {
+  border-color: var(--border-default);
+  color: var(--text-bright);
+}
+.buddy-memory__prose,
+.buddy-memory__editor,
+.buddy-memory__history {
+  max-width: 70ch;
+}
+.buddy-memory__timeline {
+  gap: var(--sp-8);
+}
+.buddy-memory__timeline > li {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: var(--sp-8);
+}
+.buddy-memory__timeline time {
+  padding-top: var(--sp-1);
+  color: var(--text-muted);
+  font-size: var(--fs-2);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.buddy-memory__editor textarea {
+  resize: vertical;
+  font: var(--fs-4) / 1.55 var(--font-mono);
+}
+.buddy-memory__disclosure > summary,
+.buddy-memory__history summary {
+  width: fit-content;
+  color: var(--text-muted);
+  font-size: var(--fs-3);
+  cursor: pointer;
+}
+.buddy-memory__history {
+  margin-top: var(--sp-5);
+  padding-left: var(--sp-7);
+  border-left: 1px solid var(--border-subtle);
+}
+.buddy-memory__history > li {
+  padding: var(--sp-4) 0;
+}
+.buddy-memory__reason {
+  margin: var(--sp-1) 0;
+  font-size: var(--fs-4);
+}
+[data-device="mobile"] .buddy-memory {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-8);
+}
+[data-device="mobile"] .buddy-memory__index {
+  position: static;
+}
+[data-device="mobile"] .buddy-memory__index a {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  padding: var(--sp-4) 0;
+  border-left: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
+[data-device="mobile"] .buddy-memory__timeline > li {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
+}

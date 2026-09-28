@@ -62,7 +62,10 @@ export function ChannelHeaderControls({
           >
             ⓘ
           </button>
-          <span className="channel-header-info__text" data-open={infoOpen || undefined}>
+          <span
+            className="channel-header-info__text ui-popover ui-popover--end"
+            data-open={infoOpen || undefined}
+          >
             {description}
           </span>
         </span>
@@ -72,7 +75,7 @@ export function ChannelHeaderControls({
           <summary aria-label="Channel settings" title="Channel settings">
             ⚙
           </summary>
-          <div className="channel-header-settings__menu ui-stack">
+          <div className="ui-popover ui-popover--end ui-stack">
             {children}
             <ChannelArchiveButton channel={channel} />
           </div>

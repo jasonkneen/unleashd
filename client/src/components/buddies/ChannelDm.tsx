@@ -22,6 +22,7 @@ import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useTurnDiagnostics } from '../../hooks/useTurnDiagnostics';
 import { ConfigOverlay } from '../../views/config/ConfigOverlay';
 import { modelSummary } from '../../views/config/config-options';
+import { BuddyAbout } from './BuddyAboutCard';
 import { BuddySigil } from './BuddySigil';
 import type { ComposerSubmit } from './ChannelComposer';
 import { ChannelLoader } from './ChannelLoader';
@@ -175,6 +176,33 @@ export function ChannelDm({
   const configError = configCommand?.state.tag === 'rejected' ? configCommand.state.message : null;
   const outOfTokens =
     !running && diagnostics.attempt?.terminalCause === 'out_of_tokens' && retryText !== null;
+  const refreshContextControl =
+    latest === conversationId && messages.length + queue.length > 0 ? (
+      <HarnessPicker
+        label="Refresh context"
+        note={`Start a fresh chat with ${buddyName} to save token cost. Saved Buddy memories carry forward; this chat remains above it.`}
+        confirm="Refresh context"
+        seed={config}
+        excluded={null}
+        buddy
+        onConfirm={(nextConfig) => newChat({ config: nextConfig })}
+      />
+    ) : null;
+  const modelControl = (
+    <button
+      type="button"
+      className="channel-dm-model channel-inline-action ui-truncate"
+      title="Set the model for future turns in this DM"
+      aria-label={`DM default model for ${buddyName}: ${config ? modelSummary(config, catalog) : 'loading'}`}
+      aria-haspopup="dialog"
+      aria-expanded={modelOpen}
+      disabled={config === null}
+      onClick={() => setModelOpen(true)}
+    >
+      Default model: {config ? modelSummary(config, catalog) : 'Loading'}
+      {configSaving ? ' …' : ''} ▾
+    </button>
+  );
   return (
     <section className={f.pane} aria-label={`Direct message with ${buddyName}`}>
       <header className={f.header} style={frame === 'mobile' ? { flexWrap: 'wrap' } : undefined}>
@@ -186,46 +214,26 @@ export function ChannelDm({
         <div className={f.heading} style={frame === 'mobile' ? { flex: 1 } : undefined}>
           {frame === 'desktop' ? <h2>{buddyName}</h2> : <h1>{buddyName}</h1>}
         </div>
-        <details className="channel-dm-about buddy-detail-about">
-          <summary aria-label={`About ${buddyName}`} title={`About ${buddyName}`}>
-            ⓘ
-          </summary>
-          <div className="buddy-detail-nav__menu" role="note" style={{ left: 0, right: 'auto' }}>
-            {buddyRole}
-          </div>
-        </details>
+        <BuddyAbout
+          buddyId={buddyId}
+          name={buddyName}
+          role={buddyRole}
+          facts={config ? [modelSummary(config, catalog)] : []}
+        />
         {frame === 'mobile' && (
           <CopyLinkButton className={f.link} path={linkPath} label="Copy link to DM" />
         )}
-        {frame === 'mobile' && <span aria-hidden="true" style={{ flexBasis: '100%', height: 0 }} />}
-        {latest === conversationId && messages.length + queue.length > 0 && (
-          <HarnessPicker
-            style={frame === 'mobile' ? { order: 3, marginTop: 0 } : undefined}
-            label="Refresh context"
-            note={`Start a fresh chat with ${buddyName} to save token cost. Saved Buddy memories carry forward; this chat remains above it.`}
-            confirm="Refresh context"
-            seed={config}
-            excluded={null}
-            buddy
-            onConfirm={(nextConfig) => newChat({ config: nextConfig })}
-          />
-        )}
-        <button
-          type="button"
-          className="channel-dm-model channel-inline-action ui-truncate"
-          style={frame === 'mobile' ? { order: 4, flex: '1 1 0', minWidth: 0 } : undefined}
-          title="Set the model for future turns in this DM"
-          aria-label={`DM default model for ${buddyName}: ${config ? modelSummary(config, catalog) : 'loading'}`}
-          aria-haspopup="dialog"
-          aria-expanded={modelOpen}
-          disabled={config === null}
-          onClick={() => setModelOpen(true)}
-        >
-          Default model: {config ? modelSummary(config, catalog) : 'Loading'}
-          {configSaving ? ' …' : ''} ▾
-        </button>
-        {frame === 'desktop' && (
-          <CopyLinkButton className={f.link} path={linkPath} label="Copy link to DM" />
+        {frame === 'mobile' ? (
+          <div className="mobile-channel-header__dm-actions ui-row">
+            {refreshContextControl}
+            {modelControl}
+          </div>
+        ) : (
+          <>
+            {refreshContextControl}
+            {modelControl}
+            <CopyLinkButton className={f.link} path={linkPath} label="Copy link to DM" />
+          </>
         )}
       </header>
       {modelOpen && (

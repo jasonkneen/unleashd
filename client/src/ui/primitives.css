@@ -194,3 +194,37 @@
     scrollbar-color: color-mix(in srgb, var(--text-emphasis) 32%, transparent) transparent;
   }
 }
+
+/* Popover: a floating panel under its trigger (the trigger's box is position: relative).
+ * Hangs from the left edge; --end hangs it from the right. Owner, 2026-09-28: the Buddy (i)
+ * was "a sad little unformatted box" because every popover re-invented its own surface. */
+.ui-popover {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: min(340px, calc(100vw - var(--sp-9)));
+  padding: var(--sp-6);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+  color: var(--text-secondary);
+  font-size: var(--fs-4);
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-popover--end {
+  right: 0;
+  left: auto;
+}
+
+.ui-popover__section {
+  margin: var(--sp-6) calc(-1 * var(--sp-6)) 0;
+  padding: var(--sp-6) var(--sp-6) 0;
+  border-top: 1px solid var(--border-subtle);
+}

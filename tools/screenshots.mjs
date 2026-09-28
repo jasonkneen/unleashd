@@ -542,6 +542,14 @@ function buildScreens(found, focus) {
       views: onBoth(`${buddy}/${tab}`),
     })),
     {
+      name: 'buddy-about',
+      missing: noBuddy,
+      views: onBoth(
+        `${buddy}/conversations`,
+        clickThen('.buddy-about > summary', '.buddy-about-card')
+      ),
+    },
+    {
       name: 'workspace-activity',
       missing: null,
       views: onBoth(`/buddies/workspaces/${enc(found.workspaceId)}`),
@@ -549,6 +557,11 @@ function buildScreens(found, focus) {
     // ── Channels ──
     { name: 'channels', missing: null, views: onBoth(channels) },
     { name: 'dm', missing: dm ? null : 'no Buddy DM', views: onBoth(dm) },
+    {
+      name: 'dm-about',
+      missing: dm ? null : 'no Buddy DM',
+      views: onBoth(dm, clickThen('.buddy-about > summary', '.buddy-about-card')),
+    },
     { name: 'channel', missing: noChannel, views: onBoth(`${channels}?${channel}`) },
     { name: 'thread', missing: noThread, views: onBoth(thread) },
     // The Task filter is desktop-only (the mobile channel screen has no picker).

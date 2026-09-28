@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
 import type { Doc } from '../src/components/buddies/types';
 
 // BuddyMemory imports a stylesheet; node cannot load CSS, so it loads as an empty module.
@@ -17,6 +18,7 @@ register(
 const { BuddyMemory, DocCard, DocRevisionList, addressOf, readUrl } = await import(
   '../src/components/buddies/BuddyMemory'
 );
+const { readMemoryDoc } = await import('../src/components/buddies/memory-doc');
 
 const doc = (overrides: Partial<Doc>): Doc => ({
   id: 'doc-1',
@@ -67,7 +69,48 @@ test('the Memory tab lists shared docs with their scope, and offers a new doc', 
   );
   assert.match(card, /release-checklist/);
   assert.match(card, /Workspace · Revision 3/);
-  const tab = renderToStaticMarkup(<BuddyMemory buddyId="ada" workspaceId="ws-1" />);
+  const tab = renderToStaticMarkup(
+    <MemoryRouter>
+      <BuddyMemory buddyId="ada" workspaceId="ws-1" />
+    </MemoryRouter>
+  );
   assert.match(tab, /Shared docs/);
   assert.match(tab, /aria-label="New doc"/);
+  // The About card links to /buddies/:id/memory#working; each portable doc owns its anchor.
+  for (const anchor of ['soul', 'working', 'long_term', 'shared']) {
+    assert.match(tab, new RegExp(`id="${anchor}"`));
+  }
+});
+
+test('a memory doc reads as a dated timeline, without the authored-by comment', () => {
+  const reading = readMemoryDoc(
+    [
+      '<!--',
+      '  authored_by: builder (owner:project_1)',
+      '  at: 2026-09-12T15:56:02.388Z',
+      '-->',
+      '# Ada',
+      '',
+      '## 2026-08-20',
+      'Guard: never reset.',
+      '## 2026-08-20',
+      'Sidebar sorts by activity.',
+      '## Not a date',
+      'stays in the entry',
+      '## 2026-13-01',
+      'an impossible month is text, not an entry',
+      '## 2026-09-09',
+      'Owner prefers restraint.',
+    ].join('\n')
+  );
+  assert.equal(reading.authoredBy, 'builder');
+  assert.equal(reading.preamble, '# Ada');
+  assert.doesNotMatch(reading.preamble, /authored_by/);
+  // Two same-day headings are one day's entry; the first date's text is not dropped.
+  assert.deepEqual(
+    reading.entries.map((entry) => entry.label),
+    ['Aug 20, 2026', 'Sep 9, 2026']
+  );
+  assert.match(reading.entries[0].body, /never reset[\s\S]*Sidebar sorts[\s\S]*## Not a date/);
+  assert.match(reading.entries[0].body, /## 2026-13-01/);
 });

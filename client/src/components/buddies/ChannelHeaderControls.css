@@ -25,22 +25,8 @@
 .channel-header-settings summary::-webkit-details-marker {
   display: none;
 }
-.channel-header-info__text,
-.channel-header-settings__menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 40;
-  min-width: 220px;
-  padding: var(--sp-4);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
-}
 .channel-header-info__text {
   display: none;
-  max-width: min(320px, 80vw);
 }
 .channel-header-info:hover .channel-header-info__text,
 .channel-header-info__text[data-open] {
