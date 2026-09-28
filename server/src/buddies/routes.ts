@@ -62,7 +62,11 @@ export interface BuddyRouteDeps {
   uploadsRoot(): string;
   channelChanged(channelId: string): void;
   onBuddyArchived(buddyId: string): void;
-  createBuilderConversation(): Promise<{ conversationId: string }>;
+  /**
+   * `workingDirectory` is the workspace the owner opened the Builder from.
+   * Absent: the caller uses the install default (sidebar New Buddy).
+   */
+  createBuilderConversation(workingDirectory?: string): Promise<{ conversationId: string }>;
 }
 
 const docKind = z.enum(['soul', 'working', 'long_term', 'shared']);
@@ -115,6 +119,11 @@ const WorkspaceSchema = z
     rootPath: z.string().trim().min(1),
   })
   .strict();
+// Slack "New Buddy" names the workspace on screen. Until 2026-09-27 the route
+// ignored the body and the Builder always opened in the unleashd checkout, so
+// a hire from Paint Live still landed in ~/git/unleashd. Guard: buddies-v2
+// "builder opened from a workspace uses that workspace root".
+const BuilderOpenSchema = z.object({ workspaceId: z.string().min(1).optional() }).strict();
 
 /**
  * κ for "New workspace" on the home screen (port of 6d04860): the folder is resolved to its real
@@ -299,7 +308,13 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       ),
     'POST 201 /api/buddies/workspaces': async (req) =>
       write(core.createWorkspace(OWNER, workspaceInput(req.body))),
-    'POST 201 /api/buddies/builder': () => deps.createBuilderConversation(),
+    'POST 201 /api/buddies/builder': async (req) => {
+      const { workspaceId } = BuilderOpenSchema.parse(req.body ?? {});
+      if (workspaceId === undefined) return deps.createBuilderConversation();
+      const workspace = (await core.listWorkspaces()).find((item) => item.id === workspaceId);
+      if (!workspace) throw new CoreError('not_found', `workspace ${workspaceId}`);
+      return deps.createBuilderConversation(workspace.rootPath);
+    },
     'POST 201 /api/buddies': async (req) => {
       const { managerId, ...input } = BuddyCreateSchema.parse(req.body);
       return write(core.createBuddy(OWNER, { ...input, manager: managerRef(managerId ?? null) }));

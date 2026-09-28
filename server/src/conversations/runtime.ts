@@ -366,6 +366,7 @@ export class Conversation extends EventEmitter {
   private policyHost(): BuddyPolicyHost {
     return {
       id: this.id,
+      workingDirectory: this.workingDirectory,
       view: this,
       visibility: () => (this._kind.t === 'buddy' ? this._kind.visibility : 'foreground'),
       provider: () => this.provider,

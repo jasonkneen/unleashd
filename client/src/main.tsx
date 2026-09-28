@@ -11,6 +11,7 @@ import {
   installClientErrorReporting,
   reportClientError,
 } from './observability/client-error-reporter';
+import { installKeepOnResume } from './pwa/install-resume';
 
 declare global {
   interface Window {
@@ -31,6 +32,7 @@ function BootMarker() {
 
 // Before React mounts: a 401 from any request now lands on the login page
 // rather than leaving an empty shell behind.
+installKeepOnResume();
 installAuthGuard();
 installClientErrorReporting();
 

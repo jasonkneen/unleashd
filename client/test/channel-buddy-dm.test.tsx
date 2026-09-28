@@ -34,4 +34,8 @@ test('desktop slack rail: buddy name is a DM button, never a buddy-page link', (
     html.includes('/buddies/workspaces/workspace/channels?workers=b1'),
     'workers stay inside the Buddy workspace'
   );
+  assert.ok(
+    html.indexOf('channel-browser-buddy-actions') < html.indexOf('buddy-background-link'),
+    'Wake controls should precede the worker link so the right-side worker target stays clear'
+  );
 });

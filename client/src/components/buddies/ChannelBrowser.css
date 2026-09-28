@@ -356,6 +356,7 @@
 
 .channel-browser-scroll {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -383,8 +384,11 @@
 
 /* ── Messages ─────────────────────────────────────────────────────────── */
 
+/* Fix guard: an owner DM body wrapped at ~5 characters while its composer stayed full width;
+   keep a one-row message list pinned to the pane instead of its min-content width. */
 .channel-browser-messages {
   /* Anchor a short channel to the bottom, beside the footer, like Slack. */
+  width: 100%;
   margin: auto 0 0;
   padding: var(--sp-6) 0 var(--sp-8);
   list-style: none;
@@ -433,6 +437,7 @@
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   column-gap: var(--sp-6);
+  width: 100%;
   padding: var(--sp-1) var(--sp-9);
 }
 
@@ -471,6 +476,7 @@
 .channel-browser-message-content {
   min-width: 0;
   max-width: 960px;
+  width: 100%;
 }
 
 .channel-browser-message-heading {
@@ -538,10 +544,8 @@ a.channel-browser-instance:hover {
 }
 
 /* ── Rail: section header with add, Buddies, new-channel form ──────── */
-
-/* A Buddy row: the name fills the row and opens the DM; Wake appears on
-   hover (and on keyboard focus) over its right edge; wake progress sits just
-   left of it. */
+/* A Buddy row: the name fills the row and opens the DM; Wake sits over the
+   sigil so the worker link remains reachable on the right. */
 .channel-browser-buddy {
   position: relative;
   min-width: 0;
@@ -560,11 +564,12 @@ a.channel-browser-instance:hover {
 .channel-browser-buddy-actions {
   position: absolute;
   top: 50%;
-  right: 4px;
+  left: var(--sp-6);
   display: flex;
   gap: var(--sp-1);
   transform: translateY(-50%);
   visibility: hidden;
+  z-index: 2;
 }
 
 .channel-browser-buddy:hover .channel-browser-buddy-actions,
@@ -597,7 +602,8 @@ a.channel-browser-instance:hover {
 
 .channel-browser-buddy-status {
   position: absolute;
-  right: 12px;
+  left: var(--sp-6);
+  z-index: 2;
   pointer-events: none;
 }
 

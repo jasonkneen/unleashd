@@ -82,8 +82,24 @@ export function dmRows(groups: readonly MessageGroup[], queued: readonly QueuedM
         break;
     }
   }
-  for (const item of queued)
-    push(`q:${item.id}`, 'owner', new Date(item.queuedAt), { t: 'text', text: item.content });
+  for (const item of queued) {
+    // Fix guard: a 334-character owner DM appeared twice while its queue head was sending, with
+    // the continuation wrapping at about five characters; stop mirroring it once transcript has it.
+    const alreadyInTranscript =
+      item.status === 'sending' &&
+      groups.some(
+        (group) =>
+          group.type === 'single' &&
+          group.messages[0]?.role === 'user' &&
+          bodyText(group.messages[0].body) === item.content &&
+          group.messages[0].timestamp.getTime() >= item.queuedAt.getTime()
+      );
+    if (!alreadyInTranscript)
+      push(`q:${item.id}`, 'owner', new Date(item.queuedAt), {
+        t: 'text',
+        text: item.content,
+      });
+  }
   return rows;
 }
 

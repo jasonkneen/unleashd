@@ -170,6 +170,12 @@
 
 .channel-media-link {
   display: inline-block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+  text-align: left;
 }
 
 .channel-media {

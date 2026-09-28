@@ -83,10 +83,11 @@ export function useWakePhase(conversationId: string): WakePhase {
 
 /**
  * "+" beside the channels rail's Buddies: start a Buddy Builder chat and open it in the DM pane
- * (the sidebar's New Buddy spine). One setup chat at a time: earlier unfinished ones are marked
- * done, so the rail's "Creating buddy" row is always the newest (493c1c7).
+ * (the sidebar's New Buddy spine). `workspaceId` is that slack workspace, so the chat opens
+ * there instead of the install checkout. One setup chat at a time: earlier unfinished ones are
+ * marked done, so the rail's "Creating buddy" row is always the newest (493c1c7).
  */
-export function useNewBuddy(open: (conversationId: string) => void) {
+export function useNewBuddy(open: (conversationId: string) => void, workspaceId?: string) {
   const builders = useAtomValue(listField('builders'));
   const [state, setState] = useState<DirectAction>({ kind: 'idle' });
   return {
@@ -95,7 +96,7 @@ export function useNewBuddy(open: (conversationId: string) => void) {
       if (state.kind === 'pending') return;
       for (const entry of builders) if (!entry.done) setConversationDone(entry.id, true);
       setState({ kind: 'pending', action: 'dm' });
-      createBuddyViaBuilder()
+      createBuddyViaBuilder(workspaceId)
         .then((conversationId) => {
           setState({ kind: 'idle' });
           open(conversationId);

@@ -124,6 +124,40 @@ test('a desktop DM keeps generations in order and puts Refresh context in the he
   assert.match(old, />Latest chat</);
 });
 
+test('a sending DM queue head disappears once its owner message is in the transcript', async () => {
+  await seed();
+  const body =
+    'Please delegate the kernel implementation now, then review the result against the saved reference and report any mismatch.';
+  jotaiStore.set(transcriptStore.patch, {
+    set: [
+      [
+        NEW,
+        {
+          tag: 'loaded' as const,
+          epoch: 0,
+          messages: [message('user', body, 44)],
+          detail: syntheticDetail(NEW, {
+            queue: [
+              { id: 'sending', content: body, queuedAt: at(43), status: 'sending' },
+              {
+                id: 'pending',
+                content: 'A distinct next message',
+                queuedAt: at(45),
+                status: 'pending',
+              },
+            ],
+          }),
+        },
+      ],
+    ],
+    remove: [],
+  });
+
+  const html = desktop(NEW);
+  assert.equal(html.split(body).length - 1, 1, 'the transcript owns the already-sent message');
+  assert.equal(html.split('A distinct next message').length - 1, 1, 'pending queue stays visible');
+});
+
 test('starting a new DM leaves the visible conversation available while its replacement loads', async () => {
   await seed();
   const originalFetch = globalThis.fetch;
@@ -163,6 +197,8 @@ test('a phone DM stays in Channels with Back to where it was opened', async () =
     html,
     new RegExp(`aria-label="Back" href="/buddies/workspaces/${WS}/channels\\?channel=ch_a"`)
   );
+  assert.match(html, /class="mobile-channel-header__dm-actions ui-row">[\s\S]*Refresh context/);
+  assert.match(html, /mobile-channel-header__dm-actions ui-row">[\s\S]*Default model:/);
   assert.match(html, /Fresh answer/);
 });
 

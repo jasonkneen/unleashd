@@ -590,11 +590,12 @@ registerBuddyRoutes(app, {
       }
     }
   },
-  createBuilderConversation: async () => {
+  createBuilderConversation: async (workingDirectory) => {
     const conversation = await buddyCreationService.createBuddyBuilderConversation({
       commandId: `buddy-builder-${uuidv4()}`,
-      // The Builder has no buddy workspace yet — it is the thing that creates one.
-      workingDirectory: resolveDefaultWorkingDirectory(),
+      // A slack New Buddy passes that workspace's root. Sidebar New Buddy
+      // passes nothing and stays on the install checkout.
+      workingDirectory: workingDirectory ?? resolveDefaultWorkingDirectory(),
     });
     return { conversationId: conversation.id };
   },

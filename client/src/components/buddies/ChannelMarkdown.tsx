@@ -6,6 +6,7 @@ import {
   memo,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -202,6 +203,7 @@ interface ChannelMarkdownData {
   buddyNames: Readonly<Record<string, string>>;
   tasks: ReadonlyMap<string, ChannelTask>;
   onOpenTask(taskId: string): void;
+  onOpenImage(src: string, alt: string): void;
 }
 
 const ChannelMarkdownDataContext = createContext<ChannelMarkdownData | null>(null);
@@ -210,6 +212,22 @@ function useChannelMarkdownData(): ChannelMarkdownData {
   const data = useContext(ChannelMarkdownDataContext);
   if (!data) throw new Error('channel markdown overrides render only inside ChannelMarkdown');
   return data;
+}
+
+function ChannelImage({ src, alt }: { src: string; alt: string }) {
+  // Fix-guard: target=_blank trapped iOS/PWA users in a full-screen document with no back
+  // control; channel-markdown.test.tsx keeps image opens inside the app-owned viewer.
+  const { onOpenImage } = useChannelMarkdownData();
+  return (
+    <button
+      type="button"
+      className="channel-media-link"
+      onClick={() => onOpenImage(src, alt)}
+      aria-label={alt ? `Open image: ${alt}` : 'Open image'}
+    >
+      <img className="channel-media" src={src} alt={alt} loading="lazy" />
+    </button>
+  );
 }
 
 function ChannelTaskBlock({ taskId }: { taskId: string }) {
@@ -263,12 +281,76 @@ const CHANNEL_COMPONENTS: Components = {
       // biome-ignore lint/a11y/useMediaCaption: user-posted clips carry no caption track
       <video className="channel-media" src={url} controls preload="metadata" title={alt} />
     ) : (
-      <a className="channel-media-link" href={url} target="_blank" rel="noreferrer">
-        <img className="channel-media" src={url} alt={alt ?? ''} loading="lazy" />
-      </a>
+      <ChannelImage src={url} alt={alt ?? ''} />
     );
   },
 };
+
+function ChannelImageOverlay({
+  image,
+  onClose,
+}: {
+  image: { src: string; alt: string };
+  onClose(): void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (!dialog.open) dialog.showModal();
+    const onCancel = (event: Event) => {
+      event.preventDefault();
+      onClose();
+    };
+    dialog.addEventListener('cancel', onCancel);
+    return () => {
+      dialog.removeEventListener('cancel', onCancel);
+      if (dialog.open) dialog.close();
+    };
+  }, [onClose]);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="channel-task-overlay ui-card ui-stack"
+      aria-label={image.alt || 'Image preview'}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <header
+        className="channel-task-overlay-header ui-row"
+        style={{ justifyContent: 'space-between' }}
+      >
+        {image.alt && <span>{image.alt}</span>}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close image"
+          title="Close image"
+          style={{
+            flex: 'none',
+            width: 32,
+            height: 32,
+            padding: 0,
+            border: 0,
+            background: 'transparent',
+            color: 'inherit',
+          }}
+        >
+          ✕
+        </button>
+      </header>
+      <img
+        className="channel-media"
+        src={image.src}
+        alt={image.alt}
+        style={{ maxWidth: '100%', maxHeight: 'calc(80vh - 72px)', objectFit: 'contain' }}
+      />
+    </dialog>
+  );
+}
 
 // Memoized: a markdown render still walks the hast into React, and a row re-renders
 // whenever who is replying changes. The cache keeps an unchanged post's body,
@@ -310,9 +392,16 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
   tasks: ReadonlyMap<string, ChannelTask>;
 }) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [openImage, setOpenImage] = useState<{ src: string; alt: string } | null>(null);
   const closeTask = useCallback(() => setOpenTaskId(null), []);
+  const closeImage = useCallback(() => setOpenImage(null), []);
   const data = useMemo(
-    () => ({ buddyNames, tasks, onOpenTask: setOpenTaskId }),
+    () => ({
+      buddyNames,
+      tasks,
+      onOpenTask: setOpenTaskId,
+      onOpenImage: (src: string, alt: string) => setOpenImage({ src, alt }),
+    }),
     [buddyNames, tasks]
   );
   const openTask = openTaskId === null ? undefined : tasks.get(openTaskId);
@@ -325,6 +414,7 @@ export const ChannelMarkdown = memo(function ChannelMarkdown({
     <ChannelMarkdownDataContext.Provider value={data}>
       <div className="channel-markdown">
         {openTask && <ChannelTaskOverlay task={openTask} names={buddyNames} onClose={closeTask} />}
+        {openImage && <ChannelImageOverlay image={openImage} onClose={closeImage} />}
         {parts.map((part, index) => {
           switch (part.t) {
             case 'text':

@@ -7,6 +7,7 @@ import {
 import { useCallback, useEffect, useRef } from 'react';
 import { noteClientOutdated, noteProtocolMismatch, setSocket } from '../atoms/actions';
 import { probeSessionAfterSocketFailure } from '../auth/session';
+import { resumeNeedsSocketReconnect } from '../pwa/resume';
 
 // Pattern: parse-dont-validate (docs/patterns.md#parse-dont-validate)
 // A streamed reply is 100-200 `chunk` frames, and running the whole
@@ -135,9 +136,35 @@ export function useWebSocket(url: string, onMessage: (data: ServerMessage) => vo
       if (isMounted.current) connect();
     }, 0);
 
+    // iOS freezes the 2s reconnect timer while the installed app is
+    // backgrounded, so the socket is already closed when the page is visible
+    // again. Connect on resume. Leave an open socket alone: replacing it
+    // during the iOS resume transition fails and loops.
+    // Guard: client/test/keep-on-resume.test.ts
+    const onResume = () => {
+      if (!isMounted.current || isIntentionalClose.current) return;
+      if (document.visibilityState !== 'visible') return;
+      if (!resumeNeedsSocketReconnect(wsRef.current?.readyState)) return;
+      if (reconnectTimeout.current) {
+        clearTimeout(reconnectTimeout.current);
+        reconnectTimeout.current = null;
+      }
+      connect();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') onResume();
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) onResume();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
+
     return () => {
       isMounted.current = false;
       isIntentionalClose.current = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
       if (initialConnectTimeout.current) {
         clearTimeout(initialConnectTimeout.current);
         initialConnectTimeout.current = null;

@@ -221,6 +221,7 @@ a.mobile-channels-wake-done {
 .mobile-channel-header {
   flex: none;
   gap: var(--sp-2);
+  min-width: 0;
   min-height: 52px;
   /* No safe-area-inset-top: .mobile-shell pads it; doubled, it left a
      status-bar-sized gap above the header (#bugfixes 2026-09-25, a2e4135). */
@@ -253,6 +254,47 @@ a.mobile-channels-wake-done {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Keep DM actions inside the header's content width. Previously the refresh
+   picker and model button were independent wrapped flex items; on a narrow
+   installed-app viewport their intrinsic widths pushed the fresh-context
+   control off the screen. */
+.mobile-channel-header__dm-actions {
+  flex: 0 1 100%;
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--sp-2);
+}
+
+.mobile-channel-header__dm-actions > .channel-harness-picker {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.mobile-channel-header__dm-actions > .channel-dm-model {
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 340px) {
+  .mobile-channel-header__dm-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mobile-channel-header__dm-actions > .channel-harness-picker,
+  .mobile-channel-header__dm-actions > .channel-dm-model {
+    flex: none;
+    width: 100%;
+  }
+
+  .mobile-channel-header__dm-actions > .channel-harness-picker > .channel-inline-action {
+    width: 100%;
+    box-sizing: border-box;
+  }
 }
 
 .mobile-channel__scroll {

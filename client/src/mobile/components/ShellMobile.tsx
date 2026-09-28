@@ -12,7 +12,6 @@ import {
   resolveMobileConversationDestination,
 } from '../../utils/conversation-route-state';
 import { isImmersiveChannelRoute } from '../channels/channel-route';
-import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import '../styles/mobile.css';
 import '../styles/mobile-ui.css';
 import '../styles/mobile-channels.css';
@@ -73,33 +72,18 @@ export function ShellMobile() {
   const activeSection = isPaneRoute
     ? resolveMobileConversationDestination(location.state, conversation).section
     : mobilePrimarySectionForPath(pathname);
-  // Publishes --mobile-keyboard-inset and tells us when the keyboard is up, so
-  // the shell can shrink to the visual viewport and hand that space to the
-  // composer instead of leaving it under the keyboard.
-  const keyboardOpen = useKeyboardInset();
   const channelsUnread = anyUnread(ownerUnreadTotal(useOwnerInboxes().data, null));
 
   return (
     // data-device scopes the colocated device tweaks in view CSS
     // ([data-device="mobile"] .x), the only device switch views may style on (G9).
-    <div
-      data-device="mobile"
-      className={
-        keyboardOpen ? 'mobile-shell ui-stack mobile-shell--keyboard' : 'mobile-shell ui-stack'
-      }
-    >
+    <div data-device="mobile" className="mobile-shell ui-stack">
       <div className={isPaneRoute ? 'mobile-content mobile-content--pane' : 'mobile-content'}>
         <div className="mobile-content__inner">
           <Outlet />
         </div>
       </div>
-      {/* Tab bar yields to the keyboard — competing for the same ~50px is what
-          made the composer feel cramped and clipped on focus. */}
-      <nav
-        className="mobile-tab-bar ui-row"
-        aria-label="Primary"
-        hidden={keyboardOpen || isImmersiveChannel}
-      >
+      <nav className="mobile-tab-bar ui-row" aria-label="Primary" hidden={isImmersiveChannel}>
         {TABS.map((tab) => (
           <NavLink
             key={tab.to}

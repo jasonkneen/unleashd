@@ -49,6 +49,18 @@ test('tool-call lines in a post collapse into the chat activity disclosure', () 
   assert.match(html, /<strong>created<\/strong>/);
 });
 
+test('channel images stay in the app instead of linking to a new document', () => {
+  const html = renderChannel(
+    '![Screenshot](/Users/me/.agent-viewer/uploads/channels/ch1/image.png)'
+  );
+  assert.match(
+    html,
+    /<button[^>]*class="channel-media-link"[^>]*aria-label="Open image: Screenshot"/
+  );
+  assert.match(html, /<img class="channel-media" src="\/api\/files\?path=/);
+  assert.doesNotMatch(html, /target="_blank"/);
+});
+
 // Owner report, #buddies-dev 2026-09-24: a Task ref inside a sentence was a
 // full-width wrapping pill that stranded ", marked ready." on its own line.
 // In a sentence it must stay one inline chip in the same paragraph; alone on

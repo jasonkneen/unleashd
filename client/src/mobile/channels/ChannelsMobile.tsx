@@ -326,7 +326,7 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
       </MobileSection>
       <ArchivedChannels workspaceId={workspaceId} channels={context.archived} />
       <MobileSection title="Buddies" meta="Tap to message · ☀ to wake">
-        <BuddySection members={directory.activeMembers} />
+        <BuddySection members={directory.activeMembers} workspaceId={workspaceId} />
       </MobileSection>
     </MobilePage>
   );
@@ -334,9 +334,15 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
 
 // The rail's '+' and "Creating buddy" row (desktop e9e3426), as touch rows: New Buddy starts a
 // Buddy Builder chat, which DmScreen hands to the conversation page; × archives that setup chat.
-function BuddySection({ members }: { members: readonly Buddy[] }) {
+function BuddySection({
+  members,
+  workspaceId,
+}: {
+  members: readonly Buddy[];
+  workspaceId: string;
+}) {
   const openDm = useChannelsDm();
-  const newBuddy = useNewBuddy(openDm);
+  const newBuddy = useNewBuddy(openDm, workspaceId);
   const creating = useAtomValue(listField('builders')).find((entry) => !entry.done);
   return (
     <ul className="mobile-channels-list">
