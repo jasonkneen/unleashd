@@ -46,7 +46,7 @@ Times rounded from the current Assembly.tsx frame schedule (60 fps).
 | 23.6–33.0 | Native multimedia | Cut and sound exist |
 | 33.0–44.3 | Design review | Rough cut 4 exists |
 | 44.3–49.9 | Short design iteration | Short version wired in source; long standalone render exists |
-| 49.9–55.5 | Swarm / memory / chat / phone flashes | First three source files exist; phone source missing |
+| 49.9–55.5 | Swarm / memory / chat / phone flashes | All four sources exist; phone = owner take P (2026-09-28) |
 | 55.5–59.3 | Free / Private / Open Source | Built in source; duplicates early benefits in part |
 | 59.3–74.3 | Harness slide / refreshed picker / subscriptions | Slides and refreshed picker exports exist |
 | 74.3–78.0 | Fork / run locally | Built in source; localhost app source missing |
@@ -59,10 +59,10 @@ finished master. File presence/source inspection is not a fresh visual approval.
 
 ## Remaining work, in order
 
-1. Capture the two missing shots from the running app: phone-width channel →
-   thread (for `2026-09-26_feature_phone.mp4`), and a clean local app view with the
+1. Capture the one missing shot from the running app: a clean local app view with the
    genuine localhost context (for `2026-09-26_feature_app.mp4`). Designer can record
-   these; no new owner take is needed.
+   it; no new owner take is needed. (The phone shot is filled by owner take P,
+   2026-09-28; see `footage/FOOTAGE.md`.)
 2. Check the September 26 swarm, memory, chat and design shots against the shipping
    UI and claims. The picker has already been refreshed. Replace stale visible UI
    where necessary; verify that the swarm shot actually supports “running swarm.”

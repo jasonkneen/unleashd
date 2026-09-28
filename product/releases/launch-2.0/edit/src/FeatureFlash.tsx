@@ -28,7 +28,7 @@ const FLASHES: Flash[] = [
   { text: 'Multiagent swarms', fill: INK.cyan, rot: -3, footage: { kind: 'desktop', name: 'swarm', from: 1.0, shot: column(280, 0.5, 0.35) } },
   { text: 'Memory!', fill: INK.yellow, rot: 2, footage: { kind: 'desktop', name: 'memory', from: 1.0, shot: column(150, 0.4, 0.4) } },
   { text: 'Familiar UI', fill: INK.wordmarkOrange, rot: -2, footage: { kind: 'desktop', name: 'chat', from: 1.0, shot: column(150, 0.5, 0.5) } },
-  { text: 'Mobile Friendly!', fill: '#859900', rot: 3, footage: { kind: 'phone', name: 'phone', from: 0.5 } },
+  { text: 'Mobile Friendly!', fill: '#859900', rot: 3, footage: { kind: 'phone', name: 'phone', from: 0 } },
 ];
 
 export const DURATION = boundary(FLASHES.length);

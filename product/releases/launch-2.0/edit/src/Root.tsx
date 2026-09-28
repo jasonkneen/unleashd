@@ -3,6 +3,7 @@ import * as Assembly from './Assembly';
 import * as Close from './Close';
 import * as DesignIteration from './DesignIteration';
 import * as DesignReview from './DesignReview';
+import * as FeatureFlash from './FeatureFlash';
 import * as MultiHarness from './MultiHarness';
 import * as NativeMultimedia from './NativeMultimedia';
 import * as Overload from './Overload';
@@ -40,6 +41,14 @@ export const Root: React.FC = () => (
       fps={NativeMultimedia.FPS}
       width={NativeMultimedia.WIDTH}
       height={NativeMultimedia.HEIGHT}
+    />
+    <Composition
+      id="FeatureFlash"
+      component={FeatureFlash.FeatureFlash}
+      durationInFrames={FeatureFlash.DURATION}
+      fps={FeatureFlash.FPS}
+      width={FeatureFlash.WIDTH}
+      height={FeatureFlash.HEIGHT}
     />
     <Composition
       id="MultiHarness"
