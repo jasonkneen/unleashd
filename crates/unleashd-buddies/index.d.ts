@@ -353,7 +353,6 @@ export interface Run {
   taskId?: string
   taskEpoch?: number
   afterRunId?: string
-  retryOf?: string
   status: RunStatus
   deadline?: string
   leaseExpiresAt?: string

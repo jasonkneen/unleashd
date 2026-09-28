@@ -14,11 +14,11 @@ use serde_json::json;
 use std::str::FromStr;
 
 const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
-    task_epoch, after_run_id, retry_of, status, deadline, lease_expires_at, snapshot, outcome, error_code, error, ready_at, \
+    task_epoch, after_run_id, status, deadline, lease_expires_at, snapshot, outcome, error_code, error, ready_at, \
     created_at, started_at, ended_at";
 
 fn run_row(r: &Row) -> rusqlite::Result<Run> {
-    let ready_at: String = r.get(19)?;
+    let ready_at: String = r.get(18)?;
     Ok(Run {
         id: r.get(0)?,
         input_key: r.get(1)?,
@@ -30,18 +30,17 @@ fn run_row(r: &Row) -> rusqlite::Result<Run> {
         task_id: r.get(8)?,
         task_epoch: r.get(9)?,
         after_run_id: r.get(10)?,
-        retry_of: r.get(11)?,
-        status: r.get(12)?,
-        deadline: r.get(13)?,
-        lease_expires_at: r.get(14)?,
-        snapshot: r.get(15)?,
-        outcome: r.get(16)?,
-        error_code: r.get(17)?,
-        error: r.get(18)?,
+        status: r.get(11)?,
+        deadline: r.get(12)?,
+        lease_expires_at: r.get(13)?,
+        snapshot: r.get(14)?,
+        outcome: r.get(15)?,
+        error_code: r.get(16)?,
+        error: r.get(17)?,
         ready_at,
-        created_at: r.get(20)?,
-        started_at: r.get(21)?,
-        ended_at: r.get(22)?,
+        created_at: r.get(19)?,
+        started_at: r.get(20)?,
+        ended_at: r.get(21)?,
     })
 }
 

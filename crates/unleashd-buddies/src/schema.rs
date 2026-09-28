@@ -120,7 +120,7 @@ CREATE TABLE run (
   id TEXT PRIMARY KEY, input_key TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 1,
   input_kind TEXT NOT NULL CHECK(input_kind IN ('chat','post','reply','schedule','failure_notice')),
   input_id TEXT NOT NULL, buddy_id TEXT NOT NULL REFERENCES buddy(id), workspace_id TEXT NOT NULL,
-  conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT, retry_of TEXT,
+  conversation_id TEXT, task_id TEXT, task_epoch INTEGER, after_run_id TEXT,
   status TEXT NOT NULL CHECK(status IN ('queued','running','cancel_requested','complete','failed','cancelled')),
   lease_token TEXT, lease_expires_at TEXT, deadline TEXT,
   snapshot TEXT, outcome TEXT, error_code TEXT, error TEXT,
@@ -200,6 +200,16 @@ fn ensure_channel_archive(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// `run.retry_of` was stored but never set: a retry is the next `attempt` of the same `input_key`,
+/// and a re-sent request is a new input. Dropped from databases created before 2026-09-27.
+fn drop_run_retry_of(conn: &Connection) -> Result<()> {
+    let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('run') WHERE name = 'retry_of')", [], |r| r.get(0))?;
+    if present {
+        conn.execute_batch("ALTER TABLE run DROP COLUMN retry_of;")?;
+    }
+    Ok(())
+}
+
 fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
@@ -225,6 +235,7 @@ pub fn open(path: &str) -> Result<Connection> {
         (true, _) => {
             require_ordered_ids(&conn, path)?;
             ensure_channel_archive(&conn)?;
+            drop_run_retry_of(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }

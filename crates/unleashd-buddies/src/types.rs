@@ -357,7 +357,6 @@ pub struct Run {
     pub task_id: Option<String>,
     pub task_epoch: Option<i64>,
     pub after_run_id: Option<String>,
-    pub retry_of: Option<String>,
     pub status: RunStatus,
     pub deadline: Option<String>,
     pub lease_expires_at: Option<String>,
