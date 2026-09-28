@@ -200,10 +200,22 @@ type TaskView =
   | { kind: 'owner'; buddyId: string }
   | { kind: 'workspace'; workspaceId: string }
   | { kind: 'task'; taskId: string };
-const readTasks = (deps: ToolDeps, grant: TurnGrant, view: TaskView) =>
-  view.kind === 'task'
-    ? taskDetail(deps.core, grant.author, view.taskId, 20)
-    : deps.core.listTasks(view);
+// Lists default to open tasks: the CEO's full list was 109 tasks (92 closed, ~206k chars) and
+// overflowed the tool result on 2026-09-27. `include: 'all'` still reaches the closed ones.
+const taskInclude = z.enum(['open', 'all']).default('open');
+type TaskInclude = z.infer<typeof taskInclude>;
+const isOpenTask = (task: { status: string }) =>
+  task.status !== 'done' && task.status !== 'cancelled';
+const readTasks = async (
+  deps: ToolDeps,
+  grant: TurnGrant,
+  view: TaskView,
+  include: TaskInclude
+) => {
+  if (view.kind === 'task') return taskDetail(deps.core, grant.author, view.taskId, 20);
+  const tasks = await deps.core.listTasks(view);
+  return include === 'all' ? tasks : tasks.filter(isOpenTask);
+};
 
 // Pattern: table-driven (docs/patterns.md#table-driven)
 const BUDDY_TOOLS = {
@@ -316,7 +328,7 @@ const BUDDY_TOOLS = {
   }),
   tasks: buddyTool({
     description:
-      "Read tasks: yours, another buddy's, the workspace's, or one task with its subtasks and latest comments.",
+      "Read tasks: yours, another buddy's, the workspace's, or one task with its subtasks and latest comments. Lists hold open tasks only unless include is 'all'.",
     writes: false,
     schema: z.object({
       view: z
@@ -327,8 +339,9 @@ const BUDDY_TOOLS = {
           z.object({ kind: z.literal('task'), taskId: z.string().min(1) }),
         ])
         .default({ kind: 'mine' }),
+      include: taskInclude,
     }),
-    handler: (deps, grant, { view }) =>
+    handler: (deps, grant, { view, include }) =>
       readTasks(
         deps,
         grant,
@@ -336,7 +349,8 @@ const BUDDY_TOOLS = {
           ? { kind: 'owner', buddyId: grant.buddyId }
           : view.kind === 'workspace'
             ? { kind: 'workspace', workspaceId: grant.workspaceId }
-            : view
+            : view,
+        include
       ),
   }),
   task_write: buddyTool({
@@ -498,7 +512,8 @@ const TEAM_TOOLS = {
 // Buddy of its own, so every view and every new task names its Buddy.
 const BUILDER_TOOLS = {
   tasks: teamTool({
-    description: "Read a buddy's tasks, a workspace's, or one task with its subtasks and comments.",
+    description:
+      "Read a buddy's tasks, a workspace's, or one task with its subtasks and comments. Lists hold open tasks only unless include is 'all'.",
     writes: false,
     schema: z.object({
       view: z.discriminatedUnion('kind', [
@@ -506,8 +521,9 @@ const BUILDER_TOOLS = {
         z.object({ kind: z.literal('workspace'), workspaceId: z.string().min(1) }),
         z.object({ kind: z.literal('task'), taskId: z.string().min(1) }),
       ]),
+      include: taskInclude,
     }),
-    handler: (deps, grant, { view }) => readTasks(deps, grant, view),
+    handler: (deps, grant, { view, include }) => readTasks(deps, grant, view, include),
   }),
   task_write: teamTool({
     description:

@@ -1490,6 +1490,47 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       key: 'builder-task-2',
     });
     assert.equal(ownerless.isError, true);
+
+    // Task lists hold open tasks unless asked: the CEO's 109 tasks (92 closed) overflowed a
+    // tool result on 2026-09-27. A closed task must still be reachable with include 'all'.
+    const closed = await w.core.upsertTask(OWNER, {
+      kind: 'create',
+      ownerId: w.designer.id,
+      title: 'Logo v1',
+      doneCriteria: 'Shipped',
+      key: 'closed-task',
+    });
+    await w.core.upsertTask(OWNER, {
+      kind: 'update',
+      taskId: closed.id,
+      baseRevision: closed.revision,
+      changes: { status: 'done' },
+      key: 'close-closed-task',
+    });
+    const designerGrant = w.endpoint.spec(
+      w.grants.issueBuddy({
+        role: 'worker',
+        buddyId: w.designer.id,
+        workspaceId: w.ws,
+        conversationId: 'c',
+        runId: null,
+      })
+    );
+    const ids = (listed: { value: Array<{ id: string }> }) =>
+      listed.value.map((t) => t.id).sort();
+    assert.deepEqual(ids(await call(designerGrant, 'tasks', {})), [task.value.id]);
+    assert.deepEqual(
+      ids(await call(designerGrant, 'tasks', { include: 'all' })),
+      [task.value.id, closed.id].sort()
+    );
+    assert.deepEqual(
+      ids(
+        await call(builder, 'tasks', {
+          view: { kind: 'owner', buddyId: w.designer.id },
+        })
+      ),
+      [task.value.id]
+    );
   } finally {
     server.close();
     await w.close();
