@@ -206,7 +206,7 @@ const readTasks = (deps: ToolDeps, grant: TurnGrant, view: TaskView) =>
 const BUDDY_TOOLS = {
   post: buddyTool({
     description:
-      "Write a post. `channel`: a channel id, {direct:[members]} (a DM, created on first use), or {task}. kind 'request' (DMs only) asks the other members for an answer and starts their turn; 'inform' wakes nobody. Reply in a thread with replyToId. Embed media as ![alt](/absolute/path).",
+      "Write a post. `channel`: a channel id, {direct:[members]} (a DM, created on first use), or {task}. kind 'request' (DMs only) asks the other members for an answer and starts their turn; 'inform' wakes nobody. Reply in a thread with replyToId. In a public channel, mention a Buddy as [@Name](buddy:<id>) (ids from `team`): it wakes that Buddy, which must reply in the thread; a Buddy who posted in the thread may also follow up. Embed media as ![alt](/absolute/path).",
     writes: true,
     schema: z.object({
       channel: channelRef,

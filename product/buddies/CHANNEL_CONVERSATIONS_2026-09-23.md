@@ -43,9 +43,24 @@ remain the three core components.
 
 ## Mention replies (host policy, `server/src/buddies/channels.ts` since T11)
 
-1. Only OWNER mentions dispatch. Buddy-authored mentions never wake anyone:
-   Buddies coordinate with `send`/`update_project`. (Thread follow-ups, below,
-   are the one bounded way a Buddy's post leads to another Buddy's turn.)
+1. Every author's mention dispatches, through ONE function
+   (`respondToMentions`): the owner's post route calls it with the chip picks,
+   the `posted` event calls it for a Buddy's post with none, so an un-picked
+   mention runs on the seat's latest config either way. A mention requires a
+   reply; a thread reply asks the other participants the follow-up gate. Both
+   stop at `MAX_BUDDY_CHAIN` Buddy posts in a row until the owner speaks; a
+   Buddy never wakes itself. The `post` tool description teaches the
+   `[@Name](buddy:<id>)` syntax.
+   *Successor decision, 2026-09-28, owner (#channels-feature thread
+   post_01a0e42e-fc7a-7343-bdbb-f18a34320edb):* until then only OWNER
+   mentions dispatched (this item read "Buddy-authored mentions never wake
+   anyone", 0fef9d4) to rule out Buddy↔Buddy loops. In practice Buddies did not know the
+   syntax, and a guessed mention rendered a live-looking chip that woke
+   nobody. The owner chose "Buddies can wake Buddies, same code path as the
+   owner" over documenting the no-op. The chain cap already bounded
+   follow-ups, and it is the loop guard that remains. Revisit if Buddy-only
+   threads hit the cap routinely, or if mention chains run up cost. Guard:
+   `buddies-v2.test.ts` "a Buddy's @mention wakes …".
 2. **Seats.** Every reply by a Buddy in a thread — mention or follow-up —
    goes to its SEAT there: one resumed conversation per (thread, Buddy), id
    `threadConversationId(root, buddy, generation)`, so the Buddy remembers the
