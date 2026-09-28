@@ -126,3 +126,26 @@ Deploy dependency: the live `buddies-v3.sqlite` has already lost `run.retry_of` 
 uncommitted `drop_run_retry_of` ran against it), so HEAD code, this branch included, cannot start
 the runner on live data until that drop is committed. Merge it first; this branch reads `config`
 by column name, so its index shift does not conflict.
+
+## Successor 2026-09-28 ~13:10Z: owner accepted; landed
+
+**Owner decision** (#bugfixes, reply "Go ahead yea" to post_01a0e7af-f0fa-7678-b861-c5d70b63f06a):
+merge `buddy-work-runs`, restart the backend, and turn off harness auto-memory for Buddy turns.
+
+- `3f3cc3e` commits the concurrent session's `run.retry_of` drop. It had been uncommitted since
+  2026-09-27 22:40 local and was already applied to the live DB. It's a separate commit so the
+  authorship stays legible.
+- The branch was rebased onto it. Conflicts in runs.rs RUN_COLS and schema.rs `open()` were resolved
+  by keeping both: no retry_of, plus config. The new integration test failed 5 of 6 full-suite
+  runs. That was a test race, not a product defect: `runOf(b())` threw before the spawn posts
+  existed, and `until` can't retry a throw. Fixed in `de03fd5`. After the fix: 212/212 pass (1
+  skipped), crate 30+2+1 pass, `pnpm typecheck` exit 0 on the branch and on the live tree.
+- main was fast-forwarded to `de03fd5` without touching other sessions' dirty files: `git apply`
+  to the tree, `git apply --cached`, check that write-tree equals the branch tree, then
+  `reset --soft`.
+- Restart: no `dev:replace`, which orphans seat turns. The addon was renamed into place (21:10
+  local), and watch-server drains the backend once running turns finish, then reloads.
+- Harness memory: Claude Code 2.1.283 has `CLAUDE_CODE_DISABLE_AUTO_MEMORY` (truthy → off), plus
+  settings `autoMemoryEnabled`. The canonical ProviderRequest has no per-request `env`, so scoping
+  it to Buddy turns needs a submodule change or a runner env. That's handed to Release Engineer
+  rather than done in this turn.
