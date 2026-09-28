@@ -45,3 +45,35 @@ one-off run with a model it chooses.
 
 The owner prefers owner-only model overrides (profile pinning), or workers need their own identity
 separate from the spawner.
+
+## Successor 2026-09-28 ~09:10Z: why Wave Simulation Lead was confused (transcript evidence)
+
+The owner asked for the transcripts. The thread turns ran on the Claude harness:
+`~/.claude/projects/-Users-nicholasbardy-git-wave-sim/fef563b6-4c1b-49a4-8729-34129e8d9f8f.jsonl`.
+
+1. 08:54:50Z: before planning, it read three of its harness auto-memory notes
+   (`~/.claude/projects/-Users-nicholasbardy-git-wave-sim/memory/`):
+   - `reference_buddy_provider_harness_selection.md` and `reference_buddy_dispatch_claude_provider.md`
+     (Sep 17–21) describe `send` with `delivery.config {provider, model, reasoning}` as the
+     supported per-assignment model pin. The lean rewrite deleted that tool. These notes live
+     outside Buddy memory, so nothing updated them.
+   - `feedback_detached_workers_outlive_turn.md` (Sep 26): Agent-tool subagents die when a Buddy
+     turn ends, so launch detached setsid+nohup workers. This workaround is still in force.
+2. 08:55:59Z: it smoke-tested `codex exec -m gpt-6-sol` and got SOL_OK, then launched 4 detached
+   workers at 08:58Z. At 08:59:51Z it saved a new memory claiming "the Buddy toolset in
+   #simulations turns has no send". That framing is channel-specific and wrong: every Buddy turn
+   has the same tools.
+3. 09:04:43Z: `ToolSearch "+unleashd_buddy send work dispatch run start"` found no `send`. It
+   corrected itself at 09:05Z.
+4. **Missed path:** it has four direct reports already on `gpt-6-sol`/high: CUDA Simulation
+   Engineer, Simulation Geometry Engineer, Simulation Measurement Engineer and Marine Mechanics
+   Engineer. The CUDA, WALLS (geometry) and PROBES (measurement) briefs match three of them. A DM
+   `request` to each would have given tracked Sol runs, visible in the UI and cancellable, with the
+   answer waking the lead. It gave up two things: xhigh effort and a fresh identity. It never
+   checked `team`.
+5. Tool results overflowed three times this turn and needed Python on saved files: `tasks` 72k
+   chars, `runs list` 57k chars. My own `channel_read` of the thread was 63k chars.
+
+Root causes: (a) the missing worker-spawn tool (Task task_01a0e744); (b) stale harness memory
+that still describes the deleted `send`; (c) unbounded read tools that overflow the harness
+result limit.
