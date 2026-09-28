@@ -846,15 +846,18 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
       }
     });
     const [a, b] = [() => spawned[0], () => spawned[1]];
-    const runOf = async (post: Post) =>
-      (await w.runs(w.lead.id)).find((r) => r.input.kind === 'post' && r.input.postId === post.id)!;
+    // The spawns are posted by the schedule turn, which may not have run when polling starts:
+    // an absent post reads as "no run yet", not a throw that `until` cannot retry (flaked 5 of 6).
+    const runOf = async (post: Post | undefined) =>
+      post &&
+      (await w.runs(w.lead.id)).find((r) => r.input.kind === 'post' && r.input.postId === post.id);
     // Workers and the return turn start in any order: route each turn by what it was asked.
     const route = async (turn: Turn) => {
       if (turn.request.prompt.includes('Sweep B'))
         return void (await until(() => w.stopped.has(turn.n), 'the stop to reach worker B'));
       if (turn.request.prompt.includes(`Your request ${a().id} was answered`)) {
         const cancelled = await call(turn.mcp, 'runs', {
-          action: { kind: 'cancel', runId: (await runOf(b())).id },
+          action: { kind: 'cancel', runId: (await runOf(b()))!.id },
         });
         assert.equal(cancelled.isError, false, cancelled.text);
       }
@@ -877,14 +880,14 @@ test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and
     });
     w.emit({ kind: 'changed' });
 
-    const cancelledB = await until(
-      async () => (await runOf(b()))?.status === 'cancelled' && runOf(b()),
-      'worker B cancelled'
-    );
-    const doneA = await until(
-      async () => (await runOf(a()))?.status === 'complete' && runOf(a()),
-      'worker A complete'
-    );
+    const cancelledB = await until(async () => {
+      const run = await runOf(b());
+      return run?.status === 'cancelled' && run;
+    }, 'worker B cancelled');
+    const doneA = await until(async () => {
+      const run = await runOf(a());
+      return run?.status === 'complete' && run;
+    }, 'worker A complete');
     for (const run of [doneA, cancelledB]) {
       assert.deepEqual(run.config, worker, 'the run records the model it was spawned on');
       const turn = w.turns.find((t) =>
