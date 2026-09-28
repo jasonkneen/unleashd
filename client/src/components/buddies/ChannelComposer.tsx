@@ -410,17 +410,17 @@ export function ChannelComposer({
             ))}
           </div>
         )}
-        {rootId !== null && (
-          <label className="ui-inline-row ui-muted">
-            <input
-              type="checkbox"
-              checked={broadcast}
-              onChange={(event) => setBroadcast(event.target.checked)}
-            />
-            Also send to channel
-          </label>
-        )}
         <span className="channel-composer-hint ui-truncate ui-muted">
+          {rootId !== null && (
+            <label>
+              <input
+                type="checkbox"
+                checked={broadcast}
+                onChange={(event) => setBroadcast(event.target.checked)}
+              />
+              Also send to channel{' '}
+            </label>
+          )}
           {problem ? (
             <span className="channel-composer-problem" role="alert">
               {problem}
