@@ -21,7 +21,7 @@ const { ChannelsMobile } = await import('../src/mobile/channels/ChannelsMobile')
 const { ReplyRetry } = await import('../src/components/buddies/HarnessPicker');
 const { directChainUrl, startNewDirectChat } = await import('../src/components/buddies/ChannelDm');
 const { workspaceDirectory } = await import('../src/components/buddies/channel-data');
-const { mobileChannelScreen, channelsHref } = await import('../src/mobile/channels/channel-route');
+const { channelsView, channelsHref } = await import('../src/components/buddies/channels-view');
 const { Provider } = await import('jotai');
 const { jotaiStore } = await import('../src/atoms/store');
 const { loadResource } = await import('../src/atoms/resources');
@@ -144,7 +144,7 @@ test('starting a new DM leaves the visible conversation available while its repl
 
 test('a phone DM stays in Channels with Back to where it was opened', async () => {
   await seed();
-  assert.deepEqual(mobileChannelScreen('?channel=ch_a&dm=x'), { kind: 'dm', conversationId: 'x' });
+  assert.deepEqual(channelsView('?channel=ch_a&dm=x'), { kind: 'dm', conversationId: 'x' });
   assert.equal(
     channelsHref(WS, { kind: 'dm', conversationId: 'x' }),
     `/buddies/workspaces/${WS}/channels?dm=x`

@@ -4,7 +4,7 @@ import { listField } from '../../atoms/conversations';
 import type { BuddyOverview } from '../../components/buddies/types';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { MobileEmptyPanel, MobilePage } from '../components/MobileUI';
-import { channelsHref } from './channel-route';
+import { channelsHref } from '../../components/buddies/channels-view';
 
 // Its own module because BOTH device trees route /channels here (App.tsx).
 // Living in ChannelsMobile.tsx made the desktop load the mobile channels chunk.

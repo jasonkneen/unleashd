@@ -47,7 +47,7 @@ test('workspace home tiles the most recent and lists every other workspace once'
 test('workspace faces are distinct Buddies, most recently active first', () => {
   const { recent } = workspaceHomeSections(
     [workspace('w', ['old', 'lead', 'dev', 'x'])],
-    new Map([['w', { requests: 2, unreadChannels: 1 }]]),
+    new Map([['w', { requests: 2, unreadChannels: 1, unreadThreads: 0 }]]),
     [
       entry('w', 'old', 9),
       entry('w', 'lead', 10),

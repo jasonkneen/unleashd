@@ -1,0 +1,38 @@
+.threads-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  margin: 0;
+  padding: var(--sp-6) var(--sp-5);
+  list-style: none;
+}
+
+.threads-head,
+.threads-fold {
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6) 0;
+  border: 0;
+  background: none;
+  color: var(--text-bright);
+  font-size: var(--fs-3);
+  text-decoration: none;
+}
+
+.threads-fold {
+  align-self: flex-start;
+  color: var(--accent);
+}
+
+/* This visit's new replies stay tinted until the view closes, even once read. */
+.threads-card [data-unread="true"] {
+  background: color-mix(in srgb, var(--theme-user) 10%, transparent);
+}
+
+.threads-pill {
+  align-self: center;
+  margin: var(--sp-4) auto;
+  padding: var(--sp-2) var(--sp-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: var(--fs-3);
+}

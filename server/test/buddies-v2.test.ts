@@ -482,6 +482,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
         evidence: [],
+        broadcast: false,
         key: 'owner-1',
       }
     );
@@ -521,6 +522,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         body: 'Lead, which date?',
         replyToId: root.id,
         evidence: [],
+        broadcast: false,
         key: 'designer-1',
       }
     );
@@ -547,7 +549,7 @@ test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a f
       w.core.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], key: body }
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: body }
       );
     const thread = async (rootId: string) =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
@@ -587,7 +589,13 @@ test('a harness failure is retried on another harness, in a new seat of the same
     const root = await w.core.post(
       OWNER,
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: `[@Lead](buddy:${w.lead.id}) ship it`, evidence: [], key: 'ask' }
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) ship it`,
+        evidence: [],
+        broadcast: false,
+        key: 'ask',
+      }
     );
     w.outOfTokens.add(1);
     await w.channels.respondToOwnerPost(w.general, root, new Map());
@@ -620,6 +628,7 @@ test('a harness failure is retried on another harness, in a new seat of the same
         body: 'Couldn’t reply: Buddy is not active',
         replyToId: root.id,
         evidence: [],
+        broadcast: false,
         key: 'not-harness',
       }
     );
@@ -1111,7 +1120,14 @@ test('follow-ups stop after three Buddy posts in a row, and a failed gate on an 
       w.core.post(
         author === 'owner' ? OWNER : buddyActor(author),
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], key: `${author}:${body}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          broadcast: false,
+          key: `${author}:${body}`,
+        }
       );
     const root = await say('owner', 'Who owns the launch?');
     // Lead, Designer, Lead: two Buddies may exchange a question, an answer and one more turn…
@@ -1185,7 +1201,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     const ask = await w.core.post(
       buddyActor(w.lead.id),
       { kind: 'direct', members: [buddyActor(w.lead.id), OWNER] },
-      { kind: 'request', body: 'May I deploy?', evidence: [], key: 'ask' }
+      { kind: 'request', body: 'May I deploy?', evidence: [], broadcast: false, key: 'ask' }
     );
     const inbox = await http('GET', `/api/buddies/workspaces/${w.ws}/inbox`);
     assert.deepEqual(
@@ -1303,7 +1319,7 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
       w.core.post(
         buddyActor(w.lead.id),
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, taskId, evidence: [], key: body }
+        { kind: 'inform', body, replyToId, taskId, evidence: [], broadcast: false, key: body }
       );
     const root = await say('Launch plan', undefined, task.id);
     const replies = [];
@@ -1411,7 +1427,14 @@ test('a thread read names each Buddy’s current seat, so the mention chip opens
     await w.core.post(
       buddyActor(w.designer.id),
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'noted', replyToId: root.id, evidence: [], key: 'designer-noted' }
+      {
+        kind: 'inform',
+        body: 'noted',
+        replyToId: root.id,
+        evidence: [],
+        broadcast: false,
+        key: 'designer-noted',
+      }
     );
     const thread = await http('GET', `/api/buddies/posts/${root.id}/thread`);
     assert.equal(thread.status, 200);
@@ -1460,7 +1483,13 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
     const post = await w.core.post(
       buddyActor(w.lead.id),
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'Keep this archive evidence', evidence: [], key: 'archive-history' }
+      {
+        kind: 'inform',
+        body: 'Keep this archive evidence',
+        evidence: [],
+        broadcast: false,
+        key: 'archive-history',
+      }
     );
     const grant = w.grants.issueBuddy({
       role: 'worker',
@@ -1528,7 +1557,13 @@ test('Buddy MCP renames a public channel without changing its identity or histor
     const post = await w.core.post(
       buddyActor(w.lead.id),
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'Keep this rename evidence', evidence: [], key: 'rename-history' }
+      {
+        kind: 'inform',
+        body: 'Keep this rename evidence',
+        evidence: [],
+        broadcast: false,
+        key: 'rename-history',
+      }
     );
     const grant = w.grants.issueBuddy({
       role: 'worker',

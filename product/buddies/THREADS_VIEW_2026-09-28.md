@@ -1,6 +1,7 @@
 # Threads view: every thread the owner is in, with what is new
 
-Draft spec · 2026-09-28 · Buddies UI Engineer · status: **proposed, awaiting owner decisions (§6)**
+Spec · 2026-09-28 · Buddies UI Engineer · status: **v1 implemented 2026-09-28** (branch
+`threads-view`; §8 records what shipped and where it differs from this spec)
 
 Builds on [Channel conversations](CHANNEL_CONVERSATIONS_2026-09-23.md) (one-level
 threads, `root_id`, `threadStats`). Reference UI: Slack's "All Threads".
@@ -231,3 +232,38 @@ Settled by checking Slack: unread-first ordering; unfollow and mark-unread in v1
 | 5 (v1.1) | Card menu: unfollow, mark unread, copy link, open in channel | ~100 lines |
 
 Step 1 changes the crate. Restart the backend after `pnpm addons` (AGENTS.md).
+
+## 8. As built (2026-09-28)
+
+The owner said "go ahead" on the recommended answers to §6: channel unread counts top-level
+posts and broadcast replies only, and following means you started or replied in the thread.
+
+**Where it lives**
+
+| Layer | Code |
+|---|---|
+| Crate | `posts.rs`: `follow` (on every post and answer), `followed_threads`, `mark_thread_read`, `IN_CHANNEL_FEED`; `schema.rs`: `ensure_threads` (table, backfill, `post.broadcast`), index `thread_read_root` |
+| Server | `routes.ts`: `GET /workspaces/:id/threads?limit=`, `POST /threads/:rootId/read`, `broadcast` on owner posts. Buddy posts always pass `broadcast: false` |
+| Client, shared | `threads-view.ts` (`holdThreads`, `useThreadsView`), `channels-view.ts` (one URL grammar for both shells, `?view=threads`), `channel-data.ts` (`useMarkRead`, `useThreadView`, `anyUnread`) |
+| Desktop | `ThreadsPane.tsx`, rows moved into `ChannelRows.tsx` (a `card` row place carries the tint) |
+| Mobile | `ThreadsMobile.tsx`, rows and screen header moved into `ChannelRowsMobile.tsx` |
+| Styles | `ThreadsPane.css`, one sheet for both shells. Net client CSS is zero: 31 lines of dead `mobile-ui-card--button` / `mobile-ui-path` were deleted |
+
+**Refactors made on the way** (each removes a copy rather than adding a layer):
+- The crate's `keyset_page` and `readable_by` replace three copies of the paging and "may read this channel" SQL. `ensure_column` replaces the one-off archive upgrade.
+- `useThreadView` replaces the thread wiring that the desktop pane and the mobile screen each carried.
+- `useMarkRead(ReadTarget)` replaces `useMarkChannelRead`. The thread pane marks the THREAD, so opening a thread no longer marks unseen top-level posts read (§1).
+- `channelsView` replaces desktop's if-ladder over the same params that mobile already parsed into a sum type. Desktop's main pane is now a thin `mainPane` dispatcher.
+- `anyUnread` is the one "something is new" test for the tab title, the mobile tab dot, the sidebar and Workspace Home, so thread replies count everywhere at once.
+
+**Differences from §2–§3**
+- Mobile's "View N previous replies" opens the thread screen instead of expanding in place: a phone card is too narrow to page inside. Desktop expands in place (the newest page; a longer thread links out).
+- The server returns at most `limit` cards with `more`, not a keyset cursor. "Show more threads" raises the limit. Followed threads number in the hundreds, not the thousands.
+- There is no 4-line clamp on long replies yet. Follow-up if Buddy reports make cards unwieldy.
+- "Also send to channel" shows as a checkbox under thread and card composers. In the channel feed, a broadcast reply is marked "replied to a thread" (desktop), and mobile's Thread link opens its root.
+- A card composer carries no seat baseline, so its @mention chips show the profile default. The server still keeps each seat's harness for un-picked mentions.
+
+**Tests**: crate `followed_threads_track_replies_apart_from_the_channel` and
+`a_database_from_before_threads_arrives_caught_up`; the query-plan guard covers the new
+statements (it caught the missing `thread_read_root` index); client `threads-view.test.tsx`
+(stable order, sticky tint, own reply is not an update, pane render).

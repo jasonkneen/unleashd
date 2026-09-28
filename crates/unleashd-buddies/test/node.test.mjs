@@ -37,7 +37,7 @@ test('a request, its run and its answer cross the napi boundary', async () => {
   const post = await core.post(
     a,
     { kind: 'direct', members: [a, b] },
-    { kind: 'request', body: 'review this', evidence: [], key: 'k1' }
+    { kind: 'request', body: 'review this', evidence: [], broadcast: false, key: 'k1' }
   );
   assert.deepEqual(post.request, { state: 'awaiting' });
   const channel = await core.openChannel(b, { kind: 'direct', members: [b, a] });

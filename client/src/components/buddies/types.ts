@@ -32,6 +32,8 @@ export type {
   Cursor,
   Doc,
   DocKind,
+  FollowedThread,
+  FollowedThreads,
   DocRevision,
   DocScope,
   Inbox,

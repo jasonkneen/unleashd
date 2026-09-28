@@ -1,7 +1,11 @@
 import { useAtomValue } from 'jotai';
 import { NavLink, Outlet, matchPath, useLocation } from 'react-router-dom';
 import { rowFamily } from '../../atoms/conversations';
-import { ownerUnreadTotal, useOwnerInboxes } from '../../components/buddies/channel-data';
+import {
+  anyUnread,
+  ownerUnreadTotal,
+  useOwnerInboxes,
+} from '../../components/buddies/channel-data';
 import {
   type MobilePrimarySection,
   mobilePrimarySectionForPath,
@@ -73,7 +77,7 @@ export function ShellMobile() {
   // the shell can shrink to the visual viewport and hand that space to the
   // composer instead of leaving it under the keyboard.
   const keyboardOpen = useKeyboardInset();
-  const channelsUnread = ownerUnreadTotal(useOwnerInboxes().data, null).unreadChannels > 0;
+  const channelsUnread = anyUnread(ownerUnreadTotal(useOwnerInboxes().data, null));
 
   return (
     // data-device scopes the colocated device tweaks in view CSS

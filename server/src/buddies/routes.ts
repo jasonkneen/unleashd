@@ -85,6 +85,8 @@ const PostBodySchema = z
     body: z.string().trim().min(1).max(32_000),
     kind: z.enum(['inform', 'request']).default('inform'),
     replyToId: z.string().min(1).optional(),
+    // "Also send to #channel": a reply that also shows in the channel feed.
+    broadcast: z.boolean().default(false),
     taskId: z.string().min(1).optional(),
     purpose: z.string().trim().min(1).max(200).optional(),
     evidence,
@@ -455,6 +457,21 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
       const { postId } = ReadSchema.parse(req.body);
       await core.markRead(OWNER, p(req, 'channelId'), postId);
       deps.channelChanged(p(req, 'channelId'));
+      return { ok: true };
+    },
+    // The Threads view (THREADS_VIEW_2026-09-28.md): followed threads, unread first.
+    'GET 200 /api/buddies/workspaces/:workspaceId/threads': (req) =>
+      core.followedThreads(
+        OWNER,
+        p(req, 'workspaceId'),
+        z.coerce.number().int().min(1).max(200).default(30).parse(q(req, 'limit'))
+      ),
+    // Read a followed thread through `postId`; the channel's own cursor is left alone.
+    'POST 200 /api/buddies/threads/:rootId/read': async (req) => {
+      const { postId } = ReadSchema.parse(req.body);
+      const root = await core.getPost(OWNER, p(req, 'rootId'));
+      await core.markThreadRead(OWNER, root.id, postId);
+      deps.channelChanged(root.channelId);
       return { ok: true };
     },
     'GET 200 /api/buddies/channels/:channelId/responding': async (req) =>

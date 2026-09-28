@@ -15,9 +15,8 @@ register(
   import.meta.url
 );
 const { ChannelsMobile } = await import('../src/mobile/channels/ChannelsMobile');
-const { isImmersiveChannelRoute, mobileChannelScreen } = await import(
-  '../src/mobile/channels/channel-route'
-);
+const { isImmersiveChannelRoute } = await import('../src/mobile/channels/channel-route');
+const { channelsView } = await import('../src/components/buddies/channels-view');
 const { channelLinkPath, postLink } = await import('../src/components/buddies/channel-link');
 const { mobilePrimarySectionForPath, resolveMobileConversationDestination } = await import(
   '../src/utils/conversation-route-state'
@@ -45,7 +44,7 @@ test('a desktop message permalink opens its thread and reply on mobile', () => {
   });
   const reply = new URL(channelLinkPath(WS, postLink(post)), 'http://host');
   assert.equal(reply.pathname, CHANNELS);
-  assert.deepEqual(mobileChannelScreen(reply.search), {
+  assert.deepEqual(channelsView(reply.search), {
     kind: 'thread',
     channelId: 'ch_a',
     rootId: 'post_root',
@@ -56,7 +55,7 @@ test('a desktop message permalink opens its thread and reply on mobile', () => {
     channelLinkPath(WS, postLink(postFixture({ id: 'post_root', channelId: 'ch_a' }))),
     'http://host'
   );
-  assert.deepEqual(mobileChannelScreen(root.search), {
+  assert.deepEqual(channelsView(root.search), {
     kind: 'thread',
     channelId: 'ch_a',
     rootId: 'post_root',
@@ -356,7 +355,7 @@ test('the mobile Task filter opens from a channel and links each post into its o
   assert.match(channel, /<option value="task-ship">Task: Ship channels<\/option>/);
 
   const url = `${base}?channel=ch_gen&task=task-ship`;
-  assert.deepEqual(mobileChannelScreen(new URL(url, 'http://x').search), {
+  assert.deepEqual(channelsView(new URL(url, 'http://x').search), {
     kind: 'task',
     channelId: 'ch_gen',
     taskId: 'task-ship',
@@ -405,7 +404,7 @@ test('archived channel links retain history and hide channel/thread composers on
   assert.match(page, /Restore/);
   assert.doesNotMatch(page, /<textarea/);
   assert.doesNotMatch(render('?channel=ch_a&thread=post_root'), /<textarea/);
-  assert.deepEqual(mobileChannelScreen('?channel=ch_a&workers=lead'), {
+  assert.deepEqual(channelsView('?channel=ch_a&workers=lead'), {
     kind: 'workers',
     buddyId: 'lead',
   });

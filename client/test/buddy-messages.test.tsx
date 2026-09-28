@@ -24,6 +24,7 @@ const post = (id: string, overrides: Partial<Post>): Post => ({
   body: id,
   evidence: [],
   request: { state: 'none' },
+  broadcast: false,
   createdAt: '2026-09-20T00:00:00Z',
   ord: id,
   ...overrides,
@@ -33,6 +34,7 @@ test("the Messages tab reads the owner's one-to-one DM, never a group DM the Bud
   const inbox: Inbox = {
     requests: [],
     waitingOn: [],
+    unreadThreads: 0,
     channels: [
       {
         channel: direct('group', {
@@ -109,6 +111,7 @@ test('the Messages tab can post to a public channel as the Buddy', () => {
   const inbox: Inbox = {
     requests: [],
     waitingOn: [],
+    unreadThreads: 0,
     channels: [
       { channel: direct('general', { type: 'public', name: 'general', purpose: 'p' }), unread: 0 },
       {

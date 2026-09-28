@@ -86,6 +86,8 @@ export function ChannelComposer({
   const [dragging, setDragging] = useState(false);
   const [choices, setChoices] = useState(NO_CHOICES);
   const [choosingFor, setChoosingFor] = useState<string | null>(null);
+  // "Also send to #channel" (THREADS_VIEW_2026-09-28.md): replies only; resets after each send.
+  const [broadcast, setBroadcast] = useState(false);
   const { catalog } = useProviderCatalog();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -216,6 +218,7 @@ export function ChannelComposer({
       channelId,
       rootId,
       body,
+      broadcast,
       createdAt: new Date().toISOString(),
     });
     draft.clear();
@@ -224,11 +227,12 @@ export function ChannelComposer({
     setPicked([]);
     setChoices(NO_CHOICES);
     setChoosingFor(null);
+    setBroadcast(false);
     setProblem(null);
     void buddyWrite<PostResult>(
       `/api/buddies/channels/${encodeURIComponent(channelId)}/posts`,
       'POST',
-      { key, body, mentionConfigs, ...(rootId === null ? {} : { replyToId: rootId }) }
+      { key, body, mentionConfigs, ...(rootId === null ? {} : { replyToId: rootId, broadcast }) }
     )
       .then((result) => {
         outboxSent(key, result.post);
@@ -405,6 +409,16 @@ export function ChannelComposer({
               />
             ))}
           </div>
+        )}
+        {rootId !== null && (
+          <label className="ui-inline-row ui-muted">
+            <input
+              type="checkbox"
+              checked={broadcast}
+              onChange={(event) => setBroadcast(event.target.checked)}
+            />
+            Also send to channel
+          </label>
         )}
         <span className="channel-composer-hint ui-truncate ui-muted">
           {problem ? (
