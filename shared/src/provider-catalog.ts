@@ -7,33 +7,6 @@ import { z } from 'zod';
 export const ProviderSchema = z.enum(['claude', 'codex', 'opencode', 'gemini', 'cursor', 'muse']);
 export type Provider = z.infer<typeof ProviderSchema>;
 
-export interface ProviderMetadata {
-  id: Provider;
-  label: string;
-  shortLabel: string;
-  cssClass: string;
-}
-
-export const PROVIDER_METADATA: Record<Provider, Omit<ProviderMetadata, 'id'>> = {
-  claude: { label: 'Claude', shortLabel: 'C', cssClass: 'claude' },
-  codex: { label: 'Codex', shortLabel: 'X', cssClass: 'codex' },
-  opencode: { label: 'OpenCode', shortLabel: 'O', cssClass: 'opencode' },
-  gemini: { label: 'Gemini', shortLabel: 'G', cssClass: 'gemini' },
-  cursor: { label: 'Cursor', shortLabel: 'Cu', cssClass: 'cursor' },
-  muse: { label: 'Muse', shortLabel: 'M', cssClass: 'muse' },
-};
-
-export const PROVIDER_OPTIONS: readonly ProviderMetadata[] = ProviderSchema.options.map((id) => ({
-  id,
-  ...PROVIDER_METADATA[id],
-}));
-
-
-export const getProviderMetadata = (provider: Provider): ProviderMetadata => ({
-  id: provider,
-  ...PROVIDER_METADATA[provider],
-});
-
 export const ModelDefinitionSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1),
@@ -46,13 +19,24 @@ export const ModelDefinitionSchema = z.object({
 });
 export type ModelDefinition = z.infer<typeof ModelDefinitionSchema>;
 
-export const ProviderCatalogEntrySchema = z.object({
+/**
+ * One provider as written in vendor/agent-cli-tool/catalog.jsonc. The generator
+ * parses the file with this schema, so the file, the generated module and the
+ * wire entry below share one definition.
+ */
+export const CatalogProviderSchema = z.object({
   id: ProviderSchema,
   displayName: z.string().min(1),
   shortName: z.string().min(1),
   models: z.array(ModelDefinitionSchema),
   defaultModelId: z.string().min(1),
   supportsDynamicModels: z.boolean().default(false),
+  /** Retired / shorthand id → current catalog id (historical session labels). */
+  aliases: z.record(z.string().min(1)).default({}),
+});
+export type CatalogProvider = z.infer<typeof CatalogProviderSchema>;
+
+export const ProviderCatalogEntrySchema = CatalogProviderSchema.omit({ aliases: true }).extend({
   // Buddy conversations require an MCP harness that fails closed when its
   // state-authority server cannot initialize. This capability is generated
   // from the harness registry, so profile UIs never maintain a second provider

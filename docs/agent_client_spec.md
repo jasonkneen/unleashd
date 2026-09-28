@@ -38,18 +38,18 @@ executeCommand(request) → consume events until complete → parse/return final
 
 **Implemented in:** `POST /api/generate-palette` in `server/src/server.ts`
 
-## The Provider Interface
+## The Model Catalog
 
-Defined in `server/src/providers/index.ts`
-
-```typescript
-interface Provider {
-  name: ProviderName;
-  listModels(): ModelInfo[];
-}
-```
-
-Server providers are metadata-only. Runtime command construction, process execution, and provider-specific output normalization live in `agent-cli-tool`.
+One data file, `vendor/agent-cli-tool/catalog.jsonc`, lists every provider's
+models, default model, reasoning levels/default effort and retired-id aliases.
+`pnpm --filter @unleashd/shared gen:catalog` parses it with the shared schemas
+(`shared/src/provider-catalog.ts`) into `shared/src/generated/catalog.ts`;
+`shared/src/model-catalog.ts` derives lookup, alias normalization and
+validation from it. The server serves it unchanged at `GET /api/provider-catalog`
+(`server/src/providers/catalog-service.ts`, which only adds `supportsRequiredMcp`
+from the harness). App choices such as default model or effort are catalog
+data, never server-side overrides. Runtime command construction, process
+execution and output normalization live in `agent-cli-tool`.
 
 ### Runtime event contract
 
@@ -69,26 +69,13 @@ server-side `ProviderEvent` re-typing layer was deleted in T08 (2026-09-25).
 
 ## Model Selection
 
-Server providers expose models via `listModels()`. CLI flag translation from model IDs happens in `agent-cli-tool` harness logic.
+Model IDs are passed verbatim to the CLI; `agent-cli-tool` harness logic turns
+them into flags. Reasoning effort is a separate field, validated against the
+union of the provider's model levels.
 
-### Claude
-```
-listModels() → [sonnet (default), opus, haiku]
-```
-
-### Codex
-```
-listModels() → [gpt-4.5 (default), gpt-5.3-codex-high, gpt-5.3-codex-medium, gpt-5.3-codex-xhigh, spark variants]
-```
-
-Codex model metadata is stored as `modelName + thinkingOptions`, then flattened into dropdown IDs. Standalone models like `gpt-4.5` pass straight through; effort variants are still decomposed by matching known effort suffixes.
-
-### OpenCode
-```
-listModels() → ['openai/gpt-5', 'openai/gpt-5-mini', ...]
-```
-
-OpenCode model IDs use a path-style format (`provider/model`, optionally with additional segments such as `openrouter/openai/gpt-5`). This keeps OpenCode flexible while preventing accidental overlap with Claude/Codex IDs.
+OpenCode (`supportsDynamicModels`) also accepts ad-hoc path-style IDs
+(`provider/model`, optionally with more segments such as
+`openrouter/openai/gpt-5`), which keeps them from overlapping Claude/Codex IDs.
 
 ## How the Server Consumes Providers
 
@@ -179,15 +166,12 @@ Set `CLAUDE_MAX_PERMISSIONS=false` or `CODEX_MAX_PERMISSIONS=false` to disable.
    - Add parser/normalizer in `agent-cli-tool/src/run.ts`
    - Ensure `executeCommand` emits normalized events consumed by `server`
 
-2. **Register in `server/src/providers/index.ts`**
-   - Add provider metadata (`name`, `listModels`) to `providers` record
+2. **Add it to the catalog**
+   - Extend `ProviderSchema` in `shared/src/provider-catalog.ts`
+   - Add its entry to `vendor/agent-cli-tool/catalog.jsonc`, then `pnpm check:catalog`
 
-3. **Add to schemas in `shared/src/index.ts`**
-   - Extend `ProviderSchema` with the new name
-   - Add model schema (e.g. `NewProviderModelSchema`) to `ModelIdSchema` union
-
-4. **Persistence** (if the agent doesn't self-persist):
+3. **Persistence** (if the agent doesn't self-persist):
    - Add a transcript parser to `crates/unleashd-ingest` (see its README)
 
-5. **Session ID capture**:
+4. **Session ID capture**:
    - Emit canonical session-start events from `agent-cli-tool` so `server` can update `conversation.sessionId`

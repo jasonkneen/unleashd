@@ -3,9 +3,8 @@ import type {
   BuddyVisibility,
   ConversationBranch,
   ConversationConfig,
-  Provider,
 } from '@unleashd/shared';
-import { bodyText, buddyKind, normalizeModelId } from '@unleashd/shared';
+import { bodyText, buddyKind } from '@unleashd/shared';
 import type { ResolvedBuddyConversation } from '../buddies/briefing';
 import { configFromProviderPreferences } from './config-mapping';
 import { INITIAL_MESSAGE_DISPATCH_LEASE_MS } from './config-records';
@@ -58,7 +57,6 @@ export interface BuddyCreationServicePorts {
   >;
   resolveBuddyConversation(context: BuddyContext): Promise<ResolvedBuddyConversation>;
   resolveWorkingDirectory(input: string): string;
-  isProviderAvailable(provider: Provider): boolean;
   createId(): string;
   getConversation(id: string): ConversationRuntime | undefined;
   createConversation(options: ConversationOptions): ConversationRuntime;
@@ -204,12 +202,9 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
   }
 
   function resolveConfig(resolved: ResolvedBuddyConversation): ConversationConfig {
-    if (!ports.isProviderAvailable(resolved.provider)) {
-      throw new Error(`Buddy provider is unavailable: ${resolved.provider}`);
-    }
     return configFromProviderPreferences({
       provider: resolved.provider,
-      model: normalizeModelId(resolved.provider, resolved.model),
+      model: resolved.model,
       reasoningEffort: resolved.reasoningEffort,
     });
   }
@@ -240,9 +235,6 @@ export function createBuddyCreationService(ports: BuddyCreationServicePorts): Bu
   async function createBuddyBuilderConversation(
     input: CreateBuddyBuilderConversationInput
   ): Promise<ConversationRuntime> {
-    if (!ports.isProviderAvailable('codex')) {
-      throw new Error('Buddy Builder requires the Codex provider');
-    }
     const conversationId = input.conversationId ?? ports.createId();
     const workingDirectory = ports.resolveWorkingDirectory(input.workingDirectory);
     const config = configFromProviderPreferences({

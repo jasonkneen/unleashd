@@ -317,7 +317,6 @@ async function world() {
     configService,
     resolveBuddyConversation: (context) => briefings.warm(context),
     resolveWorkingDirectory: (directory) => directory,
-    isProviderAvailable: () => true,
     createId: () => `conversation-${++ids}`,
     getConversation: (id) => conversations.get(id),
     createConversation: (options) => new Conversation(options),

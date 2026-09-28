@@ -1,7 +1,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { type Provider as ProviderName, encodeRows } from '@unleashd/shared';
+import { ProviderSchema, encodeRows } from '@unleashd/shared';
 
 import { executeCommand } from '@nbardy/agent-cli';
 import compression from 'compression';
@@ -36,12 +36,12 @@ import {
 } from './conversations/config-records';
 import { ConversationConfigService } from './conversations/config-service';
 import { ConversationTombstonedError } from './conversations/config-service';
-import { replaceRuntimeConfig } from './conversations/runtime-config';
 import {
   type ConversationRuntime,
   createConversationRuntime,
   overlayHistoryFields,
 } from './conversations/runtime';
+import { replaceRuntimeConfig } from './conversations/runtime-config';
 import { registerConversationRoutes } from './http/conversation-routes';
 import { registerCoreRoutes } from './http/core-routes';
 import { registerErrorDiagnosticsRoutes } from './http/error-diagnostics-routes';
@@ -71,7 +71,6 @@ import {
 } from './observability';
 import { createPaletteService } from './palettes/palette-service';
 import { buildPalettePrompt } from './palettes/prompt';
-import { getProvider, providers } from './providers';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
@@ -339,7 +338,6 @@ const buddyCreationService: BuddyCreationService = createBuddyCreationService({
   configService: conversationConfigService,
   resolveBuddyConversation,
   resolveWorkingDirectory: resolveWorkingDirectoryInput,
-  isProviderAvailable: (provider) => provider in providers,
   createId: uuidv4,
   getConversation: (id) => applicationContext.registry.get(id),
   createConversation: (options) => new Conversation(options),
@@ -671,14 +669,14 @@ const paletteService = createPaletteService({
   ports: {
     startGeneration: executeCommand,
     validateProvider: (provider) => {
-      getProvider(provider as ProviderName);
+      ProviderSchema.parse(provider);
     },
     buildPrompt: buildPalettePrompt,
   },
 });
 paletteService.registerRoutes(app);
 
-registerUsageRoutes(app, Object.keys(providers) as ProviderName[], currentIngest);
+registerUsageRoutes(app, ProviderSchema.options, currentIngest);
 registerStaticClient(app, path.join(__dirname, '../../client/dist'));
 
 const captureUnhandledHttpError: ErrorRequestHandler = (error, request, response, next) => {

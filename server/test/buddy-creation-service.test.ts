@@ -116,7 +116,6 @@ test('server Buddy creation persists, registers, broadcasts, links, and dispatch
       model: 'gpt-5.6-sol',
     }),
     resolveWorkingDirectory: (directory: string) => directory,
-    isProviderAvailable: () => true,
     createId: () => `conversation-${++nextId}`,
     createConversation: (options: ConversationOptions) => {
       conversationOptions.push(options);

@@ -1,4 +1,4 @@
-import { PROVIDER_OPTIONS, type Provider, getProviderMetadata } from '@unleashd/shared';
+import { type Provider, ProviderSchema, catalogEntryForProvider } from '@unleashd/shared';
 import { useEffect, useState } from 'react';
 import './UsagePanel.css';
 
@@ -122,7 +122,9 @@ let clientCache: { days: number; data: UsageData; time: number } | null = null;
 export function RateLimitGroup({ provider, limits }: { provider: Provider; limits: RateLimit[] }) {
   return (
     <div className="usage-rate-group ui-stack">
-      <span className="usage-rate-provider ui-muted">{getProviderMetadata(provider).label}</span>
+      <span className="usage-rate-provider ui-muted">
+        {catalogEntryForProvider(provider).displayName}
+      </span>
       {limits.map((rl) => (
         <RateLimitGauge key={rl.label} rl={rl} />
       ))}
@@ -138,7 +140,7 @@ export function UsagePanel({ onClose }: Props) {
   const [loading, setLoading] = useState(data === null);
   const [days, setDays] = useState(7);
   const [tab, setTab] = useState<ProviderTab>('all');
-  const providerTabs = ['all', ...PROVIDER_OPTIONS.map((provider) => provider.id)] as const;
+  const providerTabs = ['all', ...ProviderSchema.options] as const;
 
   useEffect(() => {
     // Show stale data while revalidating (don't flash loading if we have cache)
@@ -225,7 +227,7 @@ export function UsagePanel({ onClose }: Props) {
                     className={`usage-tab ui-control ui-muted ${tab === t ? 'active' : ''}`}
                     onClick={() => setTab(t === 'all' ? 'all' : (t as Provider))}
                   >
-                    {t === 'all' ? 'All' : getProviderMetadata(t).label}
+                    {t === 'all' ? 'All' : catalogEntryForProvider(t).displayName}
                   </button>
                 ))}
               </div>
@@ -308,7 +310,7 @@ export function UsagePanel({ onClose }: Props) {
                     {filteredSessions.slice(0, 10).map((s) => (
                       <div key={s.sessionId} className="usage-daily-row ui-row">
                         <span className="usage-session-provider ui-muted">
-                          {getProviderMetadata(s.provider).shortLabel}
+                          {catalogEntryForProvider(s.provider).shortName}
                         </span>
                         <span className="usage-session-id">{s.sessionId.slice(0, 8)}</span>
                         <span className="usage-daily-date ui-muted">{s.date.slice(5)}</span>

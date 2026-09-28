@@ -1,190 +1,76 @@
 /**
- * Generate shared/src/generated/catalog.ts from vendor/agent-cli-tool/catalog.jsonc
+ * Generate shared/src/generated/catalog.ts from vendor/agent-cli-tool/catalog.jsonc,
+ * the only model registry data. Parses it with the shared schemas, so a malformed
+ * catalog fails here instead of in a running server.
  *
- * Single source of truth: vendor/agent-cli-tool/catalog.jsonc
- * Run: pnpm --filter @unleashd/shared gen:catalog  (or pnpm exec tsx shared/scripts/gen-catalog.ts)
+ * Run: pnpm --filter @unleashd/shared gen:catalog
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
+import {
+  CatalogProviderSchema,
+  ProviderCatalogSchema,
+  ProviderSchema,
+} from '../src/provider-catalog.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '../..');
 const CATALOG_PATH = join(REPO_ROOT, 'vendor/agent-cli-tool/catalog.jsonc');
 const OUT_FILE = join(REPO_ROOT, 'shared/src/generated/catalog.ts');
 
+const CatalogFileSchema = z.object({
+  revision: z.string().min(1),
+  providers: z.array(CatalogProviderSchema),
+});
+
 // Minimal JSONC stripper: the catalog has no // inside strings.
 function stripJsonc(text: string): string {
   return text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
-type CatalogModel = {
-  id: string;
-  displayName: string;
-  isDefault?: boolean;
-  reasoning?: { levels: string[]; defaultEffort?: string };
-};
-type CatalogProvider = {
-  id: string;
-  displayName: string;
-  shortName: string;
-  defaultModelId: string;
-  supportsDynamicModels?: boolean;
-  models: CatalogModel[];
-};
-type Catalog = { revision: string; providers: CatalogProvider[] };
-
-function findProvider(catalog: Catalog, id: string): CatalogProvider {
-  const p = catalog.providers.find((e) => e.id === id);
-  if (!p) throw new Error(`Provider ${id} not found in catalog`);
-  return p;
-}
-
-function uniquePreserveOrder(items: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of items) {
-    if (!seen.has(v)) {
-      seen.add(v);
-      out.push(v);
-    }
-  }
-  return out;
-}
-
 async function main() {
-  const raw = await readFile(CATALOG_PATH, 'utf-8');
-  const catalog: Catalog = JSON.parse(stripJsonc(raw));
-
-  const claude = findProvider(catalog, 'claude');
-  const codex = findProvider(catalog, 'codex');
-  const gemini = findProvider(catalog, 'gemini');
-  const cursor = findProvider(catalog, 'cursor');
-  const muse = findProvider(catalog, 'muse');
-
-  // Model ID arrays
-  const claudeIds = claude.models.map((m) => m.id);
-  const geminiIds = gemini.models.map((m) => m.id);
-  const museIds = muse.models.map((m) => m.id);
-  // Cursor registry as-is from catalog (id, displayName, isDefault)
-  // Codex registry: need to build CODEX_MODEL_REGISTRY shape used in shared/src/index.ts
-  // That shape has modelName, displayName, thinkingOptions, defaultThinkingOption, isDefault
-
-  // Effort levels — union of all levels per provider, preserving catalog order
-  const claudeLevels = uniquePreserveOrder(claude.models.flatMap((m) => m.reasoning?.levels ?? []));
-  const codexLevels = uniquePreserveOrder(codex.models.flatMap((m) => m.reasoning?.levels ?? []));
-  const museLevels = uniquePreserveOrder(muse.models.flatMap((m) => m.reasoning?.levels ?? []));
-
-  // For Codex, the unified options add 'none' prefix (used for thinkingOptions)
-  // CODEX_EFFORT_LEVELS is just codexLevels (without 'none'), CODEX_THINKING_OPTIONS mirrors it.
-  // Keep generation explicit so adding a model with different levels still converges to union.
-  // If catalog ever diverges per-model, this union remains correct for validation.
-
-  const lines: string[] = [];
-  lines.push('// DO NOT EDIT - generated from catalog.jsonc');
-  lines.push(`// Source: vendor/agent-cli-tool/catalog.jsonc (revision ${catalog.revision})`);
-  lines.push('// Generator: shared/scripts/gen-catalog.ts');
-  lines.push('// Run: pnpm --filter @unleashd/shared gen:catalog');
-  lines.push('');
-
-  lines.push(`export const CLAUDE_MODEL_IDS = ${JSON.stringify(claudeIds)} as const;`);
-  lines.push(`export const GEMINI_MODEL_IDS = ${JSON.stringify(geminiIds)} as const;`);
-  lines.push(`export const MUSE_MODEL_IDS = ${JSON.stringify(museIds)} as const;`);
-  lines.push('');
-  // Cursor registry
-  lines.push(
-    `export const CURSOR_MODEL_REGISTRY = ${JSON.stringify(
-      cursor.models.map((m) => ({
-        id: m.id,
-        displayName: m.displayName,
-        isDefault: Boolean(m.isDefault),
-      })),
-      null,
-      2
-    )} as const;`
+  const catalog = CatalogFileSchema.parse(
+    JSON.parse(stripJsonc(await readFile(CATALOG_PATH, 'utf-8')))
   );
-  lines.push('');
-  // Effort levels
-  lines.push(`export const CLAUDE_EFFORT_LEVELS = ${JSON.stringify(claudeLevels)} as const;`);
-  lines.push(`export const CODEX_EFFORT_LEVELS = ${JSON.stringify(codexLevels)} as const;`);
-  lines.push(`export const MUSE_EFFORT_LEVELS = ${JSON.stringify(museLevels)} as const;`);
-  lines.push('');
-  // Codex thinking options — alias of effort levels per current catalog; kept separate for backward compat
-  lines.push('export const CODEX_THINKING_OPTIONS = CODEX_EFFORT_LEVELS;');
-  lines.push(`export const NO_CODEX_THINKING = "none" as const;`);
-  lines.push(
-    'export const CODEX_UNIFIED_THINKING_OPTIONS = [NO_CODEX_THINKING, ...CODEX_THINKING_OPTIONS] as const;'
-  );
-  lines.push('');
-  // Codex registry — references unified thinking options for each entry
-  // We emit literal objects with thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS and defaultThinkingOption per catalog
-  lines.push('export const CODEX_MODEL_REGISTRY = [');
-  for (const m of codex.models) {
-    const def = m.reasoning?.defaultEffort;
-    const defStr = def ? `, defaultThinkingOption: ${JSON.stringify(def)}` : '';
-    lines.push(
-      `  { modelName: ${JSON.stringify(m.id)}, displayName: ${JSON.stringify(m.displayName)}, thinkingOptions: CODEX_UNIFIED_THINKING_OPTIONS${defStr}, isDefault: ${Boolean(m.isDefault)} },`
-    );
+
+  // Relational invariants (duplicates, default model, default effort) are the wire schema's.
+  ProviderCatalogSchema.parse(catalog);
+
+  // Every Provider exactly once, so catalogEntryForProvider is a total lookup.
+  const ids = catalog.providers.map((provider) => provider.id).sort();
+  const expected = [...ProviderSchema.options].sort();
+  if (JSON.stringify(ids) !== JSON.stringify(expected)) {
+    throw new Error(`Catalog providers [${ids}] must be exactly [${expected}]`);
   }
-  lines.push('] as const;');
-  lines.push('');
 
-  // The whole catalog as data: every provider, every model, per-model reasoning.
-  // Pattern: one-type-source (docs/patterns.md#one-type-source) — the server's
-  // model lists and reasoning levels read this, never catalog.jsonc at runtime.
-  lines.push('export type CatalogModel = {');
-  lines.push('  readonly id: string;');
-  lines.push('  readonly displayName: string;');
-  lines.push('  readonly isDefault: boolean;');
-  lines.push(
-    '  readonly reasoning?: { readonly levels: readonly string[]; readonly defaultEffort?: string };'
-  );
-  lines.push('};');
-  lines.push('export type CatalogProviderEntry = {');
-  lines.push('  readonly id: string;');
-  lines.push('  readonly defaultModelId: string;');
-  lines.push('  readonly supportsDynamicModels: boolean;');
-  lines.push('  readonly models: readonly CatalogModel[];');
-  lines.push('};');
-  lines.push('export const PROVIDER_MODEL_CATALOG: readonly CatalogProviderEntry[] = [');
-  for (const p of catalog.providers) {
-    if (!p.models.some((m) => m.id === p.defaultModelId)) {
-      throw new Error(`Provider ${p.id}: defaultModelId ${p.defaultModelId} is not in its models`);
+  for (const provider of catalog.providers) {
+    for (const [alias, target] of Object.entries(provider.aliases)) {
+      if (!provider.models.some((model) => model.id === target)) {
+        throw new Error(`${provider.id} alias ${alias} → ${target}: target is not a model`);
+      }
     }
-    lines.push('  {');
-    lines.push(`    id: ${JSON.stringify(p.id)},`);
-    lines.push(`    defaultModelId: ${JSON.stringify(p.defaultModelId)},`);
-    lines.push(`    supportsDynamicModels: ${Boolean(p.supportsDynamicModels)},`);
-    lines.push('    models: [');
-    for (const m of p.models) {
-      const reasoning = m.reasoning
-        ? `, reasoning: { levels: ${JSON.stringify(m.reasoning.levels)}${
-            m.reasoning.defaultEffort
-              ? `, defaultEffort: ${JSON.stringify(m.reasoning.defaultEffort)}`
-              : ''
-          } }`
-        : '';
-      lines.push(
-        `      { id: ${JSON.stringify(m.id)}, displayName: ${JSON.stringify(m.displayName)}, isDefault: ${Boolean(m.isDefault)}${reasoning} },`
-      );
-    }
-    lines.push('    ],');
-    lines.push('  },');
   }
-  lines.push('];');
-  lines.push('');
 
-  const out = `${lines.join('\n')}\n`;
+  const out = [
+    '// DO NOT EDIT - generated from catalog.jsonc',
+    `// Source: vendor/agent-cli-tool/catalog.jsonc (revision ${catalog.revision})`,
+    '// Generator: shared/scripts/gen-catalog.ts',
+    '// Run: pnpm --filter @unleashd/shared gen:catalog',
+    '',
+    "import type { CatalogProvider } from '../provider-catalog.js';",
+    '',
+    `export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = ${JSON.stringify(catalog.providers, null, 2)};`,
+    '',
+  ].join('\n');
   await mkdir(dirname(OUT_FILE), { recursive: true });
   await writeFile(OUT_FILE, out, 'utf-8');
   console.log(`Wrote ${OUT_FILE}`);
-  console.log(
-    `  claude: ${claudeIds.length} models, gemini: ${geminiIds.length}, cursor: ${cursor.models.length}, muse: ${museIds.length}, codex: ${codex.models.length}`
-  );
 }
 
-main().catch((e) => {
-  console.error(e);
+main().catch((error) => {
+  console.error(error);
   process.exit(1);
 });

@@ -12,7 +12,6 @@ import {
   ConversationConfigPatchSchema,
   ConversationConfigSchema,
   ConversationIdSchema,
-  ModelIdSchema,
 } from './conversation-config.js';
 import {
   CreateKindSchema,
@@ -21,14 +20,7 @@ import {
   RowPatchSchema,
 } from './conversation.js';
 import { legacyBody } from './legacy-content.js';
-import {
-  PROVIDER_METADATA,
-  PROVIDER_OPTIONS,
-  type Provider,
-  type ProviderMetadata,
-  ProviderSchema,
-  getProviderMetadata,
-} from './provider-catalog.js';
+import type { Provider } from './provider-catalog.js';
 
 export * from './conversation-config.js';
 export * from './conversation.js';
@@ -38,238 +30,11 @@ export * from './legacy-content.js';
 export * from './tool-content.js';
 export * from './buddy.js';
 export * from './provider-catalog.js';
+export * from './model-catalog.js';
 
 // =============================================================================
 // Core Data Structures
 // =============================================================================
-
-export {
-  ProviderSchema,
-  type Provider,
-  type ProviderMetadata,
-  PROVIDER_METADATA,
-  PROVIDER_OPTIONS,
-  getProviderMetadata,
-};
-
-// =============================================================================
-// Model Identifiers — per-provider model choices
-//
-// Each provider defines a union of "model identifiers" that the UI presents
-// as a dropdown. These are opaque strings on the client side.
-// The server's Provider.modelToParams() decomposes them into CLI flags.
-//
-// Claude: aliases passed to `claude --model <alias>`
-// Codex: base model IDs only. Reasoning effort is a SEPARATE field on the
-//   Conversation (Conversation.reasoningEffort), mirroring Claude.
-// OpenCode: path-style identifiers passed to `opencode run -m <id>`
-//   e.g. "opencode/big-pickle" or "opencode/gpt-5-nano"
-// We require at least one "/" segment to avoid collisions with Claude/Codex IDs.
-// =============================================================================
-
-// =============================================================================
-// Generated catalog — single source of truth is vendor/agent-cli-tool/catalog.jsonc
-// Run `pnpm --filter @unleashd/shared gen:catalog` after editing catalog.jsonc.
-// This block derives schemas and helpers from the generated catalog to avoid
-// duplicate enum literals in shared/src/index.ts.
-// =============================================================================
-import {
-  CLAUDE_EFFORT_LEVELS as GEN_CLAUDE_EFFORT_LEVELS,
-  CLAUDE_MODEL_IDS as GEN_CLAUDE_MODEL_IDS,
-  CODEX_EFFORT_LEVELS as GEN_CODEX_EFFORT_LEVELS,
-  CODEX_MODEL_REGISTRY as GEN_CODEX_MODEL_REGISTRY,
-  CODEX_THINKING_OPTIONS as GEN_CODEX_THINKING_OPTIONS,
-  CODEX_UNIFIED_THINKING_OPTIONS as GEN_CODEX_UNIFIED_THINKING_OPTIONS,
-  CURSOR_MODEL_REGISTRY as GEN_CURSOR_MODEL_REGISTRY,
-  GEMINI_MODEL_IDS as GEN_GEMINI_MODEL_IDS,
-  MUSE_EFFORT_LEVELS as GEN_MUSE_EFFORT_LEVELS,
-  MUSE_MODEL_IDS as GEN_MUSE_MODEL_IDS,
-  NO_CODEX_THINKING as GEN_NO_CODEX_THINKING,
-  PROVIDER_MODEL_CATALOG,
-} from './generated/catalog.js';
-import type { CatalogProviderEntry } from './generated/catalog.js';
-
-export { PROVIDER_MODEL_CATALOG } from './generated/catalog.js';
-export type { CatalogProviderEntry } from './generated/catalog.js';
-
-// Re-export generated arrays so consumers can import from shared entry point
-export const CLAUDE_EFFORT_LEVELS = GEN_CLAUDE_EFFORT_LEVELS;
-export const CODEX_EFFORT_LEVELS = GEN_CODEX_EFFORT_LEVELS;
-export const MUSE_EFFORT_LEVELS = GEN_MUSE_EFFORT_LEVELS;
-export const CODEX_THINKING_OPTIONS = GEN_CODEX_THINKING_OPTIONS;
-export const NO_CODEX_THINKING = GEN_NO_CODEX_THINKING;
-export const CODEX_UNIFIED_THINKING_OPTIONS = GEN_CODEX_UNIFIED_THINKING_OPTIONS;
-export const CURSOR_MODEL_REGISTRY = GEN_CURSOR_MODEL_REGISTRY;
-export const CODEX_MODEL_REGISTRY = GEN_CODEX_MODEL_REGISTRY;
-
-export type CodexThinkingOption = (typeof CODEX_THINKING_OPTIONS)[number];
-export type CodexThinkingMode = typeof NO_CODEX_THINKING | CodexThinkingOption;
-
-export type CodexModelRegistryEntry = {
-  modelName: string;
-  displayName: string;
-  thinkingOptions: readonly CodexThinkingMode[];
-  defaultThinkingOption?: CodexThinkingMode;
-  isDefault?: boolean;
-};
-
-// Type assertion: generated registry conforms to CodexModelRegistryEntry[]
-// (cast avoids circular const-assertion issues while keeping runtime identical)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _codexRegistryCheck: ReadonlyArray<CodexModelRegistryEntry> = CODEX_MODEL_REGISTRY;
-
-export const ClaudeModelSchema = z.enum(GEN_CLAUDE_MODEL_IDS as unknown as [string, ...string[]]);
-
-export const GeminiModelSchema = z.enum(GEN_GEMINI_MODEL_IDS as unknown as [string, ...string[]]);
-
-export type CursorModel = (typeof CURSOR_MODEL_REGISTRY)[number]['id'];
-export const CURSOR_MODEL_IDS = CURSOR_MODEL_REGISTRY.map((entry) => entry.id);
-export const CursorModelSchema = z.enum(
-  CURSOR_MODEL_IDS as unknown as [CursorModel, ...CursorModel[]]
-);
-
-export const MuseModelSchema = z.enum(GEN_MUSE_MODEL_IDS as unknown as [string, ...string[]]);
-
-/** Retired / shorthand ids → canonical Cursor `--model` value. */
-export const CURSOR_MODEL_ALIASES: Readonly<Record<string, CursorModel>> = {
-  'composer-2': 'composer-2.5',
-  composer2: 'composer-2.5',
-  'composer-2-fast': 'composer-2.5',
-  'composer-2.5-fast': 'composer-2.5',
-  'grok-4.5': 'cursor-grok-4.5-high',
-  'grok-4.7': 'grok-4.7-high',
-};
-
-type CodexModelRegistryItem = (typeof CODEX_MODEL_REGISTRY)[number];
-
-// Codex model IDs are base IDs only. Reasoning effort lives on
-// Conversation.reasoningEffort (same shape as Claude).
-export type CodexModel = CodexModelRegistryItem['modelName'];
-
-export const CODEX_BASE_MODEL_INFOS = CODEX_MODEL_REGISTRY.map((entry) => ({
-  id: entry.modelName,
-  displayName: entry.displayName,
-  isDefault: Boolean(entry.isDefault),
-})) as ReadonlyArray<{
-  id: CodexModel;
-  displayName: string;
-  isDefault: boolean;
-}>;
-
-// Canonical Codex ModelInfo list — base IDs only. Effort is chosen via
-// Conversation.reasoningEffort (separate field), mirroring Claude.
-export const CODEX_MODEL_INFOS = CODEX_BASE_MODEL_INFOS;
-
-export const CODEX_MODEL_IDS = CODEX_MODEL_INFOS.map((model) => model.id) as readonly CodexModel[];
-const CODEX_MODEL_ID_SET = new Set<string>(CODEX_MODEL_IDS);
-export const CodexModelSchema = z.custom<CodexModel>(
-  (value): value is CodexModel => typeof value === 'string' && CODEX_MODEL_ID_SET.has(value),
-  {
-    message: `Invalid Codex model identifier. Expected one of: ${CODEX_MODEL_IDS.join(', ')}`,
-  }
-);
-
-/**
- * The catalog entry for a provider. Every Provider has one: a missing entry is a
- * stale generated catalog, and this throws at startup instead of guessing.
- */
-export function catalogEntryForProvider(provider: Provider): CatalogProviderEntry {
-  const entry = PROVIDER_MODEL_CATALOG.find((candidate) => candidate.id === provider);
-  if (!entry) {
-    throw new Error(
-      `Provider '${provider}' is missing from the generated model catalog; run pnpm --filter @unleashd/shared gen:catalog`
-    );
-  }
-  return entry;
-}
-
-export type OpenCodeModel = `${string}/${string}`;
-
-// "provider/model" path-style ID (allows additional segments like "openrouter/openai/gpt-5").
-// Allowed chars keep to typical provider/model slugs and version suffixes.
-const OPENCODE_MODEL_ID_REGEX = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._:+-]*)+$/i;
-
-export const OpenCodeModelSchema = z.custom<OpenCodeModel>(
-  (value): value is OpenCodeModel =>
-    typeof value === 'string' && OPENCODE_MODEL_ID_REGEX.test(value),
-  {
-    message:
-      "Invalid OpenCode model identifier. Expected 'provider/model' format (e.g. 'opencode/big-pickle').",
-  }
-);
-
-export function isModelIdValidForProvider(provider: Provider, modelId?: string): boolean {
-  if (!modelId) return true;
-  // Validate the canonical form so aliases never need to live in the schema.
-  const canonical = normalizeModelId(provider, modelId) ?? modelId;
-
-  switch (provider) {
-    case 'claude':
-      return ClaudeModelSchema.safeParse(canonical).success;
-    case 'codex':
-      return CodexModelSchema.safeParse(canonical).success;
-    case 'gemini':
-      return GeminiModelSchema.safeParse(canonical).success;
-    case 'opencode':
-      return OpenCodeModelSchema.safeParse(canonical).success;
-    case 'cursor':
-      return CursorModelSchema.safeParse(canonical).success;
-    case 'muse':
-      return MuseModelSchema.safeParse(canonical).success;
-  }
-}
-
-export function normalizeModelId(provider: Provider, model?: string): string | undefined {
-  if (!model) return undefined;
-  if (provider === 'cursor') {
-    return CURSOR_MODEL_ALIASES[model] ?? model;
-  }
-  return model;
-}
-
-/** Display metadata returned by Provider.listModels() for the model dropdown */
-export const ModelInfoSchema = z.object({
-  id: ModelIdSchema,
-  displayName: z.string(),
-  isDefault: z.boolean(),
-});
-export type ModelInfo = z.infer<typeof ModelInfoSchema>;
-
-// Reasoning-effort values are passed through verbatim — we never translate or
-// map them. Whatever the CLI accepts is what flows through the wire.
-//
-// Per-provider authoritative sources (verified via --help / rejection messages):
-//   claude --effort:                 low | medium | high | xhigh | max
-//   codex -c model_reasoning_effort: minimal | low | medium | high | xhigh | max | ultra
-//
-// Omitting the effort flag is represented as undefined on
-// Conversation.reasoningEffort, so it does not appear in these lists.
-//
-// No shared union enum on the wire — reasoningEffort is a nullable optional
-// string at the schema layer. The per-provider arrays below are for UI rendering
-// and server-side validation only; the submodule only "aligns" the flag name,
-// and each CLI does the final runtime reject if something slips through.
-// Effort-level arrays and types are re-exported from generated/catalog.ts (single source: vendor/agent-cli-tool/catalog.jsonc)
-
-const EFFORT_LEVELS_BY_PROVIDER: Partial<Record<Provider, readonly string[]>> = {
-  claude: CLAUDE_EFFORT_LEVELS,
-  codex: CODEX_EFFORT_LEVELS,
-  muse: MUSE_EFFORT_LEVELS,
-};
-
-export function effortLevelsForProvider(provider: Provider): readonly string[] {
-  return EFFORT_LEVELS_BY_PROVIDER[provider] ?? [];
-}
-
-export function isEffortValidForProvider(
-  provider: Provider,
-  effort: string | null | undefined
-): boolean {
-  // Both control variants are valid at the boundary: undefined requests the
-  // provider/model default, while null explicitly requests no flag.
-  if (effort == null) return true;
-  return effortLevelsForProvider(provider).includes(effort);
-}
 
 // =============================================================================
 // Provider-SESSION fork capability

@@ -1,5 +1,5 @@
 import type { ConversationRow, SubAgent } from '@unleashd/shared';
-import { getProviderMetadata } from '@unleashd/shared';
+import { catalogEntryForProvider } from '@unleashd/shared';
 import { isRowRunning } from './conversation-row';
 
 // Child sessions are list rows (protocol v3): their label and activity time
@@ -7,7 +7,7 @@ import { isRowRunning } from './conversation-row';
 function projectChildConversationToSubAgent(child: ConversationRow): SubAgent {
   const startedAt = new Date(child.createdAt);
   const running = isRowRunning(child);
-  const roleLabel = getProviderMetadata(child.provider).label;
+  const roleLabel = catalogEntryForProvider(child.provider).displayName;
   return {
     id: `session:${child.id}`,
     description: `[${roleLabel}] ${child.label}`,
@@ -27,7 +27,7 @@ function mergeNativeSubAgentWithChild(nativeAgent: SubAgent, child: Conversation
     description:
       nativeAgent.description && !nativeAgent.description.startsWith('Running ')
         ? nativeAgent.description
-        : `[${getProviderMetadata(child.provider).label}] ${child.label}`,
+        : `[${catalogEntryForProvider(child.provider).displayName}] ${child.label}`,
     currentAction: nativeAgent.currentAction ?? (running ? 'Running...' : undefined),
     completedAt: nativeAgent.completedAt ?? (running ? undefined : new Date(child.activityAt)),
   };

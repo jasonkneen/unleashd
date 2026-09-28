@@ -11,7 +11,6 @@ import {
   ProviderCatalogSchema,
   ProviderSchema,
   catalogEntryForProvider,
-  getProviderMetadata,
   isModelIdValidForProvider,
   resolveConversationConfig,
 } from '@unleashd/shared';
@@ -20,34 +19,11 @@ function catalogRevision(entries: readonly ProviderCatalogEntry[]): string {
   return crypto.createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 16);
 }
 
+// The catalog data is served as written: app choices such as the Codex default
+// model and medium effort live in catalog.jsonc, never as overrides here.
 function buildProviderEntry(provider: Provider): ProviderCatalogEntry {
-  const metadata = getProviderMetadata(provider);
-  const entry = catalogEntryForProvider(provider);
-  return {
-    id: provider,
-    displayName: metadata.label,
-    shortName: metadata.shortLabel,
-    // App defaults preserved from the refreshed picker; explicit choices stay verbatim.
-    defaultModelId: provider === 'codex' ? 'gpt-6-sol' : entry.defaultModelId,
-    supportsDynamicModels: entry.supportsDynamicModels,
-    supportsRequiredMcp: harnessMcpCapability(provider) === 'required',
-    models: entry.models.map((model) => ({
-      id: model.id,
-      displayName: model.displayName,
-      ...(model.reasoning === undefined
-        ? {}
-        : {
-            reasoning: {
-              levels: [...model.reasoning.levels],
-              ...(model.reasoning.levels.includes('medium')
-                ? { defaultEffort: 'medium' }
-                : model.reasoning.defaultEffort === undefined
-                  ? {}
-                  : { defaultEffort: model.reasoning.defaultEffort }),
-            },
-          }),
-    })),
-  };
+  const { aliases: _aliases, ...entry } = catalogEntryForProvider(provider);
+  return { ...entry, supportsRequiredMcp: harnessMcpCapability(provider) === 'required' };
 }
 
 function buildProviderCatalog(): ProviderCatalog {

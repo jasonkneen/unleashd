@@ -17,7 +17,7 @@
     "watch:esm": "tsc --watch",
     "watch:cjs": "tsc -p tsconfig.cjs.json --watch",
     "gen:catalog": "tsx scripts/gen-catalog.ts",
-    "check:catalog": "tsx scripts/gen-catalog.ts && git diff --exit-code -- shared/src/generated/catalog.ts",
+    "check:catalog": "tsx scripts/gen-catalog.ts && git diff --exit-code -- src/generated/catalog.ts",
     "prepack": "pnpm run check:catalog"
   },
   "files": ["dist"],
