@@ -77,3 +77,27 @@ The owner asked for the transcripts. The thread turns ran on the Claude harness:
 Root causes: (a) the missing worker-spawn tool (Task task_01a0e744); (b) stale harness memory
 that still describes the deleted `send`; (c) unbounded read tools that overflow the harness
 result limit.
+
+## Successor 2026-09-28 ~09:20Z: fixes proposed to the owner (lead recommendation, not yet accepted)
+
+Owner asked for obvious fixes, both to the confusion and to the system.
+
+1. Worker spawn tool: task_01a0e744. This removes the reason to detach processes.
+2. The briefing names the delegation path (`server/src/buddies/briefing.ts` tools paragraph). For
+   parallel work, DM-request a report (`team` shows each model), or spawn a worker once (1)
+   lands. Never launch agent CLIs outside Buddy runs: such runs are invisible and can't be
+   cancelled. Added to task_01a0e744 so the line names the real tool. It needs `pnpm token-audit`
+   before and after.
+3. **Owner decision needed:** harness auto-memory inside Buddy turns. A Claude-harness Buddy turn
+   runs in the workspace cwd, so it reads and writes `~/.claude/projects/<repo>/memory/`. Every
+   Buddy in that repo and the owner's own sessions share that store. It is a second memory that
+   nobody curates, next to Buddy memory (docs/patterns.md one-store), and it held both the stale
+   `send` instructions and the detached-worker recipe. Recommendation: turn it off for Buddy turns
+   and move durable facts into the owning Buddy's docs. I have **not** verified that a supported
+   switch exists; that's an engineering todo.
+4. Sweep: 6 harness memory notes in 4 repos name removed Buddy tools (wave_sim ×2,
+   unleashd ×2, stock-trader, basketball-model). I fixed the one unleashd note that gave
+   instructions (`unleashd-concurrent-buddy-project-state.md`). The other unleashd note and the
+   stock-trader/basketball ones are historical incident records. Wave Simulation Lead owns the two
+   wave_sim notes (request post_01a0e746-c189-7673-a32e-934a5b0265f4).
+5. Bounded reads and permalink reads: task_01a0e746.
