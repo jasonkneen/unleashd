@@ -21,10 +21,10 @@ import { syntheticConversation } from './fixtures/synthetic-conversations';
  * Dev reloads run two protocol versions side by side: Vite serves this client
  * at once while the backend defers its restart until turns finish. On
  * 2026-09-24 a required field made every `init` from the older backend fail
- * validation and the list went empty (fixed in e54fe26). v3 makes the skew a
- * typed state: an old `init` is recognised by type, the rows the client holds
- * stay, and the socket reconnects until a v3 `hello` arrives. (A v2 client
- * facing a v3 backend drops `hello` as an unknown type and keeps its list.)
+ * validation and the list went empty (fixed in e54fe26). An old `init` is
+ * recognised as skew: the rows the client holds stay, and the socket
+ * reconnects until a current `hello` arrives. A v3
+ * backend is rejected at the v4 socket upgrade, then reconnects after reload.
  */
 
 const V2_INIT = {
@@ -46,7 +46,7 @@ test('a v2 init is a version skew that leaves the rows the client holds', () => 
   assert.deepEqual(jotaiStore.get(connectionAtom).server, { tag: 'skew', serverVersion: 2 });
 });
 
-test('a v3 hello parses, replaces the rows and clears the skew state', () => {
+test('a current hello parses, replaces the rows and clears the skew state', () => {
   // `hello` resets per-device state that lives in localStorage.
   const stored = new Map<string, string>();
   Object.defineProperty(globalThis, 'localStorage', {
@@ -59,7 +59,7 @@ test('a v3 hello parses, replaces the rows and clears the skew state', () => {
   });
   const frame = classifyServerFrame({
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/',
     loading: false,
     archivedBuddyIds: [],
@@ -104,6 +104,7 @@ test('a newer server closing with the mismatch code shows the reload banner', ()
   assert.deepEqual(older, { t: 'skew', serverVersion: PROTOCOL_VERSION - 1 });
   noteProtocolMismatch(PROTOCOL_VERSION - 1);
   assert.equal(banner(), '');
+  assert.deepEqual([...jotaiStore.get(rowsAtom).keys()], ['held']);
 
   const newer = classifySocketClose(
     PROTOCOL_MISMATCH_CLOSE_CODE,

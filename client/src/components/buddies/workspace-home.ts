@@ -33,7 +33,7 @@ export const RECENT_TILES = 4;
 /** Buddy faces shown per workspace, most recently active first. */
 export const RECENT_FACES = 3;
 
-const NO_UNREAD: OwnerUnreadTotal = { requests: 0, unreadChannels: 0 };
+const NO_UNREAD: OwnerUnreadTotal = { requests: 0, unreadChannels: 0, unreadThreads: 0 };
 
 /**
  * Most recently active workspace first, then name. The first RECENT_TILES

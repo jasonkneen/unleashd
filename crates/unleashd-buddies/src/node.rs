@@ -102,6 +102,16 @@ impl BuddiesCore {
     }
 
     #[napi]
+    pub async fn followed_threads(&self, actor: Actor, workspace_id: String, limit: i64) -> napi::Result<FollowedThreads> {
+        call(&self.store, move |s| s.followed_threads(&actor, &workspace_id, limit)).await
+    }
+
+    #[napi]
+    pub async fn mark_thread_read(&self, actor: Actor, root_id: String, post_id: String) -> napi::Result<()> {
+        call(&self.store, move |s| s.mark_thread_read(&actor, &root_id, &post_id)).await
+    }
+
+    #[napi]
     pub async fn archived_channels(&self, actor: Actor, workspace_id: String) -> napi::Result<Vec<Channel>> {
         call(&self.store, move |s| s.archived_channels(&actor, &workspace_id)).await
     }

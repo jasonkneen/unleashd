@@ -10,7 +10,7 @@ import { ConfigDropdown } from '../ConfigDropdown';
 import { PathAutocomplete } from '../PathAutocomplete';
 import { BuddySigil, WorkspaceEmblem } from './BuddySigil';
 import { buddyApi, errorText } from './api';
-import { CHANNEL_BACKSTOP_MS, ownerUnreadTotal, useOwnerInboxes } from './channel-data';
+import { CHANNEL_BACKSTOP_MS, anyUnread, ownerUnreadTotal, useOwnerInboxes } from './channel-data';
 import type { Workspace } from './types';
 import {
   type WorkspaceActivity,
@@ -127,9 +127,9 @@ function WorkspaceLink({ row, variant }: { row: WorkspaceHomeRow; variant: 'tile
   );
 }
 
-/** Requests waiting on you are a count; channels with new posts are a dot. */
+/** Requests waiting on you are a count; new channel posts or thread replies are a dot. */
 function Notifications({ row }: { row: WorkspaceHomeRow }) {
-  const { requests, unreadChannels } = row.total;
+  const { requests, unreadChannels, unreadThreads } = row.total;
   if (requests > 0) {
     const label = `${requests} ${requests === 1 ? 'request' : 'requests'} waiting on you`;
     return (
@@ -138,8 +138,15 @@ function Notifications({ row }: { row: WorkspaceHomeRow }) {
       </span>
     );
   }
-  if (unreadChannels > 0) {
-    const label = `New posts in ${unreadChannels} ${unreadChannels === 1 ? 'channel' : 'channels'}`;
+  if (anyUnread(row.total)) {
+    const label = [
+      unreadChannels > 0 &&
+        `new posts in ${unreadChannels} ${unreadChannels === 1 ? 'channel' : 'channels'}`,
+      unreadThreads > 0 &&
+        `new replies in ${unreadThreads} ${unreadThreads === 1 ? 'thread' : 'threads'}`,
+    ]
+      .filter(Boolean)
+      .join(', ');
     return <span className="workspace-home-dot" title={label} aria-label={label} />;
   }
   return null;

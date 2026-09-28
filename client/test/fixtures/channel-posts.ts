@@ -9,6 +9,7 @@ export function postFixture(overrides: Partial<Post> & Pick<Post, 'id'>): Post {
     body: `Body of ${overrides.id}.`,
     evidence: [],
     request: { state: 'none' },
+    broadcast: false,
     createdAt,
     // Stands in for the server's time-ordered id: fixtures order by their time, then id.
     ord: `${createdAt}#${overrides.id}`,
@@ -27,5 +28,5 @@ export function publicChannel(id: string, name: string, workspaceId = 'ws-1'): C
 }
 
 export function inboxFixture(channels: ChannelUnread[], requests: Post[] = []): Inbox {
-  return { requests, waitingOn: [], channels };
+  return { requests, waitingOn: [], channels, unreadThreads: 0 };
 }

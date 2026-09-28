@@ -1,15 +1,14 @@
 import { useAtomValue } from 'jotai';
+import { useCallback, useRef } from 'react';
 import {
   buddyBackgroundWorkersAtomFamily,
   buddyWorkerReadRowsFamily,
   workerDetailsResource,
 } from '../atoms/buddy-background';
-import { isRowRunning } from '../utils/conversation-row';
-import type { TurnAttemptSnapshotLike } from '../utils/turn-diagnostics';
-import { useCallback, useRef } from 'react';
 import { createConversation } from '../atoms/commands';
 import { findWorkspace } from '../components/buddies/roster';
 import type { BuddyDetail, BuddyOverview } from '../components/buddies/types';
+import { isRowRunning } from '../utils/conversation-row';
 import { type UsePolledFetchResult, usePolledFetch } from './usePolledFetch';
 
 // =============================================================================
@@ -97,12 +96,4 @@ export function useBuddyWorkers(buddyId: string, workspaceId: string | null = nu
   const read = useBuddyWorkerRead(buddyId, workspaceId, true);
   const workers = useAtomValue(buddyBackgroundWorkersAtomFamily({ buddyId, workspaceId }));
   return { workers, read };
-}
-
-export function useBuddyWorkerDiagnostics(conversationId: string, running: boolean) {
-  return usePolledFetch<{ latestAttempt: TurnAttemptSnapshotLike | null }>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/diagnostics?limit=1`,
-    5_000,
-    running
-  );
 }

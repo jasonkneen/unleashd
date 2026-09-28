@@ -68,7 +68,7 @@ function heavyConversation(index: number): ConversationRuntime {
   });
   conversation.messages = Array.from({ length: 200 }, (_, n) => ({
     role: n % 2 === 0 ? ('user' as const) : ('assistant' as const),
-    content: `${n === 0 ? `Question ${index}: ` : ''}${LONG_BODY}`,
+    body: { t: 'text', text: `${n === 0 ? `Question ${index}: ` : ''}${LONG_BODY}` },
     timestamp: new Date(Date.UTC(2026, 8, 25, 0, index, n)),
   }));
   return conversation;

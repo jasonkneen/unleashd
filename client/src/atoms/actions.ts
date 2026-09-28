@@ -208,11 +208,18 @@ export function loadConversationDetails(conversationId: string): Promise<void> {
         body = await readCurrentHistory(conversationId);
       }
       if (requestEpoch !== connectionEpoch || !readConversation(conversationId)) return;
+      // Fix guard: a terminal attempt patch can arrive after detail GET but before
+      // history resolves; retaining it in `loading` prevents stale recovery/status.
+      const loading = readTranscript(conversationId);
+      const currentDetail =
+        loading.tag === 'loading' && loading.latestAttempt !== undefined
+          ? { ...detail, latestAttempt: loading.latestAttempt }
+          : detail;
       putTranscript(conversationId, {
         tag: 'loaded',
         epoch: body.epoch,
         messages: body.messages,
-        detail,
+        detail: currentDetail,
       });
     } catch (cause) {
       if (requestEpoch !== connectionEpoch) return;
@@ -443,6 +450,11 @@ function handlePatch(data: Extract<ServerMessage, { type: 'patch' }>): void {
   if (loaded) {
     const detail = applyDetailPatch(loaded.detail, data.patch);
     if (detail !== loaded.detail) putTranscript(data.id, { ...loaded, detail });
+  } else if (data.patch.t === 'attempt') {
+    const transcript = readTranscript(data.id);
+    if (transcript.tag === 'loading') {
+      putTranscript(data.id, { ...transcript, latestAttempt: data.patch.latestAttempt });
+    }
   }
   patchEffects(data.id, data.patch);
 }
@@ -468,6 +480,7 @@ function patchEffects(id: string, patch: RowPatch): void {
     case 'session':
     case 'subagent':
     case 'turn':
+    case 'attempt':
       return;
   }
 }
@@ -517,19 +530,44 @@ function creationAcknowledged(commandId: string, rows: readonly ConversationRow[
 }
 
 function handleMessageEvent(data: Extract<ServerMessage, { type: 'message' }>): void {
+  if (data.role === 'assistant' && data.body.t === 'parts') {
+    // A typed part follows any pending text chunks in the same provider stream.
+    // Guard: a tool frame must not hide the prose until message_complete.
+    flushChunkBuffer();
+    commitStreamSegment(data.conversationId);
+  }
   // Bodies are kept only for loaded transcripts; the row's activity patch
   // (sent with every message) carries the count for everyone else.
   const loaded = readLoaded(data.conversationId);
   if (!loaded) return;
   // A duplicate assistant record; the live one is already growing.
-  if (data.role === 'assistant' && loaded.messages.at(-1)?.role === 'assistant') return;
+  if (
+    data.role === 'assistant' &&
+    data.body.t === 'text' &&
+    data.body.text === '' &&
+    loaded.messages.at(-1)?.body.t === 'text' &&
+    loaded.messages.at(-1)?.role === 'assistant'
+  )
+    return;
   putTranscript(data.conversationId, {
     ...loaded,
+    messages: [...loaded.messages, { role: data.role, body: data.body, timestamp: new Date() }],
+  });
+}
+
+function commitStreamSegment(id: string): void {
+  const loaded = readLoaded(id);
+  const last = loaded?.messages.at(-1);
+  const streamed = jotaiStore.get(streamStore.byKey(id));
+  if (!loaded || last?.body.t !== 'text' || !streamed) return;
+  putTranscript(id, {
+    ...loaded,
     messages: [
-      ...loaded.messages,
-      { role: data.role, content: data.content, timestamp: new Date() },
+      ...loaded.messages.slice(0, -1),
+      { ...last, body: { t: 'text', text: last.body.text + streamed } },
     ],
   });
+  jotaiStore.set(streamStore.patch, { set: [], remove: [id] });
 }
 
 function handleChunk(data: Extract<ServerMessage, { type: 'chunk' }>): void {
@@ -568,7 +606,7 @@ function commitStreamedReply(id: string, reason: NonNullable<Message['completion
       ...loaded.messages.slice(0, -1),
       {
         ...last,
-        content: last.content + streamed,
+        body: last.body.t === 'text' ? { t: 'text', text: last.body.text + streamed } : last.body,
         completedAt: last.completedAt ?? new Date(),
         completionReason: last.completionReason ?? reason,
       },

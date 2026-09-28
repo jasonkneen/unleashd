@@ -13,6 +13,7 @@ export type OutboxEntry =
       channelId: string;
       rootId: string | null;
       body: string;
+      broadcast: boolean;
       createdAt: string;
     }
   | { kind: 'sent'; key: string; post: Post };

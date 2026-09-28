@@ -1,14 +1,12 @@
 import type { McpServerSpec } from '@nbardy/agent-cli';
 import type {
   BuddyContext,
+  ContentPart,
   Message,
   Provider as ProviderName,
   ResolvedExecutionConfig,
 } from '@unleashd/shared';
-import {
-  formatBuddyTeamConfigurationToolResult,
-  formatBuddyWorkerToolResult,
-} from '@unleashd/shared';
+import { parseBuddyWorkerToolResult } from '@unleashd/shared';
 import type { TurnTerminalCause } from '../observability';
 import type { TurnInput } from './input';
 
@@ -73,7 +71,7 @@ export interface TurnPolicy {
   ): { mcpServers?: Record<string, McpServerSpec>; extraArgs?: readonly string[] };
   spawned(review: { attemptId: string; messageStart: number }): void;
   spawnFailed(): void;
-  formatToolResult(output: unknown): string | null;
+  toolResultParts(output: unknown): ContentPart[];
   streamCompleted(): void;
   /** A successful, un-stopped turn drained; `messages` is the whole history. */
   reviewCompleted(messages: readonly Message[]): void;
@@ -112,9 +110,9 @@ export function chatFirstTurnPrompt(input: {
   return input.content;
 }
 
-/** Tool results every kind renders into the transcript. */
-export function formatCommonToolResult(output: unknown): string | null {
-  return formatBuddyWorkerToolResult(output) ?? formatBuddyTeamConfigurationToolResult(output);
+/** Successful tool receipts every kind renders into the transcript. */
+export function commonToolResultParts(output: unknown): ContentPart[] {
+  return parseBuddyWorkerToolResult(output).map((thread) => ({ t: 'buddy_worker_thread', thread }));
 }
 
 /** A general chat: no admission, briefing, grants or memory. */
@@ -147,8 +145,8 @@ export class ChatTurnPolicy implements TurnPolicy {
   }
   spawned(): void {}
   spawnFailed(): void {}
-  formatToolResult(output: unknown): string | null {
-    return formatCommonToolResult(output);
+  toolResultParts(output: unknown): ContentPart[] {
+    return commonToolResultParts(output);
   }
   streamCompleted(): void {}
   reviewCompleted(): void {}

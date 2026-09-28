@@ -1,0 +1,8 @@
+# Record-contract slice design (2026-09-27)
+
+- Workflow: a created or discovered conversation crosses shared Zod input → napi generated types → Rust serde/SQLite → napi record → server config adapter. The adapter currently casts the returned record through `unknown`, hiding drift.
+- Canonical active value: Rust `ConversationRecord` owns durable facts and napi generates its TypeScript shape, now used directly by the app. Shared Zod schemas remain for active input and wire values; the old full-record schema had no runtime parse call and is deleted. Historical `legacyWorkItemId`, `allowedBuddyOperations`, knowledge scope, and branch launches remain stored unchanged even if no active writer uses them.
+- Boundary: Zod validates incoming application values; Rust validates SQLite writes, maintains session index and CAS, and returns typed napi data. Missing optional fields stay absent; nullable Buddy context keys keep missing distinct from null.
+- Dispatch: existing `ConversationKind` discriminants and operation outcomes are exhaustive. Record-store methods pass typed values to the one Rust writer without shape guesses.
+- Deletion target: duplicate TS full-record schema/type and outcome type, unsafe `as unknown` and other input casts, orphan `rekey` and `appendBranchLaunch` operation/export/outcome code, and obsolete comments. No new schema generator or data rewrite.
+- Invariants: preserve revisions, tombstones, session bindings and usage, initial-message leases, simultaneous opens, and all historical JSON bytes; prove with existing native record boundary and server config tests plus typecheck. If generated types cannot satisfy app shape structurally, retain a narrow conversion with the exact mismatch documented.

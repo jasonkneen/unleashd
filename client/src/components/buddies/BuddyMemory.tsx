@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { type UsePolledFetchResult, usePolledFetch } from '../../hooks/usePolledFetch';
 import { formatTimeAgo } from '../../utils/time';
@@ -132,9 +132,10 @@ function DocHistory({ docId }: { docId: string }) {
 
 /** Markdown in the reading measure. */
 function Prose({ body }: { body: string }) {
+  const message = useMemo(() => ({ t: 'text' as const, text: body }), [body]);
   return (
     <div className="buddy-memory__prose">
-      <ChannelMarkdown body={body} buddyNames={NO_NAMES} tasks={NO_TASKS} />
+      <ChannelMarkdown body={message} buddyNames={NO_NAMES} tasks={NO_TASKS} />
     </div>
   );
 }

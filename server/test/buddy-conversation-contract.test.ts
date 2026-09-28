@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { WS_PATH, buddyKind } from '@unleashd/shared';
+import { PROTOCOL_VERSION, WS_PATH, buddyKind } from '@unleashd/shared';
 import { createDefaultConversationConfig } from '@unleashd/shared';
 import type { BuddyContext } from '@unleashd/shared';
 import { type ConversationOptions, createConversationRuntime } from '../src/conversations/runtime';
@@ -161,7 +161,7 @@ test('empty Buddy WebSocket creation resolves and registers without sending a pr
   webSocketServer.emit('connection', socket, { url: WS_PATH });
   assert.deepEqual(JSON.parse(socket.sent[0]), {
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/tmp',
     loading: true,
     archivedBuddyIds: [],

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
-import type { Message } from '@unleashd/shared';
+import { type Message, legacyBody } from '@unleashd/shared';
 import express from 'express';
 import { type ContextWindow, resolveContextWindow } from '../src/conversations/context-window';
 import type { MessageSource } from '../src/conversations/messages';
@@ -29,6 +29,10 @@ function sourceOf(subjects: RoutedConversation[]): MessageSource {
 }
 
 const WINDOW_200K: ContextWindow = { source: 'model', tokens: 200_000, modelId: 'haiku' };
+
+function textMessage(role: Message['role'], text: string): Message {
+  return { role, body: { t: 'text', text }, timestamp: new Date() };
+}
 
 function conversation(overrides: Record<string, unknown> = {}): RoutedConversation {
   return {
@@ -109,10 +113,7 @@ test('an unrecognised model is reported as unknown, never silently defaulted', (
 
 test('buildContextBreakdown sums history and pairs provider cumulative delta', () => {
   const convo = conversation({
-    messages: [
-      { role: 'user', content: 'hello', timestamp: new Date() },
-      { role: 'assistant', content: 'world!', timestamp: new Date() },
-    ],
+    messages: [textMessage('user', 'hello'), textMessage('assistant', 'world!')],
   });
   const usage = {
     sessionId: 'sess-1',
@@ -168,9 +169,23 @@ test('context-breakdown route 404s identically to the conversation route', async
 });
 
 test('context-breakdown route returns the meter payload for a known conversation', async () => {
+  const tool = { t: 'tool' as const, name: 'Read', input: { file_path: '/team.md' } };
+  const historical = legacyBody('Historical note\n📖 Read /old.md');
+  assert.equal(historical.t, 'parts', 'the stored legacy tool line is decoded at ingress');
+  if (historical.t !== 'parts') throw new Error('Expected historical tool parts');
+  const historicalTool = historical.parts.find((part) => part.t === 'tool');
+  assert.ok(historicalTool);
   const convo = conversation({
     kind: { t: 'builder' },
-    messages: [{ role: 'user', content: 'build a team', timestamp: new Date() }],
+    messages: [
+      textMessage('user', 'build a team'),
+      {
+        role: 'assistant',
+        body: { t: 'parts', parts: [{ t: 'text', text: 'Checking files.' }, tool] },
+        timestamp: new Date(),
+      },
+      { role: 'assistant', body: historical, timestamp: new Date() },
+    ],
   });
   const app = express();
   registerConversationRoutes(
@@ -193,6 +208,15 @@ test('context-breakdown route returns the meter payload for a known conversation
     const body = (await response.json()) as ReturnType<typeof buildContextBreakdown>;
     assert.equal(body.conversationId, 'convo-1');
     assert.ok(body.sections.briefing.chars > 0);
+    assert.equal(
+      body.sections.history.chars,
+      'build a team'.length +
+        'Checking files.'.length +
+        JSON.stringify(tool).length +
+        'Historical note\n'.length +
+        JSON.stringify(historicalTool).length,
+      'mixed and historical prose and tool payloads contribute to the estimate once'
+    );
     // totalChars must account for EVERY section. This previously asserted only
     // history + briefing, which silently ignored the 460 chars of MCP spec a
     // buddy_builder thread carries.
@@ -220,7 +244,7 @@ test('context-breakdown route returns the meter payload for a known conversation
 
 test('measured context becomes the headline and the unmodelled harness overhead becomes a band', () => {
   const convo = conversation({
-    messages: [{ role: 'user', content: 'x'.repeat(4_000), timestamp: new Date() }],
+    messages: [textMessage('user', 'x'.repeat(4_000))],
     // Our five sections model ~1,000 tokens of that message. The provider
     // counted 40,500 because its own system prompt and tool schemas -- which we
     // never see -- ride along on every request.
@@ -252,7 +276,7 @@ test('a provider-side compaction drops the meter instead of pushing it past 100%
   // Modelled on the real fixture: conversation 411783af compacted three times,
   // ~966k -> ~52k, while our append-only store kept every message.
   const convo = conversation({
-    messages: [{ role: 'user', content: 'y'.repeat(3_864_000), timestamp: new Date() }],
+    messages: [textMessage('user', 'y'.repeat(3_864_000))],
     providerUsage: {
       contextTokens: 52_704,
       outputTokens: 80,
@@ -289,7 +313,7 @@ test('a provider-side compaction drops the meter instead of pushing it past 100%
 /** ~40k chars of history => ~10k estimated tokens, enough to scale against. */
 function bigConversation() {
   return conversation({
-    messages: [{ role: 'user', content: 'x'.repeat(40_000) }],
+    messages: [textMessage('user', 'x'.repeat(40_000))],
   });
 }
 
@@ -315,7 +339,7 @@ test('session-file context is used when the live usage event has not run', () =>
 
 test('the live usage event outranks the session file when both are present', () => {
   const convo = conversation({
-    messages: [{ role: 'user', content: 'x'.repeat(40_000) }],
+    messages: [textMessage('user', 'x'.repeat(40_000))],
     providerUsage: { contextTokens: 99_000 },
   });
   const result = buildContextBreakdown(convo, historyOf(convo), null, null, null, WINDOW_200K, {

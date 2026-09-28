@@ -322,6 +322,7 @@ export function createChannels(ports: ChannelsPorts) {
         evidence: [],
         replyToId: input.trigger.id,
         fromConversationId: conversationId ?? undefined,
+        broadcast: false,
         key: `thread-reply:${input.trigger.id}:${input.buddyId}${input.attempt}`,
         purpose: 'reply_failed',
         body: `Couldn’t reply: ${reason}`,

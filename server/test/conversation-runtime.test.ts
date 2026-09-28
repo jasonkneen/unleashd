@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { type UnifiedAgentEvent, createParser } from '@nbardy/agent-cli';
 import { buddyKind } from '@unleashd/shared';
-import type { Provider } from '@unleashd/shared';
+import type { Message, Provider } from '@unleashd/shared';
 import { type ConversationConfig, createDefaultConversationConfig } from '@unleashd/shared';
 import type { CompletedBuddyTurn } from '../src/buddies/memory-review';
 import type { BuddyPolicyPort } from '../src/buddies/policy-port';
@@ -24,6 +24,15 @@ const BACKGROUND_AGENT_FIXTURE = join(
   __dirname,
   '../../vendor/agent-cli-tool/test/fixtures/claude-2.1.283-background-agent.jsonl'
 );
+
+function messageText(message: Pick<Message, 'body'> | undefined): string {
+  if (!message) return '';
+  return message.body.t === 'text'
+    ? message.body.text
+    : message.body.parts
+        .map((part) => (part.t === 'text' ? part.text : part.t === 'tool' ? part.name : ''))
+        .join('\n');
+}
 
 function runtimeFixture(
   options: {
@@ -300,7 +309,9 @@ test('provider completion waits for the normalized event stream and session pers
     'automation ownership must not release on turn.complete before process/event drain'
   );
   assert.equal(
-    fixture.conversation.messages.some((message) => message.content.includes('durable output')),
+    fixture.conversation.messages.some((message) =>
+      messageText(message).includes('durable output')
+    ),
     false,
     'completion must not release ownership while session persistence blocks event consumption'
   );
@@ -310,13 +321,15 @@ test('provider completion waits for the normalized event stream and session pers
   persistence.resolve();
   await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
   assert.equal(
-    fixture.conversation.messages.some((message) => message.content.includes('durable output')),
+    fixture.conversation.messages.some((message) =>
+      messageText(message).includes('durable output')
+    ),
     true
   );
   assert.equal(automationOutput, 'durable output');
   assert.deepEqual(revoked, ['conversation-id']);
   assert.equal(reviews.length, 1);
-  assert.ok(reviews[0].messages.some((message) => message.content === 'durable output'));
+  assert.ok(reviews[0].messages.some((message) => messageText(message) === 'durable output'));
   assert.ok(reviews[0].attemptId);
 });
 
@@ -348,6 +361,40 @@ test('an early turn.complete does not drop the prompt answer that follows it', a
   fixture.conversation.sendMessage('The owner prompt');
   await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
   assert.match(output, /The real answer/);
+});
+
+test('buddy completion preserves current-turn prose when a tool is last', async () => {
+  let turn = 0;
+  const fixture = runtimeFixture({
+    executeTurn: fakeExecuteTurn(() => {
+      turn += 1;
+      const current = turn;
+      async function* events() {
+        yield { type: 'turn.started' as const };
+        yield { type: 'text.delta' as const, text: current === 1 ? 'Old turn' : 'Current answer' };
+        yield { type: 'tool.use' as const, name: 'Read', input: { file_path: '/a' } };
+        yield { type: 'turn.complete' as const, reason: 'success' as const };
+      }
+      return {
+        child: { exitCode: 0 },
+        events: events(),
+        completed: Promise.resolve({
+          exitCode: 0,
+          signal: null,
+          sessionId: 'provider-session',
+          reason: 'success' as const,
+        }),
+        stop: () => undefined,
+      };
+    }),
+  });
+  const outputs: string[] = [];
+  fixture.conversation.on('buddy-turn-complete', (text: string) => outputs.push(text));
+  fixture.conversation.sendMessage('First');
+  await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
+  fixture.conversation.sendMessage('Second');
+  await eventually(() => assert.equal(fixture.conversation.hasActiveProcess(), false));
+  assert.deepEqual(outputs, ['Old turn', 'Current answer']);
 });
 
 // The terminal failure names the provider's own message, unwrapped from its JSON
@@ -617,7 +664,7 @@ test('unsupported Buddy provider leaves a queued message retryable', () => {
   assert.equal(conversation.hasActiveProcess(), false);
   assert.equal(conversation.queue[0]?.status, 'pending');
   assert.match(
-    conversation.messages.at(-1)?.content ?? '',
+    messageText(conversation.messages.at(-1)),
     /cannot start Buddy conversations.*required Buddy state tools/
   );
 });
@@ -761,7 +808,7 @@ test('historical automation transcripts refuse every user turn-admission path', 
   assert.equal(providerStarts, 0);
   assert.equal(conversation.hasActiveProcess(), false);
   assert.deepEqual(conversation.queue, []);
-  assert.match(conversation.messages.at(-1)?.content ?? '', /automation transcript is read-only/);
+  assert.match(messageText(conversation.messages.at(-1)), /automation transcript is read-only/);
 });
 
 test('first message in a user fork inherits the native source session without copying history', () => {
@@ -802,7 +849,7 @@ test('first message in a user fork inherits the native source session without co
     forkSourceSessionId: 'source-native-session',
   });
   assert.deepEqual(
-    child.messages.map((message) => message.content),
+    child.messages.map((message) => messageText(message)),
     ['Continue the original objective from this fork.']
   );
 });
@@ -897,7 +944,7 @@ test('same-provider fork on a fork-incapable harness falls back to string handof
   assert.equal(spawned?.forkSourceSessionId, undefined);
   assert.ok(spawned?.content.includes('Continue the original objective from this fork.'));
   assert.deepEqual(
-    child.messages.filter((message) => message.role === 'system').map((m) => m.content),
+    child.messages.filter((message) => message.role === 'system').map((m) => messageText(m)),
     []
   );
 });
@@ -1133,6 +1180,7 @@ test('a recorded background agent stays running until its task finishes', async 
 test('bridge watchdog terminates a turn when neither unified events nor heartbeats arrive', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
   const stub = openTurnStub();
+  t.after(() => stub.child.emit('close'));
   const { broadcasts, conversation } = runtimeFixture({
     executeTurn: fakeExecuteTurn(() => stub.turn),
   });
@@ -1148,12 +1196,14 @@ test('bridge watchdog terminates a turn when neither unified events nor heartbea
       (message) =>
         typeof message === 'object' &&
         message !== null &&
-        'content' in message &&
-        typeof message.content === 'string' &&
-        message.content.includes('Turn event bridge stalled')
+        'body' in message &&
+        typeof message.body === 'object' &&
+        message.body !== null &&
+        'text' in message.body &&
+        typeof message.body.text === 'string' &&
+        message.body.text.includes('Turn event bridge stalled')
     )
   );
-  stub.child.emit('close');
 });
 
 // First-turn prompt markers are kind-routed: only buddy_builder threads may
@@ -1511,30 +1561,34 @@ async function runScriptedTurn(provider: Provider, events: ScriptedEvent[]) {
   return { conversation, broadcasts };
 }
 
+/** Real provider records enter through the same parser as executeTurn. */
+function codexCollab(
+  tool: string,
+  phase: 'started' | 'completed',
+  extra: Record<string, unknown>
+): UnifiedAgentEvent[] {
+  return createParser('codex')({
+    type: `item.${phase}`,
+    item: { type: 'collab_tool_call', tool, sender_thread_id: 'parent', ...extra },
+  });
+}
+
 test('codex collab threads become native sub-agents that parent completion leaves alone', async () => {
-  // Guards T08 S3: codex collab handling moved out of the turn fold into the
-  // harness table (turns/subagents.ts). Shapes mirror agent-cli's codex parser
-  // (collabToolInput). A regression either drops the native rows, infers a
-  // still-pending child as "Done" when the parent turn ends, or double-counts.
-  const collab = (tool: string, phase: 'started' | 'completed', extra: Record<string, unknown>) =>
-    ({
-      type: 'tool.use',
-      name: tool,
-      input: { _phase: phase, sender_thread_id: 'parent', ...extra },
-    }) as const;
+  // Exercise the parser, not a second hand-written tool.use contract: the runtime
+  // must consume canonical child states and publish exactly one patch per observation.
   const { conversation, broadcasts } = await runScriptedTurn('codex', [
     { type: 'turn.started' },
-    collab('spawn_agent', 'started', { prompt: 'Write file_1.md' }),
-    collab('spawn_agent', 'completed', {
+    ...codexCollab('spawn_agent', 'started', { prompt: 'Write file_1.md' }),
+    ...codexCollab('spawn_agent', 'completed', {
       prompt: 'Write file_1.md',
       receiver_thread_ids: ['child-1'],
       agents_states: { 'child-1': { status: 'pending_init', message: null } },
     }),
-    collab('wait', 'completed', {
+    ...codexCollab('wait', 'completed', {
       receiver_thread_ids: ['child-1'],
       agents_states: { 'child-1': { status: 'completed', message: 'test-confirmed' } },
     }),
-    collab('spawn_agent', 'completed', {
+    ...codexCollab('spawn_agent', 'completed', {
       prompt: 'Second child',
       receiver_thread_ids: ['child-2'],
       agents_states: { 'child-2': { status: 'pending_init', message: null } },
@@ -1554,6 +1608,12 @@ test('codex collab threads become native sub-agents that parent completion leave
   assert.equal(byId.get('child-1')?.toolUses, 1);
   assert.equal(byId.get('child-1')?.currentAction, 'Done');
   assert.equal(byId.get('child-2')?.status, 'pending', 'parent completion must not settle it');
+  assert.equal(byId.get('child-2')?.completedAt, undefined);
+  assert.ok(byId.get('child-1')?.completedAt instanceof Date);
+  const patches = broadcasts.filter(
+    (message) => (message as { patch?: { t: string } }).patch?.t === 'subagent'
+  );
+  assert.equal(patches.length, 3, 'one patch per normalized child observation');
   const completed = new Set(
     broadcasts.flatMap((message) => {
       const patch = message as {
@@ -1568,8 +1628,91 @@ test('codex collab threads become native sub-agents that parent completion leave
     })
   );
   assert.deepEqual([...completed], ['child-1']);
-  const assistant = conversation.messages.find((message) => message.role === 'assistant');
-  assert.match(assistant?.content ?? '', /SUBAGENTS_OK/);
+  const assistant = conversation.messages.filter((message) => message.role === 'assistant');
+  const visible = assistant.map(messageText).join('\n');
+  assert.match(visible, /SUBAGENTS_OK/);
+  assert.equal((visible.match(/spawn_agent/g) ?? []).length, 1);
+  assert.doesNotMatch(visible, /\bwait\b/);
+});
+
+test('a childless Codex collab completion keeps one visible attempt and no child', async () => {
+  const started = codexCollab('spawn_agent', 'started', {
+    id: 'failed-spawn',
+    prompt: 'Inspect the files',
+  });
+  const completed = codexCollab('spawn_agent', 'completed', {
+    id: 'failed-spawn',
+    prompt: 'Inspect the files',
+    status: 'failed',
+  });
+  assert.equal(started[0]?.type, 'tool.use');
+  assert.equal(completed[0]?.type, 'tool.use', 'the no-tools gate still observes completion');
+  if (started[0]?.type === 'tool.use' && completed[0]?.type === 'tool.use') {
+    assert.equal(started[0].phase, 'started');
+    assert.equal(completed[0].phase, 'completed');
+  }
+  const { conversation } = await runScriptedTurn('codex', [
+    { type: 'turn.started' },
+    ...started,
+    ...completed,
+    { type: 'turn.complete', reason: 'success' },
+  ]);
+  const assistant = conversation.messages.filter((message) => message.role === 'assistant');
+  assert.equal(
+    assistant
+      .flatMap((message) => (message.body.t === 'parts' ? message.body.parts : []))
+      .filter((part) => part.t === 'tool' && part.name === 'spawn_agent').length,
+    1
+  );
+  assert.equal(conversation.subAgents.length, 0);
+});
+
+test('native sub-agent operations are applied once and follow-ups can reopen a child', async () => {
+  const observation = (id: string, tool: string, status: string) =>
+    codexCollab(tool, 'completed', {
+      id,
+      prompt: 'Child work',
+      receiver_thread_ids: ['child', 'other'],
+      agents_states: { child: { status }, other: { status: 'failed' } },
+    });
+  const spawn = observation('spawn', 'spawn_agent', 'in_progress');
+  const done = observation('done', 'wait', 'completed');
+  const reopen = observation('follow-up', 'send_input', 'in_progress');
+  const { conversation, broadcasts } = await runScriptedTurn('codex', [
+    ...spawn,
+    // A parent's command is not a child interaction, even when a child is running.
+    ...createParser('codex')({
+      type: 'item.started',
+      item: { type: 'command_execution', command: 'pwd' },
+    }),
+    ...done,
+    ...spawn,
+    ...done,
+    ...reopen,
+    ...reopen,
+    { type: 'turn.complete', reason: 'success' },
+  ]);
+  const [agent] = conversation.subAgents;
+  assert.equal(conversation.subAgents.length, 2);
+  assert.equal(agent.description, '[Codex Agent] Child work');
+  assert.equal(
+    agent.status,
+    'running',
+    'parent completion leaves the reopened native child running'
+  );
+  assert.equal(agent.currentAction, 'Sending follow-up');
+  assert.equal(agent.completedAt, undefined, 'a running child has no terminal timestamp');
+  assert.equal(agent.toolUses, 2, 'one wait and one follow-up, no replay or parent tools');
+  const other = conversation.subAgents[1];
+  assert.equal(other.toolUses, 2, 'the same operation observes each child independently');
+  assert.equal(other.status, 'error');
+  assert.equal(other.currentAction, 'Error');
+  assert.ok(other.completedAt instanceof Date);
+  assert.equal(
+    broadcasts.filter((message) => (message as { patch?: { t: string } }).patch?.t === 'subagent')
+      .length,
+    6
+  );
 });
 
 test('a Task tool starts a generic sub-agent that parent completion settles', async () => {

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   type ClientMessage,
   type ConversationConfig,
+  PROTOCOL_VERSION,
   type ServerMessage,
   classifyServerFrame,
   encodeRows,
@@ -50,7 +51,7 @@ test('a hello resends a draining-rejected create with its ids and keeps a perman
 
   const hello = classifyServerFrame({
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/',
     loading: false,
     archivedBuddyIds: [],

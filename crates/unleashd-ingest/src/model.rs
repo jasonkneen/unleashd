@@ -176,6 +176,8 @@ pub struct Message {
     pub completed_at: Option<f64>,
     pub content: String,
     pub tool_call: Option<ToolCall>,
+    /// Ordered provider blocks. JSON is the napi transport for raw provider arguments/results.
+    pub parts_json: Option<String>,
 }
 
 /// The list row for one session: everything the sidebar needs, nothing per message.

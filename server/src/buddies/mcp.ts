@@ -188,6 +188,7 @@ async function writeTask(
           evidence: write.evidence,
           taskId: write.taskId,
           fromConversationId: grant.conversationId,
+          broadcast: false,
           key: input.key,
         }
       );
@@ -237,7 +238,8 @@ const BUDDY_TOOLS = {
       const post = await deps.core.post(
         grant.author,
         { kind: 'id', id: channel.id },
-        { ...input, body, fromConversationId: grant.conversationId, runConfig }
+        // Buddies never send a reply to the channel: that is the owner's call (THREADS_VIEW §3).
+        { ...input, body, fromConversationId: grant.conversationId, runConfig, broadcast: false }
       );
       deps.events.emit({ kind: 'posted', post, channel });
       return post;

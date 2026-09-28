@@ -1,59 +1,51 @@
 import { useAtomValue } from 'jotai';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { setConversationDone } from '../../atoms/actions';
 import { listField, rowFamily } from '../../atoms/conversations';
 import { AppSettingsDropdown } from '../../components/buddies/AppSettingsDropdown';
 import { BuddyBackgroundLink } from '../../components/buddies/BuddyBackgroundLink';
 import { BuddySigil } from '../../components/buddies/BuddySigil';
-import {
-  ArchivedChannels,
-  ChannelHeaderControls,
-  useArchivedChannels,
-} from '../../components/buddies/ChannelArchive';
-import { ChannelAuthor, type OpenDm } from '../../components/buddies/ChannelAuthor';
+import { ArchivedChannels, useArchivedChannels } from '../../components/buddies/ChannelArchive';
 import { ChannelDm } from '../../components/buddies/ChannelDm';
 import { ChannelHistory, ChannelLoader } from '../../components/buddies/ChannelLoader';
-import { ChannelMarkdown, TypingDots } from '../../components/buddies/ChannelMarkdown';
+import { TypingDots } from '../../components/buddies/ChannelMarkdown';
 import { ChannelWorkers } from '../../components/buddies/ChannelWorkers';
-import { ConversationEye } from '../../components/buddies/ConversationEye';
-import { CopyLinkButton } from '../../components/buddies/CopyLinkButton';
-import { ReplyRetry } from '../../components/buddies/HarnessPicker';
 import { TaskFilter } from '../../components/buddies/TaskFilter';
 import { WakeIcon, WakeIndicator } from '../../components/buddies/WakeIndicator';
 import { errorText } from '../../components/buddies/api';
 import { useBuddyDirectActions, useNewBuddy } from '../../components/buddies/buddy-direct-actions';
 import {
   type ChannelHeading,
-  type ChannelRow,
   type WorkspaceDirectory,
-  authorName,
   channelFeed,
   channelHeading,
   channelRequestCount,
   channelRows,
   channelUnreadAttr,
-  clockTime,
   createChannel,
   feedPhase,
   newestServedId,
-  postPurposeLabel,
-  postPurposeTag,
   railChannels,
   renderFeed,
   taskPostsFeed,
-  threadFeed,
   useChannelFeed,
   useChannelResponding,
   useFollowBottom,
-  useMarkChannelRead,
+  useMarkRead,
+  useThreadView,
   useWarmChannelPosts,
   useWithOutbox,
   useWorkspaceDirectory,
   useWorkspaceInbox,
 } from '../../components/buddies/channel-data';
-import { channelLinkPath, postLink } from '../../components/buddies/channel-link';
-import type { Buddy, Channel, ChannelUnread, Inbox, Post } from '../../components/buddies/types';
+import { channelLinkPath } from '../../components/buddies/channel-link';
+import {
+  type ChannelsView,
+  channelsHref,
+  channelsView,
+} from '../../components/buddies/channels-view';
+import type { Buddy, Channel, ChannelUnread, Inbox } from '../../components/buddies/types';
 import { useBuddyOverview } from '../../hooks/useBuddyData';
 import { mobileConversationRouteState } from '../../utils/conversation-route-state';
 import { rowBuddy } from '../../utils/conversation-row';
@@ -64,8 +56,9 @@ import {
   MobileSection,
 } from '../components/MobileUI';
 import { ChannelComposerMobile, MobileChannelComposeFrame } from './ChannelComposerMobile';
+import { type RowContext, Row, ScreenHeader, useChannelsDm } from './ChannelRowsMobile';
+import { ThreadsScreen } from './ThreadsMobile';
 import { buddyWorkspaceActivityAtom, overviewWorkspaces } from './ChannelsIndex';
-import { type MobileChannelScreen, channelsHref, mobileChannelScreen } from './channel-route';
 
 // Channels on a phone, following Slack's mobile app: one screen at a time.
 //   Home    — channels and Buddies, tab bar visible
@@ -80,7 +73,7 @@ import { type MobileChannelScreen, channelsHref, mobileChannelScreen } from './c
 export function ChannelsMobile() {
   const { workspaceId = '' } = useParams();
   const location = useLocation();
-  const screen = mobileChannelScreen(location.search);
+  const screen = channelsView(location.search);
   const directory = useWorkspaceDirectory(workspaceId);
   const inbox = useWorkspaceInbox(workspaceId);
   const archived = useArchivedChannels(workspaceId);
@@ -110,7 +103,7 @@ type ScreenContext = {
   refetchInbox(): Promise<void>;
 };
 
-function renderScreen(screen: MobileChannelScreen, context: ScreenContext) {
+function renderScreen(screen: ChannelsView, context: ScreenContext) {
   switch (screen.kind) {
     case 'workers':
       return (
@@ -122,6 +115,14 @@ function renderScreen(screen: MobileChannelScreen, context: ScreenContext) {
       );
     case 'home':
       return <ChannelsHome context={context} />;
+    case 'threads':
+      return (
+        <ThreadsScreen
+          key={context.workspaceId}
+          workspaceId={context.workspaceId}
+          directory={context.directory}
+        />
+      );
     case 'channel':
       return (
         <ChannelScreen key={screen.channelId} channelId={screen.channelId} context={context} />
@@ -154,18 +155,6 @@ function renderScreen(screen: MobileChannelScreen, context: ScreenContext) {
         />
       );
   }
-}
-
-// A Buddy DM stays inside Channels (493c1c7): the current query is kept, so Back (dropping `dm`)
-// returns to the channel, thread or Home it was opened from.
-function useChannelsDm(): OpenDm {
-  const navigate = useNavigate();
-  const location = useLocation();
-  return (conversationId) => {
-    const params = new URLSearchParams(location.search);
-    params.set('dm', conversationId);
-    navigate(`${location.pathname}?${params}`);
-  };
 }
 
 // A Buddy DM drawn as a thread. The Buddy Builder chat is the hire flow, so it opens the
@@ -292,6 +281,20 @@ function ChannelsHome({ context }: { context: ScreenContext }) {
           ))}
         </ul>
       )}
+      <ul className="mobile-channels-list">
+        <li>
+          <Link
+            className="mobile-channels-row ui-row"
+            data-unread={channelUnreadAttr(inbox?.unreadThreads)}
+            to={channelsHref(workspaceId, { kind: 'threads' })}
+          >
+            <span className="mobile-channels-row__hash" aria-hidden="true">
+              ≡
+            </span>
+            <span className="mobile-channels-row__name ui-truncate">Threads</span>
+          </Link>
+        </li>
+      </ul>
       <MobileSection title="Channels">
         <ul className="mobile-channels-list">
           {rail.channels.map(row)}
@@ -496,189 +499,6 @@ function NewChannelForm({
   );
 }
 
-// ── Transcript rows ─────────────────────────────────────────────────────────
-
-// Where a row sits: in the channel (tap Thread to open its thread, see who is
-// replying), inside the thread already, or in the Task filter (posts from any
-// channel, each linked into its own). D = Channel ⊕ Thread ⊕ Task.
-type RowPlace =
-  | {
-      kind: 'channel';
-      threadHref(rootId: string): string;
-      responding: ReadonlyMap<string, string>;
-    }
-  | { kind: 'thread' }
-  | { kind: 'task'; workspaceId: string; channelNames: ReadonlyMap<string, string> };
-
-type RowContext = {
-  directory: WorkspaceDirectory;
-  place: RowPlace;
-  // The reply a permalink named (`?post=`); its row is highlighted.
-  linkedPostId: string | null;
-};
-
-function PostPurpose({ post }: { post: Post }) {
-  const label = postPurposeLabel(post);
-  return label === null ? null : (
-    <span className="mobile-channel-post__purpose" data-purpose={postPurposeTag(post)}>
-      {label}
-    </span>
-  );
-}
-
-// Posts carry no reply count (the API has none): every root offers its thread.
-function PostFooter({ post, context }: { post: Post; context: RowContext }) {
-  switch (context.place.kind) {
-    case 'thread':
-      return null;
-    case 'task':
-      return (
-        <div className="mobile-channel-post__footer ui-row">
-          <Link
-            className="mobile-channel-post__reply ui-inline-row ui-muted"
-            to={channelLinkPath(context.place.workspaceId, postLink(post))}
-          >
-            {context.place.channelNames.get(post.channelId) ?? 'another channel'}
-          </Link>
-        </div>
-      );
-    case 'channel': {
-      const place = context.place;
-      const replying = place.responding.get(post.id);
-      return (
-        <div className="mobile-channel-post__footer ui-row">
-          <Link
-            className="mobile-channel-post__reply ui-inline-row ui-muted"
-            to={place.threadHref(post.rootId ?? post.id)}
-          >
-            Thread
-          </Link>
-          {replying !== undefined && (
-            <span className="mobile-channel-post__replying">
-              <TypingDots /> {replying}
-            </span>
-          )}
-        </div>
-      );
-    }
-  }
-}
-
-function Row({ row, context }: { row: ChannelRow; context: RowContext }) {
-  const openDm = useChannelsDm();
-  const location = useLocation();
-  // Back from the conversation page returns to this channel screen.
-  const linkState = mobileConversationRouteState(location);
-  switch (row.kind) {
-    case 'day':
-      return (
-        <li className="mobile-channel-day">
-          <span>{row.label}</span>
-        </li>
-      );
-    case 'lead':
-      return (
-        <li
-          className="mobile-channel-post mobile-channel-post--lead"
-          data-purpose={postPurposeTag(row.post)}
-          data-post-id={row.post.id}
-          data-linked={row.post.id === context.linkedPostId ? 'true' : undefined}
-        >
-          <BuddySigil
-            className="mobile-channel-post__avatar"
-            name={authorName(row.post.author, context.directory.buddyNames)}
-          />
-          <div className="mobile-channel-post__content">
-            <div className="mobile-channel-post__heading">
-              <ChannelAuthor
-                className="mobile-channel-post__author"
-                author={row.post.author}
-                buddyNames={context.directory.buddyNames}
-                openDm={openDm}
-              />
-              <time dateTime={row.post.createdAt}>{clockTime(row.post.createdAt)}</time>
-              <PostPurpose post={row.post} />
-              <ConversationEye
-                post={row.post}
-                className="mobile-channel-post__reply ui-inline-row ui-muted"
-                linkState={linkState}
-              />
-            </div>
-            <ChannelMarkdown
-              body={row.post.body}
-              buddyNames={context.directory.buddyNames}
-              tasks={context.directory.taskById}
-            />
-            <ReplyRetry post={row.post} />
-            <PostFooter post={row.post} context={context} />
-          </div>
-        </li>
-      );
-    case 'continuation':
-      return (
-        <li
-          className="mobile-channel-post mobile-channel-post--continuation"
-          data-purpose={postPurposeTag(row.post)}
-          data-post-id={row.post.id}
-          data-linked={row.post.id === context.linkedPostId ? 'true' : undefined}
-        >
-          <div className="mobile-channel-post__content">
-            <PostPurpose post={row.post} />
-            <ConversationEye
-              post={row.post}
-              className="mobile-channel-post__reply ui-inline-row ui-muted"
-              linkState={linkState}
-            />
-            <ChannelMarkdown
-              body={row.post.body}
-              buddyNames={context.directory.buddyNames}
-              tasks={context.directory.taskById}
-            />
-            <ReplyRetry post={row.post} />
-            <PostFooter post={row.post} context={context} />
-          </div>
-        </li>
-      );
-  }
-}
-
-function ScreenHeader({
-  backTo,
-  title,
-  subtitle,
-  link,
-  channel,
-  settings,
-}: {
-  backTo: string;
-  title: string;
-  subtitle: string;
-  link: { path: string; label: string };
-  channel?: Channel;
-  settings?: ReactNode;
-}) {
-  return (
-    <header className="mobile-channel-header ui-row" data-channel-header>
-      <Link className="mobile-channel-header__back" to={backTo} aria-label="Back">
-        ‹
-      </Link>
-      <div className="mobile-channel-header__heading">
-        <h1>{title}</h1>
-      </div>
-      {channel && (
-        <ChannelHeaderControls channel={channel} description={subtitle}>
-          {settings}
-        </ChannelHeaderControls>
-      )}
-      <CopyLinkButton
-        className="mobile-channel-header__link channel-header-copy ui-muted"
-        path={link.path}
-        label={link.label}
-      />
-    </header>
-  );
-}
-
 // ── Channel ─────────────────────────────────────────────────────────────────
 
 function ChannelScreen({ channelId, context }: { channelId: string; context: ScreenContext }) {
@@ -692,7 +512,11 @@ function ChannelScreen({ channelId, context }: { channelId: string; context: Scr
   const posts = useWithOutbox(channelId, null, feed.posts);
   const rows = useMemo(() => channelRows(posts ?? []), [posts]);
   const follow = useFollowBottom(rows.length, posts, null);
-  useMarkChannelRead(channelId, entry?.unread, newestServedId(feed.posts));
+  useMarkRead(
+    { kind: 'channel', channelId },
+    entry !== null && entry.unread > 0,
+    newestServedId(feed.posts)
+  );
   const rowContext: RowContext = {
     directory,
     place: {
@@ -866,17 +690,12 @@ function ThreadScreen({
   const heading = entry
     ? channelHeading(entry.channel.kind, directory.buddyNames)
     : LOADING_HEADING;
-  const thread = useChannelFeed(threadFeed(rootId, linkedPostId));
-  const root = thread.latest.data?.root;
-  const replying = useChannelResponding(channelId, directory.buddyNames).get(rootId);
-  const replies = useWithOutbox(channelId, rootId, thread.posts);
-  const replyRows = useMemo(() => channelRows(replies ?? []), [replies]);
-  const follow = useFollowBottom(
-    replyRows.length + (replying === undefined ? 0 : 1),
-    thread.posts,
-    linkedPostId
+  const { thread, root, replying, replyRows, follow, onPosted } = useThreadView(
+    channelId,
+    rootId,
+    linkedPostId,
+    directory.buddyNames
   );
-  useMarkChannelRead(channelId, entry?.unread, newestServedId(thread.posts) ?? root?.id ?? null);
   const rowContext: RowContext = { directory, place: { kind: 'thread' }, linkedPostId };
   return (
     <div className="mobile-channel ui-stack">
@@ -929,10 +748,7 @@ function ThreadScreen({
           references={directory.references}
           seats={thread.latest.data?.seats}
           submit="button"
-          onPosted={() => {
-            follow.pin();
-            void thread.latest.refetch();
-          }}
+          onPosted={onPosted}
         />
       )}
     </div>

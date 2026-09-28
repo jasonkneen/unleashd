@@ -1,6 +1,6 @@
 //! Pattern: one-write-path (docs/patterns.md#one-write-path) — `put` is the only statement that
 //! writes a record row, and it rebuilds the record's session index rows in the same transaction.
-//! Create, every mutation, rekey and the importer all go through it.
+//! Create and every mutation go through it.
 //!
 //! Pattern: one-store-one-index (docs/patterns.md#one-store-one-index) — `conversation_record`
 //! holds the records; `conversation_session` is the one derived index (provider, session id) →
@@ -29,8 +29,6 @@ use std::path::Path;
 // derived general/buddy/buddy_builder tag and its `buddy_id` column.
 pub const RECORDS_SCHEMA_VERSION: i64 = 2;
 
-/// A launch history this long means something is looping; refuse rather than drop context.
-pub const MAX_BRANCH_LAUNCHES: usize = 128;
 /// A claimed-but-unacknowledged first-message delivery is re-claimable after this long.
 pub const INITIAL_MESSAGE_DISPATCH_LEASE_MS: i64 = 15_000;
 
@@ -259,7 +257,7 @@ impl Records {
     }
 
     /// The record that binds this provider session. Two records can claim one session (a legacy
-    /// rekey, a copied transcript); the most recently updated wins, then the smaller id, so the
+    /// copy of a transcript); the most recently updated wins, then the smaller id, so the
     /// answer is deterministic (config-store.ts answered with whichever file its scan met first).
     pub fn find_by_session(&self, provider: Provider, session_id: &str) -> Result<Option<ConversationRecord>> {
         let mut stmt = self.conn.prepare_cached(&format!(
@@ -440,20 +438,6 @@ impl Records {
         Ok(self.conn.prepare_cached("DELETE FROM conversation_record WHERE conversation_id = ?1")?.execute([id])? > 0)
     }
 
-    /// Move a record to a new id, keeping everything else (legacy records keyed by a session id).
-    pub fn rekey(&mut self, from: &str, to: &str) -> Result<RekeyOutcome> {
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some(existing) = load(&tx, from)? else { return Ok(RekeyOutcome::Missing) };
-        if let Some(current) = load(&tx, to)? {
-            return Ok(RekeyOutcome::Exists { current });
-        }
-        let record = ConversationRecord { conversation_id: to.to_string(), ..existing };
-        tx.prepare_cached("DELETE FROM conversation_record WHERE conversation_id = ?1")?.execute([from])?;
-        put(&tx, &record)?;
-        tx.commit()?;
-        Ok(RekeyOutcome::Rekeyed { record })
-    }
-
     /// Make `binding` the session a new turn resumes; the previous current joins the history.
     pub fn set_current_session(&mut self, id: &str, binding: SessionBinding, at: i64) -> Result<Option<ConversationRecord>> {
         let found = self.mutate(id, |r| {
@@ -523,36 +507,6 @@ impl Records {
             }
         })?;
         Ok(found.record())
-    }
-
-    /// Record a background-review launch's handoff under its digest (does not touch updatedAt).
-    pub fn append_branch_launch(&mut self, id: &str, digest: &str, handoff: &str) -> Result<BranchLaunchOutcome> {
-        let found = self.mutate(id, |r| {
-            let branch = match (r.status, r.creation.as_ref().and_then(|c| c.branch.as_ref())) {
-                (RecordStatus::Active, Some(branch)) => branch,
-                _ => return Edit::Keep(LaunchVerdict::Unavailable),
-            };
-            let launches = branch.launches.clone().unwrap_or_default();
-            if digest == branch.through_message_id || launches.contains_key(digest) {
-                return Edit::Keep(LaunchVerdict::Recorded);
-            }
-            if launches.len() >= MAX_BRANCH_LAUNCHES {
-                return Edit::Keep(LaunchVerdict::Full);
-            }
-            let mut launches = launches;
-            launches.insert(digest.to_string(), handoff.to_string());
-            let creation = r
-                .creation
-                .clone()
-                .map(|c| ConversationCreation { branch: Some(ConversationBranch { launches: Some(launches), ..branch.clone() }), ..c });
-            Edit::Write(ConversationRecord { creation, ..r.clone() }, LaunchVerdict::Recorded)
-        })?;
-        Ok(match found {
-            Found::Missing => BranchLaunchOutcome::Missing,
-            Found::Found(record, LaunchVerdict::Recorded) => BranchLaunchOutcome::Recorded { record },
-            Found::Found(_, LaunchVerdict::Unavailable) => BranchLaunchOutcome::Unavailable,
-            Found::Found(_, LaunchVerdict::Full) => BranchLaunchOutcome::Full,
-        })
     }
 
     /// Lease delivery of the creation message to `token`. Some = this caller holds the lease.
@@ -645,12 +599,6 @@ enum Verdict {
     Committed,
     Conflict,
     Tombstoned,
-}
-
-enum LaunchVerdict {
-    Recorded,
-    Unavailable,
-    Full,
 }
 
 impl<T> Found<T> {

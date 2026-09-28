@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
-import { type ServerMessage, encodeRows } from '@unleashd/shared';
+import { PROTOCOL_VERSION, type ServerMessage, encodeRows } from '@unleashd/shared';
 import { type Atom, Provider } from 'jotai';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
@@ -77,7 +77,7 @@ function seed(): void {
   ];
   handleMessage({
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/',
     loading: false,
     archivedBuddyIds: [],
@@ -190,7 +190,12 @@ function eventsForA(kind: 'content' | 'list'): Array<() => void> {
   return [
     // A new record moves A's last activity, so it re-sorts the list.
     () => {
-      handleMessage({ type: 'message', conversationId: A, role: 'user', content: 'hi' });
+      handleMessage({
+        type: 'message',
+        conversationId: A,
+        role: 'user',
+        body: { t: 'text', text: 'hi' },
+      });
       handleMessage({
         type: 'patch',
         id: A,
@@ -255,7 +260,12 @@ test('the same events for B do reach Chat(B) (the guard is not vacuous)', () => 
   seed();
   const chatReads = renderChatRecordingReads(B);
   for (const atom of chatReads.keys()) jotaiStore.sub(atom, () => {});
-  handleMessage({ type: 'message', conversationId: B, role: 'user', content: 'for B' });
+  handleMessage({
+    type: 'message',
+    conversationId: B,
+    role: 'user',
+    body: { t: 'text', text: 'for B' },
+  });
   const changed = [...chatReads].filter(([atom, before]) => jotaiStore.get(atom) !== before);
   assert.ok(
     changed.some(([atom]) => labelOf(atom) === `groups:${B}`),

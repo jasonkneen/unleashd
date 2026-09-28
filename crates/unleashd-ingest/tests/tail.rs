@@ -31,6 +31,27 @@ fn a_partial_last_line_is_left_for_the_next_read() {
 }
 
 #[test]
+fn an_old_content_checkpoint_rebuilds_before_appending_duplicate_tools() {
+    // Old folds hashed formatted tool text; new folds hash structured parts. Resuming
+    // the old hash would duplicate a repeated tool at the append boundary.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("-w").join("s.jsonl");
+    let tool = format!("{}\n", json!({
+        "type": "assistant", "uuid": "tool-1", "timestamp": "2026-09-22T00:00:00.000Z",
+        "message": { "role": "assistant", "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "echo hi" } }] }
+    }));
+    write(&path, &tool);
+    let mut previous = read(Format::Claude, &path, None);
+    previous.checkpoint.as_mut().unwrap().content_version = 0;
+    append(&path, &tool);
+    let upgraded = read(Format::Claude, &path, Some(&previous));
+    assert_eq!(upgraded.taken, Taken::Full(FullReason::ContentUpgrade));
+    assert_eq!(upgraded.apply, Apply::Replace);
+    assert_eq!(upgraded.messages, parse(Format::Claude, &path).0);
+    assert_eq!(upgraded.messages.len(), 1);
+}
+
+#[test]
 fn a_complete_record_without_its_newline_is_taken_once() {
     // Claude Code can be read between writing a record and writing its newline.
     let dir = tempfile::tempdir().unwrap();

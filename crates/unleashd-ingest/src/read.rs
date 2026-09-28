@@ -49,6 +49,9 @@ pub enum FoldState {
 /// Everything needed to resume a JSONL source where the last read stopped. Stored per source.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Checkpoint {
+    /// Bump when fold identity or stored message content changes; old checkpoints re-read.
+    #[serde(default)]
+    pub content_version: u8,
     pub offset: u64,
     pub fingerprint: Vec<u8>,
     pub hints: Hints,
@@ -64,6 +67,7 @@ pub struct Checkpoint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FullReason {
     Unseen,
+    ContentUpgrade,
     /// Another file now has this path (new inode).
     Replaced,
     Shrank,
@@ -79,6 +83,7 @@ impl FullReason {
     pub fn label(&self) -> String {
         match self {
             FullReason::Unseen => "unseen".into(),
+            FullReason::ContentUpgrade => "content-upgrade".into(),
             FullReason::Replaced => "replaced".into(),
             FullReason::Shrank => "shrank".into(),
             FullReason::Rewritten => "rewritten".into(),
@@ -256,6 +261,7 @@ fn finish<F: Fold + Into<FoldState>>(
     };
     let row = facts.map(|f| row(f, &pass.sink.visible, next_seq, stamp.mtime_ms));
     let checkpoint = Checkpoint {
+        content_version: 1,
         offset: pass.offset,
         fingerprint: fingerprint(path, pass.offset)?,
         hints,
@@ -295,6 +301,7 @@ fn full<F: Fold + Into<FoldState>>(path: &Path, ctx: &Ctx, stamp: Stamp, mut hin
 
 fn plan(path: &Path, stamp: &Stamp, prior: &Option<(Stamp, Checkpoint)>) -> io::Result<Result<(), FullReason>> {
     let Some((old, checkpoint)) = prior else { return Ok(Err(FullReason::Unseen)) };
+    if checkpoint.content_version != 1 { return Ok(Err(FullReason::ContentUpgrade)); }
     if old.dev != stamp.dev || old.ino != stamp.ino {
         return Ok(Err(FullReason::Replaced));
     }
@@ -341,7 +348,10 @@ fn read_doc(stamp: Stamp, doc: Option<Doc>) -> Outcome {
     let row = doc.and_then(|doc| {
         for m in doc.messages {
             // A document has no later line to prove the first prompt misread; nothing to retry.
-            if sink.push(m.role, m.at, m.completed_at, m.content, None).is_err() {
+            if let Some(parts_json) = m.parts_json {
+                let parts = serde_json::from_str(&parts_json).unwrap_or_default();
+                sink.push_parts(m.role, m.at, m.completed_at, m.content, parts);
+            } else if sink.push(m.role, m.at, m.completed_at, m.content, None).is_err() {
                 return None;
             }
         }
@@ -372,7 +382,7 @@ pub fn read_source(
     prior_checkpoint: Option<Checkpoint>,
 ) -> io::Result<Outcome> {
     let stamp = Stamp::of(format, path)?;
-    if prior_stamp.as_ref() == Some(&stamp) {
+    if prior_stamp.as_ref() == Some(&stamp) && prior_checkpoint.as_ref().is_none_or(|c| c.content_version == 1) {
         return Ok(Outcome {
             taken: Taken::Unchanged,
             stamp,

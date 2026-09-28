@@ -117,6 +117,7 @@ export function createUpstreamService(dependencies: UpstreamServiceDependencies)
         body: updateBody({ releaseManager, repoRoot, remote }),
         purpose: 'message',
         evidence: [marker],
+        broadcast: false,
         key: `upstream-update:${remote}:${sha}`,
       },
       new Map()

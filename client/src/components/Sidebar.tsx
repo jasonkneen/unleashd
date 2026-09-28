@@ -25,7 +25,7 @@ import {
 import { DmIcon, WakeIcon, WakeIndicator } from './buddies/WakeIndicator';
 import { useBuddyDirectActions } from './buddies/buddy-direct-actions';
 import { buddyTabPath } from './buddies/buddy-tabs';
-import { ownerUnreadTotal, useOwnerInboxes } from './buddies/channel-data';
+import { anyUnread, ownerUnreadTotal, useOwnerInboxes } from './buddies/channel-data';
 import { createBuddyViaBuilder } from './buddies/create-buddy-builder';
 import './Sidebar.css';
 import { SearchView } from '../views/search/SearchView';
@@ -587,7 +587,7 @@ export function Sidebar() {
                         className="folder-group-name ui-truncate sidebar-project-link"
                         to={path}
                         aria-current={isActive ? 'page' : undefined}
-                        data-unread={unread.unreadChannels > 0 || undefined}
+                        data-unread={anyUnread(unread) || undefined}
                         title={`${project.name} channels`}
                       >
                         <span className="folder-group-name ui-truncate"># {project.name}</span>

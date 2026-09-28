@@ -6,12 +6,7 @@ import type { Message } from '@unleashd/shared';
 const MAX_SEND_EVENT_OFFSET_MS = 5 * 60_000;
 
 function contentKey(message: Message): string {
-  return JSON.stringify([
-    message.role,
-    message.content,
-    message.toolCall?.name,
-    message.toolCall?.input,
-  ]);
+  return JSON.stringify([message.role, message.body]);
 }
 
 function exactKey(message: Message): string {

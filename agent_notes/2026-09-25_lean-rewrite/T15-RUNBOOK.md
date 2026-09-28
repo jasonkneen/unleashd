@@ -10,6 +10,19 @@ The live source is schema **34**. Importer d553cf4 (integration cherry 5625ca2) 
 hire provenance, and verifies both. See [T15-v34-rehearsal.md](T15-v34-rehearsal.md). Run these
 blocks in one **bash** shell. Stop at any failure and preserve artifacts for diagnosis.
 
+
+### Completed cutover and retained tool source
+
+The live cutover completed on September 27; this is a recovery runbook, not an
+instruction to import again into the running stores. Current main no longer
+contains the one-time tools. Recover their source from the preserved tag
+`archive/t15-importer-93367be` (commit
+`93367beeb3f76c08408c435e4afc53f7996e4801`), not release `03fc931`:
+the successful import needed the later fix accepting scheduled legacy runs.
+The backup's `RESULT.md` and `external-cutover-20260927T082211Z-10668/corrected-importer.json`
+record the exact successful binary/hash. The original stores and all failed/new
+stores remain recovery evidence; account for post-cutover writes before rollback.
+
 ## 0. Prepare pinned release and rollback checkouts
 
 Use a clean, final-gated release checkout outside the watched live checkout, and a separate

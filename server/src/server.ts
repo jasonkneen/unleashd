@@ -74,8 +74,8 @@ import { getProvider, providers } from './providers';
 import { resolveConfigAgainstProviderCatalog } from './providers/catalog-service';
 import { readLatestSwarmRuntime, registerSwarmRoutes } from './swarm';
 import { registerConversationWebSocket } from './transport/conversation-websocket';
-import { createUpstreamService } from './upstream/routes';
 import { WS_LIVENESS_INTERVAL_MS, superviseLiveness } from './transport/websocket';
+import { createUpstreamService } from './upstream/routes';
 
 import { type SessionRow, defaultRoots } from '@unleashd/ingest';
 import { validate as isUuid } from 'uuid';
@@ -199,6 +199,13 @@ const applicationContext = createConversationApplicationContext<ConversationRunt
   completionSuppressionMs: LOCAL_COMPLETION_SUPPRESS_MS,
 });
 const conversations = applicationContext.registry;
+turnAttemptJournal.subscribe((latestAttempt) => {
+  applicationContext.broadcast({
+    type: 'patch',
+    id: latestAttempt.conversationId,
+    patch: { t: 'attempt', latestAttempt },
+  });
+});
 
 // The conversation list and every history, read from the ingest store (T13b). Until the store's
 // initial scan commits nothing is listed, and a history request waits for it.
@@ -515,6 +522,8 @@ registerConversationRoutes(
   {
     getBranch: async (id) => (await conversationConfigService.getRecord(id))?.creation?.branch,
     ingest: currentIngest,
+    latestAttempt: async (id) =>
+      (await turnAttemptJournal.queryAttempts({ conversationId: id, limit: 1 }))[0] ?? null,
   }
 );
 registerTurnDiagnosticsRoutes(app, turnAttemptJournal);

@@ -1,6 +1,7 @@
 import {
   type ConversationDetail,
   type Message,
+  PROTOCOL_VERSION,
   type ServerMessage,
   encodeRows,
 } from '@unleashd/shared';
@@ -69,7 +70,7 @@ export function runEventBench(target: BenchTarget): void {
   const rows = syntheticConversations(COUNT);
   deliver({
     type: 'hello',
-    protocol: { version: 3 },
+    protocol: { version: PROTOCOL_VERSION },
     defaultCwd: '/',
     loading: false,
     archivedBuddyIds: [],

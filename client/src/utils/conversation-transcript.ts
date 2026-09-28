@@ -1,5 +1,6 @@
 import type { ConversationDetail, ConversationRow, Message } from '@unleashd/shared';
 import { shortenHomePath } from './directories';
+import { formatToolUse } from './tool-presentation';
 
 /**
  * Plain-text transcript and the fork draft, shared by both trees. Fork is a soft handoff: a new
@@ -15,9 +16,52 @@ export interface OpenConversation {
 }
 
 export function messageTranscriptContent(message: Message): string {
-  return message.toolCall?.input
-    ? `${message.content}\n\n${message.toolCall.input}`
-    : message.content;
+  if (message.body.t === 'text') return message.body.text;
+  return message.body.parts
+    .map((part) => {
+      switch (part.t) {
+        case 'text':
+          return part.text;
+        case 'tool': {
+          const summary = formatToolUse(part.name, part.input, part.displayText);
+          return part.input === undefined
+            ? summary
+            : `${summary}\n\n${typeof part.input === 'string' ? part.input : JSON.stringify(part.input, null, 2)}`;
+        }
+        case 'question':
+          return `[Question] ${JSON.stringify(part.question)}`;
+        case 'buddy_builder_result':
+          return `[Buddy Builder result] ${JSON.stringify(part.event)}`;
+        case 'buddy_worker_thread':
+          return `[Buddy worker thread] ${part.thread.label}`;
+        case 'swarm_launch':
+          return `[Swarm launch] ${part.command}`;
+      }
+    })
+    .join('\n');
+}
+
+/** Remove the machine preamble from the first user record, including mixed native blocks. */
+export function stripFirstMessagePrefix(message: Message, prefix: string): Message {
+  if (message.body.t === 'text')
+    return message.body.text.startsWith(prefix)
+      ? {
+          ...message,
+          body: { t: 'text', text: message.body.text.slice(prefix.length).replace(/^\n\n/, '') },
+        }
+      : message;
+  const first = message.body.parts[0];
+  if (first?.t !== 'text' || !first.text.startsWith(prefix)) return message;
+  return {
+    ...message,
+    body: {
+      t: 'parts',
+      parts: [
+        { t: 'text', text: first.text.slice(prefix.length).replace(/^\n\n/, '') },
+        ...message.body.parts.slice(1),
+      ],
+    },
+  };
 }
 
 export function buildThreadTranscript({ row, detail, messages }: OpenConversation): string {
@@ -41,10 +85,9 @@ export function buildThreadTranscript({ row, detail, messages }: OpenConversatio
   const prefix = detail.swarmDebugPrefix;
   const body = messages
     .map((msg, index) => {
-      const content =
-        index === 0 && msg.role === 'user' && prefix && msg.content.startsWith(prefix)
-          ? msg.content.slice(prefix.length).replace(/^\n\n/, '')
-          : messageTranscriptContent(msg);
+      const content = messageTranscriptContent(
+        index === 0 && msg.role === 'user' && prefix ? stripFirstMessagePrefix(msg, prefix) : msg
+      );
       return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${content}`;
     })
     .join('\n\n');

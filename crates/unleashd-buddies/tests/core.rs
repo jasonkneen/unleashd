@@ -27,6 +27,7 @@ fn request(body: &str, key: &str) -> PostInput {
         task_id: None,
         from_conversation_id: Some("conv-sender".into()),
         run_config: None,
+        broadcast: false,
         key: key.into(),
     }
 }
@@ -857,4 +858,94 @@ fn channel_rename_preserves_identity_and_history() {
     assert!(matches!(s.rename_channel(&buddy("peer"), &channel.id, "other", "rename"), Err(CoreError::IdempotencyConflict(_))));
     let direct = s.open_channel(&Actor::Owner, dm("mid", "ic")).unwrap();
     assert!(s.rename_channel(&Actor::Owner, &direct.id, "not-a-dm", "direct").is_err());
+}
+
+// THREADS_VIEW_2026-09-28.md. Before thread_read, one cursor per channel counted every reply as
+// channel unread, and the thread pane marked the CHANNEL read through a reply, silently skipping
+// unseen top-level posts. These pin the split: replies belong to followed threads.
+#[test]
+fn followed_threads_track_replies_apart_from_the_channel() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let general = s
+        .create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() })
+        .unwrap();
+    let to = || ChannelRef::Id { id: general.id.clone() };
+    let say = |body: &str, reply: Option<&Post>| PostInput { kind: PostKind::Inform, reply_to_id: reply.map(|p| p.id.clone()), ..request(body, body) };
+    let unread = |s: &Store| {
+        let inbox = s.inbox(&Actor::Owner, WS).unwrap();
+        (inbox.channels.iter().find(|c| c.channel.id == general.id).unwrap().unread, inbox.unread_threads)
+    };
+    let order = |s: &Store| s.followed_threads(&Actor::Owner, WS, 10).unwrap().threads.into_iter().map(|t| t.root.id).collect::<Vec<_>>();
+
+    let mine = s.post(&Actor::Owner, to(), say("mine", None)).unwrap();
+    let theirs = s.post(&buddy("ic"), to(), say("theirs", None)).unwrap();
+    s.mark_read(&Actor::Owner, &general.id, &theirs.id).unwrap();
+    assert!(order(s).is_empty(), "a root without replies is no card");
+
+    let r1 = s.post(&buddy("ic"), to(), say("r1", Some(&mine))).unwrap();
+    let r2 = s.post(&buddy("mid"), to(), say("r2", Some(&mine))).unwrap();
+    s.post(&buddy("ic"), to(), say("elsewhere", Some(&theirs))).unwrap();
+    assert_eq!(unread(s), (0, 1), "replies never count as channel unread; only the followed thread is unread");
+
+    let page = s.followed_threads(&Actor::Owner, WS, 10).unwrap();
+    assert_eq!(page.threads.len(), 1, "a thread the owner never wrote in is not followed");
+    assert_eq!(page.threads[0].participants, [Actor::Owner, buddy("ic"), buddy("mid")]);
+    match &page.threads[0].tail {
+        ThreadTail::Unread { hidden, posts } => {
+            assert_eq!((*hidden, posts.iter().map(|p| &p.id).collect::<Vec<_>>()), (0, vec![&r1.id, &r2.id]))
+        }
+        other => panic!("expected unread, got {other:?}"),
+    }
+
+    s.mark_thread_read(&Actor::Owner, &mine.id, &r2.id).unwrap();
+    s.mark_thread_read(&Actor::Owner, &mine.id, &r1.id).unwrap();
+    assert_eq!(unread(s), (0, 0), "an older mark never moves the cursor back");
+    s.mark_thread_read(&Actor::Owner, &theirs.id, &theirs.id).unwrap();
+    assert_eq!(order(s), [mine.id.clone()], "reading a thread does not follow it");
+
+    // Unread sorts first even when a caught-up thread has newer activity.
+    let later = s.post(&Actor::Owner, to(), say("later", None)).unwrap();
+    s.post(&buddy("ic"), to(), say("l1", Some(&later))).unwrap();
+    s.post(&buddy("ic"), to(), say("r3", Some(&mine))).unwrap();
+    let r4 = s.post(&Actor::Owner, to(), say("r4 mine", Some(&mine))).unwrap();
+    assert_eq!(order(s), [later.id.clone(), mine.id.clone()], "l1 is unread; the owner's own r4 read `mine` through it");
+    assert!(s.followed_threads(&Actor::Owner, WS, 1).unwrap().more);
+    match &s.followed_threads(&Actor::Owner, WS, 10).unwrap().threads[1].tail {
+        ThreadTail::CaughtUp { hidden, posts } => {
+            assert_eq!((*hidden, posts.last().map(|p| &p.id)), (2, Some(&r4.id)), "the last two, the rest folded")
+        }
+        other => panic!("expected caught up, got {other:?}"),
+    }
+
+    // Also send to #channel: a flagged reply joins the channel feed and its unread count.
+    assert!(matches!(s.post(&Actor::Owner, to(), PostInput { broadcast: true, ..say("top", None) }), Err(CoreError::Invalid(_))));
+    let shared = s.post(&buddy("ic"), to(), PostInput { broadcast: true, ..say("decided", Some(&mine)) }).unwrap();
+    let feed = s.list_posts(&Actor::Owner, PostQuery::Channel { channel_id: general.id.clone() }, None, 10).unwrap();
+    assert_eq!(feed.posts[0].id, shared.id);
+    assert!(feed.posts.iter().all(|p| p.root_id.is_none() || p.broadcast), "plain replies stay in their thread");
+    assert_eq!(unread(s).0, 1, "the broadcast reply (`later` is the owner's own)");
+}
+
+#[test]
+fn a_database_from_before_threads_arrives_caught_up() {
+    let f = fixture();
+    let mut s = f.store;
+    let general = s
+        .create_channel(&Actor::Owner, ChannelInput { workspace_id: WS.into(), name: "general".into(), purpose: "p".into(), key: "g".into() })
+        .unwrap();
+    let to = || ChannelRef::Id { id: general.id.clone() };
+    let say = |body: &str, reply: Option<&Post>| PostInput { kind: PostKind::Inform, reply_to_id: reply.map(|p| p.id.clone()), ..request(body, body) };
+    let root = s.post(&buddy("ic"), to(), say("root", None)).unwrap();
+    s.post(&Actor::Owner, to(), say("me too", Some(&root))).unwrap();
+    s.post(&buddy("ic"), to(), say("answer", Some(&root))).unwrap();
+    drop(s);
+    // Moving the table aside is a database from before it: `open` recreates and backfills it.
+    rusqlite::Connection::open(&f.path).unwrap().execute_batch("ALTER TABLE thread_read RENAME TO thread_read_aside;").unwrap();
+
+    let s = Store::open(f.path.to_str().unwrap()).unwrap();
+    let page = s.followed_threads(&Actor::Owner, WS, 10).unwrap();
+    assert_eq!(page.threads.len(), 1, "backfilled from the owner's reply");
+    assert!(matches!(page.threads[0].tail, ThreadTail::CaughtUp { .. }), "history is read, not a wall of unread");
+    assert!(s.followed_threads(&buddy("ic"), WS, 10).unwrap().threads.is_empty(), "the backfill is the owner's only");
 }

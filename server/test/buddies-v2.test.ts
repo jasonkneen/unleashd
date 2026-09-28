@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { McpServerSpec } from '@nbardy/agent-cli';
+import { type McpServerSpec, createParser } from '@nbardy/agent-cli';
 import {
   BuddiesCore,
   type Buddy,
@@ -496,6 +496,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
         evidence: [],
+        broadcast: false,
         key: 'owner-1',
       }
     );
@@ -535,6 +536,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         body: 'Lead, which date?',
         replyToId: root.id,
         evidence: [],
+        broadcast: false,
         key: 'designer-1',
       }
     );
@@ -566,6 +568,7 @@ test("a Buddy's @mention wakes that Buddy through the owner's mention path, capp
         kind: 'inform',
         body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
         evidence: [],
+        broadcast: false,
         key: 'owner-root',
       }
     );
@@ -606,6 +609,7 @@ test("a Buddy's @mention wakes that Buddy through the owner's mention path, capp
         body: `[@Designer](buddy:${w.designer.id}) bigger?`,
         replyToId: root.id,
         evidence: [],
+        broadcast: false,
         key: 'lead-third',
       }
     );
@@ -628,7 +632,7 @@ test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a f
       w.core.post(
         OWNER,
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], key: body }
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: body }
       );
     const thread = async (rootId: string) =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
@@ -668,7 +672,13 @@ test('a harness failure is retried on another harness, in a new seat of the same
     const root = await w.core.post(
       OWNER,
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: `[@Lead](buddy:${w.lead.id}) ship it`, evidence: [], key: 'ask' }
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) ship it`,
+        evidence: [],
+        broadcast: false,
+        key: 'ask',
+      }
     );
     w.outOfTokens.add(1);
     await w.channels.respondToMentions(w.general, root, new Map());
@@ -701,6 +711,7 @@ test('a harness failure is retried on another harness, in a new seat of the same
         body: 'Couldn’t reply: Buddy is not active',
         replyToId: root.id,
         evidence: [],
+        broadcast: false,
         key: 'not-harness',
       }
     );
@@ -991,13 +1002,15 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
       context: { buddyId: lead.id, workspaceId: ws, coordinationRunId: 'run-chat' },
       completedAt: new Date().toISOString(),
       messages: [
-        { role: 'user', content: 'I prefer dark mode' },
+        { role: 'user', body: { t: 'text', text: 'I prefer dark mode' } },
         {
           role: 'assistant',
-          content: '',
-          toolCall: { name: 'Read', input: `agent_notes/theme.md ${'y'.repeat(600)}` },
+          body: {
+            t: 'parts',
+            parts: [{ t: 'tool', name: 'Read', input: `agent_notes/theme.md ${'y'.repeat(600)}` }],
+          },
         },
-        { role: 'assistant', content: '', toolCall: { name: 'exec_command' } },
+        { role: 'assistant', body: { t: 'parts', parts: [{ t: 'tool', name: 'exec_command' }] } },
       ],
     });
     const receipt = await until(
@@ -1095,7 +1108,7 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
       conversationId: 'chat',
       context: { buddyId: lead.id, workspaceId: ws, coordinationRunId: 'run-chat' },
       completedAt: new Date().toISOString(),
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', body: { t: 'text', text: 'hello' } }],
     });
     const receipt = await until(
       async () =>
@@ -1126,7 +1139,7 @@ test('a missing Buddies database with the v33 file present names the import comm
     const file = join(scratch, 'buddies-v3.sqlite');
     await assert.rejects(
       openBuddiesCore(buddiesLocation(file, legacy)),
-      /one-time v33 import[\s\S]*03fc931/
+      /one-time v33\/v34 import[\s\S]*archive\/t15-importer-93367be/
     );
     assert.equal(existsSync(file), false, 'no empty database is created over an unimported one');
   } finally {
@@ -1234,8 +1247,11 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
       context: chat('chat-A'),
       completedAt: new Date().toISOString(),
       messages: [
-        { role: 'user', content: 'Do steps 1 and 2 of the migration; I will approve step 3.' },
-        { role: 'assistant', content: 'Steps 1 and 2 are done.' },
+        {
+          role: 'user',
+          body: { t: 'text', text: 'Do steps 1 and 2 of the migration; I will approve step 3.' },
+        },
+        { role: 'assistant', body: { t: 'text', text: 'Steps 1 and 2 are done.' } },
       ],
     });
     const receipt = await until(
@@ -1298,6 +1314,73 @@ test('a reply gate with no answer, or out of tokens, fails with the provider mes
   assert.match(verdict.kind === 'failed' ? verdict.reason : '', /out_of_tokens.*session limit/);
 });
 
+test('native child events cannot bypass restricted Buddy runs', async () => {
+  const w = await world();
+  let stops = 0;
+  let launches = 0;
+  const execute = (() => {
+    launches += 1;
+    return {
+      events: (async function* () {
+        // No item.started: the canonical state alone must trigger the guard.
+        yield* createParser('codex')({
+          type: 'item.completed',
+          item: {
+            type: 'collab_tool_call',
+            tool: 'spawn_agent',
+            id: 'spawn',
+            receiver_thread_ids: ['child'],
+            agents_states: { child: { status: 'pending_init' } },
+          },
+        });
+        yield { type: 'text.delta', text: '<yes>' };
+      })(),
+      completed: Promise.resolve({ reason: 'success', exitCode: 0, signal: null, sessionId: 's' }),
+      stop: () => {
+        stops += 1;
+      },
+    };
+  }) as never;
+  const reviewer = createMemoryReviewer({
+    core: w.core,
+    grants: w.grants,
+    spec: w.endpoint.spec,
+    execute,
+    logger: { warn: () => undefined },
+  });
+  try {
+    const gate = createCliReplyGate({
+      resolveExecution: async () => ({ provider: 'codex', modelId: 'gpt-6-luna' }),
+      execute,
+    });
+    const verdict = await gate({ config: createDefaultConversationConfig('codex'), prompt: 'p' });
+    assert.equal(verdict.kind, 'unparseable', 'a yes after tool activity is not admitted');
+    reviewer.start();
+    reviewer.enqueue({
+      attemptId: 'native-child-violation',
+      conversationId: 'chat',
+      context: { buddyId: w.lead.id, workspaceId: w.ws },
+      completedAt: new Date().toISOString(),
+      messages: [{ role: 'user', body: { t: 'text', text: 'hello' } }],
+    });
+    const receipt = await until(
+      async () =>
+        (await w.core.listEvents(w.lead.id, Number.MAX_SAFE_INTEGER, 20)).find(
+          (event) => event.op === 'memory_review'
+        ),
+      'failed review receipt'
+    );
+    const body = JSON.parse(receipt.payload);
+    assert.equal(body.status, 'failed');
+    assert.match(body.error, /sub-agent operation/);
+    assert.equal(launches, 2, 'one gate and one review; violations do not climb the ladder');
+    assert.equal(stops, 2);
+  } finally {
+    reviewer.stop();
+    await w.close();
+  }
+});
+
 test('follow-ups stop after three Buddy posts in a row, and a failed gate on an owner post is shown', async () => {
   const w = await world();
   try {
@@ -1305,7 +1388,14 @@ test('follow-ups stop after three Buddy posts in a row, and a failed gate on an 
       w.core.post(
         author === 'owner' ? OWNER : buddyActor(author),
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, evidence: [], key: `${author}:${body}` }
+        {
+          kind: 'inform',
+          body,
+          replyToId,
+          evidence: [],
+          broadcast: false,
+          key: `${author}:${body}`,
+        }
       );
     const root = await say('owner', 'Who owns the launch?');
     // Lead, Designer, Lead: two Buddies may exchange a question, an answer and one more turn…
@@ -1379,7 +1469,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     const ask = await w.core.post(
       buddyActor(w.lead.id),
       { kind: 'direct', members: [buddyActor(w.lead.id), OWNER] },
-      { kind: 'request', body: 'May I deploy?', evidence: [], key: 'ask' }
+      { kind: 'request', body: 'May I deploy?', evidence: [], broadcast: false, key: 'ask' }
     );
     const inbox = await http('GET', `/api/buddies/workspaces/${w.ws}/inbox`);
     assert.deepEqual(
@@ -1496,7 +1586,7 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
       w.core.post(
         buddyActor(w.lead.id),
         { kind: 'id', id: w.general.id },
-        { kind: 'inform', body, replyToId, taskId, evidence: [], key: body }
+        { kind: 'inform', body, replyToId, taskId, evidence: [], broadcast: false, key: body }
       );
     const root = await say('Launch plan', undefined, task.id);
     const replies = [];
@@ -1604,7 +1694,14 @@ test('a thread read names each Buddy’s current seat, so the mention chip opens
     await w.core.post(
       buddyActor(w.designer.id),
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'noted', replyToId: root.id, evidence: [], key: 'designer-noted' }
+      {
+        kind: 'inform',
+        body: 'noted',
+        replyToId: root.id,
+        evidence: [],
+        broadcast: false,
+        key: 'designer-noted',
+      }
     );
     const thread = await http('GET', `/api/buddies/posts/${root.id}/thread`);
     assert.equal(thread.status, 200);
@@ -1653,7 +1750,13 @@ test('owner HTTP and Buddy MCP archive a channel while retaining readable histor
     const post = await w.core.post(
       buddyActor(w.lead.id),
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'Keep this archive evidence', evidence: [], key: 'archive-history' }
+      {
+        kind: 'inform',
+        body: 'Keep this archive evidence',
+        evidence: [],
+        broadcast: false,
+        key: 'archive-history',
+      }
     );
     const grant = w.grants.issueBuddy({
       role: 'worker',
@@ -1721,7 +1824,13 @@ test('Buddy MCP renames a public channel without changing its identity or histor
     const post = await w.core.post(
       buddyActor(w.lead.id),
       { kind: 'id', id: w.general.id },
-      { kind: 'inform', body: 'Keep this rename evidence', evidence: [], key: 'rename-history' }
+      {
+        kind: 'inform',
+        body: 'Keep this rename evidence',
+        evidence: [],
+        broadcast: false,
+        key: 'rename-history',
+      }
     );
     const grant = w.grants.issueBuddy({
       role: 'worker',

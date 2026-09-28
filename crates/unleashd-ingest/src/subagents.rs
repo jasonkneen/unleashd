@@ -1,5 +1,5 @@
-//! Historical sub-agent runs reconstructed from spawn tool calls (subagent-tools.ts,
-//! `subAgentsFromToolUses`). Every run is `completed`; a run ends where the next one starts.
+//! Inferred historical Claude/Gemini runs reconstructed from spawn tool calls.
+//! Native Codex child states are not present in this fold; never infer their completion here.
 
 use crate::model::{Provider, SubAgent};
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,6 @@ pub fn is_claude_spawn_tool(name: &str) -> bool {
 pub fn is_spawn_tool(provider: Provider, name: &str) -> bool {
     is_claude_spawn_tool(name)
         || (provider == Provider::Gemini && gemini_label(name).is_some())
-        || (provider == Provider::Codex && name == "spawn_agent")
 }
 
 fn first_string(input: &Value, keys: &[&str]) -> Option<String> {
@@ -46,12 +45,6 @@ fn description(provider: Provider, name: &str, input: &Value) -> String {
         return match first_string(input, &["request", "task", "objective", "question"]) {
             Some(request) => format!("[{label}] {request}"),
             None => format!("Running {label}..."),
-        };
-    }
-    if provider == Provider::Codex && name == "spawn_agent" {
-        return match first_string(input, &["prompt", "task", "description", "objective"]) {
-            Some(request) => format!("[Codex Agent] {request}"),
-            None => "Running Codex sub-agent...".into(),
         };
     }
     format!("Running {name}...")

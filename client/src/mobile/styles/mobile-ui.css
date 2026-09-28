@@ -73,32 +73,6 @@
   min-width: 0;
 }
 
-.mobile-ui-card--button {
-  display: block;
-  padding: var(--sp-6);
-  text-align: left;
-  text-decoration: none;
-  font: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 100ms ease, border-color 120ms ease, background 120ms ease;
-}
-
-.mobile-ui-card--button:active {
-  transform: scale(0.985);
-  border-color: var(--border-strong);
-  background: var(--bg-raised-2);
-}
-
-.mobile-ui-path {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-2);
-  line-height: 1.4;
-}
-
 .mobile-ui-empty-panel {
   width: 100%;
   min-width: 0;
@@ -108,12 +82,6 @@
   font-size: var(--fs-4);
   line-height: 1.5;
   text-align: center;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mobile-ui-card--button {
-    transition: none;
-  }
 }
 
 /* ---- Header action ("+ New" on Chats / Swarms / Buddies) ---- */

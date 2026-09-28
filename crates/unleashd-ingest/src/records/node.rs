@@ -92,11 +92,6 @@ impl ConversationRecords {
     }
 
     #[napi]
-    pub async fn rekey(&self, from: String, to: String) -> Result<RekeyOutcome> {
-        call(&self.records, move |r| r.rekey(&from, &to)).await
-    }
-
-    #[napi]
     pub async fn set_current_session(
         &self,
         conversation_id: String,
@@ -125,11 +120,6 @@ impl ConversationRecords {
         at: i64,
     ) -> Result<Option<ConversationRecord>> {
         call(&self.records, move |r| r.add_session_binding(&conversation_id, binding, at)).await
-    }
-
-    #[napi]
-    pub async fn append_branch_launch(&self, conversation_id: String, digest: String, handoff: String) -> Result<BranchLaunchOutcome> {
-        call(&self.records, move |r| r.append_branch_launch(&conversation_id, &digest, &handoff)).await
     }
 
     /// Lease the first-message delivery to `token` (the caller's random UUID). null = not claimed.

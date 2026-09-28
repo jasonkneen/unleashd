@@ -1,9 +1,8 @@
 //! Pattern: one-type-source (docs/patterns.md#one-type-source)
 //!
-//! The conversation record, typed once. These are the Rust mirror of
-//! `PersistedConversationConfigRecordSchema` (shared/src/conversation-config.ts) and the napi
-//! types in the generated `index.d.ts`: field names, discriminants and literals are the same
-//! strings as the Zod schema, so a record crosses the boundary without translation.
+//! The conversation record is typed here and napi generates `index.d.ts`. Shared Zod schemas
+//! describe live input/wire values, not a second stored-record shape. Field names,
+//! discriminants and literals stay aligned so app inputs cross without translation.
 //!
 //! Pattern: sum-types (docs/patterns.md#sum-types) — every Zod union is a Rust enum here:
 //! lifecycle status, provenance, model/reasoning selection, knowledge scope, and the stored
@@ -352,31 +351,3 @@ pub enum SetConfigOutcome {
     },
     Missing,
 }
-
-#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "t", discriminant_case = "snake_case"))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RekeyOutcome {
-    Rekeyed {
-        record: ConversationRecord,
-    },
-    Missing,
-    /// The replacement id is taken.
-    Exists {
-        current: ConversationRecord,
-    },
-}
-
-#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "t", discriminant_case = "snake_case"))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BranchLaunchOutcome {
-    /// Recorded, or already recorded under this digest.
-    Recorded {
-        record: ConversationRecord,
-    },
-    Missing,
-    /// Deleted, or not a branch conversation.
-    Unavailable,
-    /// 128 launches already; never silently drop launch context an outstanding request needs.
-    Full,
-}
-

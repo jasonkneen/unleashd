@@ -16,6 +16,8 @@ export declare class BuddiesCore {
   searchPosts(actor: Actor, workspaceId: string, query: string, before: Cursor | undefined | null, limit: number): Promise<PostPage>
   inbox(actor: Actor, workspaceId: string): Promise<Inbox>
   markRead(actor: Actor, channelId: string, postId: string): Promise<void>
+  followedThreads(actor: Actor, workspaceId: string, limit: number): Promise<FollowedThreads>
+  markThreadRead(actor: Actor, rootId: string, postId: string): Promise<void>
   archivedChannels(actor: Actor, workspaceId: string): Promise<Array<Channel>>
   setChannelArchived(actor: Actor, channelId: string, archived: boolean, key: string): Promise<Channel>
   renameChannel(actor: Actor, channelId: string, name: string, key: string): Promise<Channel>
@@ -264,6 +266,22 @@ export interface EventInput {
   taskId?: string
 }
 
+/** One card of the Threads view: a thread with at least one reply that the actor follows. */
+export interface FollowedThread {
+  channel: Channel
+  root: Post
+  replies: number
+  /** Distinct authors, root author first. */
+  participants: Array<Actor>
+  tail: ThreadTail
+}
+
+/** Unread threads first, then by newest post. `more`: followed threads beyond `limit`. */
+export interface FollowedThreads {
+  threads: Array<FollowedThread>
+  more: boolean
+}
+
 export interface Inbox {
   /** Requests addressed to the actor that still await its answer. */
   requests: Array<Post>
@@ -271,6 +289,8 @@ export interface Inbox {
   waitingOn: Array<Post>
   /** The actor's channels in the workspace: every public one, its direct ones, and any it has read. */
   channels: Array<ChannelUnread>
+  /** Followed threads in the workspace with a reply by someone else after the actor's thread cursor. */
+  unreadThreads: number
 }
 
 /** Who a buddy reports to. `Nobody` makes it a top-level buddy. */
@@ -302,6 +322,8 @@ export interface Post {
   createdAt: string
   /** The post's ordered id (UUIDv7): threads, pages and read cursors order by it. */
   ord: string
+  /** A reply also shown in its channel's feed ("Also send to #channel"). Always false at top level. */
+  broadcast: boolean
 }
 
 export interface PostInput {
@@ -320,6 +342,8 @@ export interface PostInput {
    * worker). Every recipient must be the author or report to it (`EnqueueRun`).
    */
   runConfig?: RunConfig
+  /** A reply that also appears in the channel feed and its unread count. Invalid without `reply_to_id`. */
+  broadcast: boolean
   key: string
 }
 
@@ -506,6 +530,14 @@ export interface ThreadStat {
   lastReplyOrd: string
   lastReplyAuthor: Actor
 }
+
+/**
+ * What a followed thread's card shows after its root: the fold (`hidden` replies) then `posts`,
+ * oldest first. D = Unread (the replies after the cursor, at most 20) ⊕ CaughtUp (the last 2).
+ */
+export type ThreadTail =
+  | { kind: 'unread'; hidden: number; posts: Array<Post> }
+  | { kind: 'caught_up'; hidden: number; posts: Array<Post> }
 
 export interface Workspace {
   id: string

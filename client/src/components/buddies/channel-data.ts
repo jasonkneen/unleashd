@@ -13,6 +13,8 @@ import {
   type BuddyMemberExecution,
   type ConversationConfig,
   ConversationConfigSchema,
+  type MessageBody,
+  legacyBody,
 } from '@unleashd/shared';
 import { useAtomValue } from 'jotai';
 import { type UIEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -42,6 +44,13 @@ import type {
   ThreadStat,
 } from './types';
 import { taskStatusView } from './ui-contract';
+
+/** Legacy generated replies carried markers; owner posts remain literal prose. */
+export function channelPostBody(post: Post): MessageBody {
+  return post.author.kind === 'buddy' && post.conversationId
+    ? legacyBody(post.body)
+    : { t: 'text', text: post.body };
+}
 
 export function authorKey(author: Actor): string {
   switch (author.kind) {
@@ -406,6 +415,7 @@ function outboxPost(entry: OutboxEntry): Post {
         body: entry.body,
         evidence: [],
         request: { state: 'none' },
+        broadcast: entry.broadcast,
         createdAt: entry.createdAt,
         // After every served post (hex UUIDs sort below 'z'), in the order they were sent.
         ord: `z-outbox-${entry.createdAt}-${entry.key}`,
@@ -738,7 +748,7 @@ export function inboxRequests(inbox: Inbox): Post[] {
 // What a nav item shows: the badge counts requests waiting on the owner, the
 // dot says some rail channel has anything new. `workspaceId` null sums all.
 // `requests` is global in every inbox, so it is counted by post id, once.
-export type OwnerUnreadTotal = { requests: number; unreadChannels: number };
+export type OwnerUnreadTotal = { requests: number; unreadChannels: number; unreadThreads: number };
 
 export function ownerUnreadTotal(
   inboxes: OwnerInboxes | null,
@@ -746,12 +756,19 @@ export function ownerUnreadTotal(
 ): OwnerUnreadTotal {
   const requests = new Set<string>();
   let unreadChannels = 0;
+  let unreadThreads = 0;
   for (const [id, inbox] of Object.entries(inboxes ?? {})) {
     if (workspaceId !== null && id !== workspaceId) continue;
     for (const post of inboxRequests(inbox)) requests.add(post.id);
     unreadChannels += inbox.channels.filter((entry) => isListed(entry) && entry.unread > 0).length;
+    unreadThreads += inbox.unreadThreads;
   }
-  return { requests: requests.size, unreadChannels };
+  return { requests: requests.size, unreadChannels, unreadThreads };
+}
+
+/** New posts in a channel or new replies in a followed thread: the one "something is new" dot. */
+export function anyUnread(total: OwnerUnreadTotal): boolean {
+  return total.unreadChannels > 0 || total.unreadThreads > 0;
 }
 
 /** Requests awaiting the owner in one channel: a DM row's badge. */
@@ -825,29 +842,73 @@ function useDocumentVisible(): boolean {
   return visible;
 }
 
+// What the owner reads: D = Channel (its top-level cursor) ⊕ Thread (a followed thread's cursor,
+// THREADS_VIEW_2026-09-28.md). Until then the thread pane moved the CHANNEL cursor through a
+// reply, which marked top-level posts newer than it read unseen.
+export type ReadTarget =
+  | { kind: 'channel'; channelId: string }
+  | { kind: 'thread'; rootId: string };
+
+function readUrl(target: ReadTarget): string {
+  switch (target.kind) {
+    case 'channel':
+      return `/api/buddies/channels/${encodeURIComponent(target.channelId)}/read`;
+    case 'thread':
+      return `/api/buddies/threads/${encodeURIComponent(target.rootId)}/read`;
+  }
+}
+
 /**
- * The owner is looking at a channel (or thread): mark it read through the
- * newest post rendered whenever it is on screen with something unread. A post
- * that lands after this render stays unread until the next refresh shows it;
- * the server's push clears the channel on the owner's other devices.
+ * The owner is looking at a channel or thread: mark it read through the newest
+ * post rendered whenever it is on screen with something unread. A post that
+ * lands after this render stays unread until the next refresh shows it; the
+ * server's push clears it on the owner's other devices.
  */
-export function useMarkChannelRead(
-  channelId: string,
-  unread: number | undefined,
+export function useMarkRead(
+  target: ReadTarget,
+  hasUnread: boolean,
   newestPostId: string | null
 ): void {
   const visible = useDocumentVisible();
-  const hasUnread = unread !== undefined && unread > 0;
+  const url = readUrl(target);
   useEffect(() => {
     if (!visible || !hasUnread || newestPostId === null) return;
-    void buddyApi(`/api/buddies/channels/${encodeURIComponent(channelId)}/read`, {
+    void buddyApi(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ postId: newestPostId }),
-    }).catch((error: unknown) =>
-      console.warn(`[channels] could not mark ${channelId} read:`, error)
-    );
-  }, [channelId, newestPostId, hasUnread, visible]);
+    }).catch((error: unknown) => console.warn(`[channels] could not mark ${url} read:`, error));
+  }, [url, newestPostId, hasUnread, visible]);
+}
+
+/**
+ * One open thread, as both shells render it: the root, its replies (with the
+ * outbox), who is replying, bottom-following, and the thread read mark. The
+ * desktop pane and the mobile screen each carried a copy of this wiring.
+ */
+export function useThreadView(
+  channelId: string,
+  rootId: string,
+  linkedPostId: string | null,
+  buddyNames: Readonly<Record<string, string>>
+) {
+  const thread = useChannelFeed(threadFeed(rootId, linkedPostId));
+  const root = thread.latest.data?.root;
+  const replying = useChannelResponding(channelId, buddyNames).get(rootId);
+  const replies = useWithOutbox(channelId, rootId, thread.posts);
+  const replyRows = useMemo(() => channelRows(replies ?? []), [replies]);
+  const follow = useFollowBottom(
+    replyRows.length + (replying === undefined ? 0 : 1),
+    thread.posts,
+    linkedPostId
+  );
+  // A thread the owner does not follow has no cursor; the server ignores the mark.
+  useMarkRead({ kind: 'thread', rootId }, true, newestServedId(thread.posts) ?? root?.id ?? null);
+  const onPosted = () => {
+    follow.pin();
+    void thread.latest.refetch();
+  };
+  return { thread, root, replying, replyRows, follow, onPosted };
 }
 
 /**
@@ -860,10 +921,9 @@ export function useOwnerUnreadTitle(): void {
   const total = ownerUnreadTotal(inboxes.data, null);
   const baseTitle = useRef(document.title);
   useEffect(() => {
-    const prefix =
-      total.requests > 0 ? `(${total.requests}) ` : total.unreadChannels > 0 ? '• ' : '';
+    const prefix = total.requests > 0 ? `(${total.requests}) ` : anyUnread(total) ? '• ' : '';
     document.title = `${prefix}${baseTitle.current}`;
-  }, [total.requests, total.unreadChannels]);
+  }, [total.requests, total.unreadChannels, total.unreadThreads]);
 }
 
 /** Archive changes navigation and unread counts on both shells through the shared keyed cache. */

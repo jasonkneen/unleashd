@@ -263,7 +263,7 @@ export const invalidateBuddyResources = (): void =>
 
 /**
  * One channel changed (`channel_changed`): refresh its `/api/buddies/channels/<id>` keys plus
- * mounted threads, owner inboxes and task keys, which the push does not name. See docs/client-
+ * mounted threads, owner inboxes, the Threads view and task keys, which the push does not name. See docs/client-
  * rationale.md#invalidate-channel.
  */
 export const invalidateChannelResources = (channelId: string): void => {
@@ -274,6 +274,7 @@ export const invalidateChannelResources = (channelId: string): void => {
       key.startsWith(`${channel}/`) ||
       /^\/api\/buddies\/posts\/[^/]+\/thread/.test(key) ||
       /^\/api\/buddies\/workspaces\/[^/]+\/inbox$/.test(key) ||
+      /^\/api\/buddies\/workspaces\/[^/]+\/threads\?/.test(key) ||
       key.startsWith('buddy-owner-inboxes:') ||
       /^\/api\/buddies\/tasks\/[^/?]+(\/posts\?.*)?$/.test(key)
   );

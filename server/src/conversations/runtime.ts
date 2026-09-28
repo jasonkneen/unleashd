@@ -23,6 +23,7 @@ import type {
   SubAgent,
 } from '@unleashd/shared';
 import {
+  bodyText,
   encodeRows,
   kindBuddyContext,
   matchConversationKind,
@@ -463,7 +464,11 @@ export class Conversation extends EventEmitter {
   }
 
   private addSystemMessage(content: string): void {
-    this.appendMessage({ role: 'system', content, timestamp: new Date() });
+    this.appendMessage({
+      role: 'system',
+      body: { t: 'text', text: content },
+      timestamp: new Date(),
+    });
   }
 
   // The one resume/fresh decision, for both --resume and the prompt's wording.
@@ -527,7 +532,7 @@ export class Conversation extends EventEmitter {
             refreshBriefing,
           });
 
-    this.appendMessage({ role: 'user', content, timestamp: new Date() });
+    this.appendMessage({ role: 'user', body: { t: 'text', text: content }, timestamp: new Date() });
     this._policy.admitted(input, content);
     // Provenance comes from the host producer, never transcript text.
     this.runner.start({
@@ -610,7 +615,7 @@ export class Conversation extends EventEmitter {
     console.error(`[${this.id}] ${errorMessage}`);
     this.appendMessage({
       role: 'system',
-      content: errorMessage,
+      body: { t: 'text', text: errorMessage },
       timestamp: new Date(),
       completionReason: 'error',
     });
@@ -883,6 +888,7 @@ export class Conversation extends EventEmitter {
       queue: this.queue,
       subAgents: this.subAgents,
       latestTurn: { observedModel: this.observedModel, usage: this.providerUsage },
+      latestAttempt: null,
       swarmDebugPrefix: this.swarmDebugPrefix,
     };
   }
@@ -893,7 +899,7 @@ export class Conversation extends EventEmitter {
       type: 'message',
       conversationId: this.id,
       role: message.role,
-      content: message.content,
+      body: message.body,
     });
     this.publishActivity();
   }
@@ -935,7 +941,10 @@ export function conversationLabel(title: string | undefined, messages: readonly 
   if (title?.trim()) return title.trim();
   const source = messages.find((message) => message.role === 'user') ?? messages[0];
   if (!source) return 'New conversation';
-  const visible = source.content.replace(HIDDEN_ENVELOPE_RE, '').trim().replace(OOMPA_TAG_RE, '');
+  const visible = bodyText(source.body)
+    .replace(HIDDEN_ENVELOPE_RE, '')
+    .trim()
+    .replace(OOMPA_TAG_RE, '');
   const line = visible.split(/\s+/).filter(Boolean).join(' ');
   if (!line) return 'New conversation';
   return line.length > LABEL_MAX_UNITS ? `${line.slice(0, LABEL_MAX_UNITS - 1)}…` : line;

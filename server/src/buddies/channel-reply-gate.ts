@@ -88,12 +88,16 @@ async function runGate(
   const result = await runDetached(execute, request, deadline, (event, stop) => {
     if (event.type === 'text.delta') output += event.text;
     if (event.type === 'error' || event.type === 'out_of_tokens') providerError = event.message;
+    // Native child states replace completed tool events; they still violate the no-tools gate.
+    // Guard: buddies-v2.test.ts "native child events cannot bypass restricted Buddy runs".
     const broken =
       event.type === 'tool.use'
         ? `(called tool ${event.name})`
-        : output.length > GATE_MAX_CHARS
-          ? output
-          : null;
+        : event.type === 'subagent.state'
+          ? `(sub-agent ${event.operation})`
+          : output.length > GATE_MAX_CHARS
+            ? output
+            : null;
     if (broken === null) return;
     violation ??= { kind: 'unparseable', output: broken };
     stop();

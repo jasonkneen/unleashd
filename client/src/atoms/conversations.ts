@@ -8,6 +8,7 @@ import type {
   Message,
   QueuedMessage,
   SubAgent,
+  TurnAttemptSnapshot,
 } from '@unleashd/shared';
 import { type Atom, atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
@@ -193,7 +194,7 @@ export const childRowsFamily = atomFamily((parentId: string) =>
  */
 export type Transcript =
   | { tag: 'absent' }
-  | { tag: 'loading' }
+  | { tag: 'loading'; latestAttempt?: TurnAttemptSnapshot | null }
   | {
       tag: 'loaded';
       epoch: number;
