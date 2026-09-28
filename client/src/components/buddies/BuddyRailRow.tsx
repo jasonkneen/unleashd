@@ -42,7 +42,6 @@ export function BuddyRailRow({
         <BuddySigil className="channel-browser-buddy-sigil" name={member.name} />
         <span className="channel-browser-channel-name ui-truncate">{member.name}</span>
       </button>
-      <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
       {direct.woken && (
         <WakeIndicator
           key={direct.woken.attempt}
@@ -63,6 +62,7 @@ export function BuddyRailRow({
           <WakeIcon />
         </button>
       </span>
+      <BuddyBackgroundLink buddyId={member.id} workspaceId={workspaceId} name={member.name} />
     </li>
   );
 }
