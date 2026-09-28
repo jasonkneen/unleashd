@@ -26,6 +26,7 @@ fn request(body: &str, key: &str) -> PostInput {
         reply_to_id: None,
         task_id: None,
         from_conversation_id: Some("conv-sender".into()),
+        run_config: None,
         key: key.into(),
     }
 }
@@ -38,6 +39,7 @@ fn chat(buddy_id: &str, turn: &str, conversation: &str) -> EnqueueInput {
         task_id: None,
         after_run_id: None,
         deadline: None,
+        config: None,
     }
 }
 
@@ -319,6 +321,45 @@ fn request_answer_round_trip_and_failure_notice() {
     assert_eq!(s.get_post(&buddy("mid"), &failing.id).unwrap().request, RequestState::Failed);
     let notice = s.claim_run(60_000).unwrap().unwrap();
     assert_eq!((notice.run.buddy_id.as_str(), notice.run.input), ("mid", RunInput::FailureNotice { run_id: claim.run.id }));
+}
+
+// 2026-09-28: no run could choose its model, so a Buddy launched four untracked `codex exec`
+// workers from a thread (agent_notes/2026-09-28_buddy-worker-spawn-gap.md). A worker is a request
+// with a run config: its run carries the config, and the answer returns to the spawning call.
+#[test]
+fn a_worker_request_runs_on_its_own_config_and_returns_to_the_spawner() {
+    let mut f = fixture();
+    let s = &mut f.store;
+    let sol = RunConfig { provider: "codex".into(), model: "gpt-6-sol".into(), reasoning_effort: Some("high".into()) };
+    let work = |body: &str, key: &str| PostInput { run_config: Some(sol.clone()), ..request(body, key) };
+    let me_only = || ChannelRef::Direct { members: vec![buddy("mid")] };
+
+    let first = s.post(&buddy("mid"), me_only(), work("sweep A", "w1")).unwrap();
+    let second = s.post(&buddy("mid"), me_only(), work("sweep B", "w2")).unwrap();
+    let a = s.claim_run(60_000).unwrap().unwrap();
+    let b = s.claim_run(60_000).unwrap().unwrap();
+    assert_eq!(
+        [(&a.run.input, &a.run.config), (&b.run.input, &b.run.config)],
+        [(&RunInput::Post { post_id: first.id.clone() }, &Some(sol.clone())), (&RunInput::Post { post_id: second.id.clone() }, &Some(sol.clone()))],
+        "each worker is its own tracked run of the spawner, on the chosen model, in parallel"
+    );
+    s.answer(&buddy("mid"), AnswerInput { request_id: first.id.clone(), body: "A done".into(), evidence: vec![], key: "a1".into() }).unwrap();
+    s.settle_run(&a.run.id, &a.lease_token, Outcome::Complete { text: "A done".into() }).unwrap();
+    let back = s.claim_run(60_000).unwrap().unwrap();
+    assert_eq!(
+        (&back.run.input, back.run.conversation_id.as_deref(), &back.run.config),
+        (&RunInput::Reply { post_id: first.id.clone() }, Some("conv-sender"), &None),
+        "the result wakes the spawning conversation, on the spawner's own profile"
+    );
+
+    let report = s.post(&buddy("mid"), dm("mid", "ic"), work("for my report", "w3")).unwrap();
+    assert_eq!(s.list_runs(RunQuery::Buddy { buddy_id: "ic".into() }, 5).unwrap()[0].input, RunInput::Post { post_id: report.id });
+    let peer = s.post(&buddy("peer"), dm("peer", "mid"), work("switch models", "w4"));
+    assert!(matches!(peer, Err(CoreError::Denied(_))), "a peer cannot move another buddy off its profile: {peer:?}");
+    let upward = s.post(&buddy("ic"), dm("ic", "mid"), work("and you", "w5"));
+    assert!(matches!(upward, Err(CoreError::Denied(_))), "nor can a report move its manager");
+    let inform = s.post(&buddy("mid"), me_only(), PostInput { kind: PostKind::Inform, ..work("note", "w6") });
+    assert!(matches!(inform, Err(CoreError::Invalid(_))), "an inform starts no run to configure");
 }
 
 #[test]

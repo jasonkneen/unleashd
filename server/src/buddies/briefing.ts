@@ -36,6 +36,7 @@ export const BUDDY_TOOL_GUIDE = [
   'channel_read: read a channel or thread, or search every channel you can read ({search}). tasks / task_write: the authority for current work (status, blockers, next actions, comments).',
   'doc_read / doc_write: soul, working and long-term memory. Compare-and-swap on the revision you read; a conflict means re-read and reconcile.',
   'Detailed notes (decisions, evidence, failed attempts) are agent_notes/<date>_<topic>.md files you write and search with your own file tools.',
+  'Background worker: post kind "request" with worker {provider, model} to {direct:[]} (you) or a report. Each is a tracked run; its answer wakes you. Never shell out to agent CLIs.',
   'runs: your runs (list, get, cancel). schedule: cron runs. team: the directory.',
   'Never edit the Buddies database or files to change Buddy state. A denied tool is an authority boundary; do not route around it.',
   'Do not copy task status into memory. Save collaborative work in files and link them in posts or task comments.',

@@ -1,4 +1,4 @@
-import type { Actor, BuddiesCore, Channel, Post } from '@unleashd/buddies-core';
+import type { Actor, BuddiesCore, Channel, Post, Run } from '@unleashd/buddies-core';
 
 /**
  * The in-process change bus. Every Buddy write (MCP tool, owner route, runner, responder) now
@@ -7,7 +7,11 @@ import type { Actor, BuddiesCore, Channel, Post } from '@unleashd/buddies-core';
  * `channel_changed` or woke the follow-up gate. Guard: `buddies-v2.test.ts` "an MCP write fires
  * the change bus".
  */
-export type BuddyEvent = { kind: 'changed' } | { kind: 'posted'; post: Post; channel: Channel };
+export type BuddyEvent =
+  | { kind: 'changed' }
+  | { kind: 'posted'; post: Post; channel: Channel }
+  /** A cancel was recorded (owner route or a Buddy's `runs` tool); the runner stops its turn. */
+  | { kind: 'cancelled'; run: Run };
 
 export type BuddyEvents = ReturnType<typeof createBuddyEvents>;
 

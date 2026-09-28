@@ -173,7 +173,8 @@ impl Store {
                 task_id: input.task_id.as_deref(),
                 op: "post",
                 payload: json!({"channel": channel.id, "kind": input.kind.as_str(), "body": input.body, "purpose": input.purpose,
-                    "evidence": input.evidence, "reply_to": input.reply_to_id, "task": input.task_id}),
+                    "evidence": input.evidence, "reply_to": input.reply_to_id, "task": input.task_id,
+                    "run_config": input.run_config}),
                 key: Some(&input.key),
             };
             let id = idempotent(tx, &m, |tx| insert_post(tx, actor, &channel, &input))?;
@@ -539,6 +540,9 @@ fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostI
         return Err(CoreError::Invalid("channel is archived; restore it before posting".into()));
     }
     let ask = ask(input.kind, channel, actor)?;
+    if let Some(config) = &input.run_config {
+        require_worker_authority(tx, actor, &ask, config)?;
+    }
     let root_id = input.reply_to_id.as_deref().map(|parent| thread_root(tx, parent, &channel.id)).transpose()?;
     let ord = crate::ids::next().to_string();
     let id = format!("post_{ord}");
@@ -573,9 +577,23 @@ fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostI
             task_id: input.task_id.clone(),
             after_run_id: None,
             deadline: None,
+            config: input.run_config.clone(),
         })?;
     }
     Ok(id)
+}
+
+/// A worker: a request whose recipients' runs execute with `config`, not their profile. Only a
+/// recipient the author may enqueue runs for (itself, a report) takes it, so no buddy can move a
+/// peer or its manager off the model the owner picked. An inform starts no run to configure.
+fn require_worker_authority(tx: &Transaction, actor: &Actor, ask: &Ask, config: &RunConfig) -> Result<()> {
+    match ask {
+        Ask::Inform => Err(CoreError::Invalid(format!("a run config needs a request; got one on an inform: {config:?}"))),
+        Ask::Request { owed_by } => owed_by.iter().try_for_each(|recipient| match recipient {
+            Actor::Owner => Err(CoreError::Invalid("the owner runs no worker; a run config needs buddy recipients".into())),
+            Actor::Buddy { id } => require(tx, actor, Op::EnqueueRun, &Subject::Buddy { id: id.clone() }),
+        }),
+    }
 }
 
 /// A reply joins its parent's thread, which must be in the same channel.
@@ -599,6 +617,7 @@ fn notify_author(tx: &Transaction, request: &Post) -> Result<()> {
                 task_id: request.task_id.clone(),
                 after_run_id: None,
                 deadline: None,
+                config: None,
             })
             .map(|_| ()),
     }

@@ -191,6 +191,19 @@ pub enum Outcome {
     Cancelled { reason: String },
 }
 
+/// How a run executes when it must not use its buddy's saved profile: a worker the buddy (or its
+/// manager) spawned with a model of its choosing. Absent on a run = the profile. Values pass
+/// through verbatim (provider-bespoke); the server checks them against its catalog before posting.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunConfig {
+    pub provider: String,
+    pub model: String,
+    /// Absent: the provider's default effort.
+    pub reasoning_effort: Option<String>,
+}
+
 /// Doc audience. Columns (scope_kind, scope_id); Buddy scope's id is the buddy, Workspace's the workspace.
 /// Memory kinds (soul, working, long_term) are always Buddy-scoped: one per Buddy, read by every
 /// turn kind and the owner's Memory tab. Only shared docs may be Workspace-scoped.
@@ -368,6 +381,8 @@ pub struct Run {
     pub created_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
+    /// Absent: the run executes on its buddy's profile.
+    pub config: Option<RunConfig>,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
@@ -417,6 +432,9 @@ pub struct PostInput {
     pub task_id: Option<String>,
     /// The sender's conversation; a `Request`'s answer returns there.
     pub from_conversation_id: Option<String>,
+    /// A `Request` only: its recipients' runs execute with this instead of their profile (a
+    /// worker). Every recipient must be the author or report to it (`EnqueueRun`).
+    pub run_config: Option<RunConfig>,
     pub key: String,
 }
 
@@ -488,6 +506,7 @@ pub struct EnqueueInput {
     pub task_id: Option<String>,
     pub after_run_id: Option<String>,
     pub deadline: Option<String>,
+    pub config: Option<RunConfig>,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]

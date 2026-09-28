@@ -105,6 +105,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
             task_id: Some(parent.id.clone()),
             after_run_id: Some(claim.run.id.clone()),
             deadline: None,
+            config: None,
         },
     )
     .unwrap();
@@ -141,6 +142,7 @@ fn workload(s: &mut unleashd_buddies::Store) {
                 task_id: None,
                 after_run_id: None,
                 deadline: None,
+                config: None,
             },
         )
         .unwrap();
@@ -233,6 +235,7 @@ fn input(kind: PostKind, body: &str, key: &str) -> PostInput {
         reply_to_id: None,
         task_id: None,
         from_conversation_id: None,
+        run_config: None,
         key: key.into(),
     }
 }

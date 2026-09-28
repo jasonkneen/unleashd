@@ -101,3 +101,28 @@ Owner asked for obvious fixes, both to the confusion and to the system.
    stock-trader/basketball ones are historical incident records. Wave Simulation Lead owns the two
    wave_sim notes (request post_01a0e746-c189-7673-a32e-934a5b0265f4).
 5. Bounded reads and permalink reads: task_01a0e746.
+
+## Resolution (Buddies Release Engineer, branch `buddy-work-runs`)
+
+Smaller than the proposal: **no new post kind**. A request to a self-only DM already made the
+author owe the answer (`ask()` in posts.rs), so `request` + Post run + answer + Reply run was
+already the spawn-and-return path. What was missing:
+
+- `RunConfig {provider, model, reasoningEffort?}` on `PostInput.run_config` → `EnqueueInput.config`
+  → `run.config` (JSON column, added on open to existing files). Only on a request, and every
+  recipient must pass `EnqueueRun` (self or a transitive report), so a peer can't move a Buddy off
+  the model the owner picked. The runner opens the worker conversation with it
+  (`openBackground({config})` → `workerConversationConfig`).
+- MCP `post` takes `worker`; `checkedRunConfig` validates against the provider catalog and names
+  the valid models/efforts on error. `channel.direct: []` is now allowed (you alone).
+- A Buddy's `runs cancel` now stops a running turn: a `cancelled` bus event the runner handles
+  (previously only the owner route called `host.stop`; the Buddy path only marked the row).
+
+Known gap: a worker spawned from a thread seat or owner chat (foreground) returns to the DM
+inbox, not as a turn in the seat (existing `returnJob` rule: human chats take no automated input).
+The seat is not re-woken. Waking it would need a seat-audience input kind; decision left open.
+
+Deploy dependency: the live `buddies-v3.sqlite` has already lost `run.retry_of` (another session's
+uncommitted `drop_run_retry_of` ran against it), so HEAD code, this branch included, cannot start
+the runner on live data until that drop is committed. Merge it first; this branch reads `config`
+by column name, so its index shift does not conflict.

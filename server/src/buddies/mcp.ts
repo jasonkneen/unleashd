@@ -25,6 +25,7 @@ import {
 } from './core';
 import { type BuddyEvents, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
+import { WorkerSchema, checkedRunConfig } from './worker-config';
 
 /**
  * The one Buddy tool endpoint: stateless streamable HTTP on its own loopback listener, NOT the
@@ -67,8 +68,10 @@ const actorOf = (id: string): Actor => (id === 'owner' ? OWNER : buddyActor(id))
 const channelRef = z.union([
   z.object({ id: z.string().min(1) }).describe('A channel id (public, direct or task)'),
   z
-    .object({ direct: z.array(z.string().min(1)).min(1) })
-    .describe("A direct channel with these members (buddy ids, 'owner'); you are always in it"),
+    .object({ direct: z.array(z.string().min(1)) })
+    .describe(
+      "A direct channel with these members (buddy ids, 'owner'); you are always in it, so [] is you alone"
+    ),
   z.object({ task: z.string().min(1) }).describe("A task's channel (its comments)"),
 ]);
 
@@ -206,7 +209,7 @@ const readTasks = (deps: ToolDeps, grant: TurnGrant, view: TaskView) =>
 const BUDDY_TOOLS = {
   post: buddyTool({
     description:
-      "Write a post. `channel`: a channel id, {direct:[members]} (a DM, created on first use), or {task}. kind 'request' (DMs only) asks the other members for an answer and starts their turn; 'inform' wakes nobody. Reply in a thread with replyToId. In a public channel, mention a Buddy as [@Name](buddy:<id>) (ids from `team`): it wakes that Buddy, which must reply in the thread; a Buddy who posted in the thread may also follow up. Embed media as ![alt](/absolute/path).",
+      "Write a post. `channel`: a channel id, {direct:[members]} (a DM, created on first use), or {task}. kind 'request' (DMs only) asks the other members for an answer and starts their turn; 'inform' wakes nobody. Reply in a thread with replyToId. In a public channel, mention a Buddy as [@Name](buddy:<id>) (ids from `team`): it wakes that Buddy, which must reply in the thread; a Buddy who posted in the thread may also follow up. Embed media as ![alt](/absolute/path). Spawn a tracked background worker: kind 'request' with `worker` {provider, model, reasoningEffort?} to {direct:[]} (yourself) or a direct report; each request is its own run (parallel up to your run limit, visible and cancellable with `runs`), and its answer wakes this conversation. Never shell out to agent CLIs for this.",
     writes: true,
     schema: z.object({
       channel: channelRef,
@@ -215,10 +218,14 @@ const BUDDY_TOOLS = {
       replyToId: z.string().optional(),
       taskId: z.string().optional(),
       purpose: z.string().max(200).optional(),
+      worker: WorkerSchema.optional().describe(
+        "kind 'request' only: its runs execute on this model instead of the recipient's profile"
+      ),
       evidence,
       key,
     }),
-    async handler(deps, grant, input) {
+    async handler(deps, grant, { worker, ...input }) {
+      const runConfig = worker && checkedRunConfig(worker);
       const channel = await deps.core.openChannel(
         grant.author,
         toChannelRef(grant.author, input.channel)
@@ -230,7 +237,7 @@ const BUDDY_TOOLS = {
       const post = await deps.core.post(
         grant.author,
         { kind: 'id', id: channel.id },
-        { ...input, body, fromConversationId: grant.conversationId }
+        { ...input, body, fromConversationId: grant.conversationId, runConfig }
       );
       deps.events.emit({ kind: 'posted', post, channel });
       return post;
@@ -361,7 +368,8 @@ const BUDDY_TOOLS = {
       }),
   }),
   runs: buddyTool({
-    description: "List a buddy's runs (default: yours), read one, or cancel one.",
+    description:
+      "List a buddy's runs (default: yours), read one, or cancel one (a running one's turn is stopped).",
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
@@ -379,8 +387,11 @@ const BUDDY_TOOLS = {
           );
         case 'get':
           return deps.core.getRun(input.action.runId);
-        case 'cancel':
-          return deps.core.cancelRun(grant.principal, input.action.runId);
+        case 'cancel': {
+          const run = await deps.core.cancelRun(grant.principal, input.action.runId);
+          deps.events.emit({ kind: 'cancelled', run });
+          return run;
+        }
       }
     },
   }),

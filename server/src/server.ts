@@ -99,6 +99,7 @@ import { createMemoryReviewer } from './buddies/memory-review';
 import { createBuddyPolicyPort } from './buddies/policy-port';
 import { registerBuddyRoutes } from './buddies/routes';
 import { type RunnerHost, createRunner } from './buddies/runner';
+import { workerConversationConfig } from './buddies/worker-config';
 import { UPLOADS_RETENTION_MS, startUploadsGc } from './uploads/gc';
 
 let startupAuditResults: ReturnType<typeof auditLocalAgents> = [];
@@ -349,11 +350,12 @@ const buddyRunnerHost: RunnerHost = {
       ? 'background'
       : 'foreground';
   },
-  openBackground: async ({ conversationId, context, commandId }) => {
+  openBackground: async ({ conversationId, context, commandId, config }) => {
     await buddyCreationService.createServerBuddyConversation({
       context,
       conversationId,
       commandId,
+      config: config && workerConversationConfig(config),
       deferInitialMessage: true,
       visibility: 'background',
     });

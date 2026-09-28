@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -38,6 +39,7 @@ import { createMemoryReviewer } from '../src/buddies/memory-review';
 import { createBuddyPolicyPort } from '../src/buddies/policy-port';
 import { registerBuddyRoutes } from '../src/buddies/routes';
 import { createRunner } from '../src/buddies/runner';
+import { workerConversationConfig } from '../src/buddies/worker-config';
 import { TURN_MAX_RUNTIME_MS } from '../src/constants/timeouts';
 import { createBuddyCreationService } from '../src/conversations/buddy-creation-service';
 import { ConversationConfigService } from '../src/conversations/config-service';
@@ -177,6 +179,8 @@ async function world() {
   const silent = new Set<number>();
   // Turns that end out of tokens, as a harness at its usage limit reports it.
   const outOfTokens = new Set<number>();
+  // Turns whose provider process was told to stop.
+  const stopped = new Set<number>();
   const seatPost = /post\(\{ channel: \{ id: "([^"]+)" \}, replyToId: "([^"]+)"/;
   const executeTurn = ((request: ProviderRequest) => {
     const turn: Turn = { n: turns.length + 1, request, mcp: request.mcpServers!.unleashd_buddy };
@@ -196,8 +200,14 @@ async function world() {
     }>((resolve) => {
       finish = resolve;
     });
+    // A running child, as the runtime's stop escalation reads it (exitCode, 'close').
+    const child = Object.assign(new EventEmitter(), { exitCode: null as number | null });
+    completed.then(() => {
+      child.exitCode = 0;
+      child.emit('close');
+    });
     return {
-      child: { exitCode: 0 },
+      child,
       events: (async function* () {
         yield { type: 'session.started' as const, sessionId };
         yield { type: 'turn.started' as const };
@@ -225,7 +235,9 @@ async function world() {
         finish({ exitCode: 0, signal: null, sessionId, reason: 'success' });
       })(),
       completed,
-      stop: () => undefined,
+      stop: () => {
+        stopped.add(turn.n);
+      },
     };
   }) as unknown as NonNullable<ConversationRuntimeDependencies['executeTurn']>;
 
@@ -260,11 +272,12 @@ async function world() {
           ? 'background'
           : 'foreground';
       },
-      openBackground: async ({ conversationId, context, commandId }) => {
+      openBackground: async ({ conversationId, context, commandId, config }) => {
         await creation.createServerBuddyConversation({
           context,
           conversationId,
           commandId,
+          config: config && workerConversationConfig(config),
           deferInitialMessage: true,
           visibility: 'background',
         });
@@ -338,6 +351,7 @@ async function world() {
     answers,
     silent,
     outOfTokens,
+    stopped,
     gate,
     channels,
     creation,
@@ -782,6 +796,116 @@ test('a scheduled run asks for help in the background and its answer comes back 
     await until(
       async () => (await w.runs(w.lead.id)).every((r) => r.status === 'complete'),
       "Lead's runs settle"
+    );
+  } finally {
+    await w.close();
+  }
+});
+
+// 2026-09-28: a Buddy launched four untracked `codex exec` workers from a thread because no tool
+// could choose a run's model (agent_notes/2026-09-28_buddy-worker-spawn-gap.md). A worker is a
+// request to itself carrying `worker`: a tracked run on that model whose answer wakes the spawning
+// conversation, and the Buddy's own `runs cancel` reaches the worker's process.
+test('a Buddy spawns tracked workers on a model it picks; an answer wakes it and runs cancel stops one', async () => {
+  const w = await world();
+  try {
+    const worker = { provider: 'codex', model: 'gpt-6-luna', reasoningEffort: 'low' };
+    const spawned: Post[] = [];
+    w.during.set(1, async (turn) => {
+      const unknown = await call(turn.mcp, 'post', {
+        channel: { direct: [] },
+        kind: 'request',
+        body: 'x',
+        worker: { ...worker, model: 'gpt-nope' },
+        key: 'unknown-model',
+      });
+      assert.equal(unknown.isError, true);
+      assert.match(
+        unknown.text,
+        /gpt-6-luna/,
+        `the error names the models it could run: ${unknown.text}`
+      );
+      const peer = await call(turn.mcp, 'post', {
+        channel: { direct: [w.designer.id] },
+        kind: 'request',
+        body: 'switch models',
+        worker,
+        key: 'peer',
+      });
+      assert.equal(peer.isError, true, 'a peer is never moved off the profile the owner picked');
+      for (const body of ['Sweep A', 'Sweep B']) {
+        const posted = await call(turn.mcp, 'post', {
+          channel: { direct: [] },
+          kind: 'request',
+          body,
+          worker,
+          key: body,
+        });
+        assert.equal(posted.isError, false, posted.text);
+        spawned.push(posted.value);
+      }
+    });
+    const [a, b] = [() => spawned[0], () => spawned[1]];
+    const runOf = async (post: Post) =>
+      (await w.runs(w.lead.id)).find((r) => r.input.kind === 'post' && r.input.postId === post.id)!;
+    // Workers and the return turn start in any order: route each turn by what it was asked.
+    const route = async (turn: Turn) => {
+      if (turn.request.prompt.includes('Sweep B'))
+        return void (await until(() => w.stopped.has(turn.n), 'the stop to reach worker B'));
+      if (turn.request.prompt.includes(`Your request ${a().id} was answered`)) {
+        const cancelled = await call(turn.mcp, 'runs', {
+          action: { kind: 'cancel', runId: (await runOf(b())).id },
+        });
+        assert.equal(cancelled.isError, false, cancelled.text);
+      }
+    };
+    for (let n = 2; n <= 6; n++) w.during.set(n, route);
+
+    const schedule = await w.core.putSchedule(OWNER, {
+      buddyId: w.lead.id,
+      name: 'sweep',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      prompt: 'Run the sweeps',
+      limits: '{}',
+      enabled: true,
+      key: 'sweep',
+    });
+    await w.core.enqueueRun(OWNER, {
+      buddyId: w.lead.id,
+      input: { kind: 'schedule', scheduleId: schedule.id, slot: new Date().toISOString() },
+    });
+    w.emit({ kind: 'changed' });
+
+    const cancelledB = await until(
+      async () => (await runOf(b()))?.status === 'cancelled' && runOf(b()),
+      'worker B cancelled'
+    );
+    const doneA = await until(
+      async () => (await runOf(a()))?.status === 'complete' && runOf(a()),
+      'worker A complete'
+    );
+    for (const run of [doneA, cancelledB]) {
+      assert.deepEqual(run.config, worker, 'the run records the model it was spawned on');
+      const turn = w.turns.find((t) =>
+        t.request.prompt.includes(`Request ${run.input.kind === 'post' && run.input.postId}`)
+      )!;
+      const request = turn.request as { harness: string; model?: string; reasoningEffort?: string };
+      assert.deepEqual(
+        [request.harness, request.model, request.reasoningEffort],
+        ['codex', 'gpt-6-luna', 'low'],
+        'the worker ran on the chosen model, not the profile'
+      );
+    }
+    const lead = w.turns[0].request as { model?: string };
+    assert.notEqual(lead.model, 'gpt-6-luna', 'the spawner itself stays on its profile');
+    const returned = w.turns.find((t) =>
+      t.request.prompt.includes(`Your request ${a().id} was answered`)
+    )!;
+    assert.equal(
+      returned.request.resumeSessionId,
+      'native-1',
+      'the answer wakes the spawning call'
     );
   } finally {
     await w.close();

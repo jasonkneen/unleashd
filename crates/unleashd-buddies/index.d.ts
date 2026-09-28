@@ -239,6 +239,7 @@ export interface EnqueueInput {
   taskId?: string
   afterRunId?: string
   deadline?: string
+  config?: RunConfig
 }
 
 export interface Event {
@@ -314,6 +315,11 @@ export interface PostInput {
   taskId?: string
   /** The sender's conversation; a `Request`'s answer returns there. */
   fromConversationId?: string
+  /**
+   * A `Request` only: its recipients' runs execute with this instead of their profile (a
+   * worker). Every recipient must be the author or report to it (`EnqueueRun`).
+   */
+  runConfig?: RunConfig
   key: string
 }
 
@@ -364,6 +370,20 @@ export interface Run {
   createdAt: string
   startedAt?: string
   endedAt?: string
+  /** Absent: the run executes on its buddy's profile. */
+  config?: RunConfig
+}
+
+/**
+ * How a run executes when it must not use its buddy's saved profile: a worker the buddy (or its
+ * manager) spawned with a model of its choosing. Absent on a run = the profile. Values pass
+ * through verbatim (provider-bespoke); the server checks them against its catalog before posting.
+ */
+export interface RunConfig {
+  provider: string
+  model: string
+  /** Absent: the provider's default effort. */
+  reasoningEffort?: string
 }
 
 /** Why a run exists. Columns: (input_kind, input_id); the input_key is derived from it. */

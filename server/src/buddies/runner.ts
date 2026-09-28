@@ -1,4 +1,4 @@
-import type { Claim, Outcome, Post, Run, RunInput } from '@unleashd/buddies-core';
+import type { Claim, Outcome, Post, Run, RunConfig, RunInput } from '@unleashd/buddies-core';
 import type { BuddyContext } from '@unleashd/shared';
 import type { Briefings } from './briefing';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
@@ -26,10 +26,12 @@ export type ChatAdmission =
 /** What the runner needs from the conversation runtime (implemented by the host). */
 export interface RunnerHost {
   placement(conversationId: string): 'background' | 'foreground' | 'absent';
+  /** `config`: a worker run's own provider/model; absent, the Buddy's profile. */
   openBackground(input: {
     conversationId: string;
     context: BuddyContext;
     commandId: string;
+    config?: RunConfig;
   }): Promise<void>;
   /** One background turn; resolves with its final assistant text, rejects when it fails. */
   runTurn(input: {
@@ -174,7 +176,11 @@ export function createRunner(options: {
   }
 
   // A turn in the run's own new conversation.
-  const freshTurn = (run: Run, prompt: string, after: (text: string) => Promise<void> = nothingAfter): Job => ({
+  const freshTurn = (
+    run: Run,
+    prompt: string,
+    after: (text: string) => Promise<void> = nothingAfter
+  ): Job => ({
     kind: 'turn',
     conversationId: `buddy-run-${run.id}`,
     open: true,
@@ -279,6 +285,7 @@ export function createRunner(options: {
               conversationId: job.conversationId,
               context,
               commandId: `buddy-run-${run.id}`,
+              config: run.config,
             });
           await core.bindRun(run.id, claim.leaseToken, job.conversationId);
           await briefings.warm(context);
@@ -303,6 +310,12 @@ export function createRunner(options: {
     }
   }
 
+  // A running run whose cancel was recorded: kill its turn, and settle records it cancelled. Until
+  // 2026-09-28 only the owner route did this; a Buddy's `runs cancel` left its worker running.
+  function stopTurn(run: Run): void {
+    if (run.status === 'cancel_requested' && run.conversationId) host.stop(run.conversationId);
+  }
+
   function execute(claim: Claim): Promise<void> {
     const input = claim.run.input;
     const done = input.kind === 'chat' ? admitChat(claim, input.turnId) : runJob(claim);
@@ -319,7 +332,10 @@ export function createRunner(options: {
       logger.log(
         `[buddies-runner] recovered: ${recovered.interrupted} interrupted, ${recovered.abandonedChats} abandoned chat turns`
       );
-      unsubscribe = events.on(() => wake());
+      unsubscribe = events.on((event) => {
+        if (event.kind === 'cancelled') stopTurn(event.run);
+        wake();
+      });
       timer = setInterval(wake, options.backstopMs);
       timer.unref();
       paused = false;
@@ -409,7 +425,7 @@ export function createRunner(options: {
     /** Owner stop: a queued run ends now; a running one is asked to stop and its turn is killed. */
     async cancel(runId: string): Promise<Run> {
       const run = await core.cancelRun(OWNER, runId);
-      if (run.status === 'cancel_requested' && run.conversationId) host.stop(run.conversationId);
+      events.emit({ kind: 'cancelled', run });
       events.emit({ kind: 'changed' });
       return run;
     },

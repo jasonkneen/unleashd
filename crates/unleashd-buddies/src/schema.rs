@@ -125,6 +125,7 @@ CREATE TABLE run (
   lease_token TEXT, lease_expires_at TEXT, deadline TEXT,
   snapshot TEXT, outcome TEXT, error_code TEXT, error TEXT,
   ready_at TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, legacy TEXT,
+  config TEXT,
   UNIQUE(input_key, attempt)) STRICT;
 CREATE UNIQUE INDEX run_live_input ON run(input_key) WHERE status IN ('queued','running','cancel_requested');
 CREATE UNIQUE INDEX run_conversation_slot ON run(conversation_id)
@@ -210,6 +211,16 @@ fn drop_run_retry_of(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// `run.config` (a worker's own provider/model, JSON of `RunConfig`), added 2026-09-28 after
+/// Buddies shelled out to untracked `codex exec` workers because no run could choose its model.
+fn ensure_run_config(conn: &Connection) -> Result<()> {
+    let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('run') WHERE name = 'config')", [], |r| r.get(0))?;
+    if !present {
+        conn.execute_batch("ALTER TABLE run ADD COLUMN config TEXT;")?;
+    }
+    Ok(())
+}
+
 fn ensure_post_search(conn: &Connection) -> Result<()> {
     conn.execute_batch(POST_REFERENCE_INDEXES)?;
     conn.execute_batch(TASK_LIVE_INDEX)?;
@@ -236,6 +247,7 @@ pub fn open(path: &str) -> Result<Connection> {
             require_ordered_ids(&conn, path)?;
             ensure_channel_archive(&conn)?;
             drop_run_retry_of(&conn)?;
+            ensure_run_config(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }
@@ -251,6 +263,20 @@ pub fn open(path: &str) -> Result<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A live file created before 2026-09-28 has no run.config; every run read names it.
+    #[test]
+    fn run_config_is_added_to_an_existing_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        let path = path.to_str().unwrap();
+        open(path).unwrap().execute_batch("ALTER TABLE run DROP COLUMN config;").unwrap();
+        let conn = open(path).unwrap();
+        let present: bool =
+            conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('run') WHERE name = 'config')", [], |r| r.get(0)).unwrap();
+        assert!(present);
+        open(path).unwrap();
+    }
 
     #[test]
     fn channel_archive_upgrades_existing_lean_database_without_losing_channels() {

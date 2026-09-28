@@ -15,7 +15,7 @@ use std::str::FromStr;
 
 const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, \
     task_epoch, after_run_id, status, deadline, lease_expires_at, snapshot, outcome, error_code, error, ready_at, \
-    created_at, started_at, ended_at";
+    created_at, started_at, ended_at, config";
 
 fn run_row(r: &Row) -> rusqlite::Result<Run> {
     let ready_at: String = r.get(18)?;
@@ -41,7 +41,13 @@ fn run_row(r: &Row) -> rusqlite::Result<Run> {
         created_at: r.get(19)?,
         started_at: r.get(20)?,
         ended_at: r.get(21)?,
+        // By name: it is the last column, and index shifts elsewhere must not move it.
+        config: r.get::<_, Option<String>>("config")?.map(|json| run_config(&json)).transpose().map_err(corrupt)?,
     })
+}
+
+fn run_config(json: &str) -> Result<RunConfig> {
+    serde_json::from_str(json).map_err(|e| CoreError::Corrupt(format!("run config {json:?}: {e}")))
 }
 
 pub(crate) fn get_run(conn: &Connection, id: &str) -> Result<Run> {
@@ -81,8 +87,8 @@ impl Enqueue for Connection {
         let id = new_id("run");
         self.prepare_cached(
             "INSERT INTO run (id, input_key, input_kind, input_id, buddy_id, workspace_id, conversation_id, task_id, task_epoch,
-               after_run_id, status, deadline, ready_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?12, ?13)",
+               after_run_id, status, deadline, ready_at, created_at, config)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?12, ?13, ?14)",
         )?
         .execute(params![
             id,
@@ -97,7 +103,8 @@ impl Enqueue for Connection {
             input.after_run_id,
             input.deadline,
             ready_at,
-            now
+            now,
+            input.config.as_ref().map(|c| serde_json::to_string(c).expect("run config serializes"))
         ])?;
         get_run(self, &id)
     }
@@ -331,6 +338,7 @@ fn enqueue_slot(tx: &Transaction, s: Schedule, now: &str) -> Result<Run> {
         task_id: s.task_id.clone(),
         after_run_id: None,
         deadline: None,
+        config: None,
     })?;
     tx.execute("UPDATE schedule SET next_run_at = ?2 WHERE id = ?1", params![s.id, next_run(&s.cron, &s.timezone, now)?])?;
     Ok(run)
@@ -411,6 +419,7 @@ fn close_request(tx: &Transaction, post_id: &str, state: &str, failed_run: Optio
                 task_id: post.task_id,
                 after_run_id: None,
                 deadline: None,
+                config: None,
             })
             .map(|_| ()),
         _ => Ok(()),
