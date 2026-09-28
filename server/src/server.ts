@@ -36,6 +36,7 @@ import {
 } from './conversations/config-records';
 import { ConversationConfigService } from './conversations/config-service';
 import { ConversationTombstonedError } from './conversations/config-service';
+import { replaceRuntimeConfig } from './conversations/runtime-config';
 import {
   type ConversationRuntime,
   createConversationRuntime,
@@ -549,6 +550,8 @@ const buddyConversations: StableConversationPorts = {
   getConversation: (id) => applicationContext.registry.get(id),
   ensureConversationReady: buddyCreationService.ensureConversationReady,
   createConversation: (input) => buddyCreationService.createServerBuddyConversation(input),
+  reconfigure: (conversation, config) =>
+    replaceRuntimeConfig(conversationConfigService, conversation, config),
 };
 
 // One channel's posts or responders changed: clients refresh only that channel's views.

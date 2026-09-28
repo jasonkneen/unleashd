@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ConfigError,
   ConfigResolution,
@@ -47,4 +49,23 @@ export async function updateRuntimeConfig(
   if (!result.ok) return result;
   conversation.applyConfigState(result.value.next);
   return { ok: true, value: result.value.next };
+}
+
+/**
+ * Run a live conversation on `config` from its next turn (a channel mention's model pick). A no-op
+ * when it already does; a refused change (a started session's provider) throws its reason.
+ */
+export async function replaceRuntimeConfig(
+  configService: Pick<ConversationConfigService, 'update'>,
+  conversation: ConfigurableRuntime,
+  config: ConversationConfig
+): Promise<void> {
+  if (isDeepStrictEqual(conversation.config, config)) return;
+  const result = await updateRuntimeConfig(configService, conversation, {
+    conversationId: conversation.id,
+    commandId: `pick-${randomUUID()}`,
+    expectedRevision: conversation.configRevision,
+    patch: { kind: 'replace', config },
+  });
+  if (!result.ok) throw new Error(result.error.message);
 }

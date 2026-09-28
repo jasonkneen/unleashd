@@ -14,7 +14,7 @@ import type { ConversationRuntime } from '../conversations/runtime';
 //             which is how a thread seat remembers the owner's pick.
 //
 // A later generation exists only because an earlier one was deleted or (for a
-// seat) replaced by a different pick, so the newest created one is current.
+// seat) replaced by a pick on another PROVIDER, so the newest created one is current.
 
 export type ConversationSlot =
   | { kind: 'absent' }
@@ -39,6 +39,8 @@ export interface StableConversationPorts {
     /** Omitted: the Buddy's profile default, resolved by the creation service. */
     config?: ConversationConfig;
   }): Promise<ConversationRuntime>;
+  /** Run a live one on `config` from its next turn (runtime-config.ts `replaceRuntimeConfig`). */
+  reconfigure(conversation: ConversationRuntime, config: ConversationConfig): Promise<void>;
 }
 
 const MAX_GENERATIONS = 32;

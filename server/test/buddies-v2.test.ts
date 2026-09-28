@@ -15,7 +15,11 @@ import {
   type Post,
   type ThreadStat,
 } from '@unleashd/buddies-core';
-import { type BuddyContext, createDefaultConversationConfig } from '@unleashd/shared';
+import {
+  type BuddyContext,
+  type ConversationConfig,
+  createDefaultConversationConfig,
+} from '@unleashd/shared';
 import express from 'express';
 import { BUDDY_TOOL_GUIDE, composeBriefing, createBriefings } from '../src/buddies/briefing';
 import { type StableConversationPorts, slotOf } from '../src/buddies/buddy-conversation-slots';
@@ -48,6 +52,7 @@ import {
   type ConversationRuntimeDependencies,
   createConversationRuntime,
 } from '../src/conversations/runtime';
+import { replaceRuntimeConfig } from '../src/conversations/runtime-config';
 import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
 import { recordStore } from './fixtures/records';
 
@@ -241,7 +246,12 @@ async function world() {
     };
   }) as unknown as NonNullable<ConversationRuntimeDependencies['executeTurn']>;
 
-  const gate: { verdict: GateVerdict; calls: number } = { verdict: { kind: 'pass' }, calls: 0 };
+  // `hold` keeps a gate in flight until the test settles it.
+  const gate: { verdict: GateVerdict; calls: number; hold: Promise<void> } = {
+    verdict: { kind: 'pass' },
+    calls: 0,
+    hold: Promise.resolve(),
+  };
   const reviewer = createMemoryReviewer({
     core,
     grants,
@@ -322,6 +332,8 @@ async function world() {
     getConversation: (id) => conversations.get(id),
     ensureConversationReady: creation.ensureConversationReady,
     createConversation: (input) => creation.createServerBuddyConversation(input),
+    reconfigure: (conversation, config) =>
+      replaceRuntimeConfig(configService, conversation, config),
   };
   const channels = createChannels({
     core,
@@ -330,6 +342,7 @@ async function world() {
     uploadsRoot: () => join(scratch, 'uploads'),
     gate: async () => {
       gate.calls += 1;
+      await gate.hold;
       return gate.verdict;
     },
     channelChanged: () => undefined,
@@ -618,6 +631,10 @@ test("a Buddy's @mention wakes that Buddy through the owner's mention path, capp
     assert.match(capped.status === 'rejected' ? capped.reason : '', /waiting for the owner/);
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(w.turns.length, 2, 'the capped mention started no turn');
+    // …and says so in the thread: a Buddy's capped mention used to be only logged (review R8).
+    const notice = (await thread(root.id)).find((p) => p.purpose === 'reply_failed');
+    assert.equal(notice?.replyToId, third.id);
+    assert.match(notice?.body ?? '', /waiting for the owner/);
   } finally {
     await w.close();
   }
@@ -664,6 +681,104 @@ test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a f
   }
 });
 
+// The wave_sim thread, 2026-09-28: an owner's effort pick (high -> max) opened a new seat and
+// dropped three hours of resumed context; the later provider switch's fresh seat saw 10 of ~50
+// replies and none of its own. Only a provider change needs a new seat, and that seat is shown
+// the Buddy's own earlier replies.
+test("an effort pick keeps the seat's session; a provider pick opens a new seat that sees its own earlier replies", async () => {
+  const w = await world();
+  try {
+    const codex = (effort: string): ConversationConfig => ({
+      ...createDefaultConversationConfig('codex'),
+      reasoning: { mode: 'explicit' as const, effort },
+    });
+    let n = 0;
+    const say = (body: string, replyToId?: string) =>
+      w.core.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `say-${++n}` }
+      );
+    const replies = async () =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 100)).posts.filter(
+        (post) => post.purpose === 'reply'
+      ).length;
+    const mention = async (text: string, config: ConversationConfig, expected: number) => {
+      const post = await say(`[@Lead](buddy:${w.lead.id}) ${text}`, root.id);
+      await w.channels.respondToMentions(w.general, post, new Map([[w.lead.id, config]]));
+      await until(async () => (await replies()) === expected, `reply ${expected}`);
+    };
+    const root = await say('Plan the barrel solver');
+    w.answers.set(1, 'Lead finding one: the flux donor is wrong');
+    await mention('look at the solver', codex('high'), 1);
+    assert.equal(w.turns[0].request.resumeSessionId, undefined);
+
+    w.answers.set(2, 'Lead finding two: pressure solve diverges');
+    await mention('go deeper', codex('max'), 2);
+    assert.equal(w.turns[1].request.resumeSessionId, 'native-1', 'the effort pick resumed');
+    assert.equal(w.turns[1].request.reasoningEffort, 'max');
+    assert.match(w.turns[1].request.prompt, /You have seen this thread through your last turn/);
+
+    for (let i = 0; i < 12; i++) await say(`owner note ${i}`, root.id);
+    await mention('now on claude', createDefaultConversationConfig('claude'), 3);
+    const fresh = w.turns[2].request;
+    assert.equal(fresh.harness, 'claude');
+    assert.equal(fresh.resumeSessionId, undefined, 'a provider pick is a new seat');
+    assert.match(fresh.prompt, /Your own earlier replies here/);
+    assert.match(fresh.prompt, /Lead finding one/);
+    assert.match(fresh.prompt, /Lead finding two/);
+  } finally {
+    await w.close();
+  }
+});
+
+// F1 (agent_notes/2026-09-28_channels-state-machine-review.md): a gate in flight for P1 while a
+// mention P2 ran; the mention turn read P1, then the gate's yes started a second turn answering it.
+test('a follow-up for a post a mention turn already read starts no second turn', async () => {
+  const w = await world();
+  try {
+    let n = 0;
+    const say = (body: string, replyToId?: string) =>
+      w.core.post(
+        OWNER,
+        { kind: 'id', id: w.general.id },
+        { kind: 'inform', body, replyToId, evidence: [], broadcast: false, key: `say-${++n}` }
+      );
+    const replies = async () =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts.filter(
+        (post) => post.purpose === 'reply'
+      ).length;
+    const root = await say(`[@Lead](buddy:${w.lead.id}) status?`);
+    await w.channels.respondToMentions(w.general, root, new Map());
+    await until(async () => (await replies()) === 1, "Lead's first reply");
+
+    let release!: () => void;
+    w.gate.hold = new Promise((resolve) => {
+      release = resolve;
+    });
+    w.gate.verdict = { kind: 'respond' };
+    await w.channels.considerThreadPost(w.general, await say('Thoughts?', root.id));
+    await until(() => w.gate.calls === 1, 'the gate for P1 in flight');
+    const p2 = await say(`[@Lead](buddy:${w.lead.id}) answer now`, root.id);
+    await w.channels.respondToMentions(w.general, p2, new Map());
+    await until(async () => (await replies()) === 2, 'the mention reply');
+    assert.match(w.turns[1].request.prompt, /Thoughts\?/, 'the mention turn read P1');
+    release();
+    // The gate's yes is queued now; a later mention runs behind it on the pair's serial queue.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const p3 = await say(`[@Lead](buddy:${w.lead.id}) one more`, root.id);
+    await w.channels.respondToMentions(w.general, p3, new Map());
+    await until(async () => (await replies()) === 3, 'the reply to P3');
+    assert.equal(
+      w.turns.filter((turn) => /you chose to reply/.test(turn.request.prompt)).length,
+      0,
+      "the gate's yes for an already-read post starts no turn"
+    );
+  } finally {
+    await w.close();
+  }
+});
+
 // 493c1c7: a reply that failed on its harness (here out of tokens) had no way forward but to
 // re-mention and hope. The owner reruns it on another harness; the same harness is refused.
 test('a harness failure is retried on another harness, in a new seat of the same thread', async () => {
@@ -693,7 +808,11 @@ test('a harness failure is retried on another harness, in a new seat of the same
       w.channels.retryReply(notice, createDefaultConversationConfig('codex')),
       /Pick a different harness/
     );
-    const retried = await w.channels.retryReply(notice, createDefaultConversationConfig('claude'));
+    // A double click starts one rerun (review R3: each click started a turn).
+    const [retried] = await Promise.all([
+      w.channels.retryReply(notice, createDefaultConversationConfig('claude')),
+      w.channels.retryReply(notice, createDefaultConversationConfig('claude')),
+    ]);
     assert.deepEqual(retried, { buddyId: w.lead.id, status: 'started' });
     const answer = await until(
       async () => (await thread()).find((post) => post.purpose === 'reply'),
@@ -701,6 +820,8 @@ test('a harness failure is retried on another harness, in a new seat of the same
     );
     assert.equal(answer.replyToId, root.id);
     assert.equal(w.turns[1].request.harness, 'claude');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(w.turns.length, 2, 'one rerun for two clicks');
 
     const silent = await w.core.post(
       buddyActor(w.lead.id),
@@ -1469,7 +1590,9 @@ test('builder opened from a workspace uses that workspace root', async () => {
     const opened = await http('POST', '/api/buddies/builder', { workspaceId: w.ws });
     assert.equal(opened.status, 201, JSON.stringify(opened.body));
     assert.deepEqual(builderDirectories, [root]);
-    const missing = await http('POST', '/api/buddies/builder', { workspaceId: 'workspace_missing' });
+    const missing = await http('POST', '/api/buddies/builder', {
+      workspaceId: 'workspace_missing',
+    });
     assert.equal(missing.status, 404);
     const sidebar = await http('POST', '/api/buddies/builder', {});
     assert.equal(sidebar.status, 201);
@@ -1606,8 +1729,7 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
         runId: null,
       })
     );
-    const ids = (listed: { value: Array<{ id: string }> }) =>
-      listed.value.map((t) => t.id).sort();
+    const ids = (listed: { value: Array<{ id: string }> }) => listed.value.map((t) => t.id).sort();
     assert.deepEqual(ids(await call(designerGrant, 'tasks', {})), [task.value.id]);
     assert.deepEqual(
       ids(await call(designerGrant, 'tasks', { include: 'all' })),
