@@ -22,6 +22,7 @@ import {
   formatCommonToolResult,
 } from '../turns/policy';
 import { BUDDY_BUILDER_BRIEFING } from './builder';
+import { HARNESS_MEMORY_OFF } from './harness-memory';
 import type { BuddyPolicyPort } from './policy-port';
 import type { OwnedChatRun } from './runner';
 
@@ -479,7 +480,7 @@ export class BuddyTurnPolicy implements TurnPolicy {
     });
     // Capture exactly the resolved request at the provider boundary, after all awaits.
     this.execution?.onAdmitted?.(config);
-    return { mcpServers };
+    return { mcpServers, extraArgs: HARNESS_MEMORY_OFF[config.provider] };
   }
 
   /**
