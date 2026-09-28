@@ -163,6 +163,8 @@ test('a phone DM stays in Channels with Back to where it was opened', async () =
     html,
     new RegExp(`aria-label="Back" href="/buddies/workspaces/${WS}/channels\\?channel=ch_a"`)
   );
+  assert.match(html, /class="mobile-channel-header__dm-actions ui-row">[\s\S]*Refresh context/);
+  assert.match(html, /mobile-channel-header__dm-actions ui-row">[\s\S]*Default model:/);
   assert.match(html, /Fresh answer/);
 });
 

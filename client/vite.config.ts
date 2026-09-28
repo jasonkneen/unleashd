@@ -12,6 +12,7 @@ import {
 } from '../server/src/auth/gate';
 import { loginPageHtml } from '../server/src/auth/login-page';
 import { type AuthPolicy, describePolicy, resolveAuthPolicy } from '../server/src/auth/policy';
+import { isViteClientModule, patchViteResumeReload } from './src/pwa/resume';
 
 const DEV_CLIENT_PORT = 7489;
 const API_SERVER_PORT = 7499;
@@ -193,10 +194,29 @@ function openPreferredDevUrlPlugin() {
   };
 }
 
+// Dev client only. The phone's installed app drops Vite's hot-reload socket
+// on every app switch; without this the client reloads the document on resume.
+function keepPageOnResumePlugin() {
+  return {
+    name: 'unleashd-keep-page-on-resume',
+    apply: 'serve' as const,
+    enforce: 'pre' as const,
+    transform(code: string, id: string) {
+      if (!isViteClientModule(id)) return null;
+      return { code: patchViteResumeReload(code), map: null };
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   customLogger: viteLogger,
-  plugins: [react(), devAuthPlugin(devAuthPolicy), openPreferredDevUrlPlugin()],
+  plugins: [
+    react(),
+    devAuthPlugin(devAuthPolicy),
+    openPreferredDevUrlPlugin(),
+    keepPageOnResumePlugin(),
+  ],
   // The shared package's ESM and CJS watch builds update dist file-by-file.
   // Reading that mutable output from Vite creates a window where index.js is
   // absent or inconsistent with its leaf modules. The browser build can

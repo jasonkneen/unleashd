@@ -24,11 +24,10 @@
 
   /* dvh = dynamic viewport height (tracks URL bar collapse on iOS). */
   /* svh fallback for older WebKit via @supports below. */
-  /* --mobile-keyboard-inset is published by useKeyboardInset(): iOS shrinks only
-     the VISUAL viewport when the keyboard opens, so without subtracting it the
-     composer sits underneath the keyboard. Defaults to 0px when closed or when
-     visualViewport is unavailable. */
-  height: calc(100dvh - var(--mobile-keyboard-inset, 0px));
+  /* The shell remains the layout viewport. FullscreenComposer owns the
+     visual-viewport frame while editing, so keyboard resize events cannot
+     leave the whole app stuck at the keyboard's height. */
+  height: 100dvh;
   min-height: 0;
 
   /* Notch / Dynamic Island / rounded corners — never hidden behind chrome. */
@@ -45,19 +44,13 @@
    because svh is at least stable; last resort is 100vh. */
 @supports not (height: 100dvh) {
   .mobile-shell {
-    height: calc(100svh - var(--mobile-keyboard-inset, 0px));
+    height: 100svh;
   }
 }
 @supports not (height: 100svh) {
   .mobile-shell {
-    height: calc(100vh - var(--mobile-keyboard-inset, 0px));
+    height: 100vh;
   }
-}
-
-/* Keyboard up: the tab bar is `hidden` in the markup; drop its safe-area
-   padding too so the composer sits flush above the keyboard. */
-.mobile-shell--keyboard {
-  padding-bottom: 0;
 }
 
 /* ---- Scrollable content area (between header and tab bar) ---- */
@@ -401,9 +394,6 @@
 /* Author display rules otherwise override the browser's [hidden] rule. */
 .mobile-tab-bar[hidden] {
   display: none;
-}
-.mobile-shell--keyboard {
-  height: var(--mobile-viewport-height, 100dvh);
 }
 .mobile-shell:has(.fullscreen-composer--expanded) .mobile-tab-bar {
   display: none;
