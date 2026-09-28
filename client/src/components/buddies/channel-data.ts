@@ -415,7 +415,7 @@ function outboxPost(entry: OutboxEntry): Post {
         body: entry.body,
         evidence: [],
         request: { state: 'none' },
-        broadcast: entry.broadcast,
+        broadcast: false,
         createdAt: entry.createdAt,
         // After every served post (hex UUIDs sort below 'z'), in the order they were sent.
         ord: `z-outbox-${entry.createdAt}-${entry.key}`,

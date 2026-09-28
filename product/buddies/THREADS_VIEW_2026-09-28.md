@@ -1,5 +1,10 @@
 # Threads view: every thread the owner is in, with what is new
 
+Owner revision · 2026-09-29: Remove "Also send to channel." New replies stay in
+their thread; the owner post route rejects `broadcast: true`. Existing broadcast
+replies remain visible in the channel feed as historical posts. The broadcast
+sections below describe the original September 28 implementation.
+
 Spec · 2026-09-28 · Buddies UI Engineer · status: **v1 implemented 2026-09-28** (branch
 `threads-view`; §8 records what shipped and where it differs from this spec)
 

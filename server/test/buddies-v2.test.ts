@@ -1727,6 +1727,44 @@ test('owner routes restore what the T11 client migration dropped: reply stats, t
   }
 });
 
+test('owner channel replies stay in threads and reject old broadcast requests', async () => {
+  const w = await world();
+  const { server, http } = await ownerHttp(w);
+  try {
+    const root = await w.core.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      { kind: 'inform', body: 'Thread root', evidence: [], broadcast: false, key: 'broadcast-root' }
+    );
+    const reply = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: 'Do not broadcast this reply',
+      replyToId: root.id,
+      broadcast: true,
+      key: 'broadcast-reply',
+    });
+    assert.equal(reply.status, 400, JSON.stringify(reply.body));
+
+    const normal = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
+      body: 'A thread reply',
+      replyToId: root.id,
+      key: 'thread-reply',
+    });
+    assert.equal(normal.status, 201, JSON.stringify(normal.body));
+    const posted = (normal.body as unknown as { post: Post }).post;
+    assert.equal(posted.broadcast, false);
+
+    const feed = await http('GET', `/api/buddies/channels/${w.general.id}/posts?limit=50`);
+    assert.equal(feed.status, 200, JSON.stringify(feed.body));
+    assert.ok(
+      !(feed.body as unknown as { posts: Post[] }).posts.some((post) => post.id === posted.id),
+      'a thread reply is absent from the channel feed'
+    );
+  } finally {
+    server.close();
+    await w.close();
+  }
+});
+
 // Port of 6d04860 (workspace home "New workspace"): the crate reuses a workspace only on an
 // IDENTICAL root_path string, so a trailing slash or a symlink used to register the same folder
 // twice. A file, a missing folder or `/` must be a 400, never a workspace.

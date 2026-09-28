@@ -89,8 +89,9 @@ const PostBodySchema = z
     body: z.string().trim().min(1).max(32_000),
     kind: z.enum(['inform', 'request']).default('inform'),
     replyToId: z.string().min(1).optional(),
-    // "Also send to #channel": a reply that also shows in the channel feed.
-    broadcast: z.boolean().default(false),
+    // Fix-guard: the owner rejected channel broadcast replies (2026-09-29).
+    // Reject old clients that still request one; new replies stay in their thread.
+    broadcast: z.literal(false).default(false),
     taskId: z.string().min(1).optional(),
     purpose: z.string().trim().min(1).max(200).optional(),
     evidence,

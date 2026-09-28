@@ -49,7 +49,6 @@ test('an owner post shows from Send until the server feed carries it, exactly on
     channelId: 'channel',
     rootId: null,
     body: 'hello',
-    broadcast: false,
     createdAt: '2026-09-25T00:00:00.000Z',
   });
   assert.equal(render(null, []), 'outbox:k1', 'visible while the POST is in flight');

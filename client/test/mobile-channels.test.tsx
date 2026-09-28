@@ -201,6 +201,7 @@ test('a reply permalink opens its thread with the reply highlighted and the root
   );
   assert.match(html, /data-post-id="reply-120" data-linked="true"/);
   assert.match(html, /class="mobile-channel-compose__head"><span>Thread in # general<\/span>/);
+  assert.doesNotMatch(html, /Also send to channel|type="checkbox"/);
 });
 
 test('mobile channels Home lists channels and Buddies with a visible Wake', async () => {
