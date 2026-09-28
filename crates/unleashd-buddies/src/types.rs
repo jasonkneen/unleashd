@@ -297,6 +297,8 @@ pub struct Post {
     pub created_at: String,
     /// The post's ordered id (UUIDv7): threads, pages and read cursors order by it.
     pub ord: String,
+    /// A reply also shown in its channel's feed ("Also send to #channel"). Always false at top level.
+    pub broadcast: bool,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
@@ -418,6 +420,8 @@ pub struct PostInput {
     pub task_id: Option<String>,
     /// The sender's conversation; a `Request`'s answer returns there.
     pub from_conversation_id: Option<String>,
+    /// A reply that also appears in the channel feed and its unread count. Invalid without `reply_to_id`.
+    pub broadcast: bool,
     pub key: String,
 }
 
@@ -574,6 +578,37 @@ pub struct Inbox {
     pub waiting_on: Vec<Post>,
     /// The actor's channels in the workspace: every public one, its direct ones, and any it has read.
     pub channels: Vec<ChannelUnread>,
+    /// Followed threads in the workspace with a reply by someone else after the actor's thread cursor.
+    pub unread_threads: i64,
+}
+
+/// What a followed thread's card shows after its root: the fold (`hidden` replies) then `posts`,
+/// oldest first. D = Unread (the replies after the cursor, at most 20) ⊕ CaughtUp (the last 2).
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "snake_case"))]
+#[derive(Debug, Clone)]
+pub enum ThreadTail {
+    Unread { hidden: i64, posts: Vec<Post> },
+    CaughtUp { hidden: i64, posts: Vec<Post> },
+}
+
+/// One card of the Threads view: a thread with at least one reply that the actor follows.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct FollowedThread {
+    pub channel: Channel,
+    pub root: Post,
+    pub replies: i64,
+    /// Distinct authors, root author first.
+    pub participants: Vec<Actor>,
+    pub tail: ThreadTail,
+}
+
+/// Unread threads first, then by newest post. `more`: followed threads beyond `limit`.
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct FollowedThreads {
+    pub threads: Vec<FollowedThread>,
+    pub more: bool,
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(object))]

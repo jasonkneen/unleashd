@@ -18,7 +18,31 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params, params_f
 use serde_json::json;
 
 const POST_COLS: &str = "p.id, p.channel_id, p.author_id, p.root_id, p.reply_to_id, p.task_id, p.purpose, p.body, p.evidence, \
-    p.request, p.answer_id, p.conversation_id, p.return_conversation_id, p.created_at, p.ord";
+    p.request, p.answer_id, p.conversation_id, p.return_conversation_id, p.created_at, p.ord, p.broadcast";
+
+/// The channels `actor_param` (an actor key) may read: the owner every one, a buddy the public and
+/// task channels and the direct channels it is a member of. `c` is the channel.
+fn readable_by(actor_param: &str) -> String {
+    format!(
+        "({actor_param} = 'owner' OR c.kind != 'direct'
+          OR EXISTS (SELECT 1 FROM channel_member m WHERE m.channel_id = c.id AND m.member = {actor_param}))"
+    )
+}
+
+/// A feed page from `limit + 1` rows, newest first: the extra row only says there is a next page.
+fn keyset_page(mut posts: Vec<Post>, limit: i64) -> PostPage {
+    let next = match posts.len() as i64 > limit {
+        true => {
+            posts.truncate(limit as usize);
+            posts.last().map(|p| Cursor { ord: p.ord.clone() })
+        }
+        false => None,
+    };
+    PostPage { posts, next }
+}
+
+/// A channel feed row: a top-level post, or a reply also sent to the channel.
+const IN_CHANNEL_FEED: &str = "(p.root_id IS NULL OR p.broadcast = 1)";
 
 fn post_row(r: &Row) -> rusqlite::Result<Post> {
     let request = match (r.get::<_, Option<String>>(9)?.as_deref(), r.get::<_, Option<String>>(10)?) {
@@ -44,6 +68,7 @@ fn post_row(r: &Row) -> rusqlite::Result<Post> {
         return_conversation_id: r.get(12)?,
         created_at: r.get(13)?,
         ord: r.get(14)?,
+        broadcast: r.get(15)?,
     })
 }
 
@@ -225,6 +250,7 @@ impl Store {
                 if flipped != 1 {
                     return Err(CoreError::Invalid(format!("post {} is not awaiting an answer: {:?}", request.id, request.request)));
                 }
+                follow(tx, actor, request.root_id.as_deref().unwrap_or(&request.id), &ord)?;
                 notify_author(tx, &request)?;
                 Ok(id)
             })?;
@@ -259,12 +285,7 @@ impl Store {
         };
         args.push((limit + 1).into());
         let sql = format!("SELECT {POST_COLS} FROM post p WHERE {filter}{keyset} ORDER BY p.ord DESC LIMIT ?");
-        let mut posts = collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?;
-        let next = (posts.len() as i64 > limit).then(|| {
-            posts.truncate(limit as usize);
-            posts.last().map(|p| Cursor { ord: p.ord.clone() })
-        });
-        Ok(PostPage { posts, next: next.flatten() })
+        Ok(keyset_page(collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?, limit))
     }
 
     /// A permalink's page: `post_id` and every newer post of the feed (at most `limit`, oldest
@@ -274,7 +295,7 @@ impl Store {
         let (filter, args) = self.readable_feed(actor, &query)?;
         let target = get_post(&self.conn, post_id)?;
         let in_feed = match &query {
-            PostQuery::Channel { channel_id } => target.channel_id == *channel_id && target.root_id.is_none(),
+            PostQuery::Channel { channel_id } => target.channel_id == *channel_id && (target.root_id.is_none() || target.broadcast),
             PostQuery::Thread { root_id } => target.root_id.as_deref() == Some(root_id.as_str()),
         };
         if !in_feed {
@@ -297,12 +318,12 @@ impl Store {
     }
 
     /// The SQL filter of a feed, once the actor may read its channel.
-    fn readable_feed(&self, actor: &Actor, query: &PostQuery) -> Result<(&'static str, Vec<Value>)> {
-        let (channel_id, filter, args): (String, &str, Vec<Value>) = match query {
+    fn readable_feed(&self, actor: &Actor, query: &PostQuery) -> Result<(String, Vec<Value>)> {
+        let (channel_id, filter, args): (String, String, Vec<Value>) = match query {
             PostQuery::Channel { channel_id } => {
-                (channel_id.clone(), "p.channel_id = ? AND p.root_id IS NULL", vec![channel_id.clone().into()])
+                (channel_id.clone(), format!("p.channel_id = ? AND {IN_CHANNEL_FEED}"), vec![channel_id.clone().into()])
             }
-            PostQuery::Thread { root_id } => (get_post(&self.conn, root_id)?.channel_id, "p.root_id = ?", vec![root_id.clone().into()]),
+            PostQuery::Thread { root_id } => (get_post(&self.conn, root_id)?.channel_id, "p.root_id = ?".into(), vec![root_id.clone().into()]),
         };
         require(&self.conn, actor, Op::ReadChannel, &Subject::Channel { id: channel_id })?;
         Ok((filter, args))
@@ -349,18 +370,11 @@ impl Store {
         args.push((limit + 1).into());
         let sql = format!(
             "SELECT {POST_COLS} FROM post p JOIN channel c ON c.id = p.channel_id
-             WHERE p.task_id = ?1{keyset}
-               AND (?2 = 'owner' OR c.kind != 'direct'
-                    OR EXISTS (SELECT 1 FROM channel_member m WHERE m.channel_id = c.id AND m.member = ?2))
-             ORDER BY p.ord DESC LIMIT ?{}",
+             WHERE p.task_id = ?1{keyset} AND {} ORDER BY p.ord DESC LIMIT ?{}",
+            readable_by("?2"),
             args.len()
         );
-        let mut posts = collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?;
-        let next = (posts.len() as i64 > limit).then(|| {
-            posts.truncate(limit as usize);
-            posts.last().map(|p| Cursor { ord: p.ord.clone() })
-        });
-        Ok(PostPage { posts, next: next.flatten() })
+        Ok(keyset_page(collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?, limit))
     }
 
     /// Requests the actor owes (across workspaces), its own open requests, and its channels in
@@ -387,7 +401,7 @@ impl Store {
             self.conn
                 .prepare_cached(&format!(
                     "SELECT {CHANNEL_COLS}, (SELECT count(*) FROM post p WHERE p.channel_id = c.id AND p.author_id IS NOT ?3
-                        AND p.ord > coalesce(r.last_ord, '')), r.last_ord
+                        AND {IN_CHANNEL_FEED} AND p.ord > coalesce(r.last_ord, '')), r.last_ord
                      FROM channel c LEFT JOIN post_read r ON r.reader = ?1 AND r.channel_id = c.id
                      WHERE c.workspace_id = ?2 AND c.archived_at IS NULL AND (c.kind = 'public' OR r.reader IS NOT NULL
                        OR EXISTS (SELECT 1 FROM channel_member m WHERE m.member = ?1 AND m.channel_id = c.id))
@@ -397,7 +411,14 @@ impl Store {
                     Ok(ChannelUnread { channel: channel_row(r)?, unread: r.get(10)?, last_read_ord: r.get(11)? })
                 })?,
         )?;
-        Ok(Inbox { requests, waiting_on, channels })
+        let unread_threads = self.conn.prepare_cached(&format!(
+            "SELECT count(*) FROM thread_read t JOIN post root ON root.id = t.root_id JOIN channel c ON c.id = root.channel_id
+             WHERE t.reader = ?1 AND c.workspace_id = ?2 AND {}
+               AND EXISTS (SELECT 1 FROM post r WHERE r.root_id = t.root_id AND r.ord > t.last_ord AND r.author_id IS NOT ?3)",
+            readable_by("?1")
+        ))?
+        .query_row(params![me, workspace_id, my_buddy], |r| r.get(0))?;
+        Ok(Inbox { requests, waiting_on, channels, unread_threads })
     }
 
     /// Posts in `workspace_id` whose body contains every word of `query` (literal words, not FTS
@@ -422,18 +443,11 @@ impl Store {
         args.push((limit + 1).into());
         let sql = format!(
             "SELECT {POST_COLS} FROM post_search s JOIN post p ON p.rowid = s.rowid JOIN channel c ON c.id = p.channel_id
-             WHERE post_search MATCH ?1 AND c.workspace_id = ?2{keyset}
-               AND (?3 = 'owner' OR c.kind != 'direct'
-                    OR EXISTS (SELECT 1 FROM channel_member m WHERE m.channel_id = c.id AND m.member = ?3))
-             ORDER BY p.ord DESC LIMIT ?{}",
+             WHERE post_search MATCH ?1 AND c.workspace_id = ?2{keyset} AND {} ORDER BY p.ord DESC LIMIT ?{}",
+            readable_by("?3"),
             args.len()
         );
-        let mut posts = collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?;
-        let next = (posts.len() as i64 > limit).then(|| {
-            posts.truncate(limit as usize);
-            posts.last().map(|p| Cursor { ord: p.ord.clone() })
-        });
-        Ok(PostPage { posts, next: next.flatten() })
+        Ok(keyset_page(collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), post_row)?)?, limit))
     }
 
     /// Moves the actor's cursor forward to `post_id`; an older post never moves it back.
@@ -451,6 +465,78 @@ impl Store {
                    last_post_at = excluded.last_post_at, last_ord = excluded.last_ord, updated_at = excluded.updated_at
                  WHERE excluded.last_ord > post_read.last_ord",
                 params![actor.key(), channel_id, post.id, post.created_at, post.ord, now_iso()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// The Threads view: threads with replies that the actor follows in `workspace_id`, unread
+    /// first, then by newest post. Each card carries its fold and tail (`ThreadTail`), so no client
+    /// decides which replies to show.
+    pub fn followed_threads(&self, actor: &Actor, workspace_id: &str, limit: i64) -> Result<FollowedThreads> {
+        let (me, my_buddy) = (actor.key(), actor.buddy_id());
+        let sql = format!(
+            "SELECT t.root_id, t.last_ord,
+                    (SELECT count(*) FROM post r WHERE r.root_id = t.root_id) AS replies,
+                    (SELECT count(*) FROM post r WHERE r.root_id = t.root_id AND r.ord > t.last_ord AND r.author_id IS NOT ?3) AS unread,
+                    (SELECT max(r.ord) FROM post r WHERE r.root_id = t.root_id) AS latest
+             FROM thread_read t JOIN post root ON root.id = t.root_id JOIN channel c ON c.id = root.channel_id
+             WHERE t.reader = ?1 AND c.workspace_id = ?2 AND {} AND latest IS NOT NULL
+             ORDER BY unread > 0 DESC, latest DESC LIMIT ?4",
+            readable_by("?1")
+        );
+        let rows = collect(
+            self.conn
+                .prepare_cached(&sql)?
+                .query_map(params![me, workspace_id, my_buddy, limit + 1], |r| Ok((r.get::<_, String>(0)?, r.get(2)?, r.get(3)?)))?,
+        )?;
+        let more = rows.len() as i64 > limit;
+        let threads = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(|(root_id, replies, unread): (String, i64, i64)| self.followed_thread(&root_id, replies, unread))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(FollowedThreads { threads, more })
+    }
+
+    fn followed_thread(&self, root_id: &str, replies: i64, unread: i64) -> Result<FollowedThread> {
+        let root = get_post(&self.conn, root_id)?;
+        let channel = get_channel(&self.conn, &root.channel_id)?;
+        let shown = match unread > 0 {
+            true => unread.min(20),
+            false => replies.min(2),
+        };
+        let mut posts = collect(
+            self.conn
+                .prepare_cached(&format!("SELECT {POST_COLS} FROM post p WHERE p.root_id = ?1 ORDER BY p.ord DESC LIMIT ?2"))?
+                .query_map(params![root_id, shown], post_row)?,
+        )?;
+        posts.reverse();
+        let hidden = replies - posts.len() as i64;
+        let participants = collect(
+            self.conn
+                .prepare_cached("SELECT author_id FROM post WHERE id = ?1 OR root_id = ?1 GROUP BY author_id ORDER BY min(ord)")?
+                .query_map([root_id], |r| Ok(Actor::from_nullable(r.get(0)?)))?,
+        )?;
+        let tail = match unread > 0 {
+            true => ThreadTail::Unread { hidden, posts },
+            false => ThreadTail::CaughtUp { hidden, posts },
+        };
+        Ok(FollowedThread { channel, root, replies, participants, tail })
+    }
+
+    /// Moves the actor's cursor in a thread it follows forward to `post_id` (the root or a reply).
+    /// Never creates a row: reading a thread is not following it.
+    pub fn mark_thread_read(&mut self, actor: &Actor, root_id: &str, post_id: &str) -> Result<()> {
+        self.write(|tx| {
+            let post = get_post(tx, post_id)?;
+            if post.id != root_id && post.root_id.as_deref() != Some(root_id) {
+                return Err(CoreError::Invalid(format!("post {post_id} is not in thread {root_id}")));
+            }
+            require(tx, actor, Op::ReadChannel, &Subject::Channel { id: post.channel_id.clone() })?;
+            tx.execute(
+                "UPDATE thread_read SET last_ord = ?3, updated_at = ?4 WHERE reader = ?1 AND root_id = ?2 AND last_ord < ?3",
+                params![actor.key(), root_id, post.ord, now_iso()],
             )?;
             Ok(())
         })
@@ -540,12 +626,15 @@ fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostI
     }
     let ask = ask(input.kind, channel, actor)?;
     let root_id = input.reply_to_id.as_deref().map(|parent| thread_root(tx, parent, &channel.id)).transpose()?;
+    if input.broadcast && root_id.is_none() {
+        return Err(CoreError::Invalid("only a reply can also be sent to the channel".into()));
+    }
     let ord = crate::ids::next().to_string();
     let id = format!("post_{ord}");
     tx.prepare_cached(
         "INSERT INTO post (id, channel_id, author_id, root_id, reply_to_id, task_id, purpose, body, evidence, request,
-           conversation_id, return_conversation_id, created_at, ord)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+           conversation_id, return_conversation_id, created_at, ord, broadcast)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
     )?
     .execute(params![
         id,
@@ -563,8 +652,10 @@ fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostI
         input.from_conversation_id,
         ask.column().and(input.from_conversation_id.as_deref()),
         now_iso(),
-        ord
+        ord,
+        input.broadcast
     ])?;
+    follow(tx, actor, root_id.as_deref().unwrap_or(&id), &ord)?;
     for recipient in ask.owed_by().iter().filter_map(Actor::buddy_id) {
         tx.enqueue(EnqueueInput {
             buddy_id: recipient.to_string(),
@@ -576,6 +667,17 @@ fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostI
         })?;
     }
     Ok(id)
+}
+
+/// Writing in a thread follows it and reads it through the new post (THREADS_VIEW_2026-09-28.md).
+fn follow(tx: &Transaction, actor: &Actor, root_id: &str, ord: &str) -> Result<()> {
+    tx.prepare_cached(
+        "INSERT INTO thread_read (reader, root_id, last_ord, updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(reader, root_id) DO UPDATE SET last_ord = excluded.last_ord, updated_at = excluded.updated_at
+         WHERE excluded.last_ord > thread_read.last_ord",
+    )?
+    .execute(params![actor.key(), root_id, ord, now_iso()])?;
+    Ok(())
 }
 
 /// A reply joins its parent's thread, which must be in the same channel.

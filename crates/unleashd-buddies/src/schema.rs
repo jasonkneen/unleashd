@@ -82,7 +82,7 @@ CREATE TABLE post (
   request TEXT CHECK(request IN ('awaiting','answered','cancelled','failed')),
   answer_id TEXT REFERENCES post(id),
   conversation_id TEXT, return_conversation_id TEXT, created_at TEXT NOT NULL, legacy TEXT,
-  ord TEXT NOT NULL UNIQUE,
+  ord TEXT NOT NULL UNIQUE, broadcast INTEGER NOT NULL DEFAULT 0 CHECK(broadcast IN (0,1)),
   CHECK((request IS 'answered') = (answer_id IS NOT NULL))) STRICT;
 CREATE INDEX post_channel ON post(channel_id, ord);
 CREATE INDEX post_root ON post(root_id, ord) WHERE root_id IS NOT NULL;
@@ -173,7 +173,8 @@ INSERT INTO post_search(post_search) VALUES ('rebuild');
 const POST_REFERENCE_INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS post_reply_to ON post(reply_to_id) WHERE reply_to_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS post_answer ON post(answer_id) WHERE answer_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS post_task ON post(task_id, ord) WHERE task_id IS NOT NULL;";
+CREATE INDEX IF NOT EXISTS post_task ON post(task_id, ord) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS thread_read_root ON thread_read(root_id);";
 
 /// The directory cards' live-task counts (T22): only unfinished top-level tasks, so the count reads
 /// just those rows (`task_workspace` would walk every task the workspace ever had). Added after T11.
@@ -191,12 +192,39 @@ fn require_ordered_ids(conn: &Connection, path: &str) -> Result<()> {
     }
 }
 
-/// Additive compatibility for lean databases created before channel archive shipped.
-fn ensure_channel_archive(conn: &Connection) -> Result<()> {
-    let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('channel') WHERE name = 'archived_at')", [], |r| r.get(0))?;
+/// Additive compatibility: add `table.column` (declared by `decl`) to a database created before it.
+fn ensure_column(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
+    let present: bool =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)", [table, column], |r| r.get(0))?;
     if !present {
-        conn.execute_batch("ALTER TABLE channel ADD COLUMN archived_at TEXT;")?;
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))?;
     }
+    Ok(())
+}
+
+/// Followed threads (THREADS_VIEW_2026-09-28.md): a `thread_read` row is both "the reader follows
+/// this thread" and how far it has read. A database created before it gets the table plus a
+/// one-time backfill: every thread the owner started or replied in, read through its newest post,
+/// so history arrives caught up instead of as a wall of unread. `post.broadcast` marks a reply
+/// also shown in its channel ("Also send to #channel").
+fn ensure_threads(conn: &Connection) -> Result<()> {
+    ensure_column(conn, "post", "broadcast", "INTEGER NOT NULL DEFAULT 0 CHECK(broadcast IN (0,1))")?;
+    let present: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'thread_read')", [], |r| r.get(0))?;
+    if present {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "BEGIN;
+         CREATE TABLE thread_read (
+           reader TEXT NOT NULL, root_id TEXT NOT NULL REFERENCES post(id),
+           last_ord TEXT NOT NULL, updated_at TEXT NOT NULL,
+           PRIMARY KEY(reader, root_id)) STRICT, WITHOUT ROWID;
+         INSERT INTO thread_read (reader, root_id, last_ord, updated_at)
+           SELECT 'owner', t.root, (SELECT max(x.ord) FROM post x WHERE x.id = t.root OR x.root_id = t.root),
+                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           FROM (SELECT DISTINCT coalesce(p.root_id, p.id) AS root FROM post p WHERE p.author_id IS NULL) t;
+         COMMIT;",
+    )?;
     Ok(())
 }
 
@@ -224,12 +252,14 @@ pub fn open(path: &str) -> Result<Connection> {
     match (app_id == APPLICATION_ID, tables) {
         (true, _) => {
             require_ordered_ids(&conn, path)?;
-            ensure_channel_archive(&conn)?;
+            ensure_column(&conn, "channel", "archived_at", "TEXT")?;
+            ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }
         (false, 0) => {
             conn.execute_batch(&format!("BEGIN; {DDL} PRAGMA application_id = {APPLICATION_ID}; COMMIT;"))?;
+            ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
             Ok(conn)
         }
@@ -245,8 +275,8 @@ mod tests {
     fn channel_archive_upgrades_existing_lean_database_without_losing_channels() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE channel(id TEXT PRIMARY KEY); INSERT INTO channel VALUES ('kept');").unwrap();
-        ensure_channel_archive(&conn).unwrap();
-        ensure_channel_archive(&conn).unwrap();
+        ensure_column(&conn, "channel", "archived_at", "TEXT").unwrap();
+        ensure_column(&conn, "channel", "archived_at", "TEXT").unwrap();
         let row: (String, Option<String>) = conn.query_row("SELECT id, archived_at FROM channel", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!(row, ("kept".into(), None));
     }
