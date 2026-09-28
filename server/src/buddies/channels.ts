@@ -24,11 +24,13 @@ import { type BuddiesCore, OWNER, buddyActor } from './core';
 import type { BuddyEvents } from './events';
 
 // Channel replies: the host policy that turns a post into a Buddy turn (a post wakes nobody in
-// the core). Two causes, on public channels:
-//   mention   — the OWNER @mentions a Buddy; it always answers. A Buddy's mention never dispatches.
+// the core). Two causes, on public channels, the same whoever wrote the post (owner or Buddy):
+//   mention   — a post @mentions a Buddy; it must answer.
 //   follow_up — a new reply in a thread asks each OTHER Buddy who posted there one gate question
-//               (channel-reply-gate.ts); only a strict <yes> starts a reply. The chain stops once
-//               the thread's last MAX_BUDDY_CHAIN posts are all Buddies', until the owner speaks.
+//               (channel-reply-gate.ts); only a strict <yes> starts a reply.
+// Both stop once the thread's last MAX_BUDDY_CHAIN posts are all Buddies', until the owner speaks.
+// Until 2026-09-28 a Buddy's @mention dispatched nothing, a silent no-op behind a mention chip that
+// looked live; the owner asked for one path. Guard: buddies-v2 "a Buddy's @mention wakes …".
 // SEATS: every reply goes to the Buddy's seat in that thread, ONE resumed conversation per
 // (thread, Buddy) (buddy-conversation-slots.ts). The owner's mention-chip model pick opens a new
 // seat generation when the current seat runs anything else. The Buddy posts its own reply with the
@@ -67,6 +69,18 @@ function transcriptLine(post: Post, names: Names): string {
 const rootOf = (post: Post) => post.rootId ?? post.id;
 const buddyAuthor = (post: Post): string[] =>
   post.author.kind === 'buddy' ? [post.author.id] : [];
+/** Buddies a post wakes by @mention: never its own author. */
+const mentionedByPost = (post: Post): string[] =>
+  mentionedBuddyIds(post.body).filter((id) => !buddyAuthor(post).includes(id));
+/** Buddy posts in a row ending at `post` (0 when the owner wrote it). */
+function buddyChain(thread: Post[], post: Post): number {
+  let chain = 0;
+  for (let i = thread.findIndex((p) => p.id === post.id); i >= 0; i--) {
+    if (thread[i].author.kind !== 'buddy') break;
+    chain++;
+  }
+  return chain;
+}
 
 // Owner authority for a seat turn follows the author of its trigger post, read back from the
 // store by id — never from the prompt, which quotes Buddy text. B1 (2026-09-25): every seat turn
@@ -183,10 +197,10 @@ export function createChannels(ports: ChannelsPorts) {
     return { root: thread[0], omitted: replies.length - shown.length, shown };
   }
 
-  function headline(cause: Cause, where: string): string {
+  function headline(cause: Cause, where: string, author: string): string {
     switch (cause) {
       case 'mention':
-        return `The owner mentioned you in ${where}`;
+        return `${author} mentioned you in ${where}`;
       case 'follow_up':
         return `A new message arrived in ${where} you have posted in, and you chose to reply`;
     }
@@ -219,7 +233,11 @@ export function createChannels(ports: ChannelsPorts) {
     const compose = (subject: string, intro: string, context: string[]) =>
       prompt(
         input,
-        [`${headline(input.cause, subject)} in ${where}. ${intro}`, '', ...context],
+        [
+          `${headline(input.cause, subject, label(trigger.author, nameMap))} in ${where}. ${intro}`,
+          '',
+          ...context,
+        ],
         nameMap
       );
     if (trigger.rootId === undefined || trigger.rootId === null) {
@@ -521,13 +539,8 @@ export function createChannels(ports: ChannelsPorts) {
     const thread = await wholeThread(await core.getPost(OWNER, post.rootId));
     // Only the newest post is followed up: a burst is gated once, against the latest message.
     if (thread[thread.length - 1].id !== post.id) return;
-    let chain = 0;
-    for (let i = thread.length - 1; i >= 0 && thread[i].author.kind === 'buddy'; i--) chain++;
-    if (chain >= MAX_BUDDY_CHAIN) return;
-    const skipped = new Set([
-      ...buddyAuthor(post),
-      ...(post.author.kind === 'owner' ? mentionedBuddyIds(post.body) : []),
-    ]);
+    if (buddyChain(thread, post) >= MAX_BUDDY_CHAIN) return;
+    const skipped = new Set([...buddyAuthor(post), ...mentionedByPost(post)]);
     const replying = [...queues.values()]
       .filter((entry) => entry.threadRootId === post.rootId)
       .map((entry) => entry.buddyId);
@@ -544,43 +557,69 @@ export function createChannels(ports: ChannelsPorts) {
     }
   }
 
+  /**
+   * One reply per valid @mention in a post, in the Buddy's seat for this thread. The one mention
+   * path for every author: the owner's post route passes its mention-chip picks in `chosen`; a
+   * Buddy's post (below) passes none, so its mention runs on the seat's latest config.
+   */
+  async function respondToMentions(
+    channel: Channel,
+    post: Post,
+    chosen: ReadonlyMap<string, ConversationConfig>
+  ): Promise<MentionDispatch[]> {
+    const mentioned = mentionedByPost(post);
+    if (mentioned.length === 0) return [];
+    const thread = await wholeThread(await core.getPost(OWNER, rootOf(post)));
+    const chained = buddyChain(thread, post) >= MAX_BUDDY_CHAIN;
+    return Promise.all(
+      mentioned.map(async (buddyId): Promise<MentionDispatch> => {
+        if (chained)
+          return {
+            buddyId,
+            status: 'rejected',
+            reason: `${MAX_BUDDY_CHAIN} Buddy posts in a row; waiting for the owner`,
+          };
+        const admitted = await eligible(buddyId, channel.workspaceId);
+        if (!admitted.ok) return { buddyId, status: 'rejected', reason: admitted.reason };
+        const config = chosen.get(buddyId);
+        reply({
+          channel,
+          cause: 'mention',
+          request: config ? { kind: 'chosen', config } : { kind: 'keep' },
+          trigger: post,
+          rootId: rootOf(post),
+          buddyId,
+          attempt: '',
+        });
+        return { buddyId, status: 'started' };
+      })
+    );
+  }
+
   // Every post, from any writer (tool, route, runner, this responder), pushes its channel; a post
-  // in a public channel's thread asks the other Buddies there whether to follow up. A DM request
-  // needs no gate: the core already queued the recipient's run.
+  // in a public channel's thread asks the other Buddies there whether to follow up, and a Buddy's
+  // post starts its @mentions (the owner's post route starts the owner's, with its chip picks).
+  // A DM request needs no gate: the core already queued the recipient's run.
   ports.events.on((event) => {
     if (event.kind !== 'posted') return;
     ports.channelChanged(event.channel.id);
     if (event.channel.kind.type !== 'public') return;
-    void considerThreadPost(event.channel, event.post).catch((error) =>
-      logger.warn(`[channels] follow-up gating failed for post ${event.post.id}:`, error)
+    const { channel, post } = event;
+    void considerThreadPost(channel, post).catch((error) =>
+      logger.warn(`[channels] follow-up gating failed for post ${post.id}:`, error)
     );
+    if (post.author.kind !== 'buddy') return;
+    void respondToMentions(channel, post, new Map())
+      .then((dispatched) => {
+        for (const d of dispatched)
+          if (d.status === 'rejected')
+            logger.warn(`[channels] mention of ${d.buddyId} in ${post.id}: ${d.reason}`);
+      })
+      .catch((error) => logger.warn(`[channels] mentions in post ${post.id} failed:`, error));
   });
 
   return {
-    /** One reply per valid @mention in an OWNER post, in the Buddy's seat for this thread. */
-    async respondToOwnerPost(
-      channel: Channel,
-      post: Post,
-      chosen: ReadonlyMap<string, ConversationConfig>
-    ): Promise<MentionDispatch[]> {
-      return Promise.all(
-        mentionedBuddyIds(post.body).map(async (buddyId): Promise<MentionDispatch> => {
-          const admitted = await eligible(buddyId, channel.workspaceId);
-          if (!admitted.ok) return { buddyId, status: 'rejected', reason: admitted.reason };
-          const config = chosen.get(buddyId);
-          reply({
-            channel,
-            cause: 'mention',
-            request: config ? { kind: 'chosen', config } : { kind: 'keep' },
-            trigger: post,
-            rootId: rootOf(post),
-            buddyId,
-            attempt: '',
-          });
-          return { buddyId, status: 'started' };
-        })
-      );
-    },
+    respondToMentions,
 
     considerThreadPost,
 
@@ -596,8 +635,7 @@ export function createChannels(ports: ChannelsPorts) {
       const buddyIds = new Set<string>();
       for (const post of await wholeThread(root)) {
         for (const id of buddyAuthor(post)) buddyIds.add(id);
-        if (post.author.kind === 'owner')
-          for (const id of mentionedBuddyIds(post.body)) buddyIds.add(id);
+        for (const id of mentionedByPost(post)) buddyIds.add(id);
       }
       const seats: ThreadSeat[] = [];
       for (const buddyId of buddyIds) {
@@ -647,10 +685,7 @@ export function createChannels(ports: ChannelsPorts) {
         throw new Error(`Pick a different harness. ${failedProvider} is the one that failed.`);
       reply({
         channel,
-        cause:
-          trigger.author.kind === 'owner' && mentionedBuddyIds(trigger.body).includes(buddyId)
-            ? 'mention'
-            : 'follow_up',
+        cause: mentionedByPost(trigger).includes(buddyId) ? 'mention' : 'follow_up',
         request: { kind: 'chosen', config },
         trigger,
         rootId,

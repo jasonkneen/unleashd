@@ -116,3 +116,21 @@ picker opens above it (y ~1070–1678).
 
 Cut: `../edit/src/MultiHarness.tsx`. Privacy: the 0.1–0.8 s full-frame ease shows the sidebar
 (channel and Buddy names) and a terminal strip on the far left, and the mention menu shows Task titles.
+
+## P — `2026-09-28_mobile_P_art-direction-thread-scroll.mp4` (13.0 s)
+
+Role: the **Mobile Friendly!** flash in beat 7 (`../edit/src/FeatureFlash.tsx`). The owner uploaded it
+to #unleashd-2 (post_01a0e6cc…), an iPhone recording at 2:54 PM on 2026-09-28, 1180×2556 @ 60 fps.
+The owner art-directs Art Lead's painting sheets in a thread on the phone.
+
+| Time | Shows |
+|---|---|
+| 0–2.4 s | Held on "This one is quiet nice / The figures suck" |
+| 2.4–7.5 s | Scroll through Art Lead's round-2 notes to "wai when i said figures suck", the figures sheet, "I really like this one" and the fields sheets |
+| 7.5–12 s | Held on "breaking waves got much better…"; a text selection flickers at ~9 s |
+| 12–13 s | Control Center (stopping the recording): never use |
+
+Cut: `2026-09-26_feature_phone.mp4` (the name `FeatureFlash.tsx` expects) = 2.4–7.5 s at 3.6×, which is
+1.417 s, with the status bar cropped (top 140 px: carrier name and the recording pill):
+`ffmpeg -ss 2.4 -t 5.1 -i <P> -an -vf "crop=1180:2416:0:140,setpts=PTS/3.6,fps=60" -c:v libx264 -crf 14 -pix_fmt yuv420p 2026-09-26_feature_phone.mp4`.
+Privacy: only Art Lead's name and painting feedback are visible, with no sidebar or workspace names.

@@ -187,7 +187,7 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
     core,
     events: createBuddyEvents(),
     channels: {
-      respondToOwnerPost: async (_channel, post) =>
+      respondToMentions: async (_channel, post) =>
         mentionedBuddyIds(post.body).map((buddyId) => {
           turns.push(buddyId);
           return { buddyId, status: 'started' as const };

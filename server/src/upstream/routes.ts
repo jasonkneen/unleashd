@@ -30,7 +30,7 @@ export interface UpstreamServiceDependencies {
   core: BuddiesCore;
   events: BuddyEvents;
   /** Starts the Buddy turns an owner @mention asks for (buddies/channels.ts). */
-  channels: Pick<Channels, 'respondToOwnerPost'>;
+  channels: Pick<Channels, 'respondToMentions'>;
   uploadsRoot(): string;
 }
 

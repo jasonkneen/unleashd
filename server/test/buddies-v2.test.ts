@@ -486,7 +486,7 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
         key: 'owner-1',
       }
     );
-    assert.deepEqual(await w.channels.respondToOwnerPost(w.general, root, new Map()), [
+    assert.deepEqual(await w.channels.respondToMentions(w.general, root, new Map()), [
       { buddyId: w.lead.id, status: 'started' },
     ]);
     const leadReplies = async () =>
@@ -540,6 +540,73 @@ test('B1: a seat turn holds owner authority only when the owner wrote its trigge
   }
 });
 
+// 2026-09-28: a Buddy's @mention dispatched nothing — a live-looking chip that woke nobody. It now
+// takes the owner's mention path (same seat, latest config), with Buddy authority and the chain cap.
+test("a Buddy's @mention wakes that Buddy through the owner's mention path, capped by the chain", async () => {
+  const w = await world();
+  try {
+    const thread = async (rootId: string) =>
+      (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
+    const root = await w.core.post(
+      OWNER,
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Lead](buddy:${w.lead.id}) plan the launch`,
+        evidence: [],
+        key: 'owner-root',
+      }
+    );
+    // Lead's turn hands the art to Designer by @mention, through the real `post` tool.
+    w.silent.add(1);
+    w.during.set(1, async (turn) => {
+      const posted = await call(turn.mcp, 'post', {
+        channel: { id: w.general.id },
+        replyToId: root.id,
+        body: `[@Designer](buddy:${w.designer.id}) can you draw the banner?`,
+        key: 'lead-mentions-designer',
+      });
+      assert.equal(posted.isError, false, posted.text);
+    });
+    w.during.set(2, async (turn) => {
+      assert.ok(
+        !(await toolNames(turn.mcp)).includes('team_admin'),
+        'a Buddy-authored mention holds no owner authority'
+      );
+    });
+    await w.channels.respondToMentions(w.general, root, new Map());
+    await until(
+      async () =>
+        (await thread(root.id)).some(
+          (p) => p.author.kind === 'buddy' && p.author.id === w.designer.id
+        ),
+      "Designer's reply to Lead's mention"
+    );
+    assert.match(w.turns[1].request.prompt, /Lead mentioned you in a thread/);
+    assert.match(w.turns[1].request.prompt, /can you draw the banner/);
+
+    // Lead, Designer, then a third Buddy post in a row: its mention waits for the owner.
+    const third = await w.core.post(
+      buddyActor(w.lead.id),
+      { kind: 'id', id: w.general.id },
+      {
+        kind: 'inform',
+        body: `[@Designer](buddy:${w.designer.id}) bigger?`,
+        replyToId: root.id,
+        evidence: [],
+        key: 'lead-third',
+      }
+    );
+    const [capped] = await w.channels.respondToMentions(w.general, third, new Map());
+    assert.equal(capped.status, 'rejected');
+    assert.match(capped.status === 'rejected' ? capped.reason : '', /waiting for the owner/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(w.turns.length, 2, 'the capped mention started no turn');
+  } finally {
+    await w.close();
+  }
+});
+
 // 493c1c7: the server pasted the seat's final text into the thread — the scratchpad, tool lines
 // and all, or "(no reply text)". Now the Buddy's own posts are the reply, and silence is a notice.
 test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a failure notice', async () => {
@@ -555,7 +622,7 @@ test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a f
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId }, null, 50)).posts.reverse();
     const root = await say(`[@Lead](buddy:${w.lead.id}) status?`);
     w.answers.set(1, 'Shipped');
-    await w.channels.respondToOwnerPost(w.general, root, new Map());
+    await w.channels.respondToMentions(w.general, root, new Map());
     await until(async () => (await thread(root.id)).length === 1, 'the posted reply');
     const [reply] = await thread(root.id);
     assert.equal(reply.body, 'Shipped');
@@ -564,7 +631,7 @@ test('a seat reply is what the Buddy posts; a turn that posts nothing leaves a f
     w.silent.add(2);
     w.answers.set(2, 'private scratchpad text');
     const again = await say(`[@Lead](buddy:${w.lead.id}) and now?`, root.id);
-    await w.channels.respondToOwnerPost(w.general, again, new Map());
+    await w.channels.respondToMentions(w.general, again, new Map());
     const notice = await until(
       async () => (await thread(root.id)).find((post) => post.purpose === 'reply_failed'),
       'the missing-post notice'
@@ -598,7 +665,7 @@ test('a harness failure is retried on another harness, in a new seat of the same
       }
     );
     w.outOfTokens.add(1);
-    await w.channels.respondToOwnerPost(w.general, root, new Map());
+    await w.channels.respondToMentions(w.general, root, new Map());
     const thread = async () =>
       (await w.core.listPosts(OWNER, { kind: 'thread', rootId: root.id }, null, 50)).posts;
     const notice = await until(
@@ -1237,18 +1304,17 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     assert.equal(stale.status, 409);
     assert.match(stale.body.error, /^\[revision_conflict\]/);
 
-    // The owner posts a standup AS a Buddy (the pre-T11 Messages tab did); a Buddy's @mention in
-    // it starts no turn. Search finds it, over HTTP and through the channel_read tool.
+    // The owner posts a standup AS a Buddy (the pre-T11 Messages tab did). Search finds it, over
+    // HTTP and through the channel_read tool.
     const asBuddy = await http('POST', `/api/buddies/channels/${w.general.id}/posts`, {
       asBuddyId: w.designer.id,
       purpose: 'standup',
-      body: `Shipped the quarterly logo [@Lead](buddy:${w.lead.id})`,
+      body: 'Shipped the quarterly logo',
       key: 'standup-as-designer',
     });
     assert.equal(asBuddy.status, 201, JSON.stringify(asBuddy.body));
     const written = asBuddy.body as unknown as { post: Post; mentions: unknown[] };
     assert.deepEqual(written.post.author, buddyActor(w.designer.id));
-    assert.deepEqual(written.mentions, [], "a Buddy's mention dispatches nothing");
     const found = await http('GET', `/api/buddies/workspaces/${w.ws}/search?q=quarterly%20LOGO`);
     assert.deepEqual(
       (found.body as unknown as Post[]).map((post) => post.id),

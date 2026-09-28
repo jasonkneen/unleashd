@@ -92,7 +92,7 @@ const PostBodySchema = z
     evidence,
     mentionConfigs: z.array(OwnerPostMentionConfigSchema).max(32).default([]),
     // The owner writes as one of its Buddies (a standup, a handoff), as the Messages tab did before
-    // T11. The crate authorizes the Buddy as the author; its @mentions start no turn.
+    // T11. The crate authorizes the Buddy as the author; its @mentions start as that Buddy's.
     asBuddyId: z.string().min(1).optional(),
     key,
   })
@@ -199,7 +199,7 @@ export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export async function publishOwnerPost(
   deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'> & {
-    channels: Pick<Channels, 'respondToOwnerPost'>;
+    channels: Pick<Channels, 'respondToMentions'>;
   },
   author: Actor,
   ref: ChannelRef,
@@ -214,10 +214,11 @@ export async function publishOwnerPost(
   const written = await deps.core.post(author, { kind: 'id', id: target.id }, { ...input, body });
   deps.events.emit({ kind: 'changed' });
   const { post, channel } = await announcePost(deps, OWNER, written);
-  // Only the owner's own @mentions start turns, and only in a public channel's thread seats.
+  // The owner's @mentions start here, with the chip picks; a Buddy author's (the owner posting as a
+  // Buddy included) start from the `posted` event in channels.ts, the same dispatch without picks.
   const mentions =
     channel.kind.type === 'public' && post.author.kind === 'owner'
-      ? await deps.channels.respondToOwnerPost(channel, post, chosen)
+      ? await deps.channels.respondToMentions(channel, post, chosen)
       : [];
   return { post, mentions };
 }
