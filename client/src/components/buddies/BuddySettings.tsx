@@ -15,7 +15,6 @@ type ProfileFields = {
   model: string;
   reasoningEffort: string;
   managerId: string;
-  backgroundEnabled: boolean;
   maxActiveRuns: number;
 };
 
@@ -26,7 +25,6 @@ const fieldsOf = (buddy: Buddy): ProfileFields => ({
   model: buddy.model ?? '',
   reasoningEffort: buddy.reasoningEffort ?? '',
   managerId: buddy.managerId ?? '',
-  backgroundEnabled: buddy.backgroundEnabled,
   maxActiveRuns: buddy.maxActiveRuns,
 });
 
@@ -49,7 +47,6 @@ export function profileChanges(before: ProfileFields, after: ProfileFields) {
     ...(changed('model') ? { model: orNull(after.model) } : {}),
     ...(changed('reasoningEffort') ? { reasoningEffort: orNull(after.reasoningEffort) } : {}),
     ...(changed('managerId') ? { managerId: orNull(after.managerId) } : {}),
-    ...(changed('backgroundEnabled') ? { backgroundEnabled: after.backgroundEnabled } : {}),
     ...(changed('maxActiveRuns') ? { maxActiveRuns: after.maxActiveRuns } : {}),
   };
 }
@@ -176,14 +173,6 @@ function ProfileForm({
           value={fields.maxActiveRuns}
           onChange={(event) => set('maxActiveRuns', Number(event.target.value))}
         />
-      </label>
-      <label className="buddy-panel__check">
-        <input
-          type="checkbox"
-          checked={fields.backgroundEnabled}
-          onChange={(event) => set('backgroundEnabled', event.target.checked)}
-        />
-        Background work enabled
       </label>
       <button type="submit" disabled={action.busy || Object.keys(changes).length === 0}>
         {action.busy ? 'Saving…' : 'Save settings'}

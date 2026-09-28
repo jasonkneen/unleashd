@@ -82,13 +82,6 @@ export function BuddyBuilderResultCard({ event }: { event: BuddyBuilderEvent }) 
         <p>{buddy.role}</p>
         <p className="buddy-created-card__snapshot">Snapshot when saved</p>
         {runtime && <p className="buddy-created-card__runtime">{runtime}</p>}
-        {result.backgroundEnabled !== undefined && (
-          <p className="buddy-created-card__update">
-            {result.backgroundEnabled
-              ? 'Can respond to team messages'
-              : 'Team message execution disabled'}
-          </p>
-        )}
         {event.action === 'updated' && (
           <p className="buddy-created-card__update">Working brief saved</p>
         )}

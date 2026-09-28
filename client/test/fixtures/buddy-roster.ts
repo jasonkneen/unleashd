@@ -7,7 +7,6 @@ export function buddyFixture(overrides: Partial<Buddy> & Pick<Buddy, 'id' | 'nam
     slug: overrides.id,
     role: 'Teammate',
     status: 'active',
-    backgroundEnabled: true,
     maxActiveRuns: 2,
     createdAt: '2026-09-01T00:00:00.000Z',
     ...overrides,

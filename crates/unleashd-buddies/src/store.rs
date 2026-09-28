@@ -275,7 +275,7 @@ fn event_row(r: &Row) -> rusqlite::Result<Event> {
 // ---- shared reads ----------------------------------------------------------------------------
 
 pub(crate) const BUDDY_COLS: &str = "id, workspace_id, slug, name, role, status, manager_id, provider, model, \
-    reasoning_effort, soul_path, background_enabled, max_active_runs, created_at";
+    reasoning_effort, soul_path, max_active_runs, created_at";
 
 pub(crate) fn buddy_row(r: &Row) -> rusqlite::Result<Buddy> {
     Ok(Buddy {
@@ -290,9 +290,8 @@ pub(crate) fn buddy_row(r: &Row) -> rusqlite::Result<Buddy> {
         model: r.get(8)?,
         reasoning_effort: r.get(9)?,
         soul_path: r.get(10)?,
-        background_enabled: r.get(11)?,
-        max_active_runs: r.get(12)?,
-        created_at: r.get(13)?,
+        max_active_runs: r.get(11)?,
+        created_at: r.get(12)?,
     })
 }
 

@@ -180,7 +180,6 @@ async function runCase(c: CurationCase, repeat: number, warnings: string[]): Pro
     name: 'Lead',
     role: 'Engineering lead for this workspace',
     manager: { kind: 'nobody' },
-    backgroundEnabled: true,
     key: 'lead',
   });
   const seeds: Array<[MemoryDoc | 'soul', string]> = [

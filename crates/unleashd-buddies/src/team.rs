@@ -47,8 +47,7 @@ impl Store {
                 task_id: None,
                 op: "buddy.create",
                 payload: json!({"slug": input.slug, "name": input.name, "role": input.role, "manager": manager_id(&input.manager),
-                    "provider": input.provider, "model": input.model, "effort": input.reasoning_effort,
-                    "background": input.background_enabled}),
+                    "provider": input.provider, "model": input.model, "effort": input.reasoning_effort}),
                 key: Some(&input.key),
             };
             let id = idempotent(tx, &m, |tx| {
@@ -58,8 +57,8 @@ impl Store {
                 let id = new_id("buddy");
                 tx.execute(
                     "INSERT INTO buddy (id, workspace_id, slug, name, role, status, manager_id, provider, model, reasoning_effort,
-                       background_enabled, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9, ?10, ?11)",
+                       created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9, ?10)",
                     params![
                         id,
                         input.workspace_id,
@@ -70,7 +69,6 @@ impl Store {
                         input.provider,
                         input.model,
                         input.reasoning_effort,
-                        input.background_enabled,
                         now_iso()
                     ],
                 )?;
@@ -93,7 +91,7 @@ impl Store {
                 op: "buddy.update",
                 payload: json!({"name": c.name, "role": c.role, "manager": c.manager.as_ref().map(manager_id),
                     "provider": setting_json(&c.provider), "model": setting_json(&c.model),
-                    "effort": setting_json(&c.reasoning_effort), "background": c.background_enabled,
+                    "effort": setting_json(&c.reasoning_effort),
                     "max_active_runs": c.max_active_runs, "status": c.status.map(BuddyStatus::as_str)}),
                 key: Some(&input.key),
             };
@@ -104,10 +102,9 @@ impl Store {
                 tx.execute(
                     "UPDATE buddy SET name = coalesce(?2, name), role = coalesce(?3, role),
                        manager_id = CASE ?4 WHEN 1 THEN ?5 ELSE manager_id END,
-                       provider = CASE ?12 WHEN 1 THEN ?6 ELSE provider END, model = CASE ?13 WHEN 1 THEN ?7 ELSE model END,
-                       reasoning_effort = CASE ?14 WHEN 1 THEN ?8 ELSE reasoning_effort END,
-                       background_enabled = coalesce(?9, background_enabled), max_active_runs = coalesce(?10, max_active_runs),
-                       status = coalesce(?11, status)
+                       provider = CASE ?11 WHEN 1 THEN ?6 ELSE provider END, model = CASE ?12 WHEN 1 THEN ?7 ELSE model END,
+                       reasoning_effort = CASE ?13 WHEN 1 THEN ?8 ELSE reasoning_effort END,
+                       max_active_runs = coalesce(?9, max_active_runs), status = coalesce(?10, status)
                      WHERE id = ?1",
                     params![
                         buddy.id,
@@ -118,7 +115,6 @@ impl Store {
                         c.provider.as_ref().and_then(Setting::column),
                         c.model.as_ref().and_then(Setting::column),
                         c.reasoning_effort.as_ref().and_then(Setting::column),
-                        c.background_enabled,
                         c.max_active_runs,
                         c.status,
                         c.provider.is_some(),

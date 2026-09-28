@@ -68,9 +68,6 @@ export const BuddyCreateFieldsSchema = z.object({
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   reasoningEffort: z.string().min(1).optional(),
-  backgroundEnabled: z
-    .boolean()
-    .describe('Whether requests and schedules may start its turns (off: they wait)'),
 });
 export const BuddyChangesSchema = z.object({
   name: z.string().min(1).optional(),
@@ -79,7 +76,6 @@ export const BuddyChangesSchema = z.object({
   provider: profile,
   model: profile,
   reasoningEffort: profile,
-  backgroundEnabled: z.boolean().optional(),
   maxActiveRuns: z.number().int().positive().optional(),
   status: z.enum(['active', 'archived']).optional(),
 });

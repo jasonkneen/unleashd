@@ -58,7 +58,6 @@ export const BuddyBuilderResultSchema = z.object({
       })
     )
     .optional(),
-  backgroundEnabled: z.boolean().optional(),
 });
 export type BuddyBuilderResult = z.infer<typeof BuddyBuilderResultSchema>;
 

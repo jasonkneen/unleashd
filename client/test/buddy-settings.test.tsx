@@ -69,7 +69,6 @@ test('Settings offers Default for a set provider, model and effort; clearing sen
     model: 'opus',
     reasoningEffort: 'high',
     managerId: '',
-    backgroundEnabled: true,
     maxActiveRuns: 2,
   };
   // The route rejects '' (min length 1); a cleared field must go out as null.

@@ -174,7 +174,6 @@ fn workload(s: &mut unleashd_buddies::Store) {
                 provider: None,
                 model: None,
                 reasoning_effort: None,
-                background_enabled: true,
                 key: "hire".into(),
             },
         )

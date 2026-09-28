@@ -40,7 +40,6 @@ CREATE TABLE buddy (
   status TEXT NOT NULL CHECK(status IN ('active','archived')),
   manager_id TEXT REFERENCES buddy(id),
   provider TEXT, model TEXT, reasoning_effort TEXT, soul_path TEXT,
-  background_enabled INTEGER NOT NULL DEFAULT 0 CHECK(background_enabled IN (0,1)),
   max_active_runs INTEGER NOT NULL DEFAULT 5 CHECK(max_active_runs > 0),
   created_at TEXT NOT NULL, legacy TEXT,
   UNIQUE(workspace_id, slug)) STRICT;
@@ -213,6 +212,18 @@ fn drop_run_retry_of(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// `buddy.background_enabled` held every non-chat run queued while off (the default), so requests,
+/// schedules and workers sat "delivered but held" until the owner found a Settings toggle. Owner
+/// removed it 2026-09-29: background work is always available. Dropped from older databases.
+fn drop_buddy_background_enabled(conn: &Connection) -> Result<()> {
+    let present: bool =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('buddy') WHERE name = 'background_enabled')", [], |r| r.get(0))?;
+    if present {
+        conn.execute_batch("ALTER TABLE buddy DROP COLUMN background_enabled;")?;
+    }
+    Ok(())
+}
+
 /// `run.config` (a worker's own provider/model, JSON of `RunConfig`), added 2026-09-28 after
 /// Buddies shelled out to untracked `codex exec` workers because no run could choose its model.
 fn ensure_run_config(conn: &Connection) -> Result<()> {
@@ -275,6 +286,7 @@ pub fn open(path: &str) -> Result<Connection> {
             require_ordered_ids(&conn, path)?;
             ensure_column(&conn, "channel", "archived_at", "TEXT")?;
             drop_run_retry_of(&conn)?;
+            drop_buddy_background_enabled(&conn)?;
             ensure_run_config(&conn)?;
             ensure_threads(&conn)?;
             ensure_post_search(&conn)?;
@@ -306,6 +318,32 @@ mod tests {
             conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('run') WHERE name = 'config')", [], |r| r.get(0)).unwrap();
         assert!(present);
         open(path).unwrap();
+    }
+
+    // A file created before 2026-09-29 carries buddy.background_enabled (default 0), which held
+    // every background run queued. Opening drops it and keeps the buddy rows.
+    #[test]
+    fn background_enabled_is_dropped_from_an_existing_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        let path = path.to_str().unwrap();
+        open(path)
+            .unwrap()
+            .execute_batch(
+                "ALTER TABLE buddy ADD COLUMN background_enabled INTEGER NOT NULL DEFAULT 0 CHECK(background_enabled IN (0,1));
+                 INSERT INTO workspace (id, name, root_path, created_at) VALUES ('w', 'w', '/w', 'now');
+                 INSERT INTO buddy (id, workspace_id, slug, name, role, status, created_at) VALUES ('b', 'w', 'b', 'B', 'r', 'active', 'now');",
+            )
+            .unwrap();
+        let conn = open(path).unwrap();
+        let (present, buddies): (bool, i64) = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('buddy') WHERE name = 'background_enabled'), (SELECT count(*) FROM buddy)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((present, buddies), (false, 1));
     }
 
     #[test]

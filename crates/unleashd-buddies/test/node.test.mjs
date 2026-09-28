@@ -24,7 +24,6 @@ test('a request, its run and its answer cross the napi boundary', async () => {
       name: slug.toUpperCase(),
       role: 'r',
       manager: { kind: 'nobody' },
-      backgroundEnabled: true,
       key: slug,
     });
   const a = { kind: 'buddy', id: (await hire('a')).id };

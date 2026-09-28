@@ -161,7 +161,6 @@ test('bootstrap reuses an existing "Product Development Lead" as Product Dev', a
     name: 'Product Development Lead',
     role: 'Lead product development',
     manager: managerRef(null),
-    backgroundEnabled: false,
     key: 'lead',
   });
 

@@ -79,7 +79,6 @@ export interface Buddy {
   model?: string
   reasoningEffort?: string
   soulPath?: string
-  backgroundEnabled: boolean
   maxActiveRuns: number
   createdAt: string
 }
@@ -92,7 +91,6 @@ export interface BuddyChanges {
   provider?: Setting
   model?: Setting
   reasoningEffort?: Setting
-  backgroundEnabled?: boolean
   maxActiveRuns?: number
   status?: BuddyStatus
 }
@@ -106,8 +104,6 @@ export interface BuddyCreate {
   provider?: string
   model?: string
   reasoningEffort?: string
-  /** Whether requests and schedules may start its turns (off: they wait, queued). */
-  backgroundEnabled: boolean
   key: string
 }
 

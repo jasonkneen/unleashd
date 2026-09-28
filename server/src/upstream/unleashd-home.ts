@@ -92,8 +92,6 @@ async function ensureSeat(core: BuddiesCore, workspaceId: string, seat: Seat): P
     name: seat.name,
     role: seat.role,
     manager: managerRef(null),
-    // Owner @mentions start its turns; nothing runs in the background unasked.
-    backgroundEnabled: false,
     key,
   });
   await core.writeDoc(OWNER, {

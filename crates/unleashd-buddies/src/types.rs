@@ -255,7 +255,6 @@ pub struct Buddy {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub soul_path: Option<String>,
-    pub background_enabled: bool,
     pub max_active_runs: i64,
     pub created_at: String,
 }
@@ -702,8 +701,6 @@ pub struct BuddyCreate {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
-    /// Whether requests and schedules may start its turns (off: they wait, queued).
-    pub background_enabled: bool,
     pub key: String,
 }
 
@@ -736,7 +733,6 @@ pub struct BuddyChanges {
     pub provider: Option<Setting>,
     pub model: Option<Setting>,
     pub reasoning_effort: Option<Setting>,
-    pub background_enabled: Option<bool>,
     pub max_active_runs: Option<i64>,
     pub status: Option<BuddyStatus>,
 }

@@ -92,7 +92,6 @@ test('saved reporting relationships link available staff without linking archive
     action: 'created',
     result: {
       ...result,
-      backgroundEnabled: true,
       teamState: {
         employment: { kind: 'direct_report', managerId: 'lead' },
         manager: { id: 'lead', name: 'Project Lead', role: 'Lead', status: 'active' },
@@ -106,7 +105,6 @@ test('saved reporting relationships link available staff without linking archive
   };
   const visible = renderToolResult({ buddyBuilderEvent: event });
   assert.match(visible, /Reports to <a[^>]*href="\/buddies\/lead"/);
-  assert.match(visible, /Can respond to team messages/);
   assert.match(visible, /href="\/buddies\/engineer"/);
   assert.match(visible, /Product Designer \(archived\)/);
   assert.doesNotMatch(visible, /href="\/buddies\/designer"/);

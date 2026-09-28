@@ -150,7 +150,6 @@ async function world() {
       name,
       role: `${name} role`,
       manager: { kind: 'nobody' },
-      backgroundEnabled: true,
       provider: 'codex',
       key: slug,
     });
@@ -1060,7 +1059,6 @@ test('the reviewer climbs the ladder on credit exhaustion, sees tool calls, runs
     name: 'Lead',
     role: 'r',
     manager: { kind: 'nobody' },
-    backgroundEnabled: true,
     key: 'lead',
   });
   const events = createBuddyEvents();
@@ -1183,7 +1181,6 @@ test('a reviewer rung that outlives its timeout climbs to the next rung, which c
     name: 'Lead',
     role: 'r',
     manager: { kind: 'nobody' },
-    backgroundEnabled: true,
     key: 'lead',
   });
   const grants = createGrants({ ttlMs: 60_000 });
@@ -1308,7 +1305,6 @@ test("memory the reviewer saves after one chat is in the next chat's briefing", 
     name: 'Lead',
     role: 'r',
     manager: { kind: 'nobody' },
-    backgroundEnabled: true,
     key: 'lead',
   });
   const grants = createGrants({ ttlMs: 60_000 });
