@@ -17,13 +17,21 @@ const RUN_COLS: &str = "id, input_key, attempt, input_kind, input_id, buddy_id, 
     task_epoch, after_run_id, status, deadline, lease_expires_at, snapshot, outcome, error_code, error, ready_at, \
     created_at, started_at, ended_at, config";
 
+const RUN_WITH_ACTIVITY_SQL: &str = r#"FROM run r
+    JOIN buddy b ON b.id = r.buddy_id
+    LEFT JOIN (
+        SELECT buddy_id, count(*) AS active
+        FROM run INDEXED BY run_active_buddy
+        WHERE status IN ('running','cancel_requested')
+        GROUP BY buddy_id
+    ) activity ON activity.buddy_id = r.buddy_id"#;
+
 // Pattern: one-definition (docs/patterns.md#one-definition)
 // A run once appeared runnable in one view while the claimer held it for another condition. The
 // list and claim now use this exact expression; the crate test fails if either path can drift.
 const WAITING_REASON_SQL: &str = r#"CASE
     WHEN r.ready_at > ?1 THEN json_object('kind','not_before','at',r.ready_at)
     WHEN b.status <> 'active' THEN json_object('kind','buddy_archived')
-    WHEN r.input_kind <> 'chat' AND b.background_enabled = 0 THEN json_object('kind','background_off')
     WHEN r.after_run_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM run a WHERE a.id = r.after_run_id AND a.status IN ('complete','failed','cancelled')
     ) THEN json_object('kind','after_run','runId',r.after_run_id)
@@ -31,15 +39,9 @@ const WAITING_REASON_SQL: &str = r#"CASE
         SELECT 1 FROM run c WHERE c.conversation_id = r.conversation_id
           AND c.status IN ('running','cancel_requested')
     ) THEN json_object('kind','conversation_busy')
-    WHEN (
-        SELECT count(*) FROM run l WHERE l.buddy_id = r.buddy_id
-          AND l.status IN ('running','cancel_requested')
-    ) >= b.max_active_runs THEN json_object(
+    WHEN coalesce(activity.active, 0) >= b.max_active_runs THEN json_object(
         'kind','pool_full',
-        'active',(
-            SELECT count(*) FROM run l WHERE l.buddy_id = r.buddy_id
-              AND l.status IN ('running','cancel_requested')
-        ),
+        'active',coalesce(activity.active, 0),
         'max',b.max_active_runs
     )
     WHEN r.task_id IS NOT NULL AND NOT EXISTS (
@@ -167,7 +169,7 @@ impl Store {
             // removed 2026-09-29 (owner) after it silently parked requests as "delivered but held".
             let candidate: Option<String> = tx
                 .prepare_cached(&format!(
-                    "SELECT r.id FROM run r JOIN buddy b ON b.id = r.buddy_id
+                    "SELECT r.id {RUN_WITH_ACTIVITY_SQL}
                      WHERE r.status = 'queued' AND ({WAITING_REASON_SQL}) IS NULL
                      ORDER BY r.ready_at, r.id LIMIT 1"
                 ))?
@@ -287,10 +289,6 @@ impl Store {
                 ("conversation_id = ? ORDER BY created_at DESC, id DESC", vec![conversation_id.into()])
             }
             RunQuery::Task { task_id } => ("task_id = ? ORDER BY created_at DESC, id DESC", vec![task_id.into()]),
-            RunQuery::Workspace { workspace_id } => (
-                "status IN ('queued','running','cancel_requested') AND workspace_id = ? ORDER BY created_at DESC, id DESC",
-                vec![workspace_id.into()],
-            ),
             RunQuery::Queued => ("status = 'queued' ORDER BY ready_at, id", vec![]),
             RunQuery::Live { workspace_id } => {
                 ("status IN ('running','cancel_requested') AND workspace_id = ? ORDER BY started_at", vec![workspace_id.into()])
@@ -301,27 +299,24 @@ impl Store {
         collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), run_row)?)
     }
 
-    pub fn list_run_rows(&self, query: RunQuery, limit: i64) -> Result<Vec<RunRow>> {
-        let (filter, scope) = match query {
-            RunQuery::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
-            RunQuery::Task { task_id } => ("r.task_id = ?2", task_id),
-            RunQuery::Workspace { workspace_id } => {
+    pub fn list_run_rows(&self, scope: RunScope, limit: i64) -> Result<Vec<RunRow>> {
+        let (filter, scope) = match scope {
+            RunScope::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
+            RunScope::Task { task_id } => ("r.task_id = ?2", task_id),
+            RunScope::Workspace { workspace_id } => {
                 ("r.workspace_id = ?2 AND r.status IN ('queued','running','cancel_requested')", workspace_id)
-            }
-            RunQuery::Conversation { .. } | RunQuery::Queued | RunQuery::Live { .. } => {
-                return Err(CoreError::Invalid("run rows require buddy, task or workspace scope".into()));
             }
         };
         let requester = "CASE
             WHEN r.input_kind = 'chat' THEN 'owner'
-            WHEN r.input_kind = 'post' THEN coalesce((SELECT p.author_id FROM post p WHERE p.id = r.input_id), 'owner')
-            WHEN r.input_kind = 'reply' THEN coalesce((SELECT a.author_id FROM post p JOIN post a ON a.id = p.answer_id WHERE p.id = r.input_id), 'owner')
+            WHEN r.input_kind = 'post' THEN (SELECT CASE WHEN p.author_id IS NULL THEN 'owner' ELSE p.author_id END FROM post p WHERE p.id = r.input_id)
+            WHEN r.input_kind = 'reply' THEN (SELECT CASE WHEN a.author_id IS NULL THEN 'owner' ELSE a.author_id END FROM post p JOIN post a ON a.id = p.answer_id WHERE p.id = r.input_id)
             ELSE NULL END";
         let sql = format!(
             "SELECT r.id, r.status, r.input_kind, r.input_id, r.ready_at, r.task_id,
                     {requester}, r.started_at, r.ended_at,
                     CASE WHEN r.status = 'queued' THEN ({WAITING_REASON_SQL}) ELSE NULL END
-             FROM run r JOIN buddy b ON b.id = r.buddy_id
+             {RUN_WITH_ACTIVITY_SQL}
              WHERE {filter} ORDER BY r.created_at DESC, r.id DESC LIMIT ?3"
         );
         collect(self.conn.prepare_cached(&sql)?.query_map(params![now_iso(), scope, limit], |r| {

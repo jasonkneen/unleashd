@@ -41,7 +41,7 @@ export declare class BuddiesCore {
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
   getRun(id: string): Promise<Run>
   listRuns(query: RunQuery, limit: number): Promise<Array<Run>>
-  listRunRows(query: RunQuery, limit: number): Promise<Array<RunRow>>
+  listRunRows(scope: RunScope, limit: number): Promise<Array<RunRow>>
   putSchedule(actor: Actor, input: ScheduleInput): Promise<Schedule>
   listSchedules(query: ScheduleQuery): Promise<Array<Schedule>>
   dueSchedules(now: string): Promise<Array<Run>>
@@ -419,7 +419,6 @@ export type RunQuery =
   | { kind: 'buddy'; buddyId: string }
   | { kind: 'conversation'; conversationId: string }
   | { kind: 'task'; taskId: string }
-  | { kind: 'workspace'; workspaceId: string }
   | { kind: 'queued' }
   | { kind: 'live'; workspaceId: string }
 
@@ -435,6 +434,11 @@ export interface RunRow {
   waiting?: RunWaiting
 }
 
+export type RunScope =
+  | { kind: 'buddy'; buddyId: string }
+  | { kind: 'task'; taskId: string }
+  | { kind: 'workspace'; workspaceId: string }
+
 export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'complete' | 'failed' | 'cancelled'
 
 /**
@@ -444,7 +448,6 @@ export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'complete' |
 export type RunWaiting =
   | { kind: 'not_before'; at: string }
   | { kind: 'buddy_archived' }
-  | { kind: 'background_off' }
   | { kind: 'after_run'; runId: string }
   | { kind: 'conversation_busy' }
   | { kind: 'pool_full'; active: number; max: number }

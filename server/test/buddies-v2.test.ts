@@ -492,14 +492,23 @@ test('an MCP write fires the change bus in this process (B2)', async () => {
 // Pattern: fix-guards (docs/patterns.md#fix-guards). The queue view once had no reason and could
 // drift from claim admission. This crosses the real HTTP MCP endpoint; the crate test pins the
 // single SQL expression used by both list and claim.
-test('workspace run rows expose background_off and clear it when the run becomes claimable', async () => {
+test('workspace run rows expose task_paused and clear it when the same run becomes claimable', async () => {
   const w = await world();
   try {
     w.runner.stop();
-    await w.core.updateBuddy(OWNER, {
-      buddyId: w.designer.id,
-      changes: { backgroundEnabled: false },
-      key: 'waiting-off',
+    const task = await w.core.upsertTask(OWNER, {
+      kind: 'create',
+      ownerId: w.designer.id,
+      title: 'Held task',
+      doneCriteria: 'Claimed after unpausing',
+      key: 'waiting-task',
+    });
+    const paused = await w.core.upsertTask(OWNER, {
+      kind: 'update',
+      taskId: task.id,
+      baseRevision: task.revision,
+      changes: { paused: true },
+      key: 'waiting-pause',
     });
     const request = await w.core.post(
       buddyActor(w.lead.id),
@@ -508,6 +517,7 @@ test('workspace run rows expose background_off and clear it when the run becomes
         kind: 'request',
         body: 'Held work',
         evidence: [],
+        taskId: task.id,
         broadcast: false,
         key: 'waiting-request',
       }
@@ -528,7 +538,7 @@ test('workspace run rows expose background_off and clear it when the run becomes
     const row = listed.value.find(
       (item: { input: { kind: string; postId?: string } }) => item.input.postId === request.id
     );
-    assert.deepEqual(row.waiting, { kind: 'background_off' });
+    assert.deepEqual(row.waiting, { kind: 'task_paused' });
     assert.deepEqual(row.requester, buddyActor(w.lead.id));
     for (const bodyField of [
       'outcome',
@@ -540,10 +550,12 @@ test('workspace run rows expose background_off and clear it when the run becomes
     ])
       assert.equal(bodyField in row, false, `${bodyField} stays on runs get`);
 
-    await w.core.updateBuddy(OWNER, {
-      buddyId: w.designer.id,
-      changes: { backgroundEnabled: true },
-      key: 'waiting-on',
+    await w.core.upsertTask(OWNER, {
+      kind: 'update',
+      taskId: task.id,
+      baseRevision: paused.revision,
+      changes: { paused: false },
+      key: 'waiting-unpause',
     });
     const released = await call(spec, 'runs', {
       action: { kind: 'list', scope: { workspace: w.ws } },
@@ -551,6 +563,16 @@ test('workspace run rows expose background_off and clear it when the run becomes
     const releasedRow = released.value.find((item: { id: string }) => item.id === row.id);
     assert.equal(releasedRow.waiting ?? null, null);
     assert.equal((await w.core.claimRun(60_000))?.run.id, row.id);
+
+    const missing = await w.core.enqueueRun(OWNER, {
+      buddyId: w.designer.id,
+      input: { kind: 'post', postId: 'missing-post' },
+    });
+    const relisted = await call(spec, 'runs', {
+      action: { kind: 'list', scope: { workspace: w.ws } },
+    });
+    const missingRow = relisted.value.find((item: { id: string }) => item.id === missing.id);
+    assert.equal(missingRow.requester, undefined, 'a missing post is not attributed to the owner');
   } finally {
     await w.close();
   }
@@ -1813,14 +1835,6 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       ),
       [task.value.id, closed.id].sort()
     );
-    assert.deepEqual(
-      ids(
-        await call(builder, 'tasks', {
-          action: { kind: 'list', scope: { buddyId: w.designer.id } },
-        })
-      ),
-      [task.value.id]
-    );
     const taskRows = await call(builder, 'tasks', {
       action: { kind: 'list', scope: { workspace: w.ws } },
     });
@@ -1844,11 +1858,6 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
     });
     assert.equal(buddyBody.value.id, w.designer.id);
 
-    const removedComment = await call(designerGrant, 'task_write', {
-      write: { kind: 'comment', taskId: task.value.id, body: 'old path' },
-      key: 'old-comment',
-    });
-    assert.equal(removedComment.isError, true);
     const comment = await call(designerGrant, 'post', {
       channel: { task: task.value.id },
       body: 'New path',

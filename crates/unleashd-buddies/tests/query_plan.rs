@@ -23,7 +23,12 @@ const WHOLE_TABLE_BY_DESIGN: &[&str] = &["SCAN workspace"];
 /// Whole walks of a PARTIAL index whose every row is a candidate: the run queue and live leases.
 /// Any other `SCAN t USING INDEX` walks the whole table in index order (T22: the Task filter's
 /// `post.task_id` lookup walked `post` by ord before `post_task` existed, and passed).
-const INDEX_WALKS_BY_DESIGN: &[&str] = &["SCAN run USING INDEX run_queue", "SCAN r USING INDEX run_queue", "SCAN run USING INDEX run_lease"];
+const INDEX_WALKS_BY_DESIGN: &[&str] = &[
+    "SCAN run USING INDEX run_queue",
+    "SCAN r USING INDEX run_queue",
+    "SCAN run USING INDEX run_lease",
+    "SCAN run USING INDEX run_active_buddy",
+];
 /// Plan lines that scan no table: the manager-walk CTE and its constant seed row.
 const NOT_TABLES: &[&str] = &["SCAN up", "SCAN CONSTANT ROW"];
 
@@ -155,16 +160,15 @@ fn workload(s: &mut unleashd_buddies::Store) {
         RunQuery::Buddy { buddy_id: "ic".into() },
         RunQuery::Conversation { conversation_id: "c-ic".into() },
         RunQuery::Task { task_id: parent.id.clone() },
-        RunQuery::Workspace { workspace_id: WS.into() },
         RunQuery::Queued,
         RunQuery::Live { workspace_id: WS.into() },
     ] {
         s.list_runs(q, 10).unwrap();
     }
     for q in [
-        RunQuery::Buddy { buddy_id: "ic".into() },
-        RunQuery::Task { task_id: parent.id.clone() },
-        RunQuery::Workspace { workspace_id: WS.into() },
+        RunScope::Buddy { buddy_id: "ic".into() },
+        RunScope::Task { task_id: parent.id.clone() },
+        RunScope::Workspace { workspace_id: WS.into() },
     ] {
         s.list_run_rows(q, 10).unwrap();
     }

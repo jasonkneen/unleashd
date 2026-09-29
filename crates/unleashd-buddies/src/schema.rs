@@ -131,6 +131,7 @@ CREATE UNIQUE INDEX run_conversation_slot ON run(conversation_id)
   WHERE conversation_id IS NOT NULL AND status IN ('running','cancel_requested');
 CREATE INDEX run_queue ON run(ready_at, id) WHERE status = 'queued';
 CREATE INDEX run_lease ON run(lease_expires_at) WHERE status IN ('running','cancel_requested');
+CREATE INDEX run_active_buddy ON run(buddy_id) WHERE status IN ('running','cancel_requested');
 CREATE INDEX run_buddy ON run(buddy_id, status, created_at);
 CREATE INDEX run_conversation ON run(conversation_id, created_at) WHERE conversation_id IS NOT NULL;
 CREATE INDEX run_task ON run(task_id, status) WHERE task_id IS NOT NULL;
@@ -187,6 +188,8 @@ CREATE INDEX IF NOT EXISTS task_live ON task(workspace_id, owner_id, status)
 const LIST_SCOPE_INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS schedule_task ON schedule(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS schedule_workspace ON schedule(workspace_id);
+CREATE INDEX IF NOT EXISTS run_active_buddy ON run(buddy_id)
+  WHERE status IN ('running','cancel_requested');
 CREATE INDEX IF NOT EXISTS run_workspace_live ON run(workspace_id, status, created_at)
   WHERE status IN ('queued','running','cancel_requested');";
 

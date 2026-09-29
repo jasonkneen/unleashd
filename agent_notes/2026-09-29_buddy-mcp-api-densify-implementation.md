@@ -81,3 +81,34 @@ bodies. Revisit the single SQL expression only if SQLite can no longer represent
 the eligibility policy; in that case stop and redesign list/claim authority
 together rather than duplicating conditions. Reconsider wrapper renaming only as
 part of a broader core API migration with all HTTP/runtime callers in scope.
+
+## Rebase-review successor — 2026-09-29
+
+Question: how does the accepted waiting-reason/list cleanup change after main commit
+`c977f68` removed `buddy.background_enabled` and made background work always available?
+
+Decision-maker: owner, through the instruction to finish and merge this Task. Status:
+accepted implementation successor. `background_off` is removed from the reason sum type and
+the real MCP proof now uses `task_paused`. Unpausing no longer increments the Task epoch: pausing,
+reassigning and cancelling still invalidate queued work, while work deliberately queued against
+an already-paused Task survives and becomes claimable when that Task is unpaused. This is the
+smallest behavior consistent with both the documented invalidation contract and the requested
+same-run boundary proof.
+
+The review also replaces the partial `list_run_rows(RunQuery)` function with a total
+`RunScope { Buddy, Task, Workspace }`, leaves `RunQuery::Live` for the workspace activity HTTP
+caller, removes the unused `RunQuery::Workspace`, returns no requester when a referenced post is
+missing, and computes each Buddy's active pool count once through an indexed joined projection.
+The query-plan guard forced that projection onto the partial `run_active_buddy` index rather than
+accepting SQLite's initial full covering walk.
+
+On a consistent backup of the same live database used for the earlier paired measurements, the
+workspace held 524 Tasks total. The default open-only MCP projection returned 107 rows and was
+32,729 characters as compact JSON. The temporary backup was deleted after measurement.
+
+Final rebase verification: `pnpm typecheck` passed; the crate's intended pure-core command
+`cargo test --no-default-features` passed 35/35 (3 unit, 31 core integration, 1 query-plan);
+the focused real MCP suite passed 30/30; `pnpm test:server` passed 226 with 1 skipped and 0
+failed; and `pnpm test:client` passed 209/209. An initial plain `cargo test` attempt failed to
+link the optional napi symbols, as the crate's manifest warns; it was replaced by the package's
+documented no-default-features test command and is not a product failure.

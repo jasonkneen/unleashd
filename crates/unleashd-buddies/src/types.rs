@@ -395,7 +395,6 @@ pub struct Run {
 pub enum RunWaiting {
     NotBefore { at: String },
     BuddyArchived,
-    BackgroundOff,
     AfterRun { run_id: String },
     ConversationBusy,
     PoolFull { active: i64, max: i64 },
@@ -554,15 +553,19 @@ pub enum RunQuery {
     Task {
         task_id: String,
     },
-    /// Queued and running runs: the workspace's current work and wait queue.
-    Workspace {
-        workspace_id: String,
-    },
     Queued,
     /// Running (or cancel-requested) runs in a workspace: what its buddies are doing now.
     Live {
         workspace_id: String,
     },
+}
+
+#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
+#[derive(Debug, Clone)]
+pub enum RunScope {
+    Buddy { buddy_id: String },
+    Task { task_id: String },
+    Workspace { workspace_id: String },
 }
 
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]

@@ -161,7 +161,10 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
         if next.status == TaskStatus::Blocked && next.blocked_reason.as_deref().unwrap_or("").trim().is_empty() {
             return Err(CoreError::Invalid("a blocked task needs a blocked_reason".into()));
         }
-        let invalidates = next.paused != task.paused
+        // Pattern: fix-guards (docs/patterns.md#fix-guards)
+        // Unpausing used to cancel work queued while paused; the MCP waiting-reason boundary test
+        // requires that exact run to become claimable instead.
+        let invalidates = (next.paused && !task.paused)
             || next.owner_id != task.owner_id
             || (next.status == TaskStatus::Cancelled && task.status != TaskStatus::Cancelled);
         let epoch = task.epoch + i64::from(invalidates);
