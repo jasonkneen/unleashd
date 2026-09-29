@@ -62,7 +62,7 @@ const FRAMES = {
     meta: 'channel-browser-message-heading',
     author: 'channel-browser-author',
     divider: 'channel-thread-divider ui-muted ui-row',
-    note: 'channel-dm-replying',
+    note: 'channel-dm-replying channel-browser-replying ui-row ui-muted',
   },
   mobile: {
     pane: 'mobile-channel ui-stack',

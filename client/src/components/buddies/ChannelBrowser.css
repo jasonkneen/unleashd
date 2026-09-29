@@ -1,6 +1,4 @@
-/* Full-screen channel browser. Mounted outside the app shell, so it owns the
-   whole viewport: rail on the left, one channel pane filling the rest. */
-
+/* Outside the app shell: a full-screen channel browser with a rail and one expanding pane. */
 .channel-browser {
   --channel-rail-width: 264px;
   --channel-header-height: 60px;
@@ -889,31 +887,20 @@ a.channel-browser-buddy-done {
   content: "";
 }
 .channel-thread-replying {
-  /* Thread-pane messages pad sp-7 each side, then a 36px avatar and sp-6 gap: line up with that text column. */
-  padding: var(--sp-4) var(--sp-7) var(--sp-4) calc(var(--sp-7) + 36px + var(--sp-6));
+  padding: var(--sp-4) var(--sp-7) var(--sp-4) calc(var(--sp-7) + var(--sp-9) + var(--sp-6) * 2);
 }
-/* DM "is replying": sits in the message text column (message padding + 36px avatar + gap),
-   same look as .channel-browser-replying. Was the thread-pane class, whose 64px offset
-   belongs to the 420px thread pane, so in a full-width DM the dots hugged the left edge. */
+/* DM text starts after message padding + avatar + gap; the narrower thread offset misaligned it. */
 .channel-dm-replying {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
   margin: 0;
-  padding: var(--sp-4) var(--sp-9) var(--sp-4) calc(var(--sp-9) + 36px + var(--sp-6));
-  color: var(--text-muted);
-  font-size: var(--fs-4);
-  font-style: italic;
+  padding: var(--sp-4) var(--sp-9) var(--sp-4) calc(var(--sp-9) * 2 + var(--sp-6) * 2);
 }
 /* Composer placement (the composer's own look is ChannelComposer.css). */
 .channel-browser-pane > .channel-composer {
   margin: 0 24px 18px;
 }
-
 .channel-thread .channel-composer {
   margin: 8px 16px 16px;
 }
-
 .channel-browser-message--continuation .channel-markdown {
   margin-top: 0;
 }
