@@ -6,6 +6,9 @@
 import type React from 'react';
 import { AbsoluteFill, Audio, Freeze, OffthreadVideo, Sequence, useCurrentFrame } from 'remotion';
 import beat9 from '../../beat9/beat9.mp4';
+import calmDowntempo from '../../sound/calm-downtempo.wav';
+import calmHalftime from '../../sound/calm-halftime.wav';
+import calmPulse from '../../sound/calm-pulse.wav';
 import edmFull from '../../sound/edm-full.wav';
 import * as Close from './Close';
 import * as DesignReview from './DesignReview';
@@ -102,7 +105,14 @@ const Place: React.FC<{ s: Section }> = ({ s }) => {
   );
 };
 
-export const Assembly: React.FC = () => (
+// The score under everything after the intro. Same bar grid and length, so the picture never changes
+// with it: edm.py's EDM cue, or one of calm.py's three calmer versions (owner, 2026-09-30: "too
+// upbeat and generic"). Pick one at render time: --props='{"score":"pulse"}'.
+export const SCORES = { edm: edmFull, halftime: calmHalftime, pulse: calmPulse, downtempo: calmDowntempo } as const;
+export type Score = keyof typeof SCORES;
+export type AssemblyProps = { score: Score };
+
+export const Assembly: React.FC<AssemblyProps> = ({ score }) => (
   <AbsoluteFill style={{ background: '#000' }}>
     {SECTIONS.map((s) => (
       <Place key={s.id} s={s} />
@@ -116,7 +126,7 @@ export const Assembly: React.FC = () => (
       <PostIntroBenefits.BenefitsSound />
     </Sequence>
     <Sequence from={MUSIC_IN} layout="none">
-      <Audio src={edmFull} volume={buildRamp} />
+      <Audio src={SCORES[score]} volume={buildRamp} />
     </Sequence>
   </AbsoluteFill>
 );
