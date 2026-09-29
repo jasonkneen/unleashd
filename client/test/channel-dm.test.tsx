@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
-import type { Message } from '@unleashd/shared';
+import { type Message, createDefaultConversationConfig } from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { buddyFixture, rosterFixture } from './fixtures/buddy-roster';
@@ -110,9 +110,9 @@ test('a desktop DM keeps generations in order and puts Refresh context in the he
     `generations in order around the divider: ${order}`
   );
   assert.match(html, /class="channel-browser-author">Lead</);
-  assert.match(html, /class="channel-inline-action">Refresh context</);
+  assert.match(html, /class="channel-inline-action"[^>]*>Refresh context</);
   assert.ok(html.indexOf('Refresh context') < html.indexOf('Old question'));
-  assert.match(html, /Default model:/);
+  assert.match(html, /Model: /);
   assert.match(html, /aria-label="About Lead"/);
   assert.match(html, /placeholder="Message Lead"/);
   assert.doesNotMatch(html, /class="chat-container/, 'not the conversation page');
@@ -198,7 +198,7 @@ test('a phone DM stays in Channels with Back to where it was opened', async () =
     new RegExp(`aria-label="Back" href="/buddies/workspaces/${WS}/channels\\?channel=ch_a"`)
   );
   assert.match(html, /class="mobile-channel-header__dm-actions ui-row">[\s\S]*Refresh context/);
-  assert.match(html, /mobile-channel-header__dm-actions ui-row">[\s\S]*Default model:/);
+  assert.match(html, /mobile-channel-header__dm-actions ui-row">[\s\S]*Model: /);
   assert.match(html, /Fresh answer/);
 });
 
@@ -269,7 +269,7 @@ test('the conversation page sends a Buddy DM chat to Channels; other Buddy chats
   const latest = `href="/buddies/workspaces/${WS}/channels\\?dm=${NEW}"`;
   const current = page(NEW);
   assert.match(current, new RegExp(`${latest}[^>]*>Open DM<`));
-  assert.match(current, /class="channel-inline-action">Refresh context</);
+  assert.match(current, /class="channel-inline-action"[^>]*>Refresh context</);
   // An earlier generation says so and opens the latest, as the snapshot's redirect did.
   const earlier = page(OLD);
   assert.match(earlier, new RegExp(`${latest}[^>]*>Open DM<`));
@@ -277,4 +277,27 @@ test('the conversation page sends a Buddy DM chat to Channels; other Buddy chats
   const other = page(SEAT);
   assert.match(other, /class="chat-view /, 'the page rendered the conversation');
   assert.doesNotMatch(other, />Open DM</);
+});
+
+test('the New chat divider says when the harness changed, and stays plain when it did not', async () => {
+  await seed();
+  assert.doesNotMatch(desktop(NEW), /harness and model changed to/);
+  const codex = createDefaultConversationConfig('codex');
+  jotaiStore.set(transcriptStore.patch, {
+    set: [
+      [
+        NEW,
+        {
+          tag: 'loaded' as const,
+          epoch: 0,
+          messages: [message('user', 'Fresh start', 30)],
+          detail: syntheticDetail(NEW, {
+            config: { ...syntheticDetail(NEW).config, config: codex },
+          }),
+        },
+      ],
+    ],
+    remove: [],
+  });
+  assert.match(desktop(NEW), /harness and model changed to codex/);
 });

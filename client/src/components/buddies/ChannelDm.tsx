@@ -110,6 +110,16 @@ export async function startNewDirectChat(
   return conversationId;
 }
 
+// The header's model pick is the Buddy's default: new @mention seats start from the profile
+// (channels.ts profileConfig), so a pick that only changed this DM would be forgotten there.
+const profileOf = (config: ConversationConfig) => ({
+  provider: config.provider,
+  model: config.model.mode === 'explicit' ? config.model.modelId : null,
+  reasoningEffort: config.reasoning.mode === 'explicit' ? config.reasoning.effort : null,
+});
+const saveBuddyDefault = (buddyId: string, config: ConversationConfig) =>
+  buddyWrite(`/api/buddies/${encodeURIComponent(buddyId)}`, 'PATCH', profileOf(config));
+
 export function ChannelDm({
   conversationId,
   buddyId,
@@ -143,7 +153,13 @@ export function ChannelDm({
   const configCommand = useAtomValue(commandFor(conversationId)).config;
   const bodies = useConversationBodies(conversationId);
   const { catalog } = useProviderCatalog();
+  const buddyHarness = (providerId: string) =>
+    catalog?.providers.some((p) => p.id === providerId && p.supportsRequiredMcp) ?? false;
   const [modelOpen, setModelOpen] = useState(false);
+  // A pick on another harness cannot change this chat (a started session keeps its provider), so
+  // it waits here until "New convo" confirms it.
+  const [harnessDraft, setHarnessDraft] = useState<ConversationConfig | null>(null);
+  const [defaultError, setDefaultError] = useState<string | null>(null);
   const stream = useAtomValue(streamFamily(conversationId));
   const groups = useAtomValue(groupsFamily(conversationId));
   const chain = usePolledFetch<DirectChain>(directChainUrl(buddyId), 15_000);
@@ -177,33 +193,59 @@ export function ChannelDm({
   const outOfTokens =
     !running && diagnostics.attempt?.terminalCause === 'out_of_tokens' && retryText !== null;
   const refreshContextControl =
-    latest === conversationId && messages.length + queue.length > 0 ? (
-      <HarnessPicker
-        label="Refresh context"
-        note={`Start a fresh chat with ${buddyName} to save token cost. Saved Buddy memories carry forward; this chat remains above it.`}
-        confirm="Refresh context"
-        seed={config}
-        excluded={null}
-        buddy
-        onConfirm={(nextConfig) => newChat({ config: nextConfig })}
-        placement="below"
-      />
+    latest === conversationId && messages.length + queue.length > 0 && config !== null ? (
+      <button
+        type="button"
+        className="channel-inline-action"
+        title={`Start a fresh chat with ${buddyName} to save token cost. Saved Buddy memories carry forward; this chat remains above it.`}
+        onClick={() => void newChat({ config })}
+      >
+        Refresh context
+      </button>
     ) : null;
+  const shownConfig = harnessDraft ?? config;
   const modelControl = (
     <button
       type="button"
       className="channel-dm-model channel-inline-action ui-truncate"
-      title="Set the model for future turns in this DM"
-      aria-label={`DM default model for ${buddyName}: ${config ? modelSummary(config, catalog) : 'loading'}`}
+      title="Set the default model for this DM and every @mention of this Buddy"
+      aria-label={`Default model for ${buddyName}: ${config ? modelSummary(config, catalog) : 'loading'}`}
       aria-haspopup="dialog"
       aria-expanded={modelOpen}
       disabled={config === null}
       onClick={() => setModelOpen(true)}
     >
-      Default model: {config ? modelSummary(config, catalog) : 'Loading'}
+      Model: {config ? modelSummary(config, catalog) : 'Loading'}
       {configSaving ? ' …' : ''} ▾
     </button>
   );
+  const closeModel = () => {
+    setModelOpen(false);
+    setHarnessDraft(null);
+    setDefaultError(null);
+  };
+  const pickModel = (next: ConversationConfig) => {
+    if (!detail || config === null) return;
+    setDefaultError(null);
+    if (next.provider !== config.provider) {
+      setHarnessDraft(next);
+      return;
+    }
+    setHarnessDraft(null);
+    setConversationConfig({
+      conversationId,
+      expectedRevision: detail.config.revision,
+      patch: { kind: 'replace', config: next },
+    });
+    saveBuddyDefault(buddyId, next).catch((cause: unknown) => setDefaultError(errorText(cause)));
+  };
+  const startConvoOnDraft = () => {
+    if (harnessDraft === null) return;
+    const next = harnessDraft;
+    saveBuddyDefault(buddyId, next)
+      .then(() => newChat({ config: next }))
+      .then(closeModel, (cause: unknown) => setDefaultError(errorText(cause)));
+  };
   return (
     <section className={f.pane} aria-label={`Direct message with ${buddyName}`}>
       <header className={f.header} style={frame === 'mobile' ? { flexWrap: 'wrap' } : undefined}>
@@ -240,22 +282,43 @@ export function ChannelDm({
       {modelOpen && (
         <ConfigOverlay
           presentation={frame === 'mobile' ? 'sheet' : 'popover'}
-          value={config}
-          onClose={() => setModelOpen(false)}
-          onChange={(next) => {
-            if (!detail) return;
-            setConversationConfig({
-              conversationId,
-              expectedRevision: detail.config.revision,
-              patch: { kind: 'replace', config: next },
-            });
+          value={shownConfig}
+          onClose={closeModel}
+          onChange={pickModel}
+          holdOpen={harnessDraft !== null}
+          picker={{
+            disabled: configSaving,
+            defaults: 'inline',
+            providerFilter: buddyHarness,
           }}
-          picker={{ disabled: configSaving, providerDisabled: true, defaults: 'inline' }}
           notes={[
-            { tone: 'info', text: 'This model is used for future turns in this DM.' },
+            {
+              tone: 'info',
+              text: 'This is the default model for this DM and every @mention of this Buddy.',
+            },
+            ...(harnessDraft
+              ? [
+                  {
+                    tone: 'info' as const,
+                    text: 'Changing the harness clears this chat’s context and starts a new convo. Saved Buddy memory persists.',
+                  },
+                ]
+              : []),
             ...(configSaving ? [{ tone: 'info' as const, text: 'Saving…' }] : []),
             ...(configError ? [{ tone: 'error' as const, text: configError }] : []),
+            ...(defaultError ? [{ tone: 'error' as const, text: defaultError }] : []),
           ]}
+          actions={
+            harnessDraft && (
+              <button
+                type="button"
+                className="channel-composer-model-done"
+                onClick={startConvoOnDraft}
+              >
+                New convo
+              </button>
+            )
+          }
         />
       )}
       <div className={f.scroll} ref={follow.scrollRef} onScroll={follow.onScroll}>
@@ -271,7 +334,7 @@ export function ChannelDm({
             <DmGeneration
               key={id}
               conversationId={id}
-              divider={index > 0}
+              previousId={index > 0 ? shown[index - 1] : null}
               frame={f}
               buddyName={buddyName}
               buddyNames={buddyNames}
@@ -322,14 +385,15 @@ export function ChannelDm({
 
 function DmGeneration({
   conversationId,
-  divider,
+  previousId,
   frame,
   buddyName,
   buddyNames,
   tasks,
 }: {
   conversationId: string;
-  divider: boolean;
+  /** The generation before this one; null for the first, which has no divider. */
+  previousId: string | null;
   frame: Frame;
   buddyName: string;
   buddyNames: Readonly<Record<string, string>>;
@@ -338,13 +402,23 @@ function DmGeneration({
   useConversationBodies(conversationId);
   const groups = useAtomValue(groupsFamily(conversationId));
   const queue = queueOf(useAtomValue(transcriptFamily(conversationId)));
-  const provider = useAtomValue(rowFamily(conversationId))?.provider ?? null;
+  const { catalog } = useProviderCatalog();
+  const divider = previousId !== null;
+  const config = detailOf(useAtomValue(transcriptFamily(conversationId)))?.config.config ?? null;
+  const before = detailOf(useAtomValue(transcriptFamily(previousId ?? conversationId)))?.config
+    .config;
+  const summary = (c: ConversationConfig) => modelSummary(c, catalog);
+  const changedTo =
+    config && before && (config.provider !== before.provider || summary(config) !== summary(before))
+      ? `${config.provider} · ${summary(config)}`
+      : null;
   const rows = dmRows(groups, queue);
   return (
     <>
       {divider && (
-        <div className={frame.divider} title={provider ?? undefined}>
+        <div className={frame.divider}>
           <span>New chat</span>
+          {changedTo && <span>· harness and model changed to {changedTo}</span>}
         </div>
       )}
       {rows.length === 0 && !divider ? (

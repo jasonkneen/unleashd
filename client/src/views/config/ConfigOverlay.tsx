@@ -36,6 +36,10 @@ export interface ConfigOverlayProps {
   onClose: () => void;
   picker?: PickerOptions;
   notes?: readonly ConfigNote[];
+  /** Rendered under the notes (e.g. a confirm button for a change that needs one). */
+  actions?: ReactNode;
+  /** Keep a sheet open after a pick: the pick is a draft the caller still has to confirm. */
+  holdOpen?: boolean;
 }
 
 const NO_NOTES: readonly ConfigNote[] = [];
@@ -45,11 +49,13 @@ function Content({
   onPick,
   picker,
   notes,
+  actions,
 }: {
   value: ConversationConfig | null;
   onPick: (config: ConversationConfig, origin: ConfigEditOrigin) => void;
   picker: PickerOptions;
   notes: readonly ConfigNote[];
+  actions: ReactNode;
 }) {
   const { catalog, isLoading, error, retry } = useProviderCatalog();
   if (!catalog) {
@@ -87,6 +93,7 @@ function Content({
           {note.text}
         </p>
       ))}
+      {actions}
     </div>
   );
 }
@@ -175,16 +182,18 @@ export function ConfigOverlay({
   onClose,
   picker = {},
   notes = NO_NOTES,
+  actions = null,
+  holdOpen = false,
 }: ConfigOverlayProps) {
   const { Frame, closeOnPick } = PRESENTATIONS[presentation];
   const onPick = (config: ConversationConfig, origin: ConfigEditOrigin) => {
     onChange(config);
     // Typing a custom model id must not close the sheet on the first keystroke.
-    if (closeOnPick && origin === 'choice') onClose();
+    if (closeOnPick && origin === 'choice' && !holdOpen) onClose();
   };
   return (
     <Frame onClose={onClose}>
-      <Content value={value} onPick={onPick} picker={picker} notes={notes} />
+      <Content value={value} onPick={onPick} picker={picker} notes={notes} actions={actions} />
     </Frame>
   );
 }
