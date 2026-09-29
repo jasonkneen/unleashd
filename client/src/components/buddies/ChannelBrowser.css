@@ -889,8 +889,21 @@ a.channel-browser-buddy-done {
   content: "";
 }
 .channel-thread-replying {
-  /* 64px: an alignment offset to the post text column, kept exact rather than snapped. */
-  padding: var(--sp-4) var(--sp-7) 0 calc(var(--sp-10) * 2);
+  /* Thread-pane messages pad sp-7 each side, then a 36px avatar and sp-6 gap: line up with that text column. */
+  padding: var(--sp-4) var(--sp-7) var(--sp-4) calc(var(--sp-7) + 36px + var(--sp-6));
+}
+/* DM "is replying": sits in the message text column (message padding + 36px avatar + gap),
+   same look as .channel-browser-replying. Was the thread-pane class, whose 64px offset
+   belongs to the 420px thread pane, so in a full-width DM the dots hugged the left edge. */
+.channel-dm-replying {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: var(--sp-4) var(--sp-9) var(--sp-4) calc(var(--sp-9) + 36px + var(--sp-6));
+  color: var(--text-muted);
+  font-size: var(--fs-4);
+  font-style: italic;
 }
 /* Composer placement (the composer's own look is ChannelComposer.css). */
 .channel-browser-pane > .channel-composer {

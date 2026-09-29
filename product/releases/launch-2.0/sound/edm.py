@@ -930,5 +930,6 @@ def write_cue(cue: list[Section], name: str, stem_prefix: str) -> None:
         write(f"{stem_prefix}-{stem}", x)
 
 
-write_cue(BUILD_CUE, "edm-build", "edm-stem")
-write_cue(FULL_CUE, "edm-full", "edm-full-stem")
+if __name__ == "__main__":  # calm.py imports the instruments without re-rendering these
+    write_cue(BUILD_CUE, "edm-build", "edm-stem")
+    write_cue(FULL_CUE, "edm-full", "edm-full-stem")

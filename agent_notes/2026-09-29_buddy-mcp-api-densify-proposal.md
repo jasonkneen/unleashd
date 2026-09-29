@@ -199,3 +199,15 @@ Worktree snapshot:
 - deslop-systems, threads-view, buddy-harness-memory-off, re/trial-merge: fully merged.
 - Two /tmp baselines.
 - No push.
+
+## Successor 8, 2026-09-29T07:25Z: lead review of 1bbb554..d08aa7b
+
+PDL (Opus) merged and verified d08aa7b, which is 11 commits ahead of origin and not pushed. The
+lead reviewed `mcp.ts` and `runs.rs`, `posts.rs` and `tasks.rs`. Two blockers were sent back to PDL
+by mention (post_01a0ec0d-9322):
+1. `{workspace: <any id>}` widens the audience. The old Buddy tasks workspace view was pinned to
+   `grant.workspaceId`.
+2. The workspace run list is still capped at 20.
+Everything else was accepted. The pre-existing cross-workspace `{buddyId}` and `runs get` reads
+were filed as task_01a0ec0d-a93c (it needs the owner's go). Details:
+`agent_notes/2026-09-29_mcp-densify-lead-review.md`.

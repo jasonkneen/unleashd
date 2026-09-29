@@ -62,7 +62,7 @@ const FRAMES = {
     meta: 'channel-browser-message-heading',
     author: 'channel-browser-author',
     divider: 'channel-thread-divider ui-muted ui-row',
-    note: 'channel-thread-replying',
+    note: 'channel-dm-replying',
   },
   mobile: {
     pane: 'mobile-channel ui-stack',
@@ -281,7 +281,8 @@ export function ChannelDm({
         )}
         {running && stream.length === 0 && (
           <p className={f.note}>
-            <TypingDots /> {buddyName} is replying…
+            <TypingDots />
+            <span>{buddyName} is replying…</span>
           </p>
         )}
         {outOfTokens && (
