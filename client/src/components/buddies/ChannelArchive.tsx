@@ -91,18 +91,25 @@ export function ArchivedChannels({
 }: { workspaceId: string; channels: readonly Channel[] }) {
   if (!channels.length) return null;
   return (
-    <details>
-      <summary>Archived channels ({channels.length})</summary>
-      <ul className="ui-stack">
+    <section className="ui-stack" aria-labelledby="archived-channels-heading">
+      <div className="ui-section__header">
+        <h3 id="archived-channels-heading" className="ui-section__title">
+          Archived channels ({channels.length})
+        </h3>
+      </div>
+      <ul className="channel-browser-channels mobile-channels-list">
         {channels.map((channel) => (
-          <li key={channel.id} className="ui-row">
-            <Link to={channelLinkPath(workspaceId, { kind: 'channel', channelId: channel.id })}>
+          <li key={channel.id} className="channel-browser-buddy ui-row">
+            <Link
+              className="channel-browser-buddy-link mobile-channels-row"
+              to={channelLinkPath(workspaceId, { kind: 'channel', channelId: channel.id })}
+            >
               #{channel.kind.type === 'public' ? channel.kind.name : 'channel'}
             </Link>
             <ChannelArchiveButton channel={channel} />
           </li>
         ))}
       </ul>
-    </details>
+    </section>
   );
 }

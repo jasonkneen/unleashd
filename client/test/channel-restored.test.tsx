@@ -62,7 +62,7 @@ async function renderChannel(opts: {
     load: async () => [],
   });
   return renderToStaticMarkup(
-    <MemoryRouter initialEntries={[opts.url ?? '/']}>
+      <MemoryRouter initialEntries={[opts.url ?? `/?channel=${channelId}`]}>
       <Provider store={jotaiStore}>
         <ChannelBrowser
           workspaceId={opts.ws}

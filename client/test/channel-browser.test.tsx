@@ -79,8 +79,9 @@ const slackDirectory = () =>
 
 test('channel browser renders a Slack transcript, oldest first, with instance tags', async () => {
   await seedSlack();
-  const html = render('ws-slack', slackDirectory());
+  const html = render('ws-slack', slackDirectory(), '/?channel=ch_a');
   assert.match(html, /<h1>unleashd<\/h1>/);
+  assert.match(html, /aria-label="Search all channel messages"/);
   assert.match(html, /channel-browser-channel-name[^"]*">Standups</);
   const newerAt = html.indexOf('Newer handoff without a live thread.');
   const olderAt = html.indexOf('Older update from the first run.');
@@ -124,7 +125,7 @@ test('workspace slack page resolves the workspace name and member names from the
   });
   await loadResource({ key: '/api/buddies/tasks?workspaceId=ws-slack', load: async () => [] });
   const html = renderToStaticMarkup(
-    <MemoryRouter initialEntries={['/buddies/workspaces/ws-slack/channels']}>
+    <MemoryRouter initialEntries={['/buddies/workspaces/ws-slack/channels?channel=ch_a']}>
       <Provider store={jotaiStore}>
         <Routes>
           <Route path="/buddies/workspaces/:workspaceId/channels" element={<WorkspaceSlack />} />
@@ -147,6 +148,36 @@ test('channel browser shows an empty state without channels', async () => {
   });
   const html = render('ws-bare', workspaceDirectory([], 'ws-bare', []));
   assert.match(html, /No channels yet/);
+});
+
+test('channel home keeps archived channels out of the rail and in the scrollable directory', async () => {
+  const archived = {
+    ...publicChannel('ch_archived', 'old-work', 'ws-archive'),
+    archivedAt: '2026-09-27T00:00:00Z',
+  };
+  await loadResource({
+    key: '/api/buddies/workspaces/ws-archive/inbox',
+    load: async () =>
+      inboxFixture([{ channel: publicChannel('ch_active', 'general', 'ws-archive'), unread: 0 }]),
+  });
+  await loadResource({
+    key: '/api/buddies/workspaces/ws-archive/channels/archived',
+    load: async () => [archived],
+  });
+  const html = render(
+    'ws-archive',
+    workspaceDirectory(
+      [rosterFixture([lead], { id: 'ws-archive', name: 'archive' })],
+      'ws-archive',
+      []
+    )
+  );
+  const rail = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
+  assert.doesNotMatch(rail, /Archived channels/);
+  assert.match(html, /aria-label="Channel directory"/);
+  assert.match(html, /Archived channels \(1\)/);
+  assert.match(html, /href="\/buddies\/workspaces\/ws-archive\/channels\?channel=ch_archived/);
+  assert.doesNotMatch(html, /<details>/);
 });
 
 // The body is markdown with app links: an owner mention, a live Task chip and
@@ -216,7 +247,7 @@ test('posts render markdown mentions, Task chips and media; the rail keeps one B
       },
     ]
   );
-  const html = render('ws-rich', directory);
+  const html = render('ws-rich', directory, '/?channel=ch_rich');
   assert.match(html, /class="channel-browser-author">You</);
   assert.match(html, /<a class="channel-mention" href="\/buddies\/lead"[^>]*>@Lead<\/a>/);
   assert.doesNotMatch(html, /buddy:lead/);
@@ -320,7 +351,7 @@ test('the rail starts and lists a Buddy setup chat; a held post offers its conve
     )
   );
   try {
-    const html = render('ws-slack', slackDirectory());
+    const html = render('ws-slack', slackDirectory(), '/?channel=ch_a');
     assert.match(html, /aria-label="New Buddy"/);
     assert.equal(
       html.match(/Continue Creating buddy/g)?.length,

@@ -399,7 +399,9 @@ test('archived channel links retain history and hide channel/thread composers on
         </MemoryRouter>
       </Provider>
     );
-  assert.match(render(''), /Archived channels \(1\)/);
+  const home = render('');
+  assert.match(home, /Archived channels \(1\)/);
+  assert.doesNotMatch(home, /<details>/);
   const page = render('?channel=ch_a');
   assert.match(page, /general/);
   assert.match(page, /Restore/);

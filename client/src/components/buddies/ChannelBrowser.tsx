@@ -49,9 +49,9 @@ import {
   useWorkspaceInbox,
 } from './channel-data';
 import { channelLinkPath } from './channel-link';
-import { type ChannelsView, channelsView } from './channels-view';
+import { type ChannelsView, channelsHref, channelsView } from './channels-view';
 import { plainChannelText } from './channel-text';
-import type { ChannelUnread } from './types';
+import type { Channel, ChannelUnread, Inbox } from './types';
 import { initials } from './ui-contract';
 import './ChannelBrowser.css';
 
@@ -594,6 +594,68 @@ function RailChannel({
   );
 }
 
+function ChannelHomePane({
+  workspaceId,
+  channels,
+  archived,
+  inbox,
+  buddyNames,
+}: {
+  workspaceId: string;
+  channels: readonly ChannelUnread[];
+  archived: readonly Channel[];
+  inbox: Inbox | null;
+  buddyNames: Readonly<Record<string, string>>;
+}) {
+  return (
+    <section className="channel-browser-pane ui-stack" aria-label="Channel directory">
+      <header className="channel-browser-pane-header ui-row">
+        <div className="channel-browser-pane-title ui-stack">
+          <h2>Channels</h2>
+          <p className="ui-muted">Choose a channel to open its conversation.</p>
+        </div>
+      </header>
+      <div className="channel-browser-scroll ui-stack">
+        <section className="ui-stack">
+          <div className="channel-browser-rail-section-row ui-row">
+            <h3 className="channel-browser-rail-section ui-muted">Active channels</h3>
+          </div>
+          {channels.length > 0 ? (
+            <ul className="channel-browser-channels">
+              {channels.map((entry) => {
+                const heading = channelHeading(entry.channel.kind, buddyNames);
+                return (
+                  <li key={entry.channel.id}>
+                    <Link
+                      className="channel-browser-buddy-link"
+                      to={channelLinkPath(workspaceId, {
+                        kind: 'channel',
+                        channelId: entry.channel.id,
+                      })}
+                      data-unread={channelUnreadAttr(entry.unread)}
+                    >
+                      <span className="channel-browser-hash ui-muted" aria-hidden="true">
+                        {heading.mark}
+                      </span>
+                      <span className="channel-browser-channel-name ui-truncate">
+                        {heading.name}
+                      </span>
+                      <RequestsBadge count={channelRequestCount(inbox, entry.channel.id)} />
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="channel-browser-rail-empty ui-muted">No active channels.</p>
+          )}
+        </section>
+        <ArchivedChannels workspaceId={workspaceId} channels={archived} />
+      </div>
+    </section>
+  );
+}
+
 // Full-screen Slack layout. Mounted OUTSIDE the app shell (see App.tsx): the
 // channel rail replaces the conversations sidebar instead of nesting beside
 // it. Selection lives in the URL (?channel=, ?task=, ?thread=, ?post=, ?dm=, ?view=threads) so
@@ -693,7 +755,13 @@ export function ChannelBrowser({
             </li>
           </ul>
           <div className="channel-browser-rail-section-row ui-row">
-            <h3 className="channel-browser-rail-section ui-muted">Channels</h3>
+            <Link
+              className="channel-browser-rail-section ui-muted"
+              to={channelsHref(workspaceId, { kind: 'home' })}
+              aria-current={view.kind === 'home' ? 'page' : undefined}
+            >
+              Channels
+            </Link>
             <button
               type="button"
               className="channel-browser-rail-add ui-muted"
@@ -723,7 +791,6 @@ export function ChannelBrowser({
           ) : (
             <ul className="channel-browser-channels">{rail.channels.map(railRow)}</ul>
           )}
-          <ArchivedChannels workspaceId={workspaceId} channels={archived.data ?? []} />
           <div className="channel-browser-rail-section-row ui-row">
             <h3 className="channel-browser-rail-section ui-muted">Buddies</h3>
             <button
@@ -768,6 +835,15 @@ export function ChannelBrowser({
       </nav>
       <main className="channel-browser-main">
         {mainPane(view, {
+          home: () => (
+            <ChannelHomePane
+              workspaceId={workspaceId}
+              channels={rail.channels}
+              archived={archived.data ?? []}
+              inbox={inbox.data}
+              buddyNames={directory.buddyNames}
+            />
+          ),
           workers: (buddyId) => (
             <ChannelWorkers
               buddyId={buddyId}
@@ -835,15 +911,11 @@ export function ChannelBrowser({
 }
 
 // Desktop's main pane per view. A channel, thread or Task filter all render the channel pane
-// (desktop shows a thread beside its channel); Home, with nothing chosen, is the first channel.
-const channelKinds: ReadonlySet<ChannelsView['kind']> = new Set([
-  'home',
-  'channel',
-  'thread',
-  'task',
-]);
+// (desktop shows a thread beside its channel); Home is the scrollable channel directory.
+const channelKinds: ReadonlySet<ChannelsView['kind']> = new Set(['channel', 'thread', 'task']);
 
 type MainPanes = {
+  home(): ReactNode;
   workers(buddyId: string): ReactNode;
   dm(conversationId: string): ReactNode;
   threads(): ReactNode;
@@ -852,13 +924,14 @@ type MainPanes = {
 
 function mainPane(view: ChannelsView, panes: MainPanes): ReactNode {
   switch (view.kind) {
+    case 'home':
+      return panes.home();
     case 'workers':
       return panes.workers(view.buddyId);
     case 'dm':
       return panes.dm(view.conversationId);
     case 'threads':
       return panes.threads();
-    case 'home':
     case 'channel':
     case 'thread':
     case 'task':
