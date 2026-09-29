@@ -64,8 +64,8 @@ test('application defaults retain the refreshed picker while explicit reasoning 
   const defaults = resolveConfigAgainstProviderCatalog(config());
   assert.equal(defaults.status, 'resolved');
   if (defaults.status === 'resolved') {
-    assert.equal(defaults.value.modelId, 'gpt-6-sol');
-    assert.equal(defaults.value.reasoningEffort, 'medium');
+    assert.equal(defaults.value.modelId, 'gpt-6.1-sol');
+    assert.equal(defaults.value.reasoningEffort, 'low');
   }
   const explicit = resolveConfigAgainstProviderCatalog(
     config({ reasoning: { mode: 'explicit', effort: 'ultra' } })

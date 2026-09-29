@@ -26,7 +26,9 @@ const PROVIDER_CATALOG = resource<ProviderCatalog>('/api/provider-catalog', asyn
 
 /** Shared catalog resource for every configuration surface. */
 export function useProviderCatalog(): ProviderCatalogState {
-  const catalog = usePolledFetch<ProviderCatalog>(PROVIDER_CATALOG, 0);
+  // Open tabs used to keep the pre-reload catalog indefinitely. Revalidate
+  // behind the shared cache so model releases appear without a page reload.
+  const catalog = usePolledFetch<ProviderCatalog>(PROVIDER_CATALOG, 30_000);
   return {
     catalog: catalog.data,
     isLoading: catalog.kind === 'loading',

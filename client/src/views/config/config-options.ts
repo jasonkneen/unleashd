@@ -45,6 +45,27 @@ export interface ConfigGroup {
 
 type ProviderEntry = ProviderCatalog['providers'][number];
 
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// A gpt-6- prefix hid 6.1 Sol despite its presence in the live catalog.
+// Compare numeric versions per family; the picker regression covers later minor releases too.
+function latestCodexModelIds(provider: ProviderEntry): Set<string> {
+  const latest = new Map<string, { id: string; version: number[] }>();
+  for (const model of provider.models) {
+    const match = /^gpt-(\d+(?:\.\d+)*)-(astra|sol|luna)$/.exec(model.id);
+    if (!match) continue;
+    const version = match[1].split('.').map(Number);
+    const previous = latest.get(match[2]);
+    const difference = previous
+      ? (Array.from(
+          { length: Math.max(version.length, previous.version.length) },
+          (_, i) => (version[i] ?? 0) - (previous.version[i] ?? 0)
+        ).find((part) => part !== 0) ?? 0)
+      : 1;
+    if (difference > 0) latest.set(match[2], { id: model.id, version });
+  }
+  return new Set([...latest.values()].map((model) => model.id));
+}
+
 function selectionKey(selection: ModelSelection | ReasoningSelection): string {
   if (selection.mode !== 'explicit') return selection.mode;
   return 'modelId' in selection ? `explicit:${selection.modelId}` : `explicit:${selection.effort}`;
@@ -93,6 +114,7 @@ function modelGroup(
 ): ConfigGroup {
   const modelKey = selectionKey(value.model);
   const choices: ConfigChoice[] = [];
+  const latestIds = provider?.id === 'codex' ? latestCodexModelIds(provider) : null;
   if (defaults === 'listed') {
     const defaultModel = provider?.models.find((m) => m.id === provider.defaultModelId);
     choices.push({
@@ -115,11 +137,10 @@ function modelGroup(
     });
   }
   for (const model of provider?.models ?? []) {
-    // Compact Codex choices, without hiding an older saved selection or the default.
+    // One latest choice per Codex family; retain an explicitly saved older model.
     if (
       provider?.id === 'codex' &&
-      !model.id.startsWith('gpt-6-') &&
-      model.id !== provider.defaultModelId &&
+      !latestIds?.has(model.id) &&
       !(value.model.mode === 'explicit' && value.model.modelId === model.id)
     )
       continue;

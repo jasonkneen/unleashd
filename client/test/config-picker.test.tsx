@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
-import { type ConversationConfig, ProviderCatalogSchema } from '@unleashd/shared';
+import {
+  type ConversationConfig,
+  ProviderCatalogSchema,
+  catalogEntryForProvider,
+} from '@unleashd/shared';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { configGroups } from '../src/views/config/config-options';
 
@@ -55,6 +59,48 @@ const opusHigh: ConversationConfig = {
 };
 
 const all = () => true;
+
+test('Codex picker shows the latest version of each family, including minor releases', () => {
+  const codex = catalogEntryForProvider('codex');
+  const current = ProviderCatalogSchema.parse({ revision: 'current', providers: [codex] });
+  const value: ConversationConfig = {
+    provider: 'codex',
+    model: { mode: 'default' },
+    reasoning: { mode: 'default' },
+  };
+  const html = renderToStaticMarkup(
+    <ConversationConfigPicker value={value} catalog={current} onChange={() => {}} />
+  );
+  assert.match(html, /GPT-6\.1 Sol/);
+  assert.doesNotMatch(html, /GPT-6 Sol|GPT-5\.6 Sol/);
+  assert.match(html, /GPT-6 Astra/);
+  assert.match(html, /GPT-6 Luna/);
+  const selectedSol = html.match(/<input[^>]*value="explicit:gpt-6\.1-sol"[^>]*>/)?.[0] ?? '';
+  assert.match(selectedSol, /checked=""/);
+
+  const nextCatalog = ProviderCatalogSchema.parse({
+    revision: 'next',
+    providers: [
+      {
+        ...codex,
+        defaultModelId: 'gpt-6.10-sol',
+        models: [
+          ...codex.models,
+          { id: 'gpt-6.10-sol', displayName: 'GPT-6.10 Sol' },
+          { id: 'gpt-6.2-sol', displayName: 'GPT-6.2 Sol' },
+        ],
+      },
+    ],
+  });
+  const choices = configGroups(value, nextCatalog, 'inline', all).find(
+    (group) => group.id === 'model'
+  )!.choices;
+  assert.deepEqual(
+    choices.map((choice) => choice.key),
+    ['explicit:gpt-6-astra', 'explicit:gpt-6-luna', 'explicit:gpt-6.10-sol']
+  );
+  assert.equal(choices.find((choice) => choice.selected)?.key, 'explicit:gpt-6.10-sol');
+});
 
 function choice(
   config: ConversationConfig,

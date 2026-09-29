@@ -1,5 +1,5 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-30.gpt-6.1-sol)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-30.latest-sol-default)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
@@ -65,21 +65,6 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
     "displayName": "Codex",
     "shortName": "X",
     "models": [
-      {
-        "id": "gpt-6.1-sol",
-        "displayName": "GPT-6.1 Sol",
-        "reasoning": {
-          "levels": [
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-            "ultra"
-          ],
-          "defaultEffort": "low"
-        }
-      },
       {
         "id": "gpt-5.6-sol",
         "displayName": "GPT-5.6 Sol",
@@ -193,6 +178,21 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
         }
       },
       {
+        "id": "gpt-6.1-sol",
+        "displayName": "GPT-6.1 Sol",
+        "reasoning": {
+          "levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "defaultEffort": "low"
+        }
+      },
+      {
         "id": "gpt-6-sol",
         "displayName": "GPT-6 Sol",
         "reasoning": {
@@ -238,7 +238,7 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
         }
       }
     ],
-    "defaultModelId": "gpt-6-sol",
+    "defaultModelId": "gpt-6.1-sol",
     "supportsDynamicModels": false,
     "aliases": {}
   },
