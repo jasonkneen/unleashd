@@ -448,7 +448,7 @@ fn due_schedules_enqueue_once_per_slot() {
     assert_eq!(runs[0].input, RunInput::Schedule { schedule_id: schedule.id.clone(), slot });
     assert!(s.due_schedules(later).unwrap().is_empty(), "the schedule advanced past now");
     assert_eq!(
-        s.list_schedules(ScheduleQuery::Buddy { buddy_id: "ic".into() }).unwrap()[0].next_run_at.as_deref(),
+        s.list_schedules(ListScope::Buddy { buddy_id: "ic".into() }).unwrap()[0].next_run_at.as_deref(),
         Some("2099-01-01T01:00:00.000Z")
     );
 }

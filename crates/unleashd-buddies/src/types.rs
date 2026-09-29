@@ -560,17 +560,12 @@ pub enum RunQuery {
     },
 }
 
+// Pattern: one-definition (docs/patterns.md#one-definition)
+// Runs and schedules answer the same scope question; one tagged contract keeps their NAPI
+// boundary and all generated consumers in sync.
 #[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
 #[derive(Debug, Clone)]
-pub enum RunScope {
-    Buddy { buddy_id: String },
-    Task { task_id: String },
-    Workspace { workspace_id: String },
-}
-
-#[cfg_attr(feature = "node", napi_derive::napi(discriminant = "kind", discriminant_case = "lowercase"))]
-#[derive(Debug, Clone)]
-pub enum ScheduleQuery {
+pub enum ListScope {
     Buddy { buddy_id: String },
     Task { task_id: String },
     Workspace { workspace_id: String },

@@ -227,7 +227,7 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn list_run_rows(&self, scope: RunScope, limit: i64) -> napi::Result<Vec<RunRow>> {
+    pub async fn list_run_rows(&self, scope: ListScope, limit: i64) -> napi::Result<Vec<RunRow>> {
         call(&self.store, move |s| s.list_run_rows(scope, limit)).await
     }
 
@@ -237,7 +237,7 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn list_schedules(&self, query: ScheduleQuery) -> napi::Result<Vec<Schedule>> {
+    pub async fn list_schedules(&self, query: ListScope) -> napi::Result<Vec<Schedule>> {
         call(&self.store, move |s| s.list_schedules(query)).await
     }
 

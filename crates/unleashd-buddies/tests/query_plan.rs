@@ -166,9 +166,9 @@ fn workload(s: &mut unleashd_buddies::Store) {
         s.list_runs(q, 10).unwrap();
     }
     for q in [
-        RunScope::Buddy { buddy_id: "ic".into() },
-        RunScope::Task { task_id: parent.id.clone() },
-        RunScope::Workspace { workspace_id: WS.into() },
+        ListScope::Buddy { buddy_id: "ic".into() },
+        ListScope::Task { task_id: parent.id.clone() },
+        ListScope::Workspace { workspace_id: WS.into() },
     ] {
         s.list_run_rows(q, 10).unwrap();
     }
@@ -220,9 +220,9 @@ fn workload(s: &mut unleashd_buddies::Store) {
         },
     )
     .unwrap();
-    s.list_schedules(ScheduleQuery::Buddy { buddy_id: "ic".into() }).unwrap();
-    s.list_schedules(ScheduleQuery::Task { task_id: parent.id.clone() }).unwrap();
-    s.list_schedules(ScheduleQuery::Workspace { workspace_id: WS.into() }).unwrap();
+    s.list_schedules(ListScope::Buddy { buddy_id: "ic".into() }).unwrap();
+    s.list_schedules(ListScope::Task { task_id: parent.id.clone() }).unwrap();
+    s.list_schedules(ListScope::Workspace { workspace_id: WS.into() }).unwrap();
     s.due_schedules("2999-01-01T00:00:00.000Z").unwrap();
     s.append_event(
         &ic,

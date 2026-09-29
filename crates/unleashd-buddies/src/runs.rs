@@ -299,11 +299,11 @@ impl Store {
         collect(self.conn.prepare_cached(&sql)?.query_map(params_from_iter(args), run_row)?)
     }
 
-    pub fn list_run_rows(&self, scope: RunScope, limit: i64) -> Result<Vec<RunRow>> {
+    pub fn list_run_rows(&self, scope: ListScope, limit: i64) -> Result<Vec<RunRow>> {
         let (filter, scope) = match scope {
-            RunScope::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
-            RunScope::Task { task_id } => ("r.task_id = ?2", task_id),
-            RunScope::Workspace { workspace_id } => {
+            ListScope::Buddy { buddy_id } => ("r.buddy_id = ?2", buddy_id),
+            ListScope::Task { task_id } => ("r.task_id = ?2", task_id),
+            ListScope::Workspace { workspace_id } => {
                 ("r.workspace_id = ?2 AND r.status IN ('queued','running','cancel_requested')", workspace_id)
             }
         };
@@ -376,11 +376,11 @@ impl Store {
         })
     }
 
-    pub fn list_schedules(&self, query: ScheduleQuery) -> Result<Vec<Schedule>> {
+    pub fn list_schedules(&self, query: ListScope) -> Result<Vec<Schedule>> {
         let (column, id) = match query {
-            ScheduleQuery::Buddy { buddy_id } => ("buddy_id", buddy_id),
-            ScheduleQuery::Task { task_id } => ("task_id", task_id),
-            ScheduleQuery::Workspace { workspace_id } => ("workspace_id", workspace_id),
+            ListScope::Buddy { buddy_id } => ("buddy_id", buddy_id),
+            ListScope::Task { task_id } => ("task_id", task_id),
+            ListScope::Workspace { workspace_id } => ("workspace_id", workspace_id),
         };
         let sql = format!("SELECT {SCHEDULE_COLS} FROM schedule WHERE {column} = ?1 ORDER BY name");
         collect(self.conn.prepare_cached(&sql)?.query_map([id], schedule_row)?)

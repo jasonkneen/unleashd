@@ -41,9 +41,9 @@ export declare class BuddiesCore {
   updateBuddy(actor: Actor, input: BuddyUpdate): Promise<Buddy>
   getRun(id: string): Promise<Run>
   listRuns(query: RunQuery, limit: number): Promise<Array<Run>>
-  listRunRows(scope: RunScope, limit: number): Promise<Array<RunRow>>
+  listRunRows(scope: ListScope, limit: number): Promise<Array<RunRow>>
   putSchedule(actor: Actor, input: ScheduleInput): Promise<Schedule>
-  listSchedules(query: ScheduleQuery): Promise<Array<Schedule>>
+  listSchedules(query: ListScope): Promise<Array<Schedule>>
   dueSchedules(now: string): Promise<Array<Run>>
   appendEvent(actor: Actor, input: EventInput): Promise<Event>
   listEvents(buddyId: string, beforeSeq: number, limit: number): Promise<Array<Event>>
@@ -290,6 +290,11 @@ export interface Inbox {
   unreadThreads: number
 }
 
+export type ListScope =
+  | { kind: 'buddy'; buddyId: string }
+  | { kind: 'task'; taskId: string }
+  | { kind: 'workspace'; workspaceId: string }
+
 /** Who a buddy reports to. `Nobody` makes it a top-level buddy. */
 export type ManagerRef =
   | { kind: 'nobody' }
@@ -434,11 +439,6 @@ export interface RunRow {
   waiting?: RunWaiting
 }
 
-export type RunScope =
-  | { kind: 'buddy'; buddyId: string }
-  | { kind: 'task'; taskId: string }
-  | { kind: 'workspace'; workspaceId: string }
-
 export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'complete' | 'failed' | 'cancelled'
 
 /**
@@ -482,11 +482,6 @@ export interface ScheduleInput {
   enabled: boolean
   key: string
 }
-
-export type ScheduleQuery =
-  | { kind: 'buddy'; buddyId: string }
-  | { kind: 'task'; taskId: string }
-  | { kind: 'workspace'; workspaceId: string }
 
 /**
  * A profile field's new value: a named choice, or back to the server's default (column NULL).

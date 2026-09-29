@@ -188,8 +188,6 @@ CREATE INDEX IF NOT EXISTS task_live ON task(workspace_id, owner_id, status)
 const LIST_SCOPE_INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS schedule_task ON schedule(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS schedule_workspace ON schedule(workspace_id);
-CREATE INDEX IF NOT EXISTS run_active_buddy ON run(buddy_id)
-  WHERE status IN ('running','cancel_requested');
 CREATE INDEX IF NOT EXISTS run_workspace_live ON run(workspace_id, status, created_at)
   WHERE status IN ('queued','running','cancel_requested');";
 
