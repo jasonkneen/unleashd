@@ -162,8 +162,9 @@ fn update(tx: &Transaction, actor: &Actor, task_id: &str, base_revision: i64, c:
             return Err(CoreError::Invalid("a blocked task needs a blocked_reason".into()));
         }
         // Pattern: fix-guards (docs/patterns.md#fix-guards)
-        // Unpausing used to cancel work queued while paused; the MCP waiting-reason boundary test
-        // requires that exact run to become claimable instead.
+        // Unpausing used to bump the epoch too, silently cancelling a request queued while the
+        // task was paused (it showed `task_paused`, then vanished instead of running). Only
+        // pausing invalidates. Guard: buddies-v2 "task_paused ... becomes claimable".
         let invalidates = (next.paused && !task.paused)
             || next.owner_id != task.owner_id
             || (next.status == TaskStatus::Cancelled && task.status != TaskStatus::Cancelled);

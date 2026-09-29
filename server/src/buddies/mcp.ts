@@ -262,8 +262,20 @@ const BUDDY_TOOLS = {
     }),
     async handler(deps, grant, { worker, answers, channel: ref, ...input }) {
       if (answers) {
-        if (ref || worker)
-          throw new Error('post answers is mutually exclusive with channel and worker');
+        // An answer lands in the request's own thread: every channel-post field would be dropped
+        // silently, so each is refused instead (a `kind:'request'` answer once read as sent).
+        const dropped = Object.entries({
+          channel: ref,
+          worker,
+          replyToId: input.replyToId,
+          taskId: input.taskId,
+          purpose: input.purpose,
+          'kind request': input.kind === 'request' || undefined,
+        }).flatMap(([name, value]) => (value === undefined ? [] : [name]));
+        if (dropped.length)
+          throw new Error(
+            `post answers takes only body, evidence and key; drop ${dropped.join(', ')}`
+          );
         return (
           await announcePost(
             deps,

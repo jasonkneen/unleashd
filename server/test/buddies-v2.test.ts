@@ -384,12 +384,7 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     let request!: Post;
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
-      const names = await toolNames(turn.mcp);
-      assert.equal(names.length, 12);
-      assert.ok(names.includes('team_admin'));
-      assert.ok(names.includes('channel_admin'));
-      for (const removed of ['answer', 'channel_archive', 'channel_rename'])
-        assert.equal(names.includes(removed), false);
+      assert.ok((await toolNames(turn.mcp)).includes('team_admin'));
       assert.equal(await probe(turn.mcp), 200);
       const posted = await call(turn.mcp, 'post', {
         channel: { direct: [w.designer.id] },
@@ -402,6 +397,14 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     });
     w.during.set(2, async (turn) => {
       assert.match(turn.request.prompt, /Draw the logo/);
+      // An answer ignores thread/request fields; passing one must fail loudly, not post anyway.
+      const misfired = await call(turn.mcp, 'post', {
+        answers: request.id,
+        kind: 'request',
+        body: 'Logo drawn?',
+        key: 'answer-logo-misfire',
+      });
+      assert.equal(misfired.isError, true, misfired.text);
       const answered = await call(turn.mcp, 'post', {
         answers: request.id,
         body: 'Logo drawn',

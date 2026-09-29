@@ -84,6 +84,8 @@ export async function composeBriefing(
     `Role: ${buddy.role}`,
     `When asked who you are, lead with "I am ${buddy.name}." The model and harness are implementation details; mention them only from current runtime evidence.`,
     `Workspace: ${workspace.name} (${workspace.rootPath})`,
+    // List tools take an explicit scope since the 2026-09-29 densify (no implicit "mine").
+    `Your ids: buddyId ${buddy.id}, workspace ${workspace.id}`,
     '',
     'BUDDY_SOUL.md',
     bounded(soul?.content || '(No soul has been written yet.)', MAX.soul),
