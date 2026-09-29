@@ -156,6 +156,9 @@ const NewDirectSchema = z
   .object({
     config: ConversationConfigSchema.optional(),
     message: z.string().trim().min(1).max(100_000).optional(),
+    // buddyWrite stamps every body with a `key`; .strict() rejected it as an unknown key (ZodError
+    // on every "New chat" from the client, 2026-09-30). Accepted, not used: each call opens a chat.
+    key,
   })
   .strict();
 const DirectPostSchema = PostBodySchema.extend({ members: z.array(z.string().min(1)).min(1) });
