@@ -15,6 +15,7 @@ import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
 import * as Overload from './Overload';
 import * as PickerRefresh from './PickerRefresh';
+import * as Swarm from './Swarm';
 import { Block, INK } from './blocks';
 import * as PostIntroBenefits from './PostIntroBenefits';
 import * as ShowWork from './ShowWork';
@@ -52,7 +53,8 @@ export const SECTIONS: Section[] = [
   section('show-work', bar(9), bar(13), ShowWork.ShowWork, ShowWork.DURATION),
   section('harness-slide', bar(13), bar(15), Slides, SLIDE_SPLIT),
   section('picker', bar(15), bar(17), PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
-  section('features', bar(17), bar(20), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
+  section('swarm', bar(17), bar(19), Swarm.Swarm, Swarm.DURATION),
+  section('features', bar(19), bar(20), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
   section('subscriptions-slide', bar(20), bar(21), Slides, SLIDES_END, SLIDE_SPLIT),
   section('fork', bar(21), bar(23), Close.Fork, Close.FORK_FRAMES),
   section('run', bar(23), bar(25), Close.Run, Close.RUN_FRAMES),
@@ -71,6 +73,7 @@ const buildRamp = (f: number) => (f >= BUILD_FRAMES ? 1 : 0.4 + 0.6 * (f / BUILD
 const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
   { from: bar(5), to: bar(9), lines: ['Ask your agents.', 'In channels.'] },
   { from: bar(9), to: bar(13), lines: ['They show their work.', 'Images and video, right in the thread.'] },
+  { from: bar(17), to: bar(19), lines: ['Multi-agent swarms.', 'Agents @-mention each other.'] },
 ];
 const CAPTION_IN = (60 / 128) * 0.5; // seconds after the scene's downbeat
 

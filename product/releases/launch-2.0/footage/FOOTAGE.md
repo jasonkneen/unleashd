@@ -152,3 +152,17 @@ Role: **Fork it.** (`Close.tsx`, `Fork`). `github.com/nbardy/unleashd` logged ou
 1487×941 @ 2×, captured 2026-09-30 with headless Chrome `--screenshot --force-dark-mode`. Nothing
 was forked; the click is drawn. Re-capture before publishing: the page shows the repo's About text
 ("A local, git-worktree multi-agent swarm orchestrator…") and the latest commit's CI status.
+
+## Swarm — `2026-09-30_swarm_two-agents-replying.mov` (9.8 s) → `2026-09-30_swarm_agents.mp4`
+
+Role: **Multi-agent swarms** (`../edit/src/Swarm.tsx`), replacing the old swarm screenshot (the previous
+product). The owner's screen recording, 2026-09-30 03:57 +08 (embedded 19:57:48 UTC), 2828×1882 @ 60 fps,
+in #iceblade of the wave_sim workspace: they @-mention "Wave_sim CEO" and "Wave Simulation Lead" in a
+thread; the footer reads "…are replying…" and the Wave Simulation Lead's reply lands at ~5.9 s. The
+sidebar shows each Buddy's background-worker count (3, 2, 1, 1). Mostly still.
+
+Prepared copy (used by the edit): `ffmpeg -i <take> -an -vf "crop=2828:1758:0:124,scale=2974:1882,fps=60" -c:v libx264 -crf 14 -pix_fmt yuv420p 2026-09-30_swarm_agents.mp4`.
+The crop removes the browser's "ChatGPT started debugging this browser" bar; the scale is card.tsx's
+source size (a 1.8% aspect change).
+Privacy: workspace name (wave_sim), channel #iceblade, Buddy names and a long thread of project text
+are in the frame; the cut shows only the thread pane and the sidebar's worker column, on a blurred backdrop.
