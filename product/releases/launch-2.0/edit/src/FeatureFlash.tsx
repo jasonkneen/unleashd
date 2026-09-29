@@ -1,5 +1,5 @@
-// Beat 7 flash cards: "Multiagent swarms", "Memory!", "Familiar UI", "Mobile Friendly!", three
-// beats each (3 bars of the EDM groove). Each card sits over a real capture of the running app
+// Beat 7 flash cards: "Multiagent swarms", "Memory!", "Mobile Friendly!", one bar each (script v2,
+// 2026-09-30: 1.4 s was too short to read; "Familiar UI" dropped, the product scenes show it). Each card sits over a real capture of the running app
 // (../capture/record-page.mjs; ../footage/FOOTAGE.md, "Feature clips"). Desktop captures are
 // lifted out as a card of the main column, so the sidebar's real Buddy names stay blurred.
 import type React from 'react';
@@ -10,8 +10,8 @@ import { CardEdit, type Key, play, push, STILL, type Shot } from './card';
 export { FPS, HEIGHT, WIDTH } from './card';
 
 const BEAT = 60 / 128;
-const FLASH_BEATS = 3;
-// Round per boundary so four flashes fill exactly 12 beats (1.40625 s is 84.375 frames).
+const FLASH_BEATS = 4;
+// Round per boundary so the flashes fill whole bars (a bar is 112.5 frames).
 const boundary = (i: number) => Math.round(i * FLASH_BEATS * BEAT * 60);
 
 const clip = (name: string) => staticFile(`2026-09-26_feature_${name}.mp4`);
@@ -27,7 +27,6 @@ type Flash = { text: string; fill: string; rot: number; footage: Footage };
 const FLASHES: Flash[] = [
   { text: 'Multiagent swarms', fill: INK.cyan, rot: -3, footage: { kind: 'desktop', name: 'swarm', from: 1.0, shot: column(280, 0.5, 0.35) } },
   { text: 'Memory!', fill: INK.yellow, rot: 2, footage: { kind: 'desktop', name: 'memory', from: 1.0, shot: column(150, 0.4, 0.4) } },
-  { text: 'Familiar UI', fill: INK.wordmarkOrange, rot: -2, footage: { kind: 'desktop', name: 'chat', from: 1.0, shot: column(150, 0.5, 0.5) } },
   { text: 'Mobile Friendly!', fill: '#859900', rot: 3, footage: { kind: 'phone', name: 'phone', from: 0 } },
 ];
 

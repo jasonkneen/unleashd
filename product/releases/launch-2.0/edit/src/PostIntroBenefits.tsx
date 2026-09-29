@@ -1,5 +1,6 @@
 // Owner take, 2026-09-27 14:42:42 +08. Only its opening 1.5 seconds are used;
-// hold the last home frame while the four benefits land, before the channel opens.
+// hold the last home frame while the four benefits land, one per bar of the EDM build (script v2,
+// 2026-09-30): the promise rides the build and the drop starts the proof.
 import type React from 'react';
 import { AbsoluteFill, Freeze, OffthreadVideo, Sequence, staticFile, useCurrentFrame } from 'remotion';
 import { Block, INK, lerp } from './blocks';
@@ -8,7 +9,8 @@ import { MARIMBA, SFX, Soundtrack } from './soundtrack';
 export const FPS = 60;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
-export const boundary = (i: number) => Math.round(i * 3 * (60 / 128) * FPS);
+const BEAT = 60 / 128;
+export const boundary = (i: number) => Math.round(i * 4 * BEAT * FPS);
 export const DURATION = boundary(4);
 const SOURCE = staticFile('2026-09-27_post-intro_home.mov');
 const HOME_END = 90;
@@ -59,17 +61,31 @@ export const PostIntroBenefits: React.FC = () => {
   );
 };
 
-// Continue the intro's own marimba into this insert. The final chord rings
-// across the cut into the existing EDM build; the audio has no hard section cut.
+// The handoff: the intro's marimba keeps playing, in 8ths, over the build's Bm G D A, and thins
+// out bar by bar as the build's filter opens, so the calm melody becomes the build instead of
+// stopping for it (owner, 2026-09-30: "music transitions are pretty abrupt"). The build itself
+// (../../sound/edm-build.wav bars 1-4) is unchanged. One thud marks each benefit.
+type Mallet = keyof typeof MARIMBA;
+const EIGHTH = BEAT / 2;
+const UP_DOWN = [0, 1, 2, 3, 2, 1, 0, 1];
+const HANDOFF: { tones: Mallet[]; every: number; volume: number }[] = [
+  { tones: ['Fs4', 'B4', 'D5', 'Fs5'], every: 1, volume: 0.6 }, // Bm: 8ths
+  { tones: ['G3', 'D4', 'B4', 'D5'], every: 1, volume: 0.45 }, // G: 8ths, softer
+  { tones: ['D4', 'Fs4', 'A4', 'D5'], every: 2, volume: 0.32 }, // D: quarters
+  { tones: ['A4', 'A4', 'A4', 'A4'], every: 4, volume: 0.22 }, // A: two last notes, then the build alone
+];
+const handoff = HANDOFF.flatMap((bar, b) =>
+  UP_DOWN.filter((_, k) => k % bar.every === 0).map((step, i) => ({
+    at: boundary(b) / FPS + i * bar.every * EIGHTH,
+    src: MARIMBA[bar.tones[step]],
+    volume: bar.volume,
+  })),
+);
 export const BenefitsSound: React.FC = () => (
-  <Soundtrack fps={FPS} cues={TITLES.flatMap((_, i) => [
-    { at: boundary(i) / FPS, src: [MARIMBA.D4, MARIMBA.Fs4, MARIMBA.A4, MARIMBA.D5][i], volume: 0.72 },
-    { at: boundary(i) / FPS, src: SFX.thud, volume: 0.13 },
-    ...(i === 3 ? [
-      { at: boundary(i) / FPS + 0.04, src: MARIMBA.Fs4, volume: 0.34 },
-      { at: boundary(i) / FPS + 0.08, src: MARIMBA.A4, volume: 0.34 },
-    ] : []),
-  ])} />
+  <Soundtrack
+    fps={FPS}
+    cues={[...handoff, ...TITLES.map((_, i) => ({ at: boundary(i) / FPS, src: SFX.thud, volume: 0.13 }))]}
+  />
 );
 
 export const BenefitsWithSound: React.FC = () => (

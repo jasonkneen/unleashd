@@ -16,18 +16,17 @@ edm-build.wav, 15 s. A locked cut uses it, so it must stay sample-identical:
   bar 7  11.250         D   crash (quiet), vocal chop
   bar 8  13.125         A   cue ends at 15.000
 
-edm-full.wav, 67.0 s. Runs under the whole features section and the close (retimed 2026-09-30):
-  bars  1-4    0.000  BUILD      as above
-  bar   5      7.500  DROP       as above
-  bars  6-17   9.375  GROOVE     crashes 9, 13, 17 (15.0, 22.5, 30.0); chops 7, 11, 15
-  bar  18     31.875  HIT        impact + full crash ("Multi harness"), groove goes on
-  bars 19-28  33.750  GROOVE     crashes 21, 25 (37.5, 45.0); chops 19, 23, 27 (GitHub fork, run)
-  bars 29-32  52.500  BREAKDOWN  Bm G D A: no drums or bass, chords lowpassed at 1.2 kHz and softly
+edm-full.wav, 59.5 s. Runs from the title to the end card (script v2, 2026-09-30); every scene is
+one 4-bar phrase, so every section change lands where the ear expects it:
+  bars  1-4    0.000  BUILD      as above; the four benefits, over the intro's marimba handing off
+  bar   5      7.500  DROP       as above; "Ask your agents"
+  bars  6-24   9.375  GROOVE     crashes + chops on 9, 13, 17, 21 (the phrase starts)
+  bars 25-28  45.000  BREAKDOWN  Bm G D A: no drums or bass, chords lowpassed at 1.2 kHz and softly
                                  pumped, sparse arp, one chop drenched in ping-pong echo; riser +
                                  snare roll over the last 2 beats (the Vim ethos)
-  bar  33     60.000  HIT        impact + full crash (the benefits recap), groove goes on
-  bar  34     61.875  GROOVE
-  bar  35     63.750  END        impact + crash + one D-major chord, rings out and fades to 67.0
+  bar  29     52.500  HIT        impact + full crash (the benefits recap), groove goes on
+  bar  30     54.375  GROOVE
+  bar  31     56.250  END        impact + crash + one D-major chord, rings out and fades to 59.5
 
 The drop lands at exactly 7.500 s (sample 360000) in both. Writes stereo 48 kHz 16-bit WAVs next
 to this file: edm-build.wav / edm-full.wav (the mix, peak -1 dBFS) and
@@ -537,16 +536,19 @@ BUILD_CUE = [
     Groove(6, 8, crashes=(7,), chops=((7, 3, 0.75),)),
 ]
 
-FULL_CUE = [
-    Build(1, 4),
-    Drop(5),
-    Groove(6, 17, crashes=(9, 13, 17), chops=((7, 3, 0.75), (11, 2, 0.55), (15, 3, 0.55))),
-    Hit(18),  # "Multi harness"
-    Groove(19, 28, crashes=(21, 25), chops=((19, 2, 0.55), (23, 3, 0.55), (27, 2, 0.55))),
-    Breakdown(29, 32, chords=("Bm", "G", "D", "A"), chop=0),  # the Vim ethos, two cards
-    Hit(33),  # the benefits recap
-    Groove(34, 34, crashes=(), chops=()),
-    End(35, ring=3.25, fade=2.75),  # the end card
+FULL_CUE = [  # script v2 (2026-09-30): every scene is one 4-bar phrase; a crash marks each start
+    Build(1, 4),  # the four benefits, one per bar, over the marimba handoff
+    Drop(5),  # "Ask your agents"
+    Groove(
+        6,
+        24,
+        crashes=(9, 13, 17, 21),  # show their work, any harness, flashes, you own it
+        chops=((9, 3, 0.55), (13, 2, 0.55), (17, 3, 0.55), (21, 2, 0.55)),
+    ),
+    Breakdown(25, 28, chords=("Bm", "G", "D", "A"), chop=0),  # the Vim ethos, two cards
+    Hit(29),  # the benefits recap
+    Groove(30, 30, crashes=(), chops=()),
+    End(31, ring=3.25, fade=2.75),  # the end card
 ]
 
 CUT_FADE = 0.015  # a cue that ends mid-groove is cut with a 15 ms linear fade

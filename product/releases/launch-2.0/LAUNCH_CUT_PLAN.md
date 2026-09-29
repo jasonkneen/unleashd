@@ -35,32 +35,31 @@ stack later in the film: the owner-requested post-intro benefits already say bot
 Keep the privacy/local-running point with its real app proof. Retiming the music
 is part of this change. This is an edit recommendation, not yet implemented.
 
-## Timeline (as built 2026-09-30)
+## Timeline (script v2, as built 2026-09-30)
 
-Owner, 2026-09-30 (`post_01a0ee26-b3f1-7506-8ec1-51273329235a` thread): open source is "just github
-and a fork real quick"; keep repeating the benefits "to close out and sell"; place the Vim line.
-The terminal clone/run card and the mid-film Free / Private / Open Source stack are gone; the
-benefits now return as the recap before the end card. The EDM cue (`sound/edm.py` FULL_CUE) was
-retimed to match: 67.0 s, `edm-build.wav` unchanged (byte-identical).
+Owner approved `SCRIPT_V2_2026-09-30.md` ("Okay, impliment"). Every scene after the open is one
+4-bar phrase of the EDM cue (`sound/edm.py` FULL_CUE, 59.5 s; `edm-build.wav` byte-identical), and
+the intro's marimba hands its melody to the build (`PostIntroBenefits.tsx`, `BenefitsSound`).
 
-| Time (s) | Bars | Section |
-|---|---|---|
-| 0–18.0 | — | Overload and title |
-| 18.0–23.6 | — | Four benefits over home |
-| 23.6–33.0 | 1–5 | Native multimedia (build, drop) |
-| 33.0–44.3 | 6–11 | Design review |
-| 44.3–49.9 | 12–14 | Short design iteration |
-| 49.9–55.5 | 15–17 | Swarm / memory / chat / phone flashes |
-| 55.5–70.5 | 18–25 | "Multi harness" (on the hit), picker, subscriptions |
-| 70.5–74.3 | 26–27 | GitHub page, push-in, Fork click, "Fork it." |
-| 74.3–76.1 | 28 | Run it on your computer (localhost capture, 2026-09-30) |
-| 76.1–83.6 | 29–32 | Breakdown: "Vim is open source / and it's still here decades later." then "Agent software / should be too." |
-| 83.6–87.4 | 33–34 | Hit: Multi harness! Free! Private! Open Source! Customizable! |
-| 87.4–90.6 | 35 | End card |
+| Time (s) | Bars | Scene | Source |
+|---|---|---|---|
+| 0–18.0 | — | Overload, "AI Overload! / We're all feeling it. / Don't worry, we've got you covered.", title | `Overload.tsx` |
+| 18.0–25.5 | 1–4 build | The four benefits, one per bar, marimba handing off | `PostIntroBenefits.tsx` |
+| 25.5–33.0 | 5–8 drop | Ask your agents: request → 6 minutes later → iPad result (3 shots) | `DesignReview.tsx` |
+| 33.0–40.5 | 9–12 | They show their work: inline video → contact sheet → "Great work!" | `ShowWork.tsx` |
+| 40.5–48.0 | 13–16 | Multi harness slide → picker, 2 beats per harness | `beat9.mp4`, `PickerRefresh.tsx` |
+| 48.0–55.5 | 17–20 | Swarms / Memory / Mobile, one bar each; Bring your own subscriptions | `FeatureFlash.tsx`, `beat9.mp4` |
+| 55.5–63.0 | 21–24 | GitHub + Fork (2 bars), Run it on your computer (2 bars) | `Close.tsx` |
+| 63.0–70.5 | 25–28 breakdown | The Vim ethos, two cards | `Close.tsx` |
+| 70.5–74.25 | 29–30 hit | Recap: Multi harness! Free! Private! Open Source! Customizable! | `Close.tsx` |
+| 74.25–77.5 | 31 end | End card | `Close.tsx` |
+
+Not done from the v2 script: the groove does not thin before the breakdown (bar 24 is full groove;
+the breakdown's own riser leads out of it).
 
 ## Remaining work, in order
 
-1. Owner review of the full master (`edit/out/assembly.mp4`).
+1. Owner review of the v2 master (`edit/out/assembly.mp4`).
 2. Before publishing: re-capture the GitHub still once the repo's About text is updated (it still
    says "swarm orchestrator") and CI on the latest commit is green.
 3. Check the September 26 swarm, memory, chat and design shots against the shipping UI.

@@ -27,7 +27,7 @@ const Stack: React.FC<{ words: Word[]; gap: number }> = ({ words, gap }) => {
   );
 };
 
-// ---- The recap, on the bar-33 hit after the Vim line: every benefit, one per beat, then the whole
+// ---- The recap, on the bar-29 hit after the Vim line: every benefit, one per beat, then the whole
 // grid holds for the end card. Owner, 2026-09-30: "repeat the benefits to close out and sell". -----
 const RECAP: Word[][] = [
   [
@@ -166,14 +166,14 @@ export const Fork: React.FC = () => {
 
 // ---- Beat 9: "Run it on your computer." The real app, captured from localhost, in a browser
 // frame whose address bar shows the URL it was captured from. -------------------------------------
-// Captured 2026-09-30 at 1b6952b with ../capture/record-page.mjs (#unleashd-2, read-only).
+// Captured 2026-09-30 at 4ddfa88 with ../capture/record-page.mjs (#unleashd-2, read-only), 4 s.
 const APP = staticFile('2026-09-30_feature_app.mp4');
 const APP_URL = 'localhost:7489';
 const RUN: Word[] = [
   { text: 'Run it on', beat: 0, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -2 },
   { text: 'your computer.', beat: 0.5, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: 2 },
 ];
-export const RUN_FRAMES = beats(4);
+export const RUN_FRAMES = beats(8);
 
 export const Run: React.FC = () => {
   const t = useCurrentFrame() / FPS;

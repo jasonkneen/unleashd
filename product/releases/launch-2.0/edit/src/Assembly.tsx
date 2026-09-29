@@ -1,26 +1,27 @@
-// The whole launch video, beats 1–11, in script order. The open keeps its own sound design; from
-// the end of the open one continuous EDM cue (../../sound/edm-full.wav, 128 BPM) runs to the end
-// card, and every later section starts on a bar of it. Sections are data (SECTIONS); a section
+// The whole launch video, script v2 (../../SCRIPT_V2_2026-09-30.md). The open keeps its own sound
+// design; from the title one continuous EDM cue (../../sound/edm-full.wav, 128 BPM) runs to the end
+// card, and every scene after the open is one 4-bar phrase of it: a scene change anywhere else
+// read as "off step" (owner, 2026-09-30). Sections are data (SECTIONS); a section
 // plays its clip from `offset` and holds the clip's last frame if its slot outlasts it.
 import type React from 'react';
-import { AbsoluteFill, Audio, Freeze, OffthreadVideo, Sequence } from 'remotion';
+import { AbsoluteFill, Audio, Freeze, OffthreadVideo, Sequence, useCurrentFrame } from 'remotion';
 import beat9 from '../../beat9/beat9.mp4';
 import edmFull from '../../sound/edm-full.wav';
 import * as Close from './Close';
-import * as DesignIterationShort from './DesignIterationShort';
 import * as DesignReview from './DesignReview';
 import * as FeatureFlash from './FeatureFlash';
-import * as NativeMultimedia from './NativeMultimedia';
 import * as Overload from './Overload';
 import * as PickerRefresh from './PickerRefresh';
+import { Block, INK } from './blocks';
 import * as PostIntroBenefits from './PostIntroBenefits';
+import * as ShowWork from './ShowWork';
 
 export const FPS = 60;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
 
 const BAR = (4 * 60) / 128; // 1.875 s
-const MUSIC_IN = Overload.DURATION + PostIntroBenefits.DURATION;
+const MUSIC_IN = Overload.DURATION; // the build starts under the benefits
 // Frame where bar b (1-based) of the cue starts. Bars are 112.5 frames, so round per bar, never accumulate.
 const bar = (b: number) => MUSIC_IN + Math.round((b - 1) * BAR * FPS);
 
@@ -41,29 +42,38 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
   offset,
 });
 
-// Bars 18–25: harness slide (on the bar-18 hit), refreshed picker proof, subscriptions slide.
-// The picker starts on Claude and ends on the new thinking slider.
-const PICKER_FROM = bar(18) + SLIDE_SPLIT;
-const PICKER_TO = bar(26) - (SLIDES_END - SLIDE_SPLIT);
-
-// The close (owner, 2026-09-30): GitHub + fork, run it locally, the Vim ethos over the breakdown,
-// the benefits recap on the bar-33 hit, the end card on the final hit. Bars match FULL_CUE in edm.py.
 export const SECTIONS: Section[] = [
   section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
-  section('post-intro-benefits', Overload.DURATION, MUSIC_IN, PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
-  section('native-multimedia', bar(1), bar(6), NativeMultimedia.NativeMultimediaPicture, NativeMultimedia.DURATION),
-  section('design-review', bar(6), bar(12), DesignReview.DesignReview, DesignReview.DURATION),
-  section('design-iteration', bar(12), bar(15), DesignIterationShort.DesignIterationShort, DesignIterationShort.DURATION),
-  section('features', bar(15), bar(18), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
-  section('harness-slide', bar(18), PICKER_FROM, Slides, SLIDE_SPLIT),
-  section('picker', PICKER_FROM, PICKER_TO, PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
-  section('subscriptions-slide', PICKER_TO, bar(26), Slides, SLIDES_END, SLIDE_SPLIT),
-  section('fork', bar(26), bar(28), Close.Fork, Close.FORK_FRAMES),
-  section('run', bar(28), bar(29), Close.Run, Close.RUN_FRAMES),
-  section('vim', bar(29), bar(33), Close.Vim, Close.VIM_FRAMES),
-  section('recap', bar(33), bar(35), Close.Values, Close.VALUES_FRAMES),
-  section('end', bar(35), bar(35) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
+  section('benefits', MUSIC_IN, bar(5), PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
+  section('ask', bar(5), bar(9), DesignReview.DesignReview, DesignReview.DURATION),
+  section('show-work', bar(9), bar(13), ShowWork.ShowWork, ShowWork.DURATION),
+  section('harness-slide', bar(13), bar(15), Slides, SLIDE_SPLIT),
+  section('picker', bar(15), bar(17), PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
+  section('features', bar(17), bar(20), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
+  section('subscriptions-slide', bar(20), bar(21), Slides, SLIDES_END, SLIDE_SPLIT),
+  section('fork', bar(21), bar(23), Close.Fork, Close.FORK_FRAMES),
+  section('run', bar(23), bar(25), Close.Run, Close.RUN_FRAMES),
+  section('vim', bar(25), bar(29), Close.Vim, Close.VIM_FRAMES),
+  section('recap', bar(29), bar(31), Close.Values, Close.VALUES_FRAMES),
+  section('end', bar(31), bar(31) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
+
+// One caption per product scene, always top left, in from the scene's second beat.
+const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
+  { from: bar(5), to: bar(9), lines: ['Ask your agents.', 'In channels.'] },
+  { from: bar(9), to: bar(13), lines: ['They show their work.', 'Images and video, right in the thread.'] },
+];
+const CAPTION_IN = (60 / 128) * 0.5; // seconds after the scene's downbeat
+
+const Caption: React.FC<{ lines: [string, string] }> = ({ lines }) => {
+  const t = useCurrentFrame() / FPS - CAPTION_IN;
+  return (
+    <div style={{ position: 'absolute', left: 70, top: 56, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+      <Block text={lines[0]} u={t} size="md" fill={INK.cyan} ink={INK.plate} rot={-1.5} />
+      <Block text={lines[1]} u={t - 0.25} size="md" fill={INK.surface} ink={INK.cream} rot={0} />
+    </div>
+  );
+};
 export const DURATION = SECTIONS[SECTIONS.length - 1].to;
 
 const Place: React.FC<{ s: Section }> = ({ s }) => {
@@ -91,7 +101,12 @@ export const Assembly: React.FC = () => (
     {SECTIONS.map((s) => (
       <Place key={s.id} s={s} />
     ))}
-    <Sequence from={Overload.DURATION} layout="none">
+    {CAPTIONS.map((c) => (
+      <Sequence key={c.lines[0]} from={c.from} durationInFrames={c.to - c.from} name={`caption: ${c.lines[0]}`}>
+        <Caption lines={c.lines} />
+      </Sequence>
+    ))}
+    <Sequence from={MUSIC_IN} layout="none">
       <PostIntroBenefits.BenefitsSound />
     </Sequence>
     <Sequence from={MUSIC_IN} layout="none">

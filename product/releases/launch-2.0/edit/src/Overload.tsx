@@ -22,7 +22,7 @@ const T = {
   end: 18.0,
 };
 // Entrances inside the card and title scenes, in seconds from each scene's start.
-const CARD = { overload: 0.35, feeling: 0.95 };
+const CARD = { overload: 0.35, feeling: 0.95, covered: 1.7 };
 const TITLE = { introducing: 0.3, reveal: 0.55, badge: 1.3 };
 export const DURATION = Math.round(T.end * FPS);
 const frames = (s: number) => Math.round(s * FPS);
@@ -542,6 +542,8 @@ const OverloadCard: React.FC = () => {
     <AbsoluteFill style={{ background: INK.night, alignItems: 'center', justifyContent: 'center', gap: 44 }}>
       <Block text="AI Overload!" u={t - CARD.overload} size="xxl" fill={INK.red} ink={INK.cream} rot={-3} />
       <Block text="We're all feeling it." u={t - CARD.feeling} size="md" fill={INK.surface} ink={INK.cream} rot={0} />
+      {/* The voice line, as type: there is no recording (owner, 2026-09-30, script v2). */}
+      <Block text="Don't worry, we've got you covered." u={t - CARD.covered} size="md" fill={INK.cyan} ink={INK.plate} rot={-1} />
     </AbsoluteFill>
   );
 };
