@@ -69,10 +69,10 @@ type Mallet = keyof typeof MARIMBA;
 const EIGHTH = BEAT / 2;
 const UP_DOWN = [0, 1, 2, 3, 2, 1, 0, 1];
 const HANDOFF: { tones: Mallet[]; every: number; volume: number }[] = [
-  { tones: ['Fs4', 'B4', 'D5', 'Fs5'], every: 1, volume: 0.6 }, // Bm: 8ths
-  { tones: ['G3', 'D4', 'B4', 'D5'], every: 1, volume: 0.45 }, // G: 8ths, softer
-  { tones: ['D4', 'Fs4', 'A4', 'D5'], every: 2, volume: 0.32 }, // D: quarters
-  { tones: ['A4', 'A4', 'A4', 'A4'], every: 4, volume: 0.22 }, // A: two last notes, then the build alone
+  { tones: ['Fs4', 'B4', 'D5', 'Fs5'], every: 1, volume: 0.5 }, // Bm: 8ths
+  { tones: ['G3', 'D4', 'B4', 'D5'], every: 1, volume: 0.38 }, // G: 8ths, softer
+  { tones: ['D4', 'Fs4', 'A4', 'D5'], every: 2, volume: 0.28 }, // D: quarters
+  { tones: ['A4', 'A4', 'A4', 'A4'], every: 4, volume: 0.2 }, // A: two last notes, then the build alone
 ];
 const handoff = HANDOFF.flatMap((bar, b) =>
   UP_DOWN.filter((_, k) => k % bar.every === 0).map((step, i) => ({

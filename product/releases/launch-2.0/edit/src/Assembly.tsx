@@ -58,6 +58,13 @@ export const SECTIONS: Section[] = [
   section('end', bar(31), bar(31) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
 
+// The cue comes up out of the intro instead of arriving at full level: the intro's tail sits near
+// -21 dB mean and the build's first bar at -12 dB, a 9 dB step that read as "abrupt" (owner,
+// 2026-09-30), and the marimba over the unramped build clipped at 0 dBFS. The ramp reaches 1 on the
+// drop, so the drop is also the first full-level moment.
+const BUILD_FRAMES = bar(5) - MUSIC_IN;
+const buildRamp = (f: number) => (f >= BUILD_FRAMES ? 1 : 0.4 + 0.6 * (f / BUILD_FRAMES) ** 1.6);
+
 // One caption per product scene, always top left, in from the scene's second beat.
 const CAPTIONS: { from: number; to: number; lines: [string, string] }[] = [
   { from: bar(5), to: bar(9), lines: ['Ask your agents.', 'In channels.'] },
@@ -110,7 +117,7 @@ export const Assembly: React.FC = () => (
       <PostIntroBenefits.BenefitsSound />
     </Sequence>
     <Sequence from={MUSIC_IN} layout="none">
-      <Audio src={edmFull} />
+      <Audio src={edmFull} volume={buildRamp} />
     </Sequence>
   </AbsoluteFill>
 );
