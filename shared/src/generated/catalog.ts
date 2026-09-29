@@ -1,5 +1,5 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-29.claude-versioned-only)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-29.claude-three-models)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
@@ -13,7 +13,7 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
     "models": [
       {
         "id": "fable",
-        "displayName": "Claude Fable 5.1",
+        "displayName": "Fable 5.1",
         "reasoning": {
           "levels": [
             "low",
@@ -52,27 +52,12 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
           ],
           "defaultEffort": "medium"
         }
-      },
-      {
-        "id": "claude-haiku-4-5-20251001",
-        "displayName": "Haiku 4.5",
-        "reasoning": {
-          "levels": [
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max"
-          ],
-          "defaultEffort": "medium"
-        }
       }
     ],
     "defaultModelId": "claude-opus-5-5",
     "supportsDynamicModels": false,
     "aliases": {
-      "sonnet": "claude-sonnet-5-5",
-      "haiku": "claude-haiku-4-5-20251001"
+      "sonnet": "claude-sonnet-5-5"
     }
   },
   {
