@@ -47,6 +47,7 @@ export function DmChannelsNotice({
         onConfirm={(config) =>
           startNewDirectChat(buddy.buddyId, { config }).then((next) => navigate(dmPath(next)))
         }
+        placement="below"
       />
     </div>
   );

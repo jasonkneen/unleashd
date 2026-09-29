@@ -16,6 +16,11 @@ import './ChannelComposer.css';
 // confirms one choice. Callers (493c1c7): "Retry with a different harness" under a failed reply,
 // an out-of-tokens DM or chat, and "New chat" in a DM. A Buddy turn (`buddy`) needs the Buddy MCP
 // tools, and `excluded` is the harness that just failed, which the server would refuse anyway.
+// `placement` is where the popover opens relative to the button: 'above' near the composer,
+// 'below' in a header. Fix guard: the header's "Refresh context" opened upward off the top of
+// the viewport, unreadable and unpickable (#bugfixes 2026-09-28/29).
+export type PickerPlacement = 'above' | 'below';
+
 export function HarnessPicker({
   label,
   note,
@@ -24,6 +29,7 @@ export function HarnessPicker({
   excluded,
   buddy,
   onConfirm,
+  placement,
   style,
 }: {
   label: string;
@@ -34,6 +40,7 @@ export function HarnessPicker({
   excluded: string | null;
   buddy: boolean;
   onConfirm(config: ConversationConfig): Promise<unknown>;
+  placement: PickerPlacement;
   style?: CSSProperties;
 }) {
   const { catalog } = useProviderCatalog();
@@ -55,7 +62,7 @@ export function HarnessPicker({
       : null);
   const close = () => setOpen(false);
   return (
-    <div className="channel-harness-picker" style={style}>
+    <div className={`channel-harness-picker channel-harness-picker--${placement}`} style={style}>
       <button
         type="button"
         className="channel-inline-action"
@@ -148,6 +155,7 @@ export function ReplyRetry({ post }: { post: Post }) {
       seed={null}
       excluded={seat?.provider ?? null}
       buddy
+      placement="above"
       onConfirm={(config) =>
         buddyWrite(`/api/buddies/posts/${encodeURIComponent(post.id)}/retry`, 'POST', { config })
       }

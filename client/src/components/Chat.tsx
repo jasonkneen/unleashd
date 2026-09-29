@@ -674,6 +674,7 @@ export function Chat({ id }: { id: string }) {
             seed={null}
             excluded={conversation.provider}
             buddy={false}
+            placement="above"
             onConfirm={async (config) => {
               const next = createConversation({
                 workingDirectory: conversation.cwd,

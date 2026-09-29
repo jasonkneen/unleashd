@@ -37,7 +37,6 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  word-wrap: break-word;
   /* App.css's 8px ::-webkit-scrollbar takes width: an overflowing textarea wrapped
      narrower than the mirror, stranding the caret (2026-09-27). Same gutter on both. */
   scrollbar-gutter: stable;
@@ -147,9 +146,7 @@
 
 .channel-composer-picker {
   position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
-  left: 0;
+  inset: auto 0 calc(100% + 6px);
   z-index: 20;
   display: grid;
   gap: var(--sp-1);
@@ -286,10 +283,7 @@
   --channel-picker-ink: color-mix(in srgb, var(--text-bright) 60%, var(--pole-fg-pop));
   --channel-picker-selection: color-mix(in srgb, var(--text-primary) 16%, transparent);
   position: absolute;
-  top: auto;
-  right: 0;
-  bottom: calc(100% + 8px);
-  left: auto;
+  inset: auto 0 calc(100% + 8px) auto;
   width: min(100%, 360px);
   box-sizing: border-box;
   margin: 0;
@@ -448,11 +442,6 @@
   cursor: pointer;
 }
 
-.channel-composer-model-actions button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
 .channel-composer-model-actions .channel-composer-model-done {
   border-color: transparent;
   background: var(--text-bright);
@@ -478,6 +467,7 @@
   cursor: pointer;
 }
 
+.channel-composer-model-actions button:disabled,
 .channel-inline-action:disabled {
   opacity: 0.45;
   cursor: default;
@@ -485,14 +475,25 @@
 
 .channel-harness-picker {
   position: relative;
+}
+
+.channel-harness-picker--above {
   margin-top: var(--sp-3);
+}
+
+/* Header pickers open down (up left the viewport, #bugfixes 2026-09-29); phone: bottom sheet. */
+.channel-harness-picker--below > .channel-composer-model {
+  inset: calc(100% + 8px) 0 auto auto;
+  width: min(360px, calc(100vw - 2 * var(--sp-6)));
+}
+[data-device="mobile"] .channel-harness-picker--below > .channel-composer-model {
+  position: fixed;
+  inset: auto var(--sp-4) var(--sp-4);
+  width: auto;
 }
 
 .dm-channels-notice {
   gap: var(--sp-3);
-}
-.dm-channels-notice > .channel-harness-picker {
-  margin-top: 0;
 }
 .channel-dm-model {
   color: var(--text-bright);

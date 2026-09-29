@@ -186,6 +186,7 @@ export function ChannelDm({
         excluded={null}
         buddy
         onConfirm={(nextConfig) => newChat({ config: nextConfig })}
+        placement="below"
       />
     ) : null;
   const modelControl = (
@@ -292,6 +293,7 @@ export function ChannelDm({
             excluded={row?.provider ?? null}
             buddy
             onConfirm={(config) => newChat({ config, message: retryText })}
+            placement="above"
           />
         )}
         {latest !== conversationId && (
