@@ -46,7 +46,7 @@ import {
   managerRef,
   taskDetail,
 } from './core';
-import { type BuddyEvents, announcePost } from './events';
+import { type BuddyEvents, type MentionPicks, NO_PICKS, announcePost } from './events';
 import type { Runner } from './runner';
 
 /**
@@ -202,35 +202,33 @@ function mentionConfigsByBuddy(
 export type OwnerPostInput = Omit<z.infer<typeof PostBodySchema>, 'asBuddyId' | 'mentionConfigs'>;
 
 /**
- * The one way an owner-side post enters a channel: canonical media, the crate write, the feed
- * announcement and, for the owner's own post in a public channel, the Buddy turns its @mentions
- * start. The owner post routes and the upstream update (upstream/routes.ts) both come here.
+ * The one way an owner-side post enters a channel: canonical media, the crate write and the
+ * announcement, which carries the owner's mention-chip picks to the Buddy turns its @mentions
+ * start (channels.ts, the one dispatch entry for every author). A replayed key announces nothing.
+ * The owner post routes and the upstream update (upstream/routes.ts) both come here.
  */
 // Pattern: one-write-path (docs/patterns.md#one-write-path)
 export async function publishOwnerPost(
-  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'> & {
-    channels: Pick<Channels, 'respondToMentions'>;
-  },
+  deps: Pick<BuddyRouteDeps, 'core' | 'events' | 'uploadsRoot'>,
   author: Actor,
   ref: ChannelRef,
   input: OwnerPostInput,
-  chosen: ReadonlyMap<string, ConversationConfig>
-) {
+  picks: MentionPicks
+): Promise<{ post: Post }> {
   const target = await deps.core.openChannel(OWNER, ref);
   const body = requireCanonicalPostMedia(input.body, {
     uploadsRoot: deps.uploadsRoot(),
     channelId: target.id,
   });
-  const written = await deps.core.post(author, { kind: 'id', id: target.id }, { ...input, body });
+  const { post, created } = await deps.core.post(
+    author,
+    { kind: 'id', id: target.id },
+    { ...input, body }
+  );
+  if (!created) return { post };
   deps.events.emit({ kind: 'changed' });
-  const { post, channel } = await announcePost(deps, OWNER, written);
-  // The owner's @mentions start here, with the chip picks; a Buddy author's (the owner posting as a
-  // Buddy included) start from the `posted` event in channels.ts, the same dispatch without picks.
-  const mentions =
-    channel.kind.type === 'public' && post.author.kind === 'owner'
-      ? await deps.channels.respondToMentions(channel, post, chosen)
-      : [];
-  return { post, mentions };
+  await announcePost(deps, OWNER, post, picks);
+  return { post };
 }
 
 const MEDIA = new Set<string>([...CHANNEL_IMAGE_EXTENSIONS, ...CHANNEL_VIDEO_EXTENSIONS]);
@@ -267,7 +265,7 @@ export function registerBuddyRoutes(app: Express, deps: BuddyRouteDeps): void {
   };
   const posted = async <T extends Post>(post: Promise<T>) => {
     const written = await write(post);
-    return announcePost(deps, OWNER, written);
+    return announcePost(deps, OWNER, written, NO_PICKS);
   };
   const ownerPost = async (raw: unknown, ref: ChannelRef) => {
     const { asBuddyId, ...input } = PostBodySchema.parse(raw);

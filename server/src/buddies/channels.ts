@@ -18,18 +18,24 @@ import {
   scanGenerations,
   stableConversationId,
 } from './buddy-conversation-slots';
+import { type Job, NOTHING_READ, type Pair, type PairEvent, idlePair, step } from './channel-pair';
 import type { ReplyGate } from './channel-reply-gate';
 import { type BuddiesCore, OWNER, buddyActor } from './core';
-import type { BuddyEvents } from './events';
+import type { BuddyEvents, MentionPicks } from './events';
 
 // Channel replies: the host policy that turns a post into a Buddy turn (a post wakes nobody in
-// the core). Two causes, on public channels, the same whoever wrote the post (owner or Buddy):
-//   mention   — a post @mentions a Buddy; it must answer.
+// the core). ONE entry: the `posted` event, which every writer (MCP tool, owner route, runner)
+// emits once per CREATED post — a replayed idempotency key announces nothing (the crate's
+// `PostWrite.created`; until 2026-09-29 a retried tool call re-ran every mention and gate). Two
+// causes, on public channels, the same whoever wrote the post (owner or Buddy):
+//   mention   — a post @mentions a Buddy; it must answer (the owner's chip picks ride the event).
 //   follow_up — a new reply in a thread asks each OTHER Buddy who posted there one gate question
 //               (channel-reply-gate.ts); only a strict <yes> starts a reply.
-// Both stop once the thread's last MAX_BUDDY_CHAIN posts are all Buddies', until the owner speaks.
-// Until 2026-09-28 a Buddy's @mention dispatched nothing, a silent no-op behind a mention chip that
-// looked live; the owner asked for one path. Guard: buddies-v2 "a Buddy's @mention wakes …".
+// HOPS bound Buddy-to-Buddy activity by cause, not by thread: an owner post is hop 0, a post
+// written in a seat turn is one more than the post that started the turn, and a post at
+// MAX_BUDDY_HOPS wakes nobody. Until 2026-09-29 the bound was "3 Buddy posts in a row in this
+// thread", so Buddies mentioning each other across NEW threads had no bound in code (review R7).
+// A post from anywhere but a channel seat turn (a DM chat, a background run) is hop 1.
 // SEATS: every reply goes to the Buddy's seat in that thread, ONE resumed conversation per
 // (thread, Buddy) (buddy-conversation-slots.ts). The owner's mention-chip pick is applied to the
 // seat, which keeps its provider session; only a pick on another PROVIDER opens a new seat
@@ -39,23 +45,15 @@ import type { BuddyEvents } from './events';
 // `post` tool; its text output is a private scratchpad and never reaches the channel (493c1c7: the
 // server used to paste the final text, tool transcript and all, or "(no reply text)"). A turn that
 // posts nothing, or fails, leaves a visible reply_failed notice.
-//
-// Per (thread, Buddy) PAIR, four in-process structures, one meaning each: `replies` (its serial
-// reply queue), `gating` (a gate in flight) with `deferred` (the newest post that arrived while
-// busy), and `readThrough` (the newest post its last completed turn was shown). ONE admission
-// rule reads the mark: a follow-up runs only for a post the pair has not read, in a thread not
-// capped by Buddy posts. Until 2026-09-29 the rule sat in `settle` only, so a gate in flight
-// whose post a mention turn had already answered started a second turn for it (F1 in
-// agent_notes/2026-09-28_channels-state-machine-review.md). Guard: buddies-v2 "a follow-up for
-// a post a mention turn already read starts no second turn".
-// Known gaps: all four are lost on restart (a resumed seat then gets the full context: more,
-// never less), and a turn in flight at restart leaves neither its post nor the notice. A Buddy
-// chain across NEW threads is bounded by the models' choices, not the code.
+// Per (thread, Buddy) PAIR the queue, gate and read mark are ONE pure machine (channel-pair.ts);
+// this file applies its effects. Known gaps: pairs live in memory, so a restart costs each
+// resumed seat one full-context prompt, and a turn in flight at restart leaves neither its post
+// nor the notice.
 
 const CONTEXT_POSTS = 10;
 /** A fresh seat's own earlier replies, beyond the recent tail: newest first up to this budget. */
 const OWN_HISTORY_CHARS = 8000;
-const MAX_BUDDY_CHAIN = 3;
+const MAX_BUDDY_HOPS = 3;
 const THREAD_PAGE = 200;
 
 const MENTION = /\[@([^\]]+)\]\(buddy:([A-Za-z0-9_-]+)\)/g;
@@ -90,20 +88,10 @@ const mentionedByPost = (post: Post): string[] =>
 /**
  * A thread as its members wrote it: without failure notices. A notice is not announced, so it
  * must not decide dispatch either — as the newest post it hid the owner's post from the gates,
- * and it counted as a Buddy in the chain and the participants (review R11, R13).
+ * and it counted as a participant (review R11, R13).
  */
 const talkOf = (thread: Post[]) => thread.filter((post) => post.purpose !== 'reply_failed');
-/** Buddy posts in a row ending at `post` (0 when the owner wrote it), in `talk`. */
-function buddyChain(talk: Post[], post: Post): number {
-  let chain = 0;
-  for (let i = talk.findIndex((p) => p.id === post.id); i >= 0; i--) {
-    if (talk[i].author.kind !== 'buddy') break;
-    chain++;
-  }
-  return chain;
-}
-const capped = (talk: Post[], post: Post) => buddyChain(talk, post) >= MAX_BUDDY_CHAIN;
-const CAPPED_REASON = `${MAX_BUDDY_CHAIN} Buddy posts in a row; waiting for the owner`;
+const CAPPED_REASON = `${MAX_BUDDY_HOPS} Buddy hand-offs since the owner last spoke; waiting for the owner`;
 
 // Owner authority for a seat turn follows the author of its trigger post, read back from the
 // store by id — never from the prompt, which quotes Buddy text. B1 (2026-09-25): every seat turn
@@ -165,35 +153,46 @@ type Reply = {
   trigger: Post;
   rootId: string;
   buddyId: string;
-  /** One turn per id in the pair's queue: a double-clicked retry starts one turn (review R3). */
-  id: string;
+  /** The hop of the post that caused this turn; the turn's own posts are one more. */
+  hops: number;
   /** The idempotency key of its failure notice. */
   noticeKey: string;
 };
-type FollowUp = { channel: Channel; trigger: Post; root: Post; buddyId: string; others: string[] };
-type Replying = Omit<ChannelResponse, 'state'> & {
+type FollowUp = {
+  channel: Channel;
+  trigger: Post;
+  root: Post;
+  buddyId: string;
+  others: string[];
+  hops: number;
+};
+/** One pair: its machine, plus what "X is replying…" shows. */
+type PairEntry = Omit<ChannelResponse, 'state'> & {
+  machine: Pair<FollowUp, Reply>;
   waitingForSlot: boolean;
-  ids: Set<string>;
-  tail: Promise<void>;
 };
 
-const firstReply = (trigger: Post, buddyId: string) => ({
-  id: `${trigger.id}:${buddyId}`,
-  noticeKey: `thread-reply:${trigger.id}:${buddyId}`,
+/** A reply turn for the machine. One job per id is queued: a double-clicked retry runs once (R3). */
+const replyJob = (reply: Reply, id: string, mustAnswer: boolean): Job<Reply> => ({
+  id,
+  ord: reply.trigger.ord,
+  mustAnswer,
+  reply,
 });
+const noticeKey = (trigger: Post, buddyId: string) => `thread-reply:${trigger.id}:${buddyId}`;
 
 export type Channels = ReturnType<typeof createChannels>;
 
 export function createChannels(ports: ChannelsPorts) {
   const { core } = ports;
   const logger = ports.logger ?? console;
-  const replies = new Map<string, Replying>();
-  const gating = new Set<string>();
-  const deferred = new Map<string, FollowUp>();
-  const readThrough = new Map<string, string>();
+  const pairs = new Map<string, PairEntry>();
+  /** The hop of the post that started the turn now running in each seat (conversation id). */
+  const seatHops = new Map<string, number>();
   const pairKey = (rootId: string, buddyId: string) => `${rootId}:${buddyId}`;
-  const busy = (key: string) => gating.has(key) || replies.has(key);
-  const unread = (key: string, post: Post) => post.ord > (readThrough.get(key) ?? '');
+  // Read synchronously as the post is announced, while the turn that wrote it still runs.
+  const hopsOf = (post: Post): number =>
+    post.author.kind === 'owner' ? 0 : 1 + (seatHops.get(post.conversationId ?? '') ?? 0);
 
   async function names(workspaceId: string): Promise<Names> {
     return new Map((await core.listBuddies(workspaceId)).map((buddy) => [buddy.id, buddy.name]));
@@ -328,8 +327,9 @@ export function createChannels(ports: ChannelsPorts) {
       ...omitted(context.earlier.length - own.kept.length, 'earlier replies'),
       ...lines(context.shown),
     ]);
-    const mark = readThrough.get(pairKey(input.rootId, input.buddyId));
-    if (mark === undefined) return { prompt: { fresh, resumed: fresh }, through };
+    const mark =
+      pairs.get(pairKey(input.rootId, input.buddyId))?.machine.readThrough ?? NOTHING_READ;
+    if (mark === NOTHING_READ) return { prompt: { fresh, resumed: fresh }, through };
     const unseen = thread.filter(
       (post) => post.ord > mark && post.id !== trigger.id && post.conversationId !== seatId
     );
@@ -411,25 +411,7 @@ export function createChannels(ports: ChannelsPorts) {
     return talkOf(thread).some((post) => post.conversationId === seatId && post.ord > through);
   }
 
-  // The ONE admission rule, read when the reply is about to run: a mention or a retry must answer;
-  // a follow-up runs only for a post the pair has not read, in a thread not capped by Buddy posts.
-  // Checking the cap here, not only at the gate, bounds k Buddies to ~k replies (review R6).
-  async function admitted(input: Reply): Promise<boolean> {
-    switch (input.cause) {
-      case 'mention':
-      case 'retry':
-        return true;
-      case 'follow_up': {
-        const talk = talkOf(await wholeThread(await core.getPost(OWNER, input.rootId)));
-        return (
-          unread(pairKey(input.rootId, input.buddyId), input.trigger) &&
-          !capped(talk, talk[talk.length - 1])
-        );
-      }
-    }
-  }
-
-  function trackRunSlot(entry: Replying, conversation: ConversationRuntime): () => void {
+  function trackRunSlot(entry: PairEntry, conversation: ConversationRuntime): () => void {
     const waiting = (value: boolean) => {
       if (entry.waitingForSlot === value) return;
       entry.waitingForSlot = value;
@@ -444,13 +426,14 @@ export function createChannels(ports: ChannelsPorts) {
     };
   }
 
-  // A mention or retry ALWAYS ends in a reply or a visible reply_failed notice: every step,
-  // the thread reads included, is inside the one try (review R4: a throwing read left neither).
-  async function runReply(input: Reply, entry: Replying): Promise<void> {
+  // A turn ALWAYS ends in a reply or a visible reply_failed notice: every step, the thread reads
+  // included, is inside the one try (review R4: a throwing read left neither). Resolves to the
+  // newest post its prompt showed (the pair's read mark), or NOTHING_READ if it never composed one.
+  async function runReply(input: Reply, entry: PairEntry): Promise<string> {
     let seatId: string | null = null;
+    let shown = NOTHING_READ;
     let failure = 'the turn ended without a channel post';
     try {
-      if (!(await admitted(input))) return;
       const seat = await seatConfig(input.rootId, input.buddyId, input.request);
       const conversation = await openConversation(ports.conversations, {
         context: { buddyId: input.buddyId, workspaceId: input.channel.workspaceId },
@@ -471,6 +454,7 @@ export function createChannels(ports: ChannelsPorts) {
       } while (!idle(conversation));
       const { prompt, through } = composed;
       let untrack: () => void = () => undefined;
+      seatHops.set(conversation.id, input.hops);
       await awaitTurn(
         conversation,
         () => {
@@ -478,69 +462,63 @@ export function createChannels(ports: ChannelsPorts) {
           untrack = trackRunSlot(entry, conversation);
         },
         'Buddy turn failed'
-      ).finally(() => untrack());
-      readThrough.set(pairKey(input.rootId, input.buddyId), through);
-      if (await repliedSince(input, conversation.id, through)) return;
+      ).finally(() => {
+        untrack();
+        seatHops.delete(conversation.id);
+      });
+      shown = through;
+      if (await repliedSince(input, conversation.id, through)) return shown;
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     }
     await postFailure(input, seatId, failure);
+    return shown;
   }
 
-  function reply(input: Reply): void {
-    const key = pairKey(input.rootId, input.buddyId);
-    const entry: Replying = replies.get(key) ?? {
-      channelId: input.channel.id,
-      threadRootId: input.rootId,
-      buddyId: input.buddyId,
+  // The thin driver: step the pair's machine, then perform its effects, whose outcomes come back
+  // as the next events.
+  function apply(
+    meta: Pick<Reply, 'channel' | 'rootId' | 'buddyId'>,
+    event: PairEvent<FollowUp, Reply>
+  ) {
+    const key = pairKey(meta.rootId, meta.buddyId);
+    const entry: PairEntry = pairs.get(key) ?? {
+      channelId: meta.channel.id,
+      threadRootId: meta.rootId,
+      buddyId: meta.buddyId,
       startedAt: new Date().toISOString(),
       waitingForSlot: false,
-      ids: new Set(),
-      tail: Promise.resolve(),
+      machine: idlePair(),
     };
-    if (entry.ids.has(input.id)) return;
-    entry.ids.add(input.id);
-    const tail = entry.tail
-      .then(() => runReply(input, entry))
-      .catch((error) => logger.warn(`[channels] reply to ${input.trigger.id} failed:`, error))
-      .finally(() => entry.ids.delete(input.id));
-    entry.tail = tail;
-    replies.set(key, entry);
-    ports.channelChanged(entry.channelId);
-    void tail.finally(() => {
-      if (entry.tail !== tail) return;
-      replies.delete(key);
-      ports.channelChanged(entry.channelId);
-      settle(key);
-    });
-  }
-
-  function gate(input: FollowUp): void {
-    const key = pairKey(input.root.id, input.buddyId);
-    if (busy(key)) {
-      deferred.set(key, input);
-      return;
+    const was = entry.machine.queue.length;
+    const { pair, effects } = step(entry.machine, event);
+    entry.machine = pair;
+    pairs.set(key, entry);
+    if (was === 0 && pair.queue.length > 0) entry.startedAt = new Date().toISOString();
+    if ((was === 0) !== (pair.queue.length === 0)) ports.channelChanged(entry.channelId);
+    for (const effect of effects) {
+      switch (effect.kind) {
+        case 'gate':
+          void followUp(effect.trigger.followUp)
+            .catch((error): PairEvent<FollowUp, Reply> => {
+              logger.warn(`[channels] follow-up for ${meta.buddyId} failed:`, error);
+              return { kind: 'gate_no' };
+            })
+            .then((outcome) => apply(meta, outcome));
+          break;
+        case 'run':
+          void runReply(effect.job.reply, entry)
+            .catch((error) => {
+              logger.warn(`[channels] reply to ${effect.job.reply.trigger.id} failed:`, error);
+              return NOTHING_READ;
+            })
+            .then((through) => apply(meta, { kind: 'replied', through }));
+          break;
+      }
     }
-    gating.add(key);
-    void followUp(input)
-      .catch((error) => logger.warn(`[channels] follow-up for ${input.buddyId} failed:`, error))
-      .finally(() => {
-        gating.delete(key);
-        settle(key);
-      });
   }
 
-  // The pair went idle: gate the post that arrived meanwhile, unless its last turn already read
-  // it (the gate call is skipped; `admitted` re-checks when a yes is about to run). Until
-  // 2026-09-25 such a post was skipped and the owner's message went unanswered.
-  function settle(key: string): void {
-    const next = deferred.get(key);
-    if (next === undefined || busy(key)) return;
-    deferred.delete(key);
-    if (unread(key, next.trigger)) gate(next);
-  }
-
-  async function followUp(input: FollowUp): Promise<void> {
+  async function followUp(input: FollowUp): Promise<PairEvent<FollowUp, Reply>> {
     const nameMap = await names(input.channel.workspaceId);
     const role = async (id: string) => {
       const buddy = await core.getBuddy(id);
@@ -555,7 +533,8 @@ export function createChannels(ports: ChannelsPorts) {
       trigger: input.trigger,
       rootId: input.root.id,
       buddyId: input.buddyId,
-      ...firstReply(input.trigger, input.buddyId),
+      hops: input.hops,
+      noticeKey: noticeKey(input.trigger, input.buddyId),
     };
     const verdict = await ports.gate({
       config: (await seatConfig(input.root.id, input.buddyId, { kind: 'keep' })).config,
@@ -578,14 +557,17 @@ export function createChannels(ports: ChannelsPorts) {
     });
     switch (verdict.kind) {
       case 'respond':
-        return reply(followUpReply);
+        return {
+          kind: 'gate_yes',
+          job: replyJob(followUpReply, `${input.trigger.id}:${input.buddyId}`, false),
+        };
       case 'pass':
-        return;
+        return { kind: 'gate_no' };
       case 'unparseable':
         logger.warn(
           `[channels] ${input.buddyId} gave no <yes>/<no> for post ${input.trigger.id}: ${JSON.stringify(verdict.output)}`
         );
-        return;
+        return { kind: 'gate_no' };
       // The owner waits on an answer, so a gate that could not run is shown in the thread
       // (2026-09-24: every gate failed on a Codex usage limit and threads just stayed quiet).
       case 'failed':
@@ -598,6 +580,7 @@ export function createChannels(ports: ChannelsPorts) {
             null,
             `could not decide whether to reply (${verdict.reason})`
           );
+        return { kind: 'gate_no' };
     }
   }
 
@@ -625,100 +608,87 @@ export function createChannels(ports: ChannelsPorts) {
   }
 
   /** Ask every other Buddy who posted in this post's thread whether to follow up. */
-  async function considerThreadPost(channel: Channel, post: Post): Promise<void> {
+  async function followUps(channel: Channel, post: Post, hops: number): Promise<void> {
     if (!post.rootId) return;
     const talk = talkOf(await wholeThread(await core.getPost(OWNER, post.rootId)));
     // Only the newest post is followed up: a burst is gated once, against the latest message.
     if (talk[talk.length - 1].id !== post.id) return;
-    if (capped(talk, post)) return;
     const skipped = new Set([...buddyAuthor(post), ...mentionedByPost(post)]);
-    const replying = [...replies.values()]
-      .filter((entry) => entry.threadRootId === post.rootId)
+    const replying = [...pairs.values()]
+      .filter((entry) => entry.threadRootId === post.rootId && entry.machine.queue.length > 0)
       .map((entry) => entry.buddyId);
     const participants = [...new Set([...talk.flatMap(buddyAuthor), ...replying])];
     for (const buddyId of participants) {
       if (skipped.has(buddyId) || !(await eligible(buddyId, channel.workspaceId)).ok) continue;
-      gate({
+      const followUp: FollowUp = {
         channel,
         trigger: post,
         root: talk[0],
         buddyId,
         others: participants.filter((other) => other !== buddyId),
-      });
+        hops,
+      };
+      apply(
+        { channel, rootId: post.rootId, buddyId },
+        { kind: 'posted', trigger: { ord: post.ord, followUp } }
+      );
     }
   }
 
   /**
-   * One reply per valid @mention in a post, in the Buddy's seat for this thread. The one mention
-   * path for every author: the owner's post route passes its mention-chip picks in `chosen`; a
-   * Buddy's post (below) passes none, so its mention runs on the seat's latest config. A mention
-   * the chain cap holds back leaves a notice in the thread: a Buddy's was only logged (review R8).
+   * One reply per valid @mention, in the Buddy's seat for this thread, on the owner's chip pick
+   * when there is one. A mention past the hop bound leaves a notice in the thread: a Buddy's was
+   * only logged (review R8).
    */
-  async function respondToMentions(
-    channel: Channel,
-    post: Post,
-    chosen: ReadonlyMap<string, ConversationConfig>
-  ): Promise<MentionDispatch[]> {
-    const mentioned = mentionedByPost(post);
-    if (mentioned.length === 0) return [];
-    const chained = capped(
-      talkOf(await wholeThread(await core.getPost(OWNER, rootOf(post)))),
-      post
-    );
-    return Promise.all(
-      mentioned.map(async (buddyId): Promise<MentionDispatch> => {
-        const admitted = await eligible(buddyId, channel.workspaceId);
-        if (!admitted.ok) return { buddyId, status: 'rejected', reason: admitted.reason };
-        if (chained) {
-          await postFailure(
-            { channel, trigger: post, buddyId, ...firstReply(post, buddyId) },
-            null,
-            CAPPED_REASON
-          );
-          return { buddyId, status: 'rejected', reason: CAPPED_REASON };
-        }
-        const config = chosen.get(buddyId);
-        reply({
-          channel,
-          cause: 'mention',
-          request: config ? { kind: 'chosen', config } : { kind: 'keep' },
-          trigger: post,
-          rootId: rootOf(post),
-          buddyId,
-          ...firstReply(post, buddyId),
-        });
-        return { buddyId, status: 'started' };
-      })
-    );
+  async function mentions(channel: Channel, post: Post, hops: number, picks: MentionPicks) {
+    for (const buddyId of mentionedByPost(post)) {
+      const admitted = await eligible(buddyId, channel.workspaceId);
+      if (!admitted.ok) {
+        logger.warn(`[channels] mention of ${buddyId} in ${post.id}: ${admitted.reason}`);
+        continue;
+      }
+      if (hops >= MAX_BUDDY_HOPS) {
+        await postFailure(
+          { channel, trigger: post, buddyId, noticeKey: noticeKey(post, buddyId) },
+          null,
+          CAPPED_REASON
+        );
+        continue;
+      }
+      const config = picks.get(buddyId);
+      const mention: Reply = {
+        channel,
+        cause: 'mention',
+        request: config ? { kind: 'chosen', config } : { kind: 'keep' },
+        trigger: post,
+        rootId: rootOf(post),
+        buddyId,
+        hops,
+        noticeKey: noticeKey(post, buddyId),
+      };
+      apply(mention, { kind: 'mentioned', job: replyJob(mention, `${post.id}:${buddyId}`, true) });
+    }
   }
 
-  // Every post, from any writer (tool, route, runner, this responder), pushes its channel; a post
-  // in a public channel's thread asks the other Buddies there whether to follow up, and a Buddy's
-  // post starts its @mentions (the owner's post route starts the owner's, with its chip picks).
-  // A DM request needs no gate: the core already queued the recipient's run.
+  // Every created post, from any writer, pushes its channel; in a public channel it starts its
+  // @mentions and asks the thread's other Buddies whether to follow up. A post at the hop bound
+  // starts no follow-up. A DM request needs neither: the core already queued the recipient's run.
   ports.events.on((event) => {
     if (event.kind !== 'posted') return;
     ports.channelChanged(event.channel.id);
     if (event.channel.kind.type !== 'public') return;
-    const { channel, post } = event;
-    void considerThreadPost(channel, post).catch((error) =>
+    const { channel, post, picks } = event;
+    const hops = hopsOf(post);
+    void mentions(channel, post, hops, picks).catch((error) =>
+      logger.warn(`[channels] mentions in post ${post.id} failed:`, error)
+    );
+    if (hops >= MAX_BUDDY_HOPS) return;
+    void followUps(channel, post, hops).catch((error) =>
       logger.warn(`[channels] follow-up gating failed for post ${post.id}:`, error)
     );
-    if (post.author.kind !== 'buddy') return;
-    void respondToMentions(channel, post, new Map())
-      .then((dispatched) => {
-        for (const d of dispatched)
-          if (d.status === 'rejected')
-            logger.warn(`[channels] mention of ${d.buddyId} in ${post.id}: ${d.reason}`);
-      })
-      .catch((error) => logger.warn(`[channels] mentions in post ${post.id} failed:`, error));
   });
 
   return {
-    respondToMentions,
-
-    considerThreadPost,
-
     /**
      * Each thread Buddy's latest seat (harness, model, reasoning): the one its next reply runs
      * on. The mention chip opens on it; until 493c1c7 it showed the profile default, which is
@@ -745,8 +715,8 @@ export function createChannels(ports: ChannelsPorts) {
 
     /** Buddies composing a reply in this channel, for "X is replying…". */
     responding(channelId: string): ChannelResponse[] {
-      return [...replies.values()]
-        .filter((entry) => entry.channelId === channelId)
+      return [...pairs.values()]
+        .filter((entry) => entry.channelId === channelId && entry.machine.queue.length > 0)
         .map(({ channelId, threadRootId, buddyId, startedAt, waitingForSlot }) => ({
           channelId,
           threadRootId,
@@ -783,16 +753,18 @@ export function createChannels(ports: ChannelsPorts) {
           : (await seatConfig(rootId, buddyId, { kind: 'keep' })).config.provider;
       if (config.provider === failedProvider)
         throw new Error(`Pick a different harness. ${failedProvider} is the one that failed.`);
-      reply({
+      // The owner asked for it, so the rerun starts a new hop count, like an owner post.
+      const retry: Reply = {
         channel,
         cause: 'retry',
         request: { kind: 'chosen', config },
         trigger,
         rootId,
         buddyId,
-        id: `retry:${failed.id}`,
+        hops: 0,
         noticeKey: `thread-reply:${trigger.id}:${buddyId}:retry:${randomUUID()}`,
-      });
+      };
+      apply(retry, { kind: 'mentioned', job: replyJob(retry, `retry:${failed.id}`, true) });
       return { buddyId, status: 'started' };
     },
 

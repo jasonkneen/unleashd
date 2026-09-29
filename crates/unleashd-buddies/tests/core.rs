@@ -210,8 +210,10 @@ fn upsert_task_is_compare_and_swap() {
 fn idempotency_key_replays_and_rejects_a_changed_payload() {
     let mut f = fixture();
     let s = &mut f.store;
-    let a = s.post(&buddy("peer"), dm("peer", "mid"), request("hello", "k1")).unwrap();
-    let again = s.post(&buddy("peer"), dm("peer", "mid"), request("hello", "k1")).unwrap();
+    let a = s.write_post(&buddy("peer"), dm("peer", "mid"), request("hello", "k1")).unwrap();
+    let again = s.write_post(&buddy("peer"), dm("peer", "mid"), request("hello", "k1")).unwrap();
+    assert!(a.created && !again.created, "the host announces only the write that created the post");
+    let (a, again) = (a.post, again.post);
     assert_eq!(a.id, again.id, "a replay returns the first result");
     let page = s.list_posts(&buddy("mid"), PostQuery::Channel { channel_id: a.channel_id.clone() }, None, 10).unwrap();
     assert_eq!(page.posts.len(), 1, "a replay writes nothing");

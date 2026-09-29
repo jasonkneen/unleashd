@@ -608,7 +608,6 @@ const upstream = createUpstreamService({
   serverDirectory: __dirname,
   core: buddiesCore,
   events: buddyEvents,
-  channels: buddyChannels,
   uploadsRoot: () => UPLOADS_DIR,
 });
 upstream.registerRoutes(app);

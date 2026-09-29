@@ -47,8 +47,8 @@ impl BuddiesCore {
     }
 
     #[napi]
-    pub async fn post(&self, actor: Actor, channel: ChannelRef, input: PostInput) -> napi::Result<Post> {
-        call(&self.store, move |s| s.post(&actor, channel, input)).await
+    pub async fn post(&self, actor: Actor, channel: ChannelRef, input: PostInput) -> napi::Result<PostWrite> {
+        call(&self.store, move |s| s.write_post(&actor, channel, input)).await
     }
 
     #[napi]

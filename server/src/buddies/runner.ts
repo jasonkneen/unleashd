@@ -2,7 +2,7 @@ import type { Claim, Outcome, Post, Run, RunConfig, RunInput } from '@unleashd/b
 import type { BuddyContext } from '@unleashd/shared';
 import type { Briefings } from './briefing';
 import { type BuddiesCore, OWNER, buddyActor, coreError } from './core';
-import { type BuddyEvents, announcePost } from './events';
+import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { Grants } from './grants';
 
 /**
@@ -203,7 +203,7 @@ export function createRunner(options: {
           evidence: [],
           key: `run:${run.id}:answer`,
         });
-        await announcePost(options, OWNER, answer);
+        await announcePost(options, OWNER, answer, NO_PICKS);
       }
     );
   }

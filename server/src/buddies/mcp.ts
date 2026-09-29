@@ -21,7 +21,7 @@ import {
   managerRef,
   taskDetail,
 } from './core';
-import { type BuddyEvents, announcePost } from './events';
+import { type BuddyEvents, NO_PICKS, announcePost } from './events';
 import type { BuddyGrant, Grants, Role, TurnGrant } from './grants';
 import { WorkerSchema, checkedRunConfig } from './worker-config';
 
@@ -300,7 +300,8 @@ const BUDDY_TOOLS = {
               body: input.body,
               evidence: input.evidence,
               key: input.key,
-            })
+            }),
+            NO_PICKS
           )
         ).post;
       }
@@ -311,13 +312,14 @@ const BUDDY_TOOLS = {
         uploadsRoot: deps.uploadsRoot(),
         channelId: channel.id,
       });
-      const post = await deps.core.post(
+      const { post, created } = await deps.core.post(
         grant.author,
         { kind: 'id', id: channel.id },
         // Buddies never send a reply to the channel: that is the owner's call (THREADS_VIEW §3).
         { ...input, body, fromConversationId: grant.conversationId, runConfig, broadcast: false }
       );
-      deps.events.emit({ kind: 'posted', post, channel });
+      // A replayed key (a retried tool call) announces nothing: it would wake everyone again.
+      if (created) deps.events.emit({ kind: 'posted', post, channel, picks: NO_PICKS });
       return post;
     },
   }),

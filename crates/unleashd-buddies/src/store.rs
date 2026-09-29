@@ -243,14 +243,19 @@ fn record(tx: &Transaction, m: &Mutation, hash: &str, result_ref: Option<&str>) 
 /// Runs `work` once per (actor, workspace, key) and records the mutation event. A replay
 /// returns the first result's id without running `work`.
 pub(crate) fn idempotent(tx: &Transaction, m: &Mutation, work: impl FnOnce(&Transaction) -> Result<String>) -> Result<String> {
+    idempotent_write(tx, m, work).map(|(id, _)| id)
+}
+
+/// `idempotent`, also saying whether this call did the write (true) or replayed it (false).
+pub(crate) fn idempotent_write(tx: &Transaction, m: &Mutation, work: impl FnOnce(&Transaction) -> Result<String>) -> Result<(String, bool)> {
     let hash = sha256_hex(m.payload.to_string().as_bytes());
     match prior(tx, m, &hash)? {
-        Prior::Replay { result_ref: Some(id), .. } => Ok(id),
+        Prior::Replay { result_ref: Some(id), .. } => Ok((id, false)),
         Prior::Replay { result_ref: None, seq } => Err(CoreError::Corrupt(format!("event {seq} has no result_ref"))),
         Prior::Fresh => {
             let id = work(tx)?;
             record(tx, m, &hash, Some(&id))?;
-            Ok(id)
+            Ok((id, true))
         }
     }
 }

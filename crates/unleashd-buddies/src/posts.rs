@@ -10,7 +10,7 @@
 
 use crate::error::{CoreError, Result};
 use crate::runs::Enqueue;
-use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, new_id, now_iso, require};
+use crate::store::{Mutation, Store, collect, corrupt, get_buddy, idempotent, idempotent_write, new_id, now_iso, require};
 use crate::tasks::get_task;
 use crate::types::*;
 use rusqlite::types::Value;
@@ -188,6 +188,13 @@ impl Ask {
 
 impl Store {
     pub fn post(&mut self, actor: &Actor, channel: ChannelRef, input: PostInput) -> Result<Post> {
+        self.write_post(actor, channel, input).map(|written| written.post)
+    }
+
+    /// `post`, saying whether it wrote the post or replayed its key. The host announces only a
+    /// created post: a replayed key used to re-run its @mentions and follow-up gates (2026-09-28
+    /// review R2, agent_notes/2026-09-28_channels-state-machine-review.md).
+    pub fn write_post(&mut self, actor: &Actor, channel: ChannelRef, input: PostInput) -> Result<PostWrite> {
         self.write(|tx| {
             let channel = open_channel(tx, actor, &channel)?;
             require(tx, actor, Op::Post, &Subject::Channel { id: channel.id.clone() })?;
@@ -203,8 +210,8 @@ impl Store {
                     "run_config": input.run_config}),
                 key: Some(&input.key),
             };
-            let id = idempotent(tx, &m, |tx| insert_post(tx, actor, &channel, &input, task_id.as_deref()))?;
-            get_post(tx, &id)
+            let (id, created) = idempotent_write(tx, &m, |tx| insert_post(tx, actor, &channel, &input, task_id.as_deref()))?;
+            Ok(PostWrite { post: get_post(tx, &id)?, created })
         })
     }
 

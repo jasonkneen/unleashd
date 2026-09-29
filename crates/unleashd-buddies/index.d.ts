@@ -5,7 +5,7 @@ export declare class BuddiesCore {
   /** Opens (or creates) the database. Refuses a file that is not a buddies-core database. */
   static open(path: string): Promise<BuddiesCore>
   authorize(actor: Actor, op: Op, subject: Subject): Promise<Decision>
-  post(actor: Actor, channel: ChannelRef, input: PostInput): Promise<Post>
+  post(actor: Actor, channel: ChannelRef, input: PostInput): Promise<PostWrite>
   answer(actor: Actor, input: AnswerInput): Promise<Post>
   getPost(actor: Actor, id: string): Promise<Post>
   openChannel(actor: Actor, channel: ChannelRef): Promise<Channel>
@@ -359,6 +359,12 @@ export interface PostPage {
 export type PostQuery =
   | { kind: 'channel'; channelId: string }
   | { kind: 'thread'; rootId: string }
+
+/** A post write: the post, and whether this call created it (false: its key replayed). */
+export interface PostWrite {
+  post: Post
+  created: boolean
+}
 
 /** What startup recovery ended: runs a dead process held, and chat turns nobody waits for. */
 export interface Recovery {

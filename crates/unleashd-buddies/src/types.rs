@@ -291,6 +291,14 @@ pub struct Channel {
     pub created_at: String,
 }
 
+/// A post write: the post, and whether this call created it (false: its key replayed).
+#[cfg_attr(feature = "node", napi_derive::napi(object))]
+#[derive(Debug, Clone)]
+pub struct PostWrite {
+    pub post: Post,
+    pub created: bool,
+}
+
 #[cfg_attr(feature = "node", napi_derive::napi(object))]
 #[derive(Debug, Clone)]
 pub struct Post {

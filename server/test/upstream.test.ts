@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { BuddiesCore } from '@unleashd/buddies-core';
 import { UpstreamStatusSchema, UpstreamUpdateResultSchema } from '@unleashd/shared';
@@ -180,18 +180,16 @@ test('update posts one @mention of the Release Manager per upstream sha', async 
   git(publisher, 'push', '--quiet', 'origin', 'main');
 
   const core = await openCore(root);
+  // The mentions each announced post would start (channels.ts dispatches from this event).
   const turns: string[] = [];
+  const events = createBuddyEvents();
+  events.on((event) => {
+    if (event.kind === 'posted') turns.push(...mentionedBuddyIds(event.post.body));
+  });
   const service = createUpstreamService({
     serverDirectory: install,
     core,
-    events: createBuddyEvents(),
-    channels: {
-      respondToMentions: async (_channel, post) =>
-        mentionedBuddyIds(post.body).map((buddyId) => {
-          turns.push(buddyId);
-          return { buddyId, status: 'started' as const };
-        }),
-    },
+    events,
     uploadsRoot: () => join(root, 'uploads'),
   });
   const app = express();

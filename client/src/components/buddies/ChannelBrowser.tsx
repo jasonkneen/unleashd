@@ -50,7 +50,7 @@ import {
 } from './channel-data';
 import { channelLinkPath } from './channel-link';
 import { type ChannelsView, channelsHref, channelsView } from './channels-view';
-import { plainChannelText } from './channel-text';
+import { mentionsABuddy, plainChannelText } from './channel-text';
 import type { Channel, ChannelUnread, Inbox } from './types';
 import { initials } from './ui-contract';
 import './ChannelBrowser.css';
@@ -342,9 +342,8 @@ function ChannelPane({
             onPosted={(result) => {
               follow.pin();
               void feed.latest.refetch();
-              // Mentioning a Buddy opens the thread its reply will land in.
-              if (result.mentions.some((mention) => mention.status === 'started'))
-                openThread(result.post.id);
+              // Mentioning a Buddy opens the thread its reply (or why not) will land in.
+              if (mentionsABuddy(result.post.body)) openThread(result.post.id);
             }}
           />
         )}

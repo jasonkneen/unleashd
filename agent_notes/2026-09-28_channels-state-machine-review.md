@@ -132,3 +132,38 @@ Not done, and why:
   crate's `post`, which changes the napi return type for every caller.
 - R7 (Buddy chains across new threads): still bounded only by model choices.
 - Persisting `readThrough` across restarts: a restart still costs one full-context prompt.
+
+## Successor — 2026-09-29 (second pass): the "not done" list, done
+
+Decision: owner, same #channels-feature thread (post after 2e11861's recommendation): "Okay did we
+complete all this and merge it if not do it". Accepted as: implement every item the first
+successor left open.
+
+- R7 → causal hops (`MAX_BUDDY_HOPS` = 3) replace the per-thread chain count. A seat turn records
+  the hop of the post that started it (`seatHops`, by conversation id); a post written in that
+  turn is one more. The hop is read synchronously as the post is announced, while its turn still
+  runs. Guard: buddies-v2 "… hand-offs stop at the hop bound across new threads" (Lead → Designer
+  → Lead through three NEW top-level posts; mutation: not propagating the hop fails it).
+  Limit, stated rather than hidden: a post from a DM chat or a background run is hop 1, so a chain
+  that passes through a DM `request` starts counting again. That path is the run queue's.
+- R2 → the crate's napi `post` returns `PostWrite { post, created }` (`Store::write_post`;
+  `Store::post` keeps returning the post for Rust callers). The MCP tool and `publishOwnerPost`
+  announce only a created post. Guards: Rust `idempotency_key_replays…` asserts the flags;
+  buddies-v2 "a retried post (same key) wakes its mentioned Buddy once" retries AFTER the first
+  turn ended (a queued duplicate is absorbed by the pair queue, so a retry during the turn
+  proved nothing: the first version of this test passed with the guard removed).
+- F4 → one entry: the `posted` event carries `picks` (the owner's chip picks; `NO_PICKS`
+  elsewhere). `respondToMentions` / `considerThreadPost` and the route's `mentions` result are
+  gone; the client opens the thread when the post mentions a Buddy (`mentionsABuddy`), where the
+  reply or a notice lands. The upstream service no longer takes `channels`.
+- Pure machine → `server/src/buddies/channel-pair.ts`: `step(pair, event) → {pair, effects}` with
+  one admission rule; channels.ts is the driver (`apply`). `channel-pair.test.ts` searches every
+  interleaving at 5 posts (plain or mention), gate yes/no, and two read marks per turn, asserting:
+  one gate and one turn at a time, no gate/follow-up for a read post, one turn per job, every
+  mention answered once, every plain reply gated or read. Mutations (drop admission in `start`,
+  drop the read check in `settle`) both fail it.
+- Persisting `readThrough`: NOT done, deliberately. After a restart nothing is deferred or queued,
+  so the lost mark cannot cause a duplicate or lost reply; its only cost is one full-context
+  prompt per resumed seat. The crate's `thread_read` mark is not the same fact: it also advances when
+  the Buddy reads or posts from any other context, so it would skip follow-ups on posts the seat
+  never answered. Revisit if token audits show post-restart full prompts to be material.

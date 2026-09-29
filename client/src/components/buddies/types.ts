@@ -110,13 +110,10 @@ export interface ChannelResponse {
   state: 'replying' | 'queued';
 }
 
-/** POST /api/buddies/channels/:channelId/posts (and /direct/posts) */
+/**
+ * POST /api/buddies/channels/:channelId/posts (and /direct/posts). A mention's turn starts from
+ * the server's post announcement; its reply, or a notice saying why not, lands in the thread.
+ */
 export interface PostResult {
   post: Post;
-  mentions: MentionDispatch[];
 }
-
-/** Whether an owner @mention in a public channel started the Buddy's reply. */
-export type MentionDispatch =
-  | { buddyId: string; status: 'started' }
-  | { buddyId: string; status: 'rejected'; reason: string };

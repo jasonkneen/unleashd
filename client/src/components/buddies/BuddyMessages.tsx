@@ -117,7 +117,7 @@ function SendForm({ buddyId, refresh }: { buddyId: string; refresh: () => Promis
 
 /**
  * Post to a workspace channel AS this Buddy (a standup, a handoff, an announcement), as the Messages
- * tab offered before T11. The server writes it with the Buddy as author; its @mentions start no turn.
+ * tab offered before T11. The server writes it with the Buddy as author; its @mentions start turns as that Buddy's.
  */
 export function PostAsBuddyForm({
   buddyId,

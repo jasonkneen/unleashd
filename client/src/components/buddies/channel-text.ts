@@ -4,7 +4,7 @@
  * Pure text rules for channel posts. Pure and CSS-free so mobile may import it.
  *
  * A post body is markdown. References are markdown links with app schemes:
- *   `[@Name](buddy:<id>)`   a mention — an OWNER mention starts that Buddy's turn
+ *   `[@Name](buddy:<id>)`   a mention — starts that Buddy's turn, whoever wrote it
  *   `[Title](task:<id>)`    a Task, rendered as a live status chip
  *   `![alt](/abs/path)`     inline image or video, served through /api/files
  *
@@ -227,6 +227,9 @@ export function composerReferenceMarks(
 export type BuddyReference = Extract<ChannelReference, { kind: 'buddy' }>;
 
 const MENTION_TOKEN = /\]\(buddy:([A-Za-z0-9_-]+)\)/g;
+
+/** Whether a post body @mentions a Buddy: its reply (or a notice) will land in the post's thread. */
+export const mentionsABuddy = (body: string) => /\]\(buddy:[A-Za-z0-9_-]+\)/.test(body);
 
 /**
  * The picked Buddies whose mention survives in the text, in mention order:

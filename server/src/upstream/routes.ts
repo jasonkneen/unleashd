@@ -7,9 +7,8 @@ import type {
   UpstreamUpdateResult,
 } from '@unleashd/shared';
 import type { Express, Request, Response } from 'express';
-import type { Channels } from '../buddies/channels';
 import { type BuddiesCore, OWNER, coreError } from '../buddies/core';
-import type { BuddyEvents } from '../buddies/events';
+import { type BuddyEvents, NO_PICKS } from '../buddies/events';
 import { publishOwnerPost } from '../buddies/routes';
 import { type Checkout, UPSTREAM_BRANCH, checkUpstream, resolveCheckout } from './git-upstream';
 import { bootstrapUnleashdHome } from './unleashd-home';
@@ -29,8 +28,6 @@ export interface UpstreamServiceDependencies {
   serverDirectory: string;
   core: BuddiesCore;
   events: BuddyEvents;
-  /** Starts the Buddy turns an owner @mention asks for (buddies/channels.ts). */
-  channels: Pick<Channels, 'respondToMentions'>;
   uploadsRoot(): string;
 }
 
@@ -108,7 +105,7 @@ export function createUpstreamService(dependencies: UpstreamServiceDependencies)
       if (asked) return { kind: 'posted', result: { workspaceId, channelId, postId: asked.id } };
       before = page.next;
     } while (before);
-    const { post, mentions } = await publishOwnerPost(
+    const { post } = await publishOwnerPost(
       dependencies,
       OWNER,
       { kind: 'id', id: channelId },
@@ -120,12 +117,8 @@ export function createUpstreamService(dependencies: UpstreamServiceDependencies)
         broadcast: false,
         key: `upstream-update:${remote}:${sha}`,
       },
-      new Map()
+      NO_PICKS
     );
-    for (const mention of mentions) {
-      if (mention.status === 'rejected')
-        console.warn(`[upstream] update request started no turn: ${mention.reason}`);
-    }
     return { kind: 'posted', result: { workspaceId, channelId, postId: post.id } };
   }
 

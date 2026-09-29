@@ -61,6 +61,22 @@ remain the three core components.
    follow-ups, and it is the loop guard that remains. Revisit if Buddy-only
    threads hit the cap routinely, or if mention chains run up cost. Guard:
    `buddies-v2.test.ts` "a Buddy's @mention wakes …".
+   *Successor, 2026-09-29, owner ("did we complete all this … if not do
+   it", same thread):* the ONE entry is now the `posted` event, emitted only
+   for a CREATED post (the crate's `PostWrite.created`; a replayed key used to
+   re-run every mention). The owner's chip picks ride the event, so there is
+   no second call site and no author branch. The bound is now causal HOPS,
+   not "`MAX_BUDDY_CHAIN` Buddy posts in a row in this thread": an owner
+   post is hop 0, a post written in a seat turn is one more than the post
+   that started the turn, and a post at `MAX_BUDDY_HOPS` (3) wakes nobody (a
+   capped mention leaves a notice). The per-thread count let two Buddies
+   ping-pong through NEW threads with no bound in code. A post from a DM chat
+   or a background run counts as hop 1, so a chain that passes through a DM
+   request restarts its count: that path is bounded by the run queue, not
+   by hops. Per (thread, Buddy) the queue, gate and read mark are one pure
+   machine (`channel-pair.ts`), checked by an exhaustive interleaving search
+   (`channel-pair.test.ts`). Evidence and history:
+   `agent_notes/2026-09-28_channels-state-machine-review.md`.
 2. **Seats.** Every reply by a Buddy in a thread — mention or follow-up —
    goes to its SEAT there: one resumed conversation per (thread, Buddy), id
    `threadConversationId(root, buddy, generation)`, so the Buddy remembers the
