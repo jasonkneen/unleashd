@@ -177,7 +177,14 @@ export async function runUploadsGc(options: UploadsGcOptions): Promise<UploadsGc
 /** Runs one GC pass in a worker thread so the transcript scan never touches the event loop. */
 export function runUploadsGcInWorker(options: UploadsGcOptions): Promise<UploadsGcReport> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(__filename, { workerData: { task: UPLOADS_GC_TASK, options } });
+    // Boot through `require` so the worker compiles this file the way the main thread does
+    // (tsx's CJS hook in dev, plain CJS in dist). `new Worker(__filename)` of the .ts made
+    // Node parse it as CJS, fail on `import`, and print MODULE_TYPELESS_PACKAGE_JSON on
+    // every dev start (2026-09-28).
+    const worker = new Worker(`require(${JSON.stringify(__filename)})`, {
+      eval: true,
+      workerData: { task: UPLOADS_GC_TASK, options },
+    });
     worker.once(
       'message',
       (message: { ok: true; report: UploadsGcReport } | { ok: false; error: string }) =>
