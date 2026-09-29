@@ -144,6 +144,7 @@ function ThreadPane({
           references={context.directory.references}
           submit="enter"
           seats={thread.latest.data?.seats}
+          autoFocus
           onPosted={onPosted}
         />
       )}

@@ -63,6 +63,7 @@ export function ChannelComposer({
   rootId,
   references,
   seats = NO_SEATS,
+  autoFocus = false,
   submit,
   onPosted,
 }: {
@@ -73,6 +74,8 @@ export function ChannelComposer({
   references: readonly ChannelReference[];
   /** Each thread Buddy's latest seat; none at the top level (no thread yet). */
   seats?: readonly ThreadSeat[];
+  /** Focus the textarea on mount: the desktop thread pane, opened by a Reply click. */
+  autoFocus?: boolean;
   submit: ComposerSubmit;
   onPosted(result: PostResult): void;
 }) {
@@ -97,7 +100,7 @@ export function ChannelComposer({
     conversationId: channelDraftId(channelId, rootId),
     textareaRef,
     controlled: true,
-    autoFocus: false,
+    autoFocus,
     maxHeight: MAX_TEXTAREA_HEIGHT,
     onDraftLoaded: (stored) => {
       const restored = decodeChannelDraft(stored);
