@@ -111,8 +111,20 @@ export async function composeBriefing(
   ].join('\n');
   if (briefing.length > BRIEFING_MAX_CHARACTERS)
     throw new Error(`Buddy briefing exceeds ${BRIEFING_MAX_CHARACTERS} characters`);
+  // The tool guide and explicit ids are part of the identity: an existing conversation must
+  // re-brief after an MCP contract change, or it keeps calling removed tools forever.
+  // Guard: buddies-v2.test.ts "briefing generation tracks its MCP guide and scope identity".
   const identity = createHash('sha256')
-    .update(JSON.stringify([buddy.name, buddy.role, soul?.revision ?? 0]))
+    .update(
+      JSON.stringify([
+        buddy.name,
+        buddy.role,
+        soul?.revision ?? 0,
+        buddy.id,
+        workspace.id,
+        BUDDY_TOOL_GUIDE,
+      ])
+    )
     .digest('hex');
   return {
     context,

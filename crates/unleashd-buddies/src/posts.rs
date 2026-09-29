@@ -191,18 +191,19 @@ impl Store {
         self.write(|tx| {
             let channel = open_channel(tx, actor, &channel)?;
             require(tx, actor, Op::Post, &Subject::Channel { id: channel.id.clone() })?;
+            let task_id = task_id_for_channel(&channel, input.task_id.as_deref())?;
             let m = Mutation {
                 actor,
                 workspace_id: &channel.workspace_id,
                 buddy_id: actor.buddy_id(),
-                task_id: input.task_id.as_deref(),
+                task_id: task_id.as_deref(),
                 op: "post",
                 payload: json!({"channel": channel.id, "kind": input.kind.as_str(), "body": input.body, "purpose": input.purpose,
-                    "evidence": input.evidence, "reply_to": input.reply_to_id, "task": input.task_id,
+                    "evidence": input.evidence, "reply_to": input.reply_to_id, "task": task_id,
                     "run_config": input.run_config}),
                 key: Some(&input.key),
             };
-            let id = idempotent(tx, &m, |tx| insert_post(tx, actor, &channel, &input))?;
+            let id = idempotent(tx, &m, |tx| insert_post(tx, actor, &channel, &input, task_id.as_deref()))?;
             get_post(tx, &id)
         })
     }
@@ -621,7 +622,30 @@ impl Store {
     }
 }
 
-fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostInput) -> Result<String> {
+// Pattern: parse-dont-validate (docs/patterns.md#parse-dont-validate)
+// Task-channel posts used to keep the MCP caller's optional task_id (usually absent), so the task
+// feed could not see them. The channel is the authoritative task identity at this boundary.
+fn task_id_for_channel(channel: &Channel, explicit: Option<&str>) -> Result<Option<String>> {
+    match &channel.kind {
+        ChannelKind::Task { task_id } => {
+            if explicit.is_some_and(|id| id != task_id) {
+                return Err(CoreError::Invalid(format!(
+                    "post task_id does not match task channel {task_id}"
+                )));
+            }
+            Ok(Some(task_id.clone()))
+        }
+        _ => Ok(explicit.map(str::to_owned)),
+    }
+}
+
+fn insert_post(
+    tx: &Transaction,
+    actor: &Actor,
+    channel: &Channel,
+    input: &PostInput,
+    task_id: Option<&str>,
+) -> Result<String> {
     if channel.archived_at.is_some() {
         return Err(CoreError::Invalid("channel is archived; restore it before posting".into()));
     }
@@ -646,7 +670,7 @@ fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostI
         actor.buddy_id(),
         root_id,
         input.reply_to_id,
-        input.task_id,
+        task_id,
         input.purpose,
         input.body,
         evidence_json(&input.evidence),
@@ -665,7 +689,7 @@ fn insert_post(tx: &Transaction, actor: &Actor, channel: &Channel, input: &PostI
             buddy_id: recipient.to_string(),
             input: RunInput::Post { post_id: id.clone() },
             conversation_id: None,
-            task_id: input.task_id.clone(),
+            task_id: task_id.map(str::to_owned),
             after_run_id: None,
             deadline: None,
             config: input.run_config.clone(),

@@ -713,15 +713,40 @@ fn task_posts_gather_one_tasks_posts_across_the_channels_a_reader_may_read() {
     s.post(&buddy("lead"), ChannelRef::Id { id: general.id.clone() }, about(&task, "public")).unwrap();
     s.post(&buddy("mid"), dm("mid", "ic"), about(&task, "private")).unwrap();
     s.post(&buddy("lead"), ChannelRef::Id { id: general.id.clone() }, about(&other, "elsewhere")).unwrap();
+    s.post(
+        &buddy("lead"),
+        ChannelRef::Task { task_id: task.id.clone() },
+        PostInput {
+            kind: PostKind::Inform,
+            body: "task channel".into(),
+            purpose: None,
+            evidence: vec![],
+            reply_to_id: None,
+            task_id: None,
+            from_conversation_id: None,
+            run_config: None,
+            broadcast: false,
+            key: "task-channel".into(),
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        s.post(
+            &buddy("lead"),
+            ChannelRef::Task { task_id: task.id.clone() },
+            about(&other, "wrong task"),
+        ),
+        Err(CoreError::Invalid(_))
+    ));
     let bodies = |who: &Actor, before: Option<Cursor>, limit: i64| {
         let page = s.task_posts(who, &task.id, before, limit).unwrap();
         (page.posts.into_iter().map(|p| p.body).collect::<Vec<_>>(), page.next)
     };
-    assert_eq!(bodies(&Actor::Owner, None, 10).0, ["private", "public"], "the owner reads every channel");
-    assert_eq!(bodies(&buddy("peer"), None, 10).0, ["public"], "a DM stays with its members");
+    assert_eq!(bodies(&Actor::Owner, None, 10).0, ["task channel", "private", "public"], "the owner reads every channel");
+    assert_eq!(bodies(&buddy("peer"), None, 10).0, ["task channel", "public"], "a task channel is readable to its workspace");
     let (first, next) = bodies(&Actor::Owner, None, 1);
-    assert_eq!(first, ["private"]);
-    assert_eq!(bodies(&Actor::Owner, next, 1).0, ["public"], "keyset paging on the ordered id");
+    assert_eq!(first, ["task channel"]);
+    assert_eq!(bodies(&Actor::Owner, next, 1).0, ["private"], "keyset paging on the ordered id");
 }
 
 #[test]

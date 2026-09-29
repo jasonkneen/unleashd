@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -384,7 +385,12 @@ test('one full chat turn: an owner chat asks another Buddy, it answers, the retu
     let request!: Post;
     w.during.set(1, async (turn) => {
       // Owner-authored input: the grant is the owner's, so team_admin is listed.
-      assert.ok((await toolNames(turn.mcp)).includes('team_admin'));
+      const names = await toolNames(turn.mcp);
+      assert.equal(names.length, 12);
+      assert.ok(names.includes('team_admin'));
+      assert.ok(names.includes('channel_admin'));
+      for (const removed of ['answer', 'channel_archive', 'channel_rename'])
+        assert.equal(names.includes(removed), false);
       assert.equal(await probe(turn.mcp), 200);
       const posted = await call(turn.mcp, 'post', {
         channel: { direct: [w.designer.id] },
@@ -1498,6 +1504,21 @@ test('the briefing tool guide stays inside its budget', () => {
   assert.ok(BUDDY_TOOL_GUIDE.length <= 3_000, `${BUDDY_TOOL_GUIDE.length} chars`);
 });
 
+test('briefing generation tracks its MCP guide and scope identity', async () => {
+  const w = await world();
+  const context = { buddyId: w.lead.id, workspaceId: w.ws };
+  try {
+    const before = await composeBriefing(w.core, context);
+    assert.match(before.briefing, new RegExp(`Your ids: buddyId ${w.lead.id}`));
+    const identity = createHash('sha256')
+      .update(JSON.stringify([w.lead.name, w.lead.role, 0, w.lead.id, w.ws, BUDDY_TOOL_GUIDE]))
+      .digest('hex');
+    assert.equal(before.memoryGeneration, `memory:0:0:identity:${identity}`);
+  } finally {
+    await w.close();
+  }
+});
+
 // 2026-09-25 (92e8692): Claude reports a session-limit 429 as a successful
 // result with no text. The gate read the empty answer as `unparseable` and an
 // untagged owner follow-up stayed quiet instead of showing "Couldn't reply".
@@ -1867,6 +1888,11 @@ test('owner routes: a DM request is answered over HTTP, typed errors keep their 
       key: 'new-comment',
     });
     assert.equal(comment.isError, false, comment.text);
+    const taskPosts = await w.core.taskPosts(OWNER, task.value.id, null, 20);
+    assert.ok(
+      taskPosts.posts.some((post) => post.body === 'New path' && post.taskId === task.value.id),
+      'a post written to a task channel keeps the task identity for task feeds'
+    );
 
     const schedule = await w.core.putSchedule(OWNER, {
       buddyId: w.designer.id,

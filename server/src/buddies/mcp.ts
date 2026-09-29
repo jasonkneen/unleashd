@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServerSpec } from '@nbardy/agent-cli';
-import type { Actor, ChannelRef, DocRef, DocScope } from '@unleashd/buddies-core';
+import type { Actor, ChannelRef, DocRef, DocScope, ListScope } from '@unleashd/buddies-core';
 import { z } from 'zod';
 import { requireCanonicalPostMedia } from './channel-media';
 import {
@@ -87,7 +87,7 @@ const teamTargetSchema = z.union([
   z.object({ workspace: z.string().min(1) }).strict(),
 ]);
 
-const scopeQuery = (scope: Scope) =>
+const scopeQuery = (scope: Scope): ListScope =>
   'buddyId' in scope
     ? ({ kind: 'buddy', buddyId: scope.buddyId } as const)
     : 'taskId' in scope
@@ -395,7 +395,7 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List slim run rows by {buddyId}, {taskId}, or {workspace}; get one full run; or cancel. Queued rows include waiting.',
+      'List slim run rows by {buddyId}, {taskId}, or {workspace}; workspace lists queued/running work only. Get one full run or cancel. Queued rows include waiting.',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
