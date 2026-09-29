@@ -211,6 +211,7 @@ export function loadConversationDetails(conversationId: string): Promise<void> {
       // Fix guard: a terminal attempt patch can arrive after detail GET but before
       // history resolves; retaining it in `loading` prevents stale recovery/status.
       const loading = readTranscript(conversationId);
+      reconcileStream(conversationId, body.messages.at(-1));
       const currentDetail =
         loading.tag === 'loading' && loading.latestAttempt !== undefined
           ? { ...detail, latestAttempt: loading.latestAttempt }
@@ -252,6 +253,7 @@ export function refreshTranscript(conversationId: string): Promise<void> {
       await loadConversationDetails(conversationId);
       return;
     }
+    reconcileStream(conversationId, tail.messages.at(-1) ?? latest.messages.at(keep - 1));
     // Structural sharing: the kept prefix keeps its message objects, so only
     // the tail groups rebuild (T05's tail regroup).
     putTranscript(conversationId, {
@@ -553,6 +555,30 @@ function handleMessageEvent(data: Extract<ServerMessage, { type: 'message' }>): 
     ...loaded,
     messages: [...loaded.messages, { role: data.role, body: data.body, timestamp: new Date() }],
   });
+}
+
+/**
+ * A history read landed while a reply streams. The server's copy of the reply already holds the
+ * chunks it folded before answering, and the stream atom still holds them too, so the view drew
+ * them twice (withStreamingTail) and the next tool frame committed the double (#bugfixes
+ * 2026-09-29: every Codex DM reply showed each paragraph twice, glued, "…local workBy …").
+ * Keep only the chunks the server copy does not have yet; guard: stream-history-refresh.test.ts.
+ */
+function reconcileStream(id: string, after: Message | undefined): void {
+  flushChunkBuffer();
+  const streamed = jotaiStore.get(streamStore.byKey(id));
+  if (!streamed) return;
+  const before = readLoaded(id)?.messages.at(-1);
+  const shown = before?.role === 'assistant' && before.body.t === 'text' ? before.body.text : '';
+  const server = after?.role === 'assistant' && after.body.t === 'text' ? after.body.text : null;
+  // The server moved past this text record (or rewrote it): its snapshot is the whole reply.
+  const already = server?.startsWith(shown) ? server.slice(shown.length) : null;
+  const rest =
+    already !== null && streamed.startsWith(already) ? streamed.slice(already.length) : '';
+  jotaiStore.set(
+    streamStore.patch,
+    rest ? { set: [[id, rest]], remove: [] } : { set: [], remove: [id] }
+  );
 }
 
 function commitStreamSegment(id: string): void {
