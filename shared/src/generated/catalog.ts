@@ -1,5 +1,5 @@
 // DO NOT EDIT - generated from catalog.jsonc
-// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-29.claude-three-models)
+// Source: vendor/agent-cli-tool/catalog.jsonc (revision 2026-09-30.gpt-6.1-sol)
 // Generator: shared/scripts/gen-catalog.ts
 // Run: pnpm --filter @unleashd/shared gen:catalog
 
@@ -65,6 +65,21 @@ export const PROVIDER_MODEL_CATALOG: readonly CatalogProvider[] = [
     "displayName": "Codex",
     "shortName": "X",
     "models": [
+      {
+        "id": "gpt-6.1-sol",
+        "displayName": "GPT-6.1 Sol",
+        "reasoning": {
+          "levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "defaultEffort": "low"
+        }
+      },
       {
         "id": "gpt-5.6-sol",
         "displayName": "GPT-5.6 Sol",
