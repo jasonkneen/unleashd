@@ -50,12 +50,14 @@ the intro's marimba hands its melody to the build (`PostIntroBenefits.tsx`, `Ben
 | 40.5–48.0 | 13–16 | Multi harness slide → picker, 2 beats per harness | `beat9.mp4`, `PickerRefresh.tsx` |
 | 48.0–55.5 | 17–20 | Swarms / Memory / Mobile, one bar each; Bring your own subscriptions | `FeatureFlash.tsx`, `beat9.mp4` |
 | 55.5–63.0 | 21–24 | GitHub + Fork (2 bars), Run it on your computer (2 bars) | `Close.tsx` |
-| 63.0–70.5 | 25–28 breakdown | The Vim ethos, two cards | `Close.tsx` |
-| 70.5–74.25 | 29–30 hit | Recap: Multi harness! Free! Private! Open Source! Customizable! | `Close.tsx` |
-| 74.25–77.5 | 31 end | End card | `Close.tsx` |
+| 63.0–70.5 | 25–28 coda | The Vim ethos, two cards, plain type surfacing word by word | `Close.tsx` |
+| 70.5–76.5 | 29 final chord | End card, plain type, fades to black with the chord | `Close.tsx` |
 
-Not done from the v2 script: the groove does not thin before the breakdown (bar 24 is full groove;
-the breakdown's own riser leads out of it).
+Quiet close (owner, 2026-09-30, after the v2 render): the recap is cut, the beat never comes back
+after the Vim line (`Coda` in `edm.py`: breakdown texture, then one soft D chord with no impact or
+crash), and the Vim line and end card drop the colour-slab type, which stays for the demo scenes.
+
+Not done from the v2 script: the groove does not thin before the coda (bar 24 is full groove).
 
 ## Remaining work, in order
 

@@ -1,7 +1,8 @@
-// The close, in type: GitHub + "Fork it", "Run it on your computer", the Vim ethos, the benefits
-// recap and the end card. Every section is timed in beats of the EDM cue
-// (../../sound/edm.py, 128 BPM) so the assembly can drop each one on its bar.
-// Sections are data (text, beat, colour); the components just render them with <Block>.
+// The close: GitHub + "Fork it" and "Run it on your computer" (block type, like the demo), then the
+// quiet close in plain type: the Vim ethos over the coda and the end card over its final chord.
+// Every section is timed in beats of the EDM cue (../../sound/edm.py, 128 BPM) so the assembly can
+// drop each one on its bar.
+// Sections are data (text, timing, colour); the components just render them.
 import type React from 'react';
 import { AbsoluteFill, Easing, Img, OffthreadVideo, Series, staticFile, useCurrentFrame } from 'remotion';
 import wordmark from '../../brand/unleashd-wordmark-3d_trimmed.png';
@@ -15,46 +16,6 @@ export const beats = (n: number) => Math.round(n * BEAT * FPS);
 
 type Size = 'md' | 'xl' | 'xxl';
 type Word = { text: string; beat: number; size: Size; fill: string; ink: string; rot: number };
-
-const Stack: React.FC<{ words: Word[]; gap: number }> = ({ words, gap }) => {
-  const t = useCurrentFrame() / FPS;
-  return (
-    <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', gap }}>
-      {words.map((w) => (
-        <Block key={w.text} text={w.text} u={t - w.beat * BEAT} size={w.size} fill={w.fill} ink={w.ink} rot={w.rot} />
-      ))}
-    </AbsoluteFill>
-  );
-};
-
-// ---- The recap, on the bar-29 hit after the Vim line: every benefit, one per beat, then the whole
-// grid holds for the end card. Owner, 2026-09-30: "repeat the benefits to close out and sell". -----
-const RECAP: Word[][] = [
-  [
-    { text: 'Multi harness!', beat: 0, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -3 },
-    { text: 'Free!', beat: 1, size: 'xl', fill: INK.yellow, ink: INK.plate, rot: 2 },
-  ],
-  [
-    { text: 'Private!', beat: 2, size: 'xl', fill: INK.red, ink: INK.cream, rot: 2 },
-    { text: 'Open Source!', beat: 3, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: -2 },
-  ],
-  [{ text: 'Customizable!', beat: 4, size: 'xl', fill: '#859900', ink: INK.plate, rot: -1 }],
-];
-export const VALUES_FRAMES = beats(8);
-export const Values: React.FC = () => {
-  const t = useCurrentFrame() / FPS;
-  return (
-    <AbsoluteFill style={{ background: INK.plate, alignItems: 'center', justifyContent: 'center', gap: 22 }}>
-      {RECAP.map((row) => (
-        <div key={row[0].text} style={{ display: 'flex', gap: 28 }}>
-          {row.map((w) => (
-            <Block key={w.text} text={w.text} u={t - w.beat * BEAT} size={w.size} fill={w.fill} ink={w.ink} rot={w.rot} />
-          ))}
-        </div>
-      ))}
-    </AbsoluteFill>
-  );
-};
 
 // ---- Open source: the real GitHub page, a push-in to Fork, the click, "Fork it." --------------------
 // Owner, 2026-09-30: "just show github and a fork real quick". The page is a logged-out dark-mode
@@ -202,53 +163,87 @@ export const Run: React.FC = () => {
   );
 };
 
-// ---- The ethos, over the 4-bar breakdown, after the fork: why open source matters. Owner-approved
-// wording (../brand/PROJECT_ETHOS.md), two cards with a hard cut on bar 3 of the breakdown. ---------
-const VIM_CARDS: Word[][] = [
+// ---- The quiet close (owner, 2026-09-30): no recap, no beat coming back, and no colour slabs —
+// those stay for the demo. Plain type that surfaces word by word over the coda, then the end card
+// over one soft chord, fading to black. -----------------------------------------------------------
+type Quiet = { text: string; at: number; size: number; weight: number; color: string };
+
+// Each word rises out of a soft blur; `at` is seconds into the card, words 0.12 s apart.
+const QuietLine: React.FC<{ line: Quiet; t: number }> = ({ line, t }) => (
+  <div style={{ display: 'flex', gap: '0.26em', fontFamily: FONT, fontSize: line.size, fontWeight: line.weight, color: line.color, letterSpacing: -0.5 }}>
+    {line.text.split(' ').map((word, i) => {
+      const u = Easing.out(Easing.cubic)(clamp01((t - line.at - i * 0.12) / 0.6));
+      return (
+        <span key={`${i}-${word}`} style={{ opacity: u, filter: `blur(${lerp(10, 0, u)}px)`, transform: `translateY(${lerp(14, 0, u)}px)` }}>
+          {word}
+        </span>
+      );
+    })}
+  </div>
+);
+
+const QUIET_CREAM = 'rgba(253,246,227,.72)';
+const VIM_CARDS: Quiet[][] = [
   [
-    { text: 'Vim is open source', beat: 0, size: 'xl', fill: '#859900', ink: INK.plate, rot: -2 },
-    { text: "and it's still here decades later.", beat: 1.5, size: 'md', fill: INK.surface, ink: INK.cream, rot: 0 },
+    { text: 'Vim is open source', at: 0.15, size: 118, weight: 600, color: INK.cream },
+    { text: "and it's still here decades later.", at: 1.0, size: 64, weight: 400, color: QUIET_CREAM },
   ],
   [
-    { text: 'Agent software', beat: 0, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -2 },
-    { text: 'should be too.', beat: 1, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: 2 },
+    { text: 'Agent software', at: 0.15, size: 118, weight: 600, color: INK.cream },
+    { text: 'should be too.', at: 0.7, size: 118, weight: 600, color: INK.wordmarkOrange },
   ],
 ];
 const VIM_CARD = beats(8);
+const DISSOLVE = 0.35; // seconds: each card fades out before the next surfaces
 export const VIM_FRAMES = VIM_CARDS.length * VIM_CARD;
+
+const QuietCard: React.FC<{ lines: Quiet[] }> = ({ lines }) => {
+  const t = useCurrentFrame() / FPS;
+  const len = VIM_CARD / FPS;
+  return (
+    <AbsoluteFill
+      style={{
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 18,
+        opacity: 1 - clamp01((t - (len - DISSOLVE)) / DISSOLVE),
+        transform: `scale(${lerp(1, 1.03, t / len)})`,
+      }}
+    >
+      {lines.map((line) => (
+        <QuietLine key={line.text} line={line} t={t} />
+      ))}
+    </AbsoluteFill>
+  );
+};
+
 export const Vim: React.FC = () => (
   <AbsoluteFill style={{ background: INK.night }}>
     <Series>
-      {VIM_CARDS.map((words) => (
-        <Series.Sequence key={words[0].text} durationInFrames={VIM_CARD}>
-          <Stack words={words} gap={26} />
+      {VIM_CARDS.map((lines) => (
+        <Series.Sequence key={lines[0].text} durationInFrames={VIM_CARD}>
+          <QuietCard lines={lines} />
         </Series.Sequence>
       ))}
     </Series>
   </AbsoluteFill>
 );
 
-// ---- Beat 11: the end card, on the final hit. -----------------------------------------------------
-export const END_FRAMES = Math.round(3.25 * FPS);
+// ---- The end card, over the coda's final chord (6 s ring): the wordmark settles in, the call to
+// action and the repo surface as plain type, and the frame fades to black with the chord. --------
+export const END_FRAMES = Math.round(6.0 * FPS);
+const END_FADE = 1.4;
 export const EndCard: React.FC = () => {
   const t = useCurrentFrame() / FPS;
-  const reveal = Easing.out(Easing.back(1.6))(clamp01(t / 0.45));
+  const settle = Easing.out(Easing.cubic)(clamp01(t / 1.1));
+  const out = 1 - clamp01((t - (END_FRAMES / FPS - END_FADE)) / END_FADE);
   return (
-    <AbsoluteFill style={{ background: INK.plate, alignItems: 'center', justifyContent: 'center', gap: 20 }}>
-      <Img src={wordmark} style={{ width: 1000, opacity: clamp01(t / 0.15), transform: `scale(${lerp(0.85, 1, reveal)})` }} />
-      <Block text="Try Unleashd Today, Free!" u={t - 2 * BEAT} size="md" fill={INK.wordmarkOrange} ink={INK.plate} rot={-1.5} />
-      <div
-        style={{
-          fontFamily: FONT,
-          fontSize: 34,
-          fontWeight: 600,
-          color: INK.cream,
-          opacity: clamp01((t - 4 * BEAT) / 0.3),
-          marginTop: 18,
-        }}
-      >
-        github.com/nbardy/unleashd
-      </div>
+    <AbsoluteFill style={{ background: INK.night }}>
+      <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', gap: 26, opacity: out }}>
+        <Img src={wordmark} style={{ width: 900, opacity: settle, transform: `scale(${lerp(0.96, 1, settle)})` }} />
+        <QuietLine line={{ text: 'Try Unleashd today. Free.', at: 1.2, size: 56, weight: 600, color: INK.cream }} t={t} />
+        <QuietLine line={{ text: 'github.com/nbardy/unleashd', at: 1.9, size: 36, weight: 400, color: QUIET_CREAM }} t={t} />
+      </AbsoluteFill>
     </AbsoluteFill>
   );
 };
@@ -258,7 +253,6 @@ export const SECTIONS: { id: string; frames: number; C: React.FC }[] = [
   { id: 'fork', frames: FORK_FRAMES, C: Fork },
   { id: 'run', frames: RUN_FRAMES, C: Run },
   { id: 'vim', frames: VIM_FRAMES, C: Vim },
-  { id: 'values', frames: VALUES_FRAMES, C: Values },
   { id: 'end', frames: END_FRAMES, C: EndCard },
 ];
 export const DURATION = SECTIONS.reduce((n, s) => n + s.frames, 0);

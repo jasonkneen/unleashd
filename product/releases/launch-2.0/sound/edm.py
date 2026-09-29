@@ -16,17 +16,15 @@ edm-build.wav, 15 s. A locked cut uses it, so it must stay sample-identical:
   bar 7  11.250         D   crash (quiet), vocal chop
   bar 8  13.125         A   cue ends at 15.000
 
-edm-full.wav, 59.5 s. Runs from the title to the end card (script v2, 2026-09-30); every scene is
+edm-full.wav, 58.5 s. Runs from the title to the end card (script v2, 2026-09-30); every scene is
 one 4-bar phrase, so every section change lands where the ear expects it:
   bars  1-4    0.000  BUILD      as above; the four benefits, over the intro's marimba handing off
   bar   5      7.500  DROP       as above; "Ask your agents"
   bars  6-24   9.375  GROOVE     crashes + chops on 9, 13, 17, 21 (the phrase starts)
-  bars 25-28  45.000  BREAKDOWN  Bm G D A: no drums or bass, chords lowpassed at 1.2 kHz and softly
-                                 pumped, sparse arp, one chop drenched in ping-pong echo; riser +
-                                 snare roll over the last 2 beats (the Vim ethos)
-  bar  29     52.500  HIT        impact + full crash (the benefits recap), groove goes on
-  bar  30     54.375  GROOVE
-  bar  31     56.250  END        impact + crash + one D-major chord, rings out and fades to 59.5
+  bars 25-28  45.000  CODA       Bm G D A: no drums or bass, chords lowpassed at 1.2 kHz and softly
+                                 pumped, sparse arp, one chop drenched in ping-pong echo (the Vim line)
+  bar  29     52.500             a quiet reversed swell into one soft D-major chord, a low D and a
+                                 muffled boom; no impact, no crash (the end card); fades to 58.5
 
 The drop lands at exactly 7.500 s (sample 360000) in both. Writes stereo 48 kHz 16-bit WAVs next
 to this file: edm-build.wav / edm-full.wav (the mix, peak -1 dBFS) and
@@ -528,7 +526,17 @@ class End:  # impact + crash + one ringing D-major chord; the file ends `ring` s
     first = last = property(lambda self: self.bar)
 
 
-Section = Build | Drop | Groove | Hit | Breakdown | End
+@dataclass(frozen=True)
+class Coda:  # the quiet close: breakdown texture with no lead-in, then one soft ringing D chord
+    first: int
+    last: int  # the bar the final chord is struck on
+    chords: tuple[str, ...]  # one CHORDS name per bar before `last`
+    chop: int  # CHOP_PHRASES index, drenched in echo on the first bar
+    ring: float  # the file ends `ring` s after the final chord
+    fade: float  # master fade over the last `fade` s, on a squared curve
+
+
+Section = Build | Drop | Groove | Hit | Breakdown | End | Coda
 
 BUILD_CUE = [
     Build(1, 4),
@@ -545,10 +553,9 @@ FULL_CUE = [  # script v2 (2026-09-30): every scene is one 4-bar phrase; a crash
         crashes=(9, 13, 17, 21),  # show their work, any harness, flashes, you own it
         chops=((9, 3, 0.55), (13, 2, 0.55), (17, 3, 0.55), (21, 2, 0.55)),
     ),
-    Breakdown(25, 28, chords=("Bm", "G", "D", "A"), chop=0),  # the Vim ethos, two cards
-    Hit(29),  # the benefits recap
-    Groove(30, 30, crashes=(), chops=()),
-    End(31, ring=3.25, fade=2.75),  # the end card
+    # Owner, 2026-09-30: the Vim line's breakdown "adds tension", but the beat coming back for a
+    # recap hit read as weird; close quiet and dramatic instead. A -> D resolves on the end card.
+    Coda(25, 29, chords=("Bm", "G", "D", "A"), chop=0, ring=6.0, fade=4.0),
 ]
 
 CUT_FADE = 0.015  # a cue that ends mid-groove is cut with a 15 ms linear fade
@@ -556,6 +563,7 @@ ENDINGS = {  # last section -> (cue length, master fade seconds, fade curve expo
     Groove: lambda s: (at(s.last + 1), CUT_FADE, 1),
     # Squared: a linear fade left the reverb/echo tail at -56 dBFS in the last 0.1 s.
     End: lambda s: (at(s.bar) + s.ring, s.fade, 2),
+    Coda: lambda s: (at(s.last) + s.ring, s.fade, 2),
 }
 
 
@@ -566,6 +574,7 @@ def checked(cue: list[Section]) -> list[Section]:
     assert type(cue[-1]) in ENDINGS, f"a cue ends on {' or '.join(k.__name__ for k in ENDINGS)}"
     for s in cue:
         assert type(s) is not Breakdown or len(s.chords) == s.last - s.first + 1, s
+        assert type(s) is not Coda or len(s.chords) == s.last - s.first, s
     return cue
 
 
@@ -739,14 +748,19 @@ def hit_section(s: Hit, mix: Mix) -> None:
     mix.add("impact", mix.kit.impact, at(s.bar), 0.85)
 
 
-def breakdown_section(s: Breakdown, mix: Mix) -> None:
-    for bar, name in zip(range(s.first, s.last + 1), s.chords):
+def breakdown_bars(mix: Mix, first: int, chords: tuple[str, ...], chop_index: int) -> None:
+    """No drums or bass: lowpassed chords, a sparse arp, one chop drenched in echo."""
+    for bar, name in zip(range(first, first + len(chords)), chords):
         voicing = CHORDS[name][0]
         # Ghost sidechain on the quarters: no kick, but the chords still breathe.
         quarters = [at(bar, k) for k in range(4)]
         mix.add_chord("breakdown", chord_bar(voicing, mix.rng["chords"], 0.0), at(bar), quarters)
         arp_bar(mix, voicing, bar, "D5", 0.22, every=3)
-    mix.add("vox-drench", chop(s.chop), at(s.first), 0.7)
+    mix.add("vox-drench", chop(chop_index), at(first), 0.7)
+
+
+def breakdown_section(s: Breakdown, mix: Mix) -> None:
+    breakdown_bars(mix, s.first, s.chords, s.chop)
     # Lead-in over the last 2 beats: riser, and a snare roll in 16ths then 32nds.
     t0 = at(s.last, 2)
     mix.add("riser", fft_filter(riser(mix.rng["riser"], 2 * BEAT), lp(9000)), t0, 0.3)
@@ -768,6 +782,20 @@ def end_section(s: End, mix: Mix) -> None:
         mix.add("arp", panned(pluck(hz(note), 0.6), 0.35 * (-1) ** i), t0 + 0.025 * i, 0.35)
 
 
+def coda_section(s: Coda, mix: Mix) -> None:
+    breakdown_bars(mix, s.first, s.chords, s.chop)
+    t0 = at(s.last)
+    # A breath in, not a riser: the build's reversed crash, quiet and dark, peaking on the chord.
+    swell = crash(rng_for("coda-swell"), seconds=1.2)[:, ::-1]
+    swell = fft_filter(swell, lp(4000)) * np.linspace(0, 1, swell.shape[1]) ** 2
+    mix.add("swell", swell, t0 - swell.shape[1] / SR, 0.18)
+    # The final chord: soft, no impact or crash; one low boom under it.
+    mix.add_chord("end", ring_chord(END_VOICING, mix.rng["chords"], s.ring) * 0.5, t0, [])
+    t = t_axis(s.ring)
+    mix.add("bass", bass_note(hz("D2"), s.ring, np.minimum(1, t / 0.004) * np.exp(-t / 1.4)), t0, 0.45)
+    mix.add("kick", fft_filter(mix.kit.k_first, lp(180)), t0, 0.35)
+
+
 BUILDERS = {
     Build: build_section,
     Drop: drop_section,
@@ -775,6 +803,7 @@ BUILDERS = {
     Hit: hit_section,
     Breakdown: breakdown_section,
     End: end_section,
+    Coda: coda_section,
 }
 
 

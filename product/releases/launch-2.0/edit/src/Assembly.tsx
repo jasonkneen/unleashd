@@ -54,8 +54,7 @@ export const SECTIONS: Section[] = [
   section('fork', bar(21), bar(23), Close.Fork, Close.FORK_FRAMES),
   section('run', bar(23), bar(25), Close.Run, Close.RUN_FRAMES),
   section('vim', bar(25), bar(29), Close.Vim, Close.VIM_FRAMES),
-  section('recap', bar(29), bar(31), Close.Values, Close.VALUES_FRAMES),
-  section('end', bar(31), bar(31) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
+  section('end', bar(29), bar(29) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
 
 // The cue comes up out of the intro instead of arriving at full level: the intro's tail sits near
