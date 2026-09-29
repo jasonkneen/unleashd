@@ -165,8 +165,8 @@ impl Store {
                 [now],
             )?;
             // Ready, predecessor finished, conversation free, buddy under its limit, task not paused.
-            // Background work is always claimable: the per-buddy `background_enabled` hold was
-            // removed 2026-09-29 (owner) after it silently parked requests as "delivered but held".
+            // Background work is always claimable: the old per-Buddy hold was removed 2026-09-29
+            // (owner) after it silently parked requests as "delivered but held".
             let candidate: Option<String> = tx
                 .prepare_cached(&format!(
                     "SELECT r.id {RUN_WITH_ACTIVITY_SQL}
