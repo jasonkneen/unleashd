@@ -140,10 +140,16 @@ async function subdirectories(
   }
 }
 
+const CLIENT_HUNG_UP = new Set(['ECONNABORTED', 'EPIPE', 'ECONNRESET']);
+
 function handleSendFileError(error: Error | undefined, response: Response, filePath: string): void {
   if (!error) return;
   const detail = error as Error & { code?: string; status?: number; statusCode?: number };
   const missing = detail.code === 'ENOENT' || detail.status === 404 || detail.statusCode === 404;
+  // The client hanging up mid-send is routine, not a failure: <video> fetches metadata then
+  // aborts for range requests, and a reload drops in-flight media. Logged as EPIPE /
+  // ECONNABORTED stack traces on every restart until 2026-09-28.
+  if (CLIENT_HUNG_UP.has(detail.code ?? '')) return;
   if (!missing) console.error('[filesystem] Failed to send file', filePath, error);
   if (response.headersSent) return;
   response.status(missing ? 404 : 500).json({
