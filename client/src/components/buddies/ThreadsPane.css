@@ -1,6 +1,4 @@
 .threads-list {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-6);
   margin: 0;
   padding: var(--sp-6) var(--sp-5);
@@ -21,6 +19,11 @@
 .threads-fold {
   align-self: flex-start;
   color: var(--accent);
+}
+
+.threads-open {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 /* This visit's new replies stay tinted until the view closes, even once read. */

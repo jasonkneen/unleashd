@@ -66,7 +66,7 @@ export function ThreadsScreen({
       ) : view.cards.length === 0 ? (
         <MobileEmptyPanel>Threads you start or reply in show up here.</MobileEmptyPanel>
       ) : (
-        <ol className="threads-list">
+        <ol className="threads-list ui-stack">
           {view.cards.map((card) => (
             <ThreadCardMobile
               key={card.thread.root.id}
@@ -131,6 +131,7 @@ function ThreadCardMobile({
         <span className="ui-muted ui-truncate">
           {joinNames(participantNames(thread, directory.buddyNames))}
         </span>
+        <span className="threads-fold threads-open">Open thread ›</span>
       </Link>
       <ol className="mobile-channel__posts">
         <Row row={{ kind: 'lead', key: rootId, post: thread.root }} context={context} />

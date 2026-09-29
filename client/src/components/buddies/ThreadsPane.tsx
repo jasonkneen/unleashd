@@ -79,7 +79,7 @@ export function ThreadsPane({
             <span>Threads you start or reply in show up here.</span>
           </div>
         ) : (
-          <ol className="threads-list">
+          <ol className="threads-list ui-stack">
             {view.cards.map((card) => (
               <ThreadCardView
                 key={card.thread.root.id}
@@ -115,6 +115,7 @@ function ThreadCardView({
   const { buddyNames } = base.directory;
   const [expanded, setExpanded] = useState(false);
   const heading = channelHeading(thread.channel.kind, buddyNames);
+  const threadPath = channelLinkPath(base.workspaceId, { kind: 'thread', channelId, rootId });
   const replying = useChannelResponding(channelId, buddyNames).get(rootId);
   useMarkRead(
     { kind: 'thread', rootId },
@@ -127,11 +128,7 @@ function ThreadCardView({
   return (
     <li className="threads-card ui-card ui-surface ui-stack">
       <header className="threads-head ui-row">
-        <Link
-          className="threads-head"
-          to={channelLinkPath(base.workspaceId, { kind: 'thread', channelId, rootId })}
-          title="Open in channel"
-        >
+        <Link className="threads-head" to={threadPath} title="Open thread">
           {heading.mark}
           {heading.name}
         </Link>
@@ -139,6 +136,9 @@ function ThreadCardView({
         <span className="ui-muted ui-truncate">
           {joinNames(participantNames(thread, buddyNames))}
         </span>
+        <Link className="threads-fold threads-open" to={threadPath}>
+          Open thread ›
+        </Link>
       </header>
       <ol className="channel-browser-messages">
         <LeadRow post={thread.root} context={context} />
