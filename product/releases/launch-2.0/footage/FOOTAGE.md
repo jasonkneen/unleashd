@@ -134,3 +134,21 @@ Cut: `2026-09-26_feature_phone.mp4` (the name `FeatureFlash.tsx` expects) = 2.4�
 1.417 s, with the status bar cropped (top 140 px: carrier name and the recording pill):
 `ffmpeg -ss 2.4 -t 5.1 -i <P> -an -vf "crop=1180:2416:0:140,setpts=PTS/3.6,fps=60" -c:v libx264 -crf 14 -pix_fmt yuv420p 2026-09-26_feature_phone.mp4`.
 Privacy: only Art Lead's name and painting feedback are visible, with no sidebar or workspace names.
+
+## App — `2026-09-30_feature_app.mp4` (2.2 s)
+
+Role: **Run it on your computer.** (`../edit/src/Close.tsx`, `Run`). Our capture, 2026-09-30 at
+1b6952b, from the running app at `localhost:7489` with `../capture/record-page.mjs`
+(read-only: no writes blocked, no WS frames sent), 2974×1882 @ 60 fps, a held frame of #unleashd-2:
+
+`node product/releases/launch-2.0/capture/record-page.mjs --out /tmp/app-cap --path '/buddies/workspaces/project_26fce156-5c5d-4dd9-a9d6-4b527a50af3c/channels?channel=list_032cedcb-55a1-44b2-a625-5ff70fb4e616' --seconds 2.2 --hold 2.2 --freeze '.sidebar' --ready "document.querySelectorAll('img,video').length>2"`
+
+Privacy: the sidebar shows the unleashd workspace's channel and Buddy names; the channel shows the
+owner's launch-video posts (including the Vim line). Nothing from other workspaces.
+
+## GitHub — `2026-09-30_github_repo.png` (still)
+
+Role: **Fork it.** (`Close.tsx`, `Fork`). `github.com/nbardy/unleashd` logged out, dark mode,
+1487×941 @ 2×, captured 2026-09-30 with headless Chrome `--screenshot --force-dark-mode`. Nothing
+was forked; the click is drawn. Re-capture before publishing: the page shows the repo's About text
+("A local, git-worktree multi-agent swarm orchestrator…") and the latest commit's CI status.

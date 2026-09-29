@@ -35,53 +35,39 @@ stack later in the film: the owner-requested post-intro benefits already say bot
 Keep the privacy/local-running point with its real app proof. Retiming the music
 is part of this change. This is an edit recommendation, not yet implemented.
 
-## Existing timeline audit
+## Timeline (as built 2026-09-30)
 
-Times rounded from the current Assembly.tsx frame schedule (60 fps).
+Owner, 2026-09-30 (`post_01a0ee26-b3f1-7506-8ec1-51273329235a` thread): open source is "just github
+and a fork real quick"; keep repeating the benefits "to close out and sell"; place the Vim line.
+The terminal clone/run card and the mid-film Free / Private / Open Source stack are gone; the
+benefits now return as the recap before the end card. The EDM cue (`sound/edm.py` FULL_CUE) was
+retimed to match: 67.0 s, `edm-build.wav` unchanged (byte-identical).
 
-| Current time | Section | Evidence / state |
+| Time (s) | Bars | Section |
 |---|---|---|
-| 0–18.0 | Overload and title | Render exists; intro voice line unresolved |
-| 18.0–23.6 | Four benefits over home | September 27 review render exists |
-| 23.6–33.0 | Native multimedia | Cut and sound exist |
-| 33.0–44.3 | Design review | Rough cut 4 exists |
-| 44.3–49.9 | Short design iteration | Short version wired in source; long standalone render exists |
-| 49.9–55.5 | Swarm / memory / chat / phone flashes | All four sources exist; phone = owner take P (2026-09-28) |
-| 55.5–59.3 | Free / Private / Open Source | Built in source; duplicates early benefits in part |
-| 59.3–74.3 | Harness slide / refreshed picker / subscriptions | Slides and refreshed picker exports exist |
-| 74.3–78.0 | Fork / run locally | Built in source; localhost app source missing |
-| 78.0–81.8 | Older Vim wording | Built in source; saved ethos not yet inserted |
-| 81.8–85.0 | End card | Built in source |
-
-The original 45–60-second estimate is stale. `out/assembly-rough-1.mp4` predates the
-latest additions. `out/post-intro-review.mp4` is a 33-second section review, not a
-finished master. File presence/source inspection is not a fresh visual approval.
+| 0–18.0 | — | Overload and title |
+| 18.0–23.6 | — | Four benefits over home |
+| 23.6–33.0 | 1–5 | Native multimedia (build, drop) |
+| 33.0–44.3 | 6–11 | Design review |
+| 44.3–49.9 | 12–14 | Short design iteration |
+| 49.9–55.5 | 15–17 | Swarm / memory / chat / phone flashes |
+| 55.5–70.5 | 18–25 | "Multi harness" (on the hit), picker, subscriptions |
+| 70.5–74.3 | 26–27 | GitHub page, push-in, Fork click, "Fork it." |
+| 74.3–76.1 | 28 | Run it on your computer (localhost capture, 2026-09-30) |
+| 76.1–83.6 | 29–32 | Breakdown: "Vim is open source / and it's still here decades later." then "Agent software / should be too." |
+| 83.6–87.4 | 33–34 | Hit: Multi harness! Free! Private! Open Source! Customizable! |
+| 87.4–90.6 | 35 | End card |
 
 ## Remaining work, in order
 
-1. Capture the one missing shot from the running app: a clean local app view with the
-   genuine localhost context (for `2026-09-26_feature_app.mp4`). Designer can record
-   it; no new owner take is needed. (The phone shot is filled by owner take P,
-   2026-09-28; see `footage/FOOTAGE.md`.)
-2. Check the September 26 swarm, memory, chat and design shots against the shipping
-   UI and claims. The picker has already been refreshed. Replace stale visible UI
-   where necessary; verify that the swarm shot actually supports “running swarm.”
-3. Make the closing copy/timing change above; consolidate duplicated claims. Keep
-   the owner's four immediate post-intro benefits. Recommend on-screen text for
-   “Don't worry, we've got you covered” so voice recording is not a dependency.
-   Voice remains an owner preference, not an asset we already have.
-4. Verify the fork/install command and launch URL against the current README;
-   distinguish the free app from any provider subscription costs in the close.
-5. Render one complete master and review the actual film end to end: readable type,
-   shot continuity, music joins, truthful elapsed-time chips and privacy on every
-   frame. Known exposure windows include the unblurred openings of product clips
-   and visible workspace names on the new home shot.
-6. Post that single full draft for owner review; then export the approved master,
-   thumbnail and optional short cut. Publishing requires separate owner approval.
-
-Done means a complete export with no missing media, the agreed copy, checked
-privacy/audio, and owner review. Choosing the software release commit and shipping
-the package remain the release team's separate task.
+1. Owner review of the full master (`edit/out/assembly.mp4`).
+2. Before publishing: re-capture the GitHub still once the repo's About text is updated (it still
+   says "swarm orchestrator") and CI on the latest commit is green.
+3. Check the September 26 swarm, memory, chat and design shots against the shipping UI.
+4. Privacy pass on every frame (unblurred openings of product clips, workspace names on the home
+   shot and the localhost shot).
+5. Export the approved master, thumbnail and optional 20–30 s social cut. Publishing requires
+   separate owner approval.
 
 ## Sources
 

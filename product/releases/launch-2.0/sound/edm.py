@@ -16,16 +16,18 @@ edm-build.wav, 15 s. A locked cut uses it, so it must stay sample-identical:
   bar 7  11.250         D   crash (quiet), vocal chop
   bar 8  13.125         A   cue ends at 15.000
 
-edm-full.wav, 61.375 s. Runs under the whole features section and the close:
+edm-full.wav, 67.0 s. Runs under the whole features section and the close (retimed 2026-09-30):
   bars  1-4    0.000  BUILD      as above
   bar   5      7.500  DROP       as above
   bars  6-17   9.375  GROOVE     crashes 9, 13, 17 (15.0, 22.5, 30.0); chops 7, 11, 15
-  bar  18     31.875  HIT        impact + full crash ("Free! Private! Open Source!"), groove goes on
-  bars 19-29  33.750  GROOVE     crashes 21, 25, 29 (37.5, 45.0, 52.5); chops 19, 23, 27
-  bars 30-31  54.375  BREAKDOWN  G, A: no drums or bass, chords lowpassed at 1.2 kHz and softly
+  bar  18     31.875  HIT        impact + full crash ("Multi harness"), groove goes on
+  bars 19-28  33.750  GROOVE     crashes 21, 25 (37.5, 45.0); chops 19, 23, 27 (GitHub fork, run)
+  bars 29-32  52.500  BREAKDOWN  Bm G D A: no drums or bass, chords lowpassed at 1.2 kHz and softly
                                  pumped, sparse arp, one chop drenched in ping-pong echo; riser +
-                                 snare roll over the last 2 beats (57.188)
-  bar  32     58.125  END        impact + crash + one D-major chord, rings out and fades to 61.375
+                                 snare roll over the last 2 beats (the Vim ethos)
+  bar  33     60.000  HIT        impact + full crash (the benefits recap), groove goes on
+  bar  34     61.875  GROOVE
+  bar  35     63.750  END        impact + crash + one D-major chord, rings out and fades to 67.0
 
 The drop lands at exactly 7.500 s (sample 360000) in both. Writes stereo 48 kHz 16-bit WAVs next
 to this file: edm-build.wav / edm-full.wav (the mix, peak -1 dBFS) and
@@ -539,10 +541,12 @@ FULL_CUE = [
     Build(1, 4),
     Drop(5),
     Groove(6, 17, crashes=(9, 13, 17), chops=((7, 3, 0.75), (11, 2, 0.55), (15, 3, 0.55))),
-    Hit(18),  # "Free! Private! Open Source!"
-    Groove(19, 29, crashes=(21, 25, 29), chops=((19, 2, 0.55), (23, 3, 0.55), (27, 2, 0.55))),
-    Breakdown(30, 31, chords=("G", "A"), chop=0),  # "Inspired by Vim" lands on the end hit
-    End(32, ring=3.25, fade=2.75),  # the end card
+    Hit(18),  # "Multi harness"
+    Groove(19, 28, crashes=(21, 25), chops=((19, 2, 0.55), (23, 3, 0.55), (27, 2, 0.55))),
+    Breakdown(29, 32, chords=("Bm", "G", "D", "A"), chop=0),  # the Vim ethos, two cards
+    Hit(33),  # the benefits recap
+    Groove(34, 34, crashes=(), chops=()),
+    End(35, ring=3.25, fade=2.75),  # the end card
 ]
 
 CUT_FADE = 0.015  # a cue that ends mid-groove is cut with a 15 ms linear fade

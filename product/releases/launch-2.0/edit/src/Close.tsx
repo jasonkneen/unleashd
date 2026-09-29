@@ -1,5 +1,5 @@
-// The close, beats 8–11, in type: "Free! Private! Open Source!", "Fork it", "Run it on your
-// computer", the Vim line and the end card. Every section is timed in beats of the EDM cue
+// The close, in type: GitHub + "Fork it", "Run it on your computer", the Vim ethos, the benefits
+// recap and the end card. Every section is timed in beats of the EDM cue
 // (../../sound/edm.py, 128 BPM) so the assembly can drop each one on its bar.
 // Sections are data (text, beat, colour); the components just render them with <Block>.
 import type React from 'react';
@@ -27,76 +27,135 @@ const Stack: React.FC<{ words: Word[]; gap: number }> = ({ words, gap }) => {
   );
 };
 
-// ---- Beat 8: one word per beat from the bar-18 hit, then the full stack holds. --------------------
-const VALUES: Word[] = [
-  { text: 'Free!', beat: 0, size: 'xxl', fill: INK.cyan, ink: INK.plate, rot: -4 },
-  { text: 'Private!', beat: 1, size: 'xxl', fill: INK.yellow, ink: INK.plate, rot: 2 },
-  { text: 'Open Source!', beat: 2, size: 'xxl', fill: INK.wordmarkOrange, ink: INK.plate, rot: -3 },
+// ---- The recap, on the bar-33 hit after the Vim line: every benefit, one per beat, then the whole
+// grid holds for the end card. Owner, 2026-09-30: "repeat the benefits to close out and sell". -----
+const RECAP: Word[][] = [
+  [
+    { text: 'Multi harness!', beat: 0, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -3 },
+    { text: 'Free!', beat: 1, size: 'xl', fill: INK.yellow, ink: INK.plate, rot: 2 },
+  ],
+  [
+    { text: 'Private!', beat: 2, size: 'xl', fill: INK.red, ink: INK.cream, rot: 2 },
+    { text: 'Open Source!', beat: 3, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: -2 },
+  ],
+  [{ text: 'Customizable!', beat: 4, size: 'xl', fill: '#859900', ink: INK.plate, rot: -1 }],
 ];
 export const VALUES_FRAMES = beats(8);
-export const Values: React.FC = () => (
-  <AbsoluteFill style={{ background: INK.plate }}>
-    <Stack words={VALUES} gap={10} />
-  </AbsoluteFill>
-);
-
-// ---- Beat 9: "Fork it." over the real clone-and-run commands from the README. --------------------
-const REPO = 'https://github.com/nbardy/unleashd';
-const TERMINAL: { prompt: boolean; text: string; beat: number; typeBeats: number }[] = [
-  { prompt: true, text: `git clone ${REPO}`, beat: 0.3, typeBeats: 1.3 },
-  { prompt: true, text: 'cd unleashd && pnpm install && pnpm dev', beat: 1.9, typeBeats: 1.2 },
-  { prompt: false, text: '➜  Local:  http://localhost:7489', beat: 3.3, typeBeats: 0 },
-];
-const FORK: Word[] = [
-  { text: 'Fork it.', beat: 0, size: 'xl', fill: INK.yellow, ink: INK.plate, rot: -3 },
-  { text: 'Add the features you want.', beat: 1, size: 'md', fill: INK.surface, ink: INK.cream, rot: 0 },
-];
-export const FORK_FRAMES = beats(4);
-
-const Terminal: React.FC = () => {
+export const Values: React.FC = () => {
   const t = useCurrentFrame() / FPS;
   return (
-    <div
-      style={{
-        width: 1240,
-        padding: '26px 36px 34px',
-        borderRadius: 18,
-        background: INK.night,
-        boxShadow: '0 40px 100px rgba(0,0,0,.55)',
-        outline: '1px solid rgba(255,255,255,.08)',
-        fontFamily: 'Menlo, monospace',
-        fontSize: 34,
-        lineHeight: 1.6,
-        color: INK.cream,
-      }}
-    >
-      <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
-        {[INK.red, INK.yellow, '#859900'].map((c) => (
-          <span key={c} style={{ width: 18, height: 18, borderRadius: 9, background: c }} />
-        ))}
-      </div>
-      {TERMINAL.map((line) => {
-        const u = t - line.beat * BEAT;
-        const shown = line.typeBeats === 0 ? line.text.length : Math.floor(line.text.length * clamp01(u / (line.typeBeats * BEAT)));
-        return (
-          <div key={line.text} style={{ visibility: u < 0 ? 'hidden' : 'visible', color: line.prompt ? INK.cream : INK.cyan }}>
-            {line.prompt ? <span style={{ color: INK.wordmarkOrange }}>$ </span> : null}
-            {line.text.slice(0, shown)}
-          </div>
-        );
-      })}
-    </div>
+    <AbsoluteFill style={{ background: INK.plate, alignItems: 'center', justifyContent: 'center', gap: 22 }}>
+      {RECAP.map((row) => (
+        <div key={row[0].text} style={{ display: 'flex', gap: 28 }}>
+          {row.map((w) => (
+            <Block key={w.text} text={w.text} u={t - w.beat * BEAT} size={w.size} fill={w.fill} ink={w.ink} rot={w.rot} />
+          ))}
+        </div>
+      ))}
+    </AbsoluteFill>
   );
 };
 
+// ---- Open source: the real GitHub page, a push-in to Fork, the click, "Fork it." --------------------
+// Owner, 2026-09-30: "just show github and a fork real quick". The page is a logged-out dark-mode
+// capture (../footage/2026-09-30_github_repo.png, 2974×1882). Nothing is forked: the click is a
+// cursor and a press flash drawn over the still.
+const REPO_SHOT = staticFile('2026-09-30_github_repo.png');
+const REPO_URL = 'github.com/nbardy/unleashd';
+const CARD_W = 1500;
+const CHROME_H = 64;
+const SHOT_SCALE = CARD_W / 2974;
+// Fork button in capture px (x 2474–2678, y 177–231), as card px.
+const FORK_BTN = { x: 2474 * SHOT_SCALE, y: CHROME_H + 177 * SHOT_SCALE, w: 204 * SHOT_SCALE, h: 54 * SHOT_SCALE };
+const FORK_AT = { x: FORK_BTN.x + FORK_BTN.w / 2, y: FORK_BTN.y + FORK_BTN.h / 2 };
+const CARD_AT = { x: (1920 - CARD_W) / 2, y: 60 };
+const FORK_TO = { x: 1560, y: 200 }; // where the push-in carries the button: the card then overfills the frame, browser bar above it
+const ZOOM = 2.0;
+const CLICK_BEAT = 4;
+const FORK: Word[] = [
+  { text: 'Fork it.', beat: CLICK_BEAT, size: 'xl', fill: INK.yellow, ink: INK.plate, rot: -3 },
+  { text: 'Add the features you want.', beat: CLICK_BEAT + 1, size: 'md', fill: INK.surface, ink: INK.cream, rot: 0 },
+];
+export const FORK_FRAMES = beats(8);
+
+const BrowserBar: React.FC<{ url: string }> = ({ url }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 22, height: CHROME_H, padding: '0 22px', background: '#e8e8e8' }}>
+    <div style={{ display: 'flex', gap: 10 }}>
+      {[INK.red, INK.yellow, '#859900'].map((c) => (
+        <span key={c} style={{ width: 16, height: 16, borderRadius: 8, background: c }} />
+      ))}
+    </div>
+    <div
+      style={{
+        flex: 1,
+        height: 40,
+        borderRadius: 20,
+        background: '#fff',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 22px',
+        fontFamily: FONT,
+        fontSize: 26,
+        fontWeight: 600,
+        color: '#333',
+      }}
+    >
+      {url}
+    </div>
+  </div>
+);
+
+const Cursor: React.FC<{ x: number; y: number; press: number }> = ({ x, y, press }) => (
+  <svg
+    width={44}
+    height={60}
+    viewBox="0 0 22 30"
+    style={{ position: 'absolute', left: x, top: y, transform: `scale(${1 - 0.15 * press})`, transformOrigin: '0 0' }}
+  >
+    <path d="M1 1 L1 23 L6.5 17.5 L10.5 27 L14 25.5 L10 16.5 L17.5 16.5 Z" fill="#fff" stroke="#000" strokeWidth={1.4} />
+  </svg>
+);
+
 export const Fork: React.FC = () => {
   const t = useCurrentFrame() / FPS;
+  const push = Easing.inOut(Easing.cubic)(clamp01(t / (3.5 * BEAT)));
+  const s = lerp(1, ZOOM, push);
+  const btn = { x: lerp(CARD_AT.x + FORK_AT.x, FORK_TO.x, push), y: lerp(CARD_AT.y + FORK_AT.y, FORK_TO.y, push) };
+  const glide = Easing.out(Easing.cubic)(clamp01((t - BEAT) / (2.5 * BEAT)));
+  const sinceClick = t - CLICK_BEAT * BEAT;
+  const press = sinceClick < 0 ? 0 : Math.max(0, 1 - Math.abs(sinceClick - 0.06) / 0.12);
+  const flash = sinceClick < 0 ? 0.12 * glide : lerp(0.45, 0.14, clamp01(sinceClick / 0.4));
   return (
-    <AbsoluteFill style={{ background: INK.plate, alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ transform: `translateY(90px) scale(${lerp(0.96, 1.02, t / (4 * BEAT))})` }}>
-        <Terminal />
+    <AbsoluteFill style={{ background: INK.plate }}>
+      <div
+        style={{
+          position: 'absolute',
+          left: CARD_AT.x,
+          top: CARD_AT.y,
+          width: CARD_W,
+          borderRadius: 16,
+          overflow: 'hidden',
+          boxShadow: '0 40px 100px rgba(0,0,0,.55)',
+          transformOrigin: `${FORK_AT.x}px ${FORK_AT.y}px`,
+          transform: `translate(${btn.x - CARD_AT.x - FORK_AT.x}px, ${btn.y - CARD_AT.y - FORK_AT.y}px) scale(${s})`,
+        }}
+      >
+        <BrowserBar url={REPO_URL} />
+        <Img src={REPO_SHOT} style={{ display: 'block', width: CARD_W }} />
+        <div
+          style={{
+            position: 'absolute',
+            left: FORK_BTN.x,
+            top: FORK_BTN.y,
+            width: FORK_BTN.w,
+            height: FORK_BTN.h,
+            borderRadius: 4,
+            background: `rgba(255,255,255,${flash})`,
+          }}
+        />
       </div>
-      <div style={{ position: 'absolute', left: 150, top: 110, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 18 }}>
+      <Cursor x={lerp(1560, btn.x + 6, glide)} y={lerp(980, btn.y + 4, glide)} press={press} />
+      <div style={{ position: 'absolute', left: 150, top: 640, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 18 }}>
         {FORK.map((w) => (
           <Block key={w.text} text={w.text} u={t - w.beat * BEAT} size={w.size} fill={w.fill} ink={w.ink} rot={w.rot} />
         ))}
@@ -107,8 +166,9 @@ export const Fork: React.FC = () => {
 
 // ---- Beat 9: "Run it on your computer." The real app, captured from localhost, in a browser
 // frame whose address bar shows the URL it was captured from. -------------------------------------
-const APP = staticFile('2026-09-26_feature_app.mp4');
-const APP_URL = 'localhost:7489/channels';
+// Captured 2026-09-30 at 1b6952b with ../capture/record-page.mjs (#unleashd-2, read-only).
+const APP = staticFile('2026-09-30_feature_app.mp4');
+const APP_URL = 'localhost:7489';
 const RUN: Word[] = [
   { text: 'Run it on', beat: 0, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -2 },
   { text: 'your computer.', beat: 0.5, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: 2 },
@@ -130,30 +190,7 @@ export const Run: React.FC = () => {
           transform: `translateY(${lerp(60, 110, settle)}px) scale(${lerp(1.08, 1, settle)})`,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 22, height: 64, padding: '0 22px' }}>
-          <div style={{ display: 'flex', gap: 10 }}>
-            {[INK.red, INK.yellow, '#859900'].map((c) => (
-              <span key={c} style={{ width: 16, height: 16, borderRadius: 8, background: c }} />
-            ))}
-          </div>
-          <div
-            style={{
-              flex: 1,
-              height: 40,
-              borderRadius: 20,
-              background: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '0 22px',
-              fontFamily: FONT,
-              fontSize: 26,
-              fontWeight: 600,
-              color: '#333',
-            }}
-          >
-            {APP_URL}
-          </div>
-        </div>
+        <BrowserBar url={APP_URL} />
         <OffthreadVideo src={APP} muted style={{ display: 'block', width: 1500 }} />
       </div>
       <div style={{ position: 'absolute', left: 120, top: 70, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
@@ -165,16 +202,29 @@ export const Run: React.FC = () => {
   );
 };
 
-// ---- Beat 10: the Vim line, over the breakdown. Owner wording. -----------------------------------
-const VIM: Word[] = [
-  { text: 'Inspired by Vim.', beat: 0, size: 'xl', fill: '#859900', ink: INK.plate, rot: -2 },
-  { text: 'We need open source agent software', beat: 2.5, size: 'md', fill: INK.surface, ink: INK.cream, rot: 0 },
-  { text: 'for the future.', beat: 4, size: 'md', fill: INK.cyan, ink: INK.plate, rot: 0 },
+// ---- The ethos, over the 4-bar breakdown, after the fork: why open source matters. Owner-approved
+// wording (../brand/PROJECT_ETHOS.md), two cards with a hard cut on bar 3 of the breakdown. ---------
+const VIM_CARDS: Word[][] = [
+  [
+    { text: 'Vim is open source', beat: 0, size: 'xl', fill: '#859900', ink: INK.plate, rot: -2 },
+    { text: "and it's still here decades later.", beat: 1.5, size: 'md', fill: INK.surface, ink: INK.cream, rot: 0 },
+  ],
+  [
+    { text: 'Agent software', beat: 0, size: 'xl', fill: INK.cyan, ink: INK.plate, rot: -2 },
+    { text: 'should be too.', beat: 1, size: 'xl', fill: INK.wordmarkOrange, ink: INK.plate, rot: 2 },
+  ],
 ];
-export const VIM_FRAMES = beats(8);
+const VIM_CARD = beats(8);
+export const VIM_FRAMES = VIM_CARDS.length * VIM_CARD;
 export const Vim: React.FC = () => (
   <AbsoluteFill style={{ background: INK.night }}>
-    <Stack words={VIM} gap={26} />
+    <Series>
+      {VIM_CARDS.map((words) => (
+        <Series.Sequence key={words[0].text} durationInFrames={VIM_CARD}>
+          <Stack words={words} gap={26} />
+        </Series.Sequence>
+      ))}
+    </Series>
   </AbsoluteFill>
 );
 
@@ -205,10 +255,10 @@ export const EndCard: React.FC = () => {
 
 // Preview of the whole close in order (the assembly places each section on its own bar).
 export const SECTIONS: { id: string; frames: number; C: React.FC }[] = [
-  { id: 'values', frames: VALUES_FRAMES, C: Values },
   { id: 'fork', frames: FORK_FRAMES, C: Fork },
   { id: 'run', frames: RUN_FRAMES, C: Run },
   { id: 'vim', frames: VIM_FRAMES, C: Vim },
+  { id: 'values', frames: VALUES_FRAMES, C: Values },
   { id: 'end', frames: END_FRAMES, C: EndCard },
 ];
 export const DURATION = SECTIONS.reduce((n, s) => n + s.frames, 0);

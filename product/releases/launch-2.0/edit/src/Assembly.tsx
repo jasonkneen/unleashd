@@ -41,11 +41,13 @@ const section = (id: string, from: number, to: number, C: React.FC, frames: numb
   offset,
 });
 
-// Bars 20–27: harness slide, refreshed picker proof, subscriptions slide.
+// Bars 18–25: harness slide (on the bar-18 hit), refreshed picker proof, subscriptions slide.
 // The picker starts on Claude and ends on the new thinking slider.
-const PICKER_FROM = bar(20) + SLIDE_SPLIT;
-const PICKER_TO = bar(28) - (SLIDES_END - SLIDE_SPLIT);
+const PICKER_FROM = bar(18) + SLIDE_SPLIT;
+const PICKER_TO = bar(26) - (SLIDES_END - SLIDE_SPLIT);
 
+// The close (owner, 2026-09-30): GitHub + fork, run it locally, the Vim ethos over the breakdown,
+// the benefits recap on the bar-33 hit, the end card on the final hit. Bars match FULL_CUE in edm.py.
 export const SECTIONS: Section[] = [
   section('overload', 0, Overload.DURATION, Overload.Overload, Overload.DURATION),
   section('post-intro-benefits', Overload.DURATION, MUSIC_IN, PostIntroBenefits.PostIntroBenefits, PostIntroBenefits.DURATION),
@@ -53,14 +55,14 @@ export const SECTIONS: Section[] = [
   section('design-review', bar(6), bar(12), DesignReview.DesignReview, DesignReview.DURATION),
   section('design-iteration', bar(12), bar(15), DesignIterationShort.DesignIterationShort, DesignIterationShort.DURATION),
   section('features', bar(15), bar(18), FeatureFlash.FeatureFlash, FeatureFlash.DURATION),
-  section('values', bar(18), bar(20), Close.Values, Close.VALUES_FRAMES),
-  section('harness-slide', bar(20), PICKER_FROM, Slides, SLIDE_SPLIT),
+  section('harness-slide', bar(18), PICKER_FROM, Slides, SLIDE_SPLIT),
   section('picker', PICKER_FROM, PICKER_TO, PickerRefresh.PickerRefresh, PickerRefresh.DURATION),
-  section('subscriptions-slide', PICKER_TO, bar(28), Slides, SLIDES_END, SLIDE_SPLIT),
-  section('fork', bar(28), bar(29), Close.Fork, Close.FORK_FRAMES),
-  section('run', bar(29), bar(30), Close.Run, Close.RUN_FRAMES),
-  section('vim', bar(30), bar(32), Close.Vim, Close.VIM_FRAMES),
-  section('end', bar(32), bar(32) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
+  section('subscriptions-slide', PICKER_TO, bar(26), Slides, SLIDES_END, SLIDE_SPLIT),
+  section('fork', bar(26), bar(28), Close.Fork, Close.FORK_FRAMES),
+  section('run', bar(28), bar(29), Close.Run, Close.RUN_FRAMES),
+  section('vim', bar(29), bar(33), Close.Vim, Close.VIM_FRAMES),
+  section('recap', bar(33), bar(35), Close.Values, Close.VALUES_FRAMES),
+  section('end', bar(35), bar(35) + Close.END_FRAMES, Close.EndCard, Close.END_FRAMES),
 ];
 export const DURATION = SECTIONS[SECTIONS.length - 1].to;
 
