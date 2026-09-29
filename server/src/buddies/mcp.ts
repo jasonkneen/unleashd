@@ -94,6 +94,21 @@ const scopeQuery = (scope: Scope): ListScope =>
       ? ({ kind: 'task', taskId: scope.taskId } as const)
       : ({ kind: 'workspace', workspaceId: scope.workspace } as const);
 
+// Pattern: capability-grants (docs/patterns.md#capability-grants)
+// A Buddy turn lists only its own workspace; the Builder spans workspaces by design. The crate list
+// queries take no actor, so this is the boundary: until 2026-09-29 `{workspace}` passed any id
+// through, and a Buddy could read another workspace's tasks, runs and schedule prompts.
+function checkedScope(grant: TurnGrant, scope: Scope): Scope {
+  if (!('workspace' in scope) || grant.role === 'builder' || scope.workspace === grant.workspaceId)
+    return scope;
+  throw new Error(`workspace ${scope.workspace} is not this turn's workspace`);
+}
+
+// Pattern: table-driven (docs/patterns.md#table-driven)
+// The workspace view is the "all live work" read: 17 Buddies x 5 runs overflows 20 rows, and a
+// silent cut there was the original complaint. A list past its cap says so (`truncated`).
+const RUN_ROW_LIMIT: Record<ListScope['kind'], number> = { buddy: 20, task: 20, workspace: 100 };
+
 function toChannelRef(author: Actor, ref: z.infer<typeof channelRef>): ChannelRef {
   if ('id' in ref) return { kind: 'id', id: ref.id };
   if ('task' in ref) return { kind: 'task', taskId: ref.task };
@@ -233,7 +248,7 @@ const TASKS_TOOL = teamTool({
   handler: (deps, grant, { action }) =>
     action.kind === 'get'
       ? taskDetail(deps.core, grant.author, action.taskId, 20)
-      : readTaskRows(deps, action.scope, action.include),
+      : readTaskRows(deps, checkedScope(grant, action.scope), action.include),
 });
 
 // Pattern: table-driven (docs/patterns.md#table-driven)
@@ -395,7 +410,7 @@ const BUDDY_TOOLS = {
   }),
   runs: buddyTool({
     description:
-      'List slim run rows by {buddyId}, {taskId}, or {workspace}; workspace lists queued/running work only. Get one full run or cancel. Queued rows include waiting.',
+      'List slim run rows by {buddyId}, {taskId}, or {workspace} (yours; queued/running only) as {runs, truncated}. Get one full run or cancel. Queued rows include waiting.',
     writes: true,
     schema: z.object({
       action: z.discriminatedUnion('kind', [
@@ -406,8 +421,12 @@ const BUDDY_TOOLS = {
     }),
     async handler(deps, grant, input) {
       switch (input.action.kind) {
-        case 'list':
-          return deps.core.listRunRows(scopeQuery(input.action.scope), 20);
+        case 'list': {
+          const scope = scopeQuery(checkedScope(grant, input.action.scope));
+          const limit = RUN_ROW_LIMIT[scope.kind];
+          const rows = await deps.core.listRunRows(scope, limit + 1);
+          return { runs: rows.slice(0, limit), truncated: rows.length > limit };
+        }
         case 'get':
           return deps.core.getRun(input.action.runId);
         case 'cancel': {
@@ -437,7 +456,7 @@ const BUDDY_TOOLS = {
       const action = input.action;
       switch (action.kind) {
         case 'list':
-          return deps.core.listSchedules(scopeQuery(action.scope));
+          return deps.core.listSchedules(scopeQuery(checkedScope(grant, action.scope)));
         case 'put':
           return deps.core.putSchedule(grant.principal, {
             ...action,

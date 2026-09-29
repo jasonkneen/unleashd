@@ -544,7 +544,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
       action: { kind: 'list', scope: { workspace: w.ws } },
     });
     assert.equal(listed.isError, false, listed.text);
-    const row = listed.value.find(
+    const row = listed.value.runs.find(
       (item: { input: { kind: string; postId?: string } }) => item.input.postId === request.id
     );
     assert.deepEqual(row.waiting, { kind: 'task_paused' });
@@ -569,7 +569,7 @@ test('workspace run rows expose task_paused and clear it when the same run becom
     const released = await call(spec, 'runs', {
       action: { kind: 'list', scope: { workspace: w.ws } },
     });
-    const releasedRow = released.value.find((item: { id: string }) => item.id === row.id);
+    const releasedRow = released.value.runs.find((item: { id: string }) => item.id === row.id);
     assert.equal(releasedRow.waiting ?? null, null);
     assert.equal((await w.core.claimRun(60_000))?.run.id, row.id);
 
@@ -580,8 +580,43 @@ test('workspace run rows expose task_paused and clear it when the same run becom
     const relisted = await call(spec, 'runs', {
       action: { kind: 'list', scope: { workspace: w.ws } },
     });
-    const missingRow = relisted.value.find((item: { id: string }) => item.id === missing.id);
+    const missingRow = relisted.value.runs.find((item: { id: string }) => item.id === missing.id);
     assert.equal(missingRow.requester, undefined, 'a missing post is not attributed to the owner');
+
+    // The workspace view is the "all live work" read: past 20 live runs it must still list them
+    // all, and past its cap it must say so rather than stop silently (lead review, 2026-09-29).
+    const enqueue = (count: number, from: number) =>
+      Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          w.core.enqueueRun(OWNER, {
+            buddyId: w.designer.id,
+            input: { kind: 'post', postId: `live-${from + i}` },
+          })
+        )
+      );
+    await enqueue(30, 0);
+    const live = await call(spec, 'runs', {
+      action: { kind: 'list', scope: { workspace: w.ws } },
+    });
+    assert.equal(live.value.runs.length, 32);
+    assert.equal(live.value.truncated, false);
+    await enqueue(80, 30);
+    const capped = await call(spec, 'runs', {
+      action: { kind: 'list', scope: { workspace: w.ws } },
+    });
+    assert.equal(capped.value.runs.length, 100);
+    assert.equal(capped.value.truncated, true);
+
+    // A Buddy turn reads only its own workspace: the crate list queries take no actor, so a
+    // foreign id here once returned another workspace's tasks, runs and schedule prompts.
+    for (const [tool, action] of [
+      ['runs', { kind: 'list', scope: { workspace: 'project_elsewhere' } }],
+      ['tasks', { kind: 'list', scope: { workspace: 'project_elsewhere' } }],
+      ['schedule', { kind: 'list', scope: { workspace: 'project_elsewhere' } }],
+    ] as const) {
+      const foreign = await call(spec, tool, { action });
+      assert.equal(foreign.isError, true, `${tool} must refuse another workspace`);
+    }
   } finally {
     await w.close();
   }
