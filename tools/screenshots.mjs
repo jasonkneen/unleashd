@@ -595,6 +595,13 @@ function buildScreens(found, focus) {
       missing: noChannel,
       views: onBoth(`${channels}?${channel}`, OPEN_MENTION_MENU),
     },
+    // The Threads card's reply composer: the same fullscreen editor and @ menu as a channel's.
+    // Its layout rules were scoped to the channel screen, so this one shrank (#bugfixes 2026-09-29).
+    {
+      name: 'threads-mention-menu',
+      missing: null,
+      views: onBoth(`${channels}?view=threads`, OPEN_MENTION_MENU),
+    },
     {
       name: 'mention-model',
       missing: noChannel,
