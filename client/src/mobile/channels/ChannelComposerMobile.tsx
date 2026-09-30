@@ -42,7 +42,11 @@ export function MobileChannelComposeFrame({
   return (
     <FullscreenComposer expanded={editing} onClose={stopEditing}>
       <div
-        className="mobile-channel-compose"
+        className={
+          editing
+            ? 'mobile-channel-compose mobile-channel-compose--editing'
+            : 'mobile-channel-compose'
+        }
         onPointerDownCapture={(event) => {
           buttonPointer.current = Boolean((event.target as HTMLElement).closest('button'));
         }}

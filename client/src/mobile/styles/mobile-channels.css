@@ -479,16 +479,14 @@ a.mobile-channels-wake-done {
   min-height: 44px;
 }
 
-/* Editing (a2e4135): the frame is the visual viewport. A slim head with Done,
-   the field fills the rest, the @ menu sits in flow just above the bar.
-   Scoped to the compose frame, never `.mobile-channel`: the Threads card
-   composer lives outside that screen, so it went fullscreen with an unstretched
-   field and a clipped @ menu (#bugfixes 2026-09-29). */
+/* Editing (a2e4135): viewport-sized frame, Done head, @ menu in flow. Keyed on --editing, not
+   .mobile-channel: the Threads card composer shrank outside it (#bugfixes 2026-09-29). */
 .mobile-channel-compose__head {
   display: none;
 }
 
-.fullscreen-composer--expanded :is(.mobile-channel-compose, .channel-composer) {
+.mobile-channel-compose--editing,
+.mobile-channel-compose--editing .channel-composer {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -499,7 +497,7 @@ a.mobile-channels-wake-done {
   border-radius: 0;
 }
 
-.fullscreen-composer--expanded .mobile-channel-compose__head {
+.mobile-channel-compose--editing .mobile-channel-compose__head {
   display: flex;
   flex: none;
   align-items: center;
@@ -516,26 +514,26 @@ a.mobile-channels-wake-done {
   font-weight: 600;
 }
 
-.fullscreen-composer--expanded .channel-composer-field {
+.mobile-channel-compose--editing .channel-composer-field {
   flex: 1 1 0;
   min-height: 0;
 }
 
 /* !important beats the grow-with-text inline height ChannelComposer sets. */
-.fullscreen-composer--expanded .channel-composer textarea {
+.mobile-channel-compose--editing .channel-composer textarea {
   height: 100% !important;
   max-height: none;
   overflow-y: auto;
 }
 
-.fullscreen-composer--expanded .channel-composer-picker {
+.mobile-channel-compose--editing .channel-composer-picker {
   position: static;
   order: 1;
   max-height: 40%;
   margin: 0 6px 4px;
 }
 
-.fullscreen-composer--expanded .channel-composer-bar {
+.mobile-channel-compose--editing .channel-composer-bar {
   order: 2;
 }
 
