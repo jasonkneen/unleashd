@@ -97,12 +97,16 @@ def master(mix: Mix) -> np.ndarray:
     top = np.max(np.abs(out))
     out = out * limiter_gain(out / top, drive=10 ** (4 / 20)) / top
     out *= np.clip((LENGTH - mix.time) / FADE, 0, 1) ** 2
-    return out * PEAK / np.max(np.abs(out))
+    # The intro's boom peaks near -3 dBFS and its calm marimba sits around -19 dB mean. Mastered to a
+    # -1 dBFS peak the groove read at -9 dB mean, 10 dB above the intro (owner, 2026-09-30: "too
+    # loud"). -10 dBFS peak lands the groove near the intro's marimba level.
+    return out * SCORE_PEAK / np.max(np.abs(out))
 
 
 # ---- Instruments.
 
 PAD_RMS = 0.2
+SCORE_PEAK = 10 ** (-10 / 20)
 
 
 def marimba(f: float, r: np.random.Generator, seconds: float = 2.0) -> np.ndarray:
@@ -213,12 +217,12 @@ Feel = HalfTime | Pulse | Downtempo
 
 def halftime(mix: Mix) -> None:
     for bar in range(5, LAST_GROOVE + 1):
-        pad_bar(mix, bar, 3200, 0.35)
-        sub_bar(mix, bar, 0.2)
-        motif_bar(mix, bar, 0.26)
-        mix.add("drums", kick(mix.rng("kick"), decay=0.24, click=0.2), at(bar), 0.75)
+        pad_bar(mix, bar, 3200, 0.24)
+        sub_bar(mix, bar, 0.45)
+        motif_bar(mix, bar, 0.3)
+        mix.add("drums", kick(mix.rng("kick"), decay=0.24, click=0.2), at(bar), 0.6)
         mix.add("drums", kick(mix.rng("kick"), decay=0.18, click=0.1), at(bar, 2.5), 0.35)
-        mix.add("drums", snare(mix.rng("snare"), tone=190, band=2200, decay=0.14), at(bar, 2), 0.42, 1.4)
+        mix.add("drums", snare(mix.rng("snare"), tone=190, band=2200, decay=0.14), at(bar, 2), 0.36, 1.4)
         if bar >= 9:
             for k in range(8):
                 mix.add("drums", hat(mix.rng("hat"), 0.02), at(bar, k / 2), 0.05 if k % 2 else 0.03)
