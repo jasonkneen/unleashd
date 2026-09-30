@@ -127,7 +127,7 @@ function ThreadCardView({
   const rows = useMemo(() => channelRows([...card.posts].reverse()), [card.posts]);
   return (
     <li className="threads-card ui-card ui-surface ui-stack">
-      <header className="threads-head ui-row">
+      <header className="threads-header ui-row">
         <Link className="threads-head" to={threadPath} title="Open thread">
           {heading.mark}
           {heading.name}

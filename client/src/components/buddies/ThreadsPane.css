@@ -21,6 +21,17 @@
   color: var(--accent);
 }
 
+.threads-header {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.threads-header .threads-head {
+  padding: 0;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
 .threads-open {
   margin-left: auto;
   white-space: nowrap;
@@ -38,4 +49,19 @@
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   font-size: var(--fs-3);
+}
+
+/* Mobile: flat rows split by hairlines, not boxed cards (owner: "not flat, like separators"). */
+[data-device="mobile"] .threads-list {
+  gap: 0;
+  padding: 0;
+}
+
+[data-device="mobile"] .threads-card {
+  padding: var(--sp-5) 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
 }
