@@ -6,7 +6,10 @@ import {
   applyConversationConfigPatch,
   resolveConversationConfig,
 } from '../../shared/src/index';
-import { resolveConfigAgainstProviderCatalog } from '../src/providers/catalog-service';
+import {
+  createProviderCatalog,
+  resolveConfigAgainstProviderCatalog,
+} from '../src/providers/catalog-service';
 
 const catalog = ProviderCatalogSchema.parse({
   revision: 'catalog-1',
@@ -64,14 +67,32 @@ test('application defaults retain the refreshed picker while explicit reasoning 
   const defaults = resolveConfigAgainstProviderCatalog(config());
   assert.equal(defaults.status, 'resolved');
   if (defaults.status === 'resolved') {
-    assert.equal(defaults.value.modelId, 'gpt-6.1-sol');
-    assert.equal(defaults.value.reasoningEffort, 'low');
+    // The model is whatever the served catalog defaults to; the effort is product policy.
+    // 1444cdd once rewrote this pair to the data's literals ('gpt-6.1-sol', 'low').
+    assert.equal(
+      defaults.value.modelId,
+      createProviderCatalog().providers.find((provider) => provider.id === 'codex')?.defaultModelId
+    );
+    assert.equal(defaults.value.reasoningEffort, 'medium');
   }
   const explicit = resolveConfigAgainstProviderCatalog(
     config({ reasoning: { mode: 'explicit', effort: 'ultra' } })
   );
   assert.equal(explicit.status, 'resolved');
   if (explicit.status === 'resolved') assert.equal(explicit.value.reasoningEffort, 'ultra');
+});
+
+// Regression guard (2026-09-30): gpt-6.1-sol was added with codex's own default_reasoning_level
+// (`low`) and the only test pinning the default was edited to match. Medium is our policy for EVERY
+// reasoning model, and an omitted default would silently hand the choice to the CLI, so assert it
+// over the whole served catalog rather than one literal.
+test('every reasoning model in the served catalog defaults to medium effort', () => {
+  for (const provider of createProviderCatalog().providers) {
+    for (const model of provider.models) {
+      if (model.reasoning)
+        assert.equal(model.reasoning.defaultEffort, 'medium', `${provider.id}/${model.id}`);
+    }
+  }
 });
 
 test('provider catalog enforces relational invariants', () => {

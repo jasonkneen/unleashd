@@ -48,8 +48,13 @@ models, default model, reasoning levels/default effort and retired-id aliases.
 validation from it. The server serves it unchanged at `GET /api/provider-catalog`
 (`server/src/providers/catalog-service.ts`, which only adds `supportsRequiredMcp`
 from the harness). App choices such as default model or effort are catalog
-data, never server-side overrides. Runtime command construction, process
-execution and output normalization live in `agent-cli-tool`.
+data, never server-side overrides. The default effort is `medium` for every
+reasoning model: product policy, not the CLI's. Do not copy
+`default_reasoning_level` from codex's `models_cache.json` when adding a model
+(gpt-6.1-sol shipped `low` that way on 2026-09-30);
+`server/test/conversation-config-domain.test.ts` asserts it over the whole
+catalog. Runtime command construction, process execution and output
+normalization live in `agent-cli-tool`.
 
 ### Runtime event contract
 
